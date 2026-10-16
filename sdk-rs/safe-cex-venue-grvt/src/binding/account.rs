@@ -16,6 +16,7 @@ use std::rc::Rc;
 fn failure(message: impl AsRef<str>) -> Js {
     Thrown::error("Error", message.as_ref()).value
 }
+
 impl AccountHost for Host {
     fn binding(&self) -> Rc<Self> {
         Rc::new(self.clone())
@@ -220,5 +221,32 @@ impl AccountHost for Host {
     fn keys_join(&self, object: Js) -> JsResult<Js> {
         let keys = object.own_keys().into_iter().map(Js::String).collect();
         value(Js::array(keys).call_method("join", vec![Js::str(",")]))
+    }
+}
+
+#[cfg(test)]
+mod accepted_contract_tests {
+    #[test]
+    fn accepted_account_error_factory() {
+        for message in ["", "protocol denied", "café\n\0💠"] {
+            let actual = super::failure(message);
+            let separate = super::failure(message);
+            let name = actual.get("name").expect("native error name");
+            let text = actual.get("message").expect("native error text");
+            assert_eq!(
+                name.as_str().unwrap().as_ref(),
+                "Error".encode_utf16().collect::<Vec<_>>(),
+                "native UTF16 error name"
+            );
+            assert_eq!(
+                text.as_str().unwrap().as_ref(),
+                message.encode_utf16().collect::<Vec<_>>(),
+                "native UTF16 error text"
+            );
+            assert!(
+                !actual.strict_equals(&separate),
+                "fresh error object identity"
+            );
+        }
     }
 }

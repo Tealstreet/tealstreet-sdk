@@ -441,3 +441,24 @@ where
 {
     listen(symbol, callback)
 }
+
+#[cfg(test)]
+mod accepted_contract_tests {
+    #[test]
+    fn accepted_trigger_info_error_factory() {
+        for kind in ["undefined", "null", "café\n\0💠"] {
+            let actual = super::trigger_info_error(kind);
+            assert_eq!(actual.name, "TypeError", "native diagnostic name");
+            assert_eq!(
+                actual.message,
+                format!("Cannot read properties of {kind} (reading 'metadata')"),
+                "native diagnostic text"
+            );
+            assert_eq!(
+                actual.metadata.as_ref(),
+                &safe_cex_exchange::runtime::ExchangeErrorMetadata::default(),
+                "fresh native metadata"
+            );
+        }
+    }
+}

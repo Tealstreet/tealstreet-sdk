@@ -232,3 +232,71 @@ all nineteen aliases. All 184 receipts pass the scoped ratchet without changing
 the standing defect ledger. Both maintained source tests, strict host/Wasm clippy,
 formatting and parity checks pass. The 109 remaining indexed nominal/function
 owners still need individual review.
+
+## Scalar, selector and error helper batch
+
+Twenty additional function contracts review sixteen executed projections and four
+output-only diagnostic factories individually. The production bodies retain their
+behavior; the Rust additions are native factory witnesses under cfg(test).
+
+The sixteen runtime adapters execute 310 independently authored cases. Five
+scalar helpers contribute 190 cases covering absent/null/boolean inputs, empty
+and nonempty arrays/objects, noncallable coercion members, finite raw JSON Number
+rounding, signed zero, overflow and underflow. Numeric outputs retain binary64
+bits; only NaN is canonicalized. Strings can produce nonfinite results, while the
+raw JSON carrier remains finite. This chosen carrier does not admit executable
+coercion hooks, own undefined properties or arbitrary host objects.
+
+The adjacent response selectors distinguish missing Option values from present
+null, preserve truthy-first alias precedence, and compare length strictly with
+numeric zero. Optional uppercase retains native text or the caller's diagnostic.
+Signing fields keep pair order, duplicate names and empty strings. The recursive
+signing integer carrier preserves the exact binary64 integer as decimal text,
+including values beyond 2^53 whose shortest Number spelling differs. This is the
+existing Alloy representation adapter, not an EIP-712 validation claim. Interval
+projection checks mapped strings and all twelve stock inherited identities. Its
+producer supplies a mapped fallback for misses, so Missing is outside this
+internal call domain.
+
+The direct nonce producer has four ordered-cache cases, separately from its
+composition wrapper. They inspect native time bits, real-ID sentinels, earliest
+time retention and paired 200-entry eviction. Thirteen cancellation cases inspect
+native typed success, response message/code precedence, coercion before callback,
+callback ordering and retained callback-error identity/metadata. Seven logging
+catch cases retain the original native cause or replacement logger error, with
+all four severities visible. These typed internal success cases do not extend the
+source Exchange return type.
+
+The four diagnostic factories perform no protocol admission. Twelve direct
+native witnesses inspect their real error fields and fresh default metadata;
+the JS error factory additionally checks UTF-16 fields and distinct object
+identity. Their explicit classification receipts do not claim gate runtime
+execution. Each factory has its own compiling name-drift negative control.
+
+The maintained accepted-value-source.cjs oracle compares 190 cases with actual
+ECMAScript String, Number and parseFloat operators, plus 85 independent selected
+language/representation expectations. It also executes the two actual maintained
+GRVT cancellation catch bodies against eleven error fixtures. Two typed success
+cases and the uppercasing/logging native representation remain separate native
+evidence. The existing composition oracle supplies four actual-source nonce
+cases. Fresh JavaScript Error stacks are ambient; the oracle compares the
+explicit callback stack only, rather than equating a fresh JS stack with native
+None. In-memory nullish-fallback and source-prefix controls require named failures
+and restore the baseline.
+
+Run the maintained witnesses with the isolated TypeScript compiler path:
+
+```sh
+SAFE_CEX_TYPESCRIPT_PATH=/absolute/path/to/typescript/lib/typescript.js \
+  CARGO_INCREMENTAL=0 cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml \
+  --locked -p safe-cex-venue-grvt --test accepted_value_source
+CARGO_INCREMENTAL=0 cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml \
+  --locked -p safe-cex-venue-grvt --lib accepted_
+```
+
+Twenty individual production drift controls compile and fail their intended
+native assertions before exact restoration passes. Sixteen runtime mutations
+exercise coercion, parse/default selection, alias precedence, emptiness, text and
+schema identity, integer conversion, nonce retention and callback/log ordering.
+Four factory mutations each fail their named direct native test. Dependent
+helper failures are checked explicitly; compiler failures do not count.
