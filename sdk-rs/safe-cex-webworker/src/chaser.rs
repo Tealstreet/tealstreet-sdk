@@ -150,7 +150,16 @@ impl ChaserOrderInstance {
                 }
             }
         }
-        self.remaining_size.set(self.options.borrow().size - total);
+        let size = self.options.borrow().size;
+        let remaining = size - total;
+        // Summed fills land a float hair off the size (0.1 + 0.058 vs 0.158);
+        // that is filled, not a remainder to chase.
+        self.remaining_size
+            .set(if remaining.abs() <= size.abs() * 1e-9 {
+                0.0
+            } else {
+                remaining
+            });
     }
     pub fn subtract_filled_size(&self, order: &Order) {
         let filled = placement_filled(order);
