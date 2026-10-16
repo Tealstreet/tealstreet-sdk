@@ -13,10 +13,10 @@ note = "CHOSEN prepared acyclic JsJsonValue input preserves undefined, BigInt an
 [[symbol]]
 ts = "isKucoinSignatureRejection"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-kucoin/src/api.rs::is_kucoin_signature_rejection"
+status = "ported"
+note = "Renamed target `safe-cex-venue-kucoin/src/api.rs::is_kucoin_signature_rejection`. Decoded-JSON code/message predicate shared by futures and Spot. tests/api_capture.rs checks the actual-source predicate plus the re-signed retry boundary; its string witness retains exact UTF-16 preimages before Node hashing and refuses unrepresentable native inputs. sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
 
 [[symbol]]
 ts = "createAPI"
