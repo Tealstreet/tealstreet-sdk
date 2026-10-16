@@ -25,3 +25,5 @@ pub mod exchange;
 
 pub mod api_factory;
 pub mod classes;
+
+pub mod binding;
