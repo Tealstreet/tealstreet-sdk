@@ -340,8 +340,12 @@ impl PublicProtocol {
             let Some(socket) = store_socket.upgrade() else {
                 return Ok(());
             };
-            handle_tickers_event(socket.store().as_ref(), json, false)
-                .map_err(|error| ExchangeError::new(error.to_string()))
+            handle_tickers_event(
+                socket.store().as_ref(),
+                json,
+                socket.emitter().name() == "bybitspot",
+            )
+            .map_err(|error| ExchangeError::new(error.to_string()))
         });
         let pong_socket = Rc::downgrade(socket);
         let pong: safe_cex_exchange::websocket::MessageHandler =
@@ -374,7 +378,16 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
             self.runtime.as_ref(),
             self.category,
             parent.uses_bybit_demo_environment(),
-            None,
+            if self.category == "spot" {
+                let network = if parent.base.options().testnet == Some(true) {
+                    "testnet"
+                } else {
+                    "livenet"
+                };
+                crate::spot_types::BASE_WS_URL["public"]["spot"][network].as_str()
+            } else {
+                None
+            },
         )
     }
     // ts: BybitPublicWebsocket.onOpen — one tickers topic per market of this category.
@@ -392,7 +405,9 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
                 .markets()
                 .iter()
                 .filter(|m| {
-                    m.option.is_none() && ((m.quote == "USDT" || m.quote == "USDC") == linear)
+                    m.option.is_none()
+                        && (self.category == "spot"
+                            || ((m.quote == "USDT" || m.quote == "USDC") == linear))
                 })
                 .map(|m| format!("tickers.{}", m.symbol))
                 .collect();

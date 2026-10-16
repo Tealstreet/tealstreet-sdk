@@ -8,7 +8,7 @@ kind = "class"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "FINDING ddi2il-38: the current shared PublicProtocol supports basic Spot startup/data dispatch, but concrete source public class wiring remains incomplete. Its on_open rebuilds topics directly from Store markets, bypassing the parent active-symbol selector, and has not wired activeTickerSymbols:changed, markets:changed or retained topic-set reconciliation. Existing public_ticker_topics/public_ws_lifecycle body ports do not establish these consumers. This row remains pending; Exchange trait/private delivery/registry evidence does not promote it."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#handleActiveTickerSymbolsChanged"
@@ -24,7 +24,7 @@ kind = "constructor"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "FINDING ddi2il-38: the current shared PublicProtocol supports basic Spot startup/data dispatch, but concrete source public class wiring remains incomplete. Its on_open rebuilds topics directly from Store markets, bypassing the parent active-symbol selector, and has not wired activeTickerSymbols:changed, markets:changed or retained topic-set reconciliation. Existing public_ticker_topics/public_ws_lifecycle body ports do not establish these consumers. This row remains pending; Exchange trait/private delivery/registry evidence does not promote it."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#getCurrentTickerTopics"

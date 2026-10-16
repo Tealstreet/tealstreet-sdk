@@ -141,6 +141,15 @@ fn dispatch_callback(
     captures: Vec<Js>,
     args: Vec<Js>,
 ) -> Result<Js, Thrown> {
+    if matches!(
+        code,
+        "account-orders"
+            | "inverse-account-positions"
+            | "spot-account-positions"
+            | "account-tick-again"
+    ) {
+        return crate::variant_account_refresh::dispatch(h.as_ref(), &owner, code, args);
+    }
     if code.starts_with("start_") {
         return crate::primary_startup::start_callback(h, owner, code, args);
     }

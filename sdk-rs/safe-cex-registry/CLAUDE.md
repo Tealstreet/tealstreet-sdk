@@ -159,6 +159,11 @@ shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
 delivery and cancellation over local native transports; its constructor-removal
 control lives in the venue's scripts/registry-control.py.
 
+The Bybit host also constructs `Bybitspot` after its distinct Spot receiver is
+bound. Native Bybit loopback HTTP coverage includes Spot for local and hosted
+signing; its existing registry dependency edge and caller-owned limiter API
+remain shared across these constructors. Inverse/HyroTrader await their bindings.
+
 ApexOmni's signed native host shares the account capability with HTTP and private
 WS auth, retaining remote accountName while keeping the API secret in the browser.
 `native_host_apexomni` verifies both signed wire paths and pending-signature
