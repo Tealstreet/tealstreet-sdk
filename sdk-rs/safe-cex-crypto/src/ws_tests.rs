@@ -39,9 +39,10 @@ impl<'de> serde::Deserializer<'de> for EnumVariants<'_> {
 
 #[test]
 fn every_output_format_requires_a_golden_case() {
-    // Capture serde's generated list, so adding an enum variant cannot evade this test.
+    // Capture the remote decoder's complete generated literal list. The public
+    // frontdoor deliberately admits strings before any enum visitor runs.
     let mut variants = None;
-    assert!(WsOutputFormat::deserialize(EnumVariants(&mut variants)).is_err());
+    assert!(WsOutputFormatWire::deserialize(EnumVariants(&mut variants)).is_err());
     let expected: std::collections::BTreeSet<_> = variants
         .expect("enum must expose its derived variant list")
         .iter()
@@ -114,7 +115,7 @@ fn local_compositions_match_existing_typescript_goldens() {
     }
     assert!(!goldens.is_empty(), "must parse TS composition goldens");
     let mut variants = None;
-    let _ = WsOutputFormat::deserialize(EnumVariants(&mut variants));
+    let _ = WsOutputFormatWire::deserialize(EnumVariants(&mut variants));
     let local: std::collections::BTreeSet<_> = variants
         .unwrap()
         .iter()
