@@ -13,7 +13,6 @@ use safe_cex_exchange::{
     client_order_id::ClientOrderIdRule,
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange},
-    external::ExternalPublicData,
     runtime::{ExchangeError, ExchangeFuture, LogSeverity},
     socket_lifecycle::SocketSlot,
     websocket::{
@@ -26,9 +25,7 @@ use safe_cex_transport::{
     TransportError, TransportFuture, rate_limit::RateLimitClock, secondary::SecondaryKeyClients,
     socket::SocketFrame,
 };
-use safe_cex_types::{
-    ExchangeName, ExchangeOptions, ExchangeOptionsExternalPublicData, Order, PlaceOrderOpts,
-};
+use safe_cex_types::{ExchangeName, ExchangeOptions, Order, PlaceOrderOpts};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -42,7 +39,7 @@ use std::{
 pub(crate) type HttpBuilder =
     Rc<dyn Fn(&ExchangeOptions, &str, i64) -> Result<Rc<dyn RestAdapter>, String>>;
 pub(crate) type ExternalFactory =
-    Rc<dyn Fn(&ExchangeOptionsExternalPublicData) -> Rc<dyn ExternalPublicData>>;
+    safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory;
 type PublicSocket = BlofinPublicWebsocket<PublicHost>;
 type PrivateSocket = BlofinPrivateWebsocket<PrivateHost>;
 
@@ -398,7 +395,8 @@ impl BlofinExchangeHost for NativeHost {
         let base = base.get().clone();
         let external = self.external.clone();
         Box::pin(async move {
-            base.init_external_public_data(|options| external(options))
+            let owner = base.clone();
+            base.init_external_public_data(|options| external(options, owner))
                 .await
                 .map_err(ServiceError::Host)
         })

@@ -20,6 +20,7 @@ use safe_cex_venue_backpack::{
 use safe_cex_venue_binance::exchange_classes::{
     BinanceExchange, BinancePMExchange, BinanceSpotExchange, ExchangeDependencies,
 };
+use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
@@ -67,6 +68,8 @@ pub trait RustVenueHost {
     fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError>;
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError>;
+    /// Bitget, Bitget USDC and Bitget inverse share one input set.
+    fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -85,6 +88,9 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Bitget, bitget_constructor),
+    (ExchangeName::Bitgetinverse, bitget_constructor),
+    (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Okx, okx_constructor),
@@ -150,11 +156,20 @@ fn external_factory(
             "{venue}: externalPublicData is configured but no provider was supplied"
         ))),
         None => Ok(Rc::new(
-            |_: &ExchangeOptionsExternalPublicData| -> Rc<dyn ExternalPublicData> {
+            |_: &ExchangeOptionsExternalPublicData,
+             _: Rc<BaseExchange>|
+             -> Rc<dyn ExternalPublicData> {
                 unreachable!("externalPublicData is unset, so no provider is built")
             },
         )),
     }
+}
+
+pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
+        Ok(exchange)
+    })
 }
 
 pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -168,13 +183,7 @@ pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
-        let exchange = BitunixVenue::new(
-            base,
-            deps.build,
-            deps.install,
-            deps.runtime,
-            Rc::new(move |config| external(config)),
-        )?;
+        let exchange = BitunixVenue::new(base, deps.build, deps.install, deps.runtime, external)?;
         Ok(exchange)
     })
 }
@@ -195,7 +204,7 @@ pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             base,
             move |options, base_url, budget| http(options, base_url, budget),
             deps.runtime,
-            move |config| external(config),
+            external,
             deps.remote_signer_account_name,
         )?;
         Ok(exchange)

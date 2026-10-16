@@ -96,6 +96,7 @@ pub struct PrePlacementEntry {
     pub price: f64,
     pub amount: f64,
     pub timestamp: f64,
+    pub cloid: Option<JsString>,
 }
 #[derive(Deserialize)]
 #[serde(remote = "PrePlacementEntry")]
@@ -108,13 +109,21 @@ struct PrePlacementEntryWire {
     amount: f64,
     #[serde(rename = "timestamp", deserialize_with = "crate::spot_json::number")]
     timestamp: f64,
+    #[serde(
+        rename = "cloid",
+        default,
+        deserialize_with = "crate::spot_json::present"
+    )]
+    cloid: Option<JsString>,
 }
 impl<'de> Deserialize<'de> for PrePlacementEntry {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
         let raw = Box::<serde_json::value::RawValue>::deserialize(decoder)?;
-        let text =
-            crate::spot_json::object_fields(raw.get(), &["type", "price", "amount", "timestamp"])
-                .map_err(serde::de::Error::custom)?;
+        let text = crate::spot_json::object_fields(
+            raw.get(),
+            &["type", "price", "amount", "timestamp", "cloid"],
+        )
+        .map_err(serde::de::Error::custom)?;
         struct OnlyMap;
         impl<'de> serde::de::Visitor<'de> for OnlyMap {
             type Value = PrePlacementEntry;

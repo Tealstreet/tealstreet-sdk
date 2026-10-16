@@ -39,6 +39,7 @@ pub struct State {
     pub reference: Option<N>,
     pub max: Option<N>,
     pub cancel_completed: bool,
+    pub replacement_client_order_id: Option<N>,
     pub callbacks: std::collections::HashMap<String, UpdateCallback<N>>,
     pub settled: Vec<Result<N, N>>,
 }
@@ -93,7 +94,8 @@ impl WsPingHost for Host {
         if matches!(v,N::Builtin(name)if name=="Math") && ["abs", "max"].contains(&k) {
             return Ok(N::Builtin(format!("Math.{k}")));
         }
-        if eq(v, &self.base.exchange) && ["log", "cancelOrders", "placeOrder"].contains(&k) {
+        if eq(v, &self.base.exchange) && ["log", "cancelOrders", "placeOrderWithCloid"].contains(&k)
+        {
             return Ok(N::Builtin(k.into()));
         }
         if eq(v, &self.st.borrow().store) && k == "addOrUpdateOrder" {
@@ -227,7 +229,16 @@ impl WsPingHost for Host {
                 }
                 Ok(self.st.borrow().cancel_result.clone())
             }
-            "placeOrder" => {
+            "mintHyperliquidCloid" => {
+                self.record(id, args);
+                Ok(s("0xmint"))
+            }
+            "withReplacementClientOrderId" => {
+                self.record(id, &args[1..]);
+                self.st.borrow_mut().replacement_client_order_id = Some(args[1].clone());
+                Ok(first)
+            }
+            "placeOrderWithCloid" => {
                 assert!(
                     self.st.borrow().cancel_completed,
                     "UPDATE native cancellation awaited before placement"
@@ -671,6 +682,7 @@ impl Host {
                 reference: None,
                 max: None,
                 cancel_completed: false,
+                replacement_client_order_id: None,
                 callbacks: std::collections::HashMap::new(),
                 settled: vec![],
             })),

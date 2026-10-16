@@ -126,6 +126,7 @@ fn wire<H: PlacementHost>(
     base: &H::Value,
     market_amount: Option<&H::Value>,
     trigger: Option<(&H::Value, &H::Value)>,
+    cloid: &H::Value,
 ) -> Result<H::Value, H::Error> {
     import_call(h, "orderRequestToOrderWire", |h| {
         let request = h.object()?;
@@ -165,6 +166,7 @@ fn wire<H: PlacementHost>(
             Ok(vec![m.clone(), requested])
         })?;
         h.define_data(&request, "reduce_only", &reduce)?;
+        h.define_data(&request, "cloid", cloid)?;
         Ok(vec![request, index.clone()])
     })
 }
@@ -220,14 +222,32 @@ async fn post<H: PlacementHost>(
     })?;
     Ok((response, ids))
 }
-async fn body<H: PlacementHost>(
+/// ts: placeOrder. The caller's ID goes on the main wire verbatim; otherwise one is minted.
+async fn place_body<H: PlacementHost>(
     h: &mut H,
     e: &H::Value,
     opts: &H::Value,
 ) -> Result<H::Value, H::Error> {
-    method(h, e, "resolveCallerClientOrderId", |_| {
+    let caller = method(h, e, "resolveCallerClientOrderId", |_| {
         Ok(vec![opts.clone()])
     })?;
+    let cloid = if h.is_nullish(&caller) {
+        import_call(h, "mintHyperliquidCloid", |_| Ok(vec![]))?
+    } else {
+        caller
+    };
+    let ids = method(h, e, "placeOrderWithCloid", |_| {
+        Ok(vec![opts.clone(), cloid])
+    })?;
+    h.await_value(ids).await
+}
+/// ts: #placeOrderWithCloid; `cloid` is the main wire's client order ID.
+async fn body<H: PlacementHost>(
+    h: &mut H,
+    e: &H::Value,
+    opts: &H::Value,
+    cloid: &H::Value,
+) -> Result<H::Value, H::Error> {
     if kind_is(h, opts, "TrailingStopLoss")? {
         return Err(failure(h, |h| Ok(lit(h, "Not supported")))?);
     }
@@ -248,13 +268,15 @@ async fn body<H: PlacementHost>(
         let base = method(h, e, "getOrderBasePrice", |h| {
             Ok(vec![m.clone(), lit(h, "market order")])
         })?;
-        let wire = wire(h, e, opts, &m, &index, &base, Some(&amount), None)?;
+        let wire = wire(h, e, opts, &m, &index, &base, Some(&amount), None, cloid)?;
         let builder = method(h, e, "getBuilderInfo", |_| Ok(vec![]))?;
         let builder = h.await_value(builder).await?;
         let action = import_call(h, "orderWiresToOrderAction", |h| {
-            Ok(vec![h.array(&[wire])?, builder])
+            Ok(vec![h.array(&[wire.clone()])?, builder])
         })?;
         let payload = sign_payload(h, e, &action).await?;
+        // A market order is a Gtc limit at 5% slippage; an unfilled remainder rests as one.
+        record_placement(h, e, &wire, &m)?;
         let (_, ids) = post(h, e, payload).await?;
         let first = h.get(&ids, "0")?;
         if h.truthy(&first) {
@@ -267,7 +289,9 @@ async fn body<H: PlacementHost>(
         }
         return Ok(ids);
     } else if kind_is(h, opts, "Limit")? {
-        let value = method(h, e, "placeLimitOrder", |_| Ok(vec![opts.clone()]))?;
+        let value = method(h, e, "placeLimitOrder", |_| {
+            Ok(vec![opts.clone(), cloid.clone()])
+        })?;
         return h.await_value(value).await;
     } else if kind_is(h, opts, "TakeProfit")? || kind_is(h, opts, "StopLoss")? {
         let index = asset(h, &m)?;
@@ -320,6 +344,7 @@ async fn body<H: PlacementHost>(
             &base,
             None,
             Some((&wire_size, &price)),
+            cloid,
         )?;
         let builder = method(h, e, "getBuilderInfo", |_| Ok(vec![]))?;
         let builder = h.await_value(builder).await?;
@@ -330,10 +355,20 @@ async fn body<H: PlacementHost>(
             } else {
                 "orderWiresToOrderAction"
             },
-            |h| Ok(vec![h.array(&[wire])?, builder]),
+            |h| Ok(vec![h.array(&[wire.clone()])?, builder]),
         )?;
         let payload = sign_payload(h, e, &action).await?;
-        if hip3(h, &m)? {
+        // Recorded before the REST call: the WS handler identifies this order by
+        // its cloid even for a positional TP/SL, whose response carries no oid.
+        record_placement(h, e, &wire, &m)?;
+        // Core perps cache only a STOP ENTRY (non-reduce-only trigger).
+        let cache = if hip3(h, &m)? {
+            true
+        } else {
+            let reduce = h.get(opts, "reduceOnly")?;
+            !h.truthy(&reduce)
+        };
+        if cache {
             let coin = import_call(h, "symbolToCoin", |h| Ok(vec![h.get(&m, "symbol")?]))?;
             method(h, e, "addToPrePlacementCache", |h| {
                 let side = h.get(opts, "side")?;
@@ -341,7 +376,7 @@ async fn body<H: PlacementHost>(
                 let raw = h.get(opts, "price")?;
                 let price = zero_or(h, raw);
                 let amount = h.get(opts, "amount")?;
-                Ok(vec![coin, side, kind, price, amount])
+                Ok(vec![coin, side, kind, price, amount, cloid.clone()])
             })?;
         }
         let (response, ids) = post(h, e, payload).await?;
@@ -410,6 +445,18 @@ async fn body<H: PlacementHost>(
         Ok(h.literal(&JsString(text)))
     })?)
 }
+/// `this.recordPlacement([orderWire], market.symbol)`.
+fn record_placement<H: PlacementHost>(
+    h: &mut H,
+    e: &H::Value,
+    wire: &H::Value,
+    m: &H::Value,
+) -> Result<(), H::Error> {
+    method(h, e, "recordPlacement", |h| {
+        Ok(vec![h.array(&[wire.clone()])?, h.get(m, "symbol")?])
+    })?;
+    Ok(())
+}
 pub fn place_order<H: PlacementHost + HelperTaskHost<H::Value, H::Error>>(
     host: &H,
     e: &H::Value,
@@ -422,7 +469,24 @@ where
     let mut h = host.clone();
     let e = e.clone();
     let opts = opts.clone();
-    crate::helper_tasks::start(host, async move { body(&mut h, &e, &opts).await })
+    crate::helper_tasks::start(host, async move { place_body(&mut h, &e, &opts).await })
+}
+/// ts: HyperliquidExchange#placeOrderWithCloid.
+pub fn place_order_with_cloid<H: PlacementHost + HelperTaskHost<H::Value, H::Error>>(
+    host: &H,
+    e: &H::Value,
+    opts: &H::Value,
+    cloid: &H::Value,
+) -> HelperObserver<H::Value, H::Error>
+where
+    H::Value: 'static,
+    H::Error: Clone + 'static,
+{
+    let mut h = host.clone();
+    let e = e.clone();
+    let opts = opts.clone();
+    let cloid = cloid.clone();
+    crate::helper_tasks::start(host, async move { body(&mut h, &e, &opts, &cloid).await })
 }
 pub fn run_serial_order_callback<H: PlacementHost>(
     h: &mut H,
