@@ -26,7 +26,11 @@ fn typed_numbers_retain_native_bits_in_both_directions() {
         };
         let js = from_typed(&native).unwrap();
         assert_eq!(
-            js.get("scalar").unwrap().as_f64().unwrap().to_bits(),
+            js.get("scalar")
+                .unwrap()
+                .as_f64()
+                .expect("native-to-JS scalar Number retains bits")
+                .to_bits(),
             value.to_bits(),
             "native-to-JS scalar bits"
         );
