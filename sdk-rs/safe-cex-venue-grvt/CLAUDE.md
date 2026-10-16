@@ -266,3 +266,8 @@ per-crate contract file. Retain the 25 complete positional-array controls and
 five native alias tests; a passing subset does not clear unreviewed compiler
 owners or the borrowed-alias probe refusal. Exact scope and reproduction commands
 are in [ACCEPTED_CONTRACTS.md](ACCEPTED_CONTRACTS.md).
+
+Private numeric comparison preserves BigInt equality across both Number zero
+signs. Native trait-method tests pin coercion effects, original thrown-object
+identity and the source error-code comparisons to 1000. Current TypeScript call
+sites use 1000; zero cases exercise the broader native comparison helper.

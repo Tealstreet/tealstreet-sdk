@@ -87,6 +87,13 @@ is None and present null is Some(Null). Existing numeric lexemes, including
 overflow and signed zero, survive; native NaN is refused. This is JSON capture,
 not JavaScript wire projection; Num owns typed ingress and output eligibility.
 
+Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
+float directly. Capture accepts that event using the same Float path as the
+newtype buffer, preserving signed zero, infinities and NaN payload bits. JSON
+projection still refuses NaN and carries infinities as valid overflow lexemes;
+the raw-token map protocol remains strict. The retained_native_f64 and Num
+passthrough_native_f64 targets cover both direct capture and public projection.
+
 OrderRiskProfile serialization follows its source construction branch. The
 loss-side limit branch places positionSize before fee; all other risk branches
 place it last. Rust-only position_size_before_fee metadata selects the order,

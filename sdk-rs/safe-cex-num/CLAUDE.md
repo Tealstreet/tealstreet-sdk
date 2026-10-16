@@ -332,3 +332,10 @@ regressions are restored by `scripts/order-policy-controls.py`; failures must
 include the named native assertion, never only a compiler diagnostic.
 
 get_balance_slice returns a borrowed BalanceSlice containing the source account or exact currency row. An available/locked row remains that shape; get_total_balance_from_balance sees its absent total and applies the source zero default. Do not fall back to the account total merely because a present currency row has a different runtime shape.
+
+Externally tagged numeric enum objects enter through MapAccessDeserializer, whose
+EnumAccess bridge invokes the enum visitor. MapDeserializer's ordinary enum hint
+forwards to visit_map and cannot decode these variants. Require exactly one tag
+before dispatch; the bridge alone need not consume extra keys. Raw/owned/borrowed
+regressions inspect unit/newtype/tuple/record variants and numeric bits, while
+shared string-union front guards still reject tagged maps.

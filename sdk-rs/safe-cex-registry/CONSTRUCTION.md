@@ -260,10 +260,15 @@ The native host supplies KuCoin's per-options HTTP inputs, shared virtual clock
 and runtime-backed retry clock. MEXC receives its existing configured API stack
 and native sockets; private fills forward to the constructed venue's emitter
 through a weak reference. Native date conversion retains the shared UTC-host
-assumption. Hosted remoteSigner is visibly refused until those venue signing
-capabilities are connected. `tests/native_host_kucoin_mexc.rs` constructs all
+assumption. KuCoin futures and Spot share the hosted account with both HTTP
+clients, source options and typed availability through the common signer bridge.
+Private WS obtains its token through that signed HTTP path. MEXC still refuses
+hosted signing until its capability is connected. `tests/native_host_kucoin_mexc.rs` constructs all
 three entries and verifies actual signed account reads server-side, including
 KuCoin's signed passphrase and MEXC's stable account identity.
+`native_host_kucoin_hosted` additionally compares actual TypeScript request
+metadata, callback headers, unlimited cancellation and private subscription
+topics over native local HTTP/WS with no local secret or passphrase.
 
 
 KuCoin/MEXC construction validation measured fourteen scoped tests, zero parity
