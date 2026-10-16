@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { inventory } from './accepted-inventory.mjs';
+import { loadContracts, defaultContractDirectory } from './accepted-contract-files.mjs';
 import { runProbes } from './accepted-probes.mjs';
 import { reviewedLocalHelper, requireNativeDecoderObservations } from './accepted-local-helpers.mjs';
 import { aliasClaim, aliasTargetIdentity, toolingAliasExemption } from './accepted-aliases.mjs';
@@ -14,6 +15,8 @@ import { genericAliasProbe } from './accepted-callable-alias.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
 
 const args = process.argv.slice(2);
+const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? defaultContractDirectory;
+const allContracts = loadContracts(contractPath);
 const root = fs.realpathSync(path.resolve(args.find(arg => arg.startsWith('--workspace='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')));
 const jobFlags = args.filter(arg => arg.startsWith('--jobs='));
 assert.ok(jobFlags.length <= 1, 'accepted-set: duplicate --jobs');
@@ -94,8 +97,7 @@ for (const pkg of members) {
     const claims = spawnSync(scanner, ['--alias-claims-json', root, ...aliasSources], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
     assert.equal(claims.status, 0, `accepted-set: public alias claim inventory failed: ${claims.stderr}`);
     const aliasClaims = JSON.parse(claims.stdout);
-    const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/contracts.json');
-    const aliasContracts = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+    const aliasContracts = allContracts;
     const nativePolicy = JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../rust-wasm.json'), 'utf8'));
     for (const alias of result.publicAliases) {
       const contract = aliasContracts[alias.name];
@@ -127,8 +129,7 @@ for (const pkg of members) {
       if (enclosing) {
         const owners = result.types.filter(owner => owner.deserialize && owner.ident === enclosing && fs.realpathSync(path.resolve(root, owner.span.filename)) === fs.realpathSync(file));
         assert.equal(owners.length, 1, `${label}: accepted-set assertion: serde helper needs its unique enclosing Deserialize owner`);
-        const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/contracts.json');
-        requireNativeDecoderObservations(owners[0], JSON.parse(fs.readFileSync(contractPath, 'utf8'))[owners[0].name], label);
+        requireNativeDecoderObservations(owners[0], allContracts[owners[0].name], label);
         delegatedLocals.push({ name: `${label}@${row}:${column}`, runtimeOwner: owners[0].name });
         return null;
       }
@@ -136,8 +137,7 @@ for (const pkg of members) {
       assert.ok(['non-decoder', 'decoder-helper'].includes(contract?.category) && contract.reason?.trim(), `${label}: accepted-set assertion: unclassified nested free function; move decoders to module scope`);
       if (contract.category === 'decoder-helper') {
         const owner = result.types.find(owner => owner.name === contract.runtimeOwner);
-        const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/contracts.json');
-        const runtimeContract = JSON.parse(fs.readFileSync(contractPath, 'utf8'))[contract.runtimeOwner];
+        const runtimeContract = allContracts[contract.runtimeOwner];
         assert.ok(owner && (owner.deserialize || (owner.kind === 'function' && runtimeContract?.category === 'decoder') || runtimeContract?.shape === 'observed'), `${label}: accepted-set assertion: decoder helper requires its inventoried production decoder`);
         requireNativeDecoderObservations(owner, runtimeContract, label);
       }
@@ -152,8 +152,7 @@ for (const pkg of members) {
       : 'unsupported local scope needs module-scope production coverage';
     assert.ok(!ident.startsWith('UNSUPPORTED_'), `${file}::${ident}: accepted-set assertion: ${scopeReason}`);
     const helper = { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
-    const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/contracts.json');
-    if (reviewedLocalHelper(helper, localTypeHelpers, fs.readFileSync(file), result.types, JSON.parse(fs.readFileSync(contractPath, 'utf8')))) {
+    if (reviewedLocalHelper(helper, localTypeHelpers, fs.readFileSync(file), result.types, allContracts)) {
       delegatedLocals.push({ name: helper.label, runtimeOwner: localTypeHelpers[helper.label].runtimeOwner });
       return null;
     }
@@ -198,8 +197,7 @@ const output = path.join(metadata.target_directory, 'accepted-set-inventory.json
 fs.writeFileSync(output, `${JSON.stringify(found, null, 2)}\n`);
 console.log(`accepted-set: ${found.reduce((sum, pkg) => sum + pkg.types.filter(type => type.deserialize).length, 0)} Deserialize owners; inventory ${output}`);
 if (!args.includes('--inventory')) {
-  const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/contracts.json');
-  const contracts = args.includes('--census') ? undefined : JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+  const contracts = args.includes('--census') ? undefined : allContracts;
   const results = runProbes(root, metadata, found, contracts, configuration);
   const failures = results.filter(row => row.failures.length);
   if (!args.includes('--measure')) assert.equal(failures.length, 0, `accepted-set: ${failures.length} failed types\n${failures.map(row => `${row.name}: ${row.failures.join('; ')}`).join('\n')}`);
