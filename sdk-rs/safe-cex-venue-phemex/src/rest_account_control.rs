@@ -438,3 +438,19 @@ pub async fn set_leverage_helper<H: SettingsHost>(
     host.record_leverage(&symbol, &context, side.as_ref(), signed.abs(), signed)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn endpoint_lookup_preserves_selected_wire_paths() {
+        assert_eq!(endpoint("ACCOUNT"), "/g-accounts/accountPositions");
+        assert_eq!(endpoint("SET_LEVERAGE"), "/g-positions/leverage");
+        assert_eq!(
+            endpoint("SET_POSITION_MODE"),
+            "/g-positions/switch-pos-mode-sync"
+        );
+        assert!(std::panic::catch_unwind(|| endpoint("not-an-endpoint")).is_err());
+    }
+}

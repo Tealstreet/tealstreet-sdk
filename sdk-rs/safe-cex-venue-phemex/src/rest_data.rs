@@ -1100,3 +1100,23 @@ pub async fn fetch_ohlcv<H: DataHost>(h: &mut H, opts: H::V) -> Result<H::V, H::
         }
     }
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn utf16_encoder_preserves_native_units() {
+        assert_eq!(units(""), Vec::<u16>::new());
+        assert_eq!(units("A🚀\0"), vec![65, 55357, 56960, 0]);
+        assert_eq!(units("é雪"), vec![233, 38634]);
+    }
+
+    #[test]
+    fn endpoint_lookup_preserves_selected_wire_paths() {
+        assert_eq!(endpoint("MARKETS"), "/public/products");
+        assert_eq!(endpoint("TICKERS"), "/md/v3/ticker/24hr/all");
+        assert_eq!(endpoint("KLINE"), "/exchange/public/md/v2/kline/list");
+        assert!(std::panic::catch_unwind(|| endpoint("not-an-endpoint")).is_err());
+    }
+}
