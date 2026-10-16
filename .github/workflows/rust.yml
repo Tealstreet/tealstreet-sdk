@@ -57,7 +57,7 @@ on:
       - 'package.json'
       - 'yarn.lock'
       - 'apps/module-frame/package.json'
-      - 'scripts/rust-ci-wiring.test.mjs'
+      - 'sdk-rs/scripts/rust-ci-wiring.test.mjs'
       - 'sdk-rs/parity/extract-ts/scripts/check-dependency.mjs'
       - 'packages/safe-cex-web/src/candleCache/**'
       - 'packages/safe-cex-server/src/candleCache/**'
@@ -109,7 +109,7 @@ on:
       - 'package.json'
       - 'yarn.lock'
       - 'apps/module-frame/package.json'
-      - 'scripts/rust-ci-wiring.test.mjs'
+      - 'sdk-rs/scripts/rust-ci-wiring.test.mjs'
       - 'sdk-rs/parity/extract-ts/scripts/check-dependency.mjs'
       - 'packages/safe-cex-web/src/candleCache/**'
       - 'packages/safe-cex-server/src/candleCache/**'
@@ -177,7 +177,7 @@ jobs:
           - check: build
             command: cargo build --locked
           - check: test
-            command: cargo test --locked
+            command: cargo test --locked --no-fail-fast
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -254,7 +254,7 @@ jobs:
       - name: Run routing TypeScript equivalence gate
         if: matrix.check == 'test'
         run: |
-          node --test ../scripts/rust-ci-wiring.test.mjs
+          node --test scripts/rust-ci-wiring.test.mjs
           node safe-cex-transport/scripts/routing.mjs --check --equivalence
           cargo test --locked -p safe-cex-transport --all-targets -- --include-ignored
           cargo test --locked -p safe-cex-transport --doc

@@ -142,6 +142,10 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     case 'hyperliquidspot':
       return symbol.replace('/', '');
 
+    // -- TxFlow: BTC-USDC / BTC-USDT → BTCUSDC / BTCUSDT -------------------
+    case 'txflow':
+      return symbol.replace(/-/g, '');
+
     // -- Kraken: PF_XBTUSD → BTCUSD ----------------------------------------
     case 'kraken': {
       let clean = symbol.startsWith('PF_') ? symbol.slice(3) : symbol;
@@ -306,6 +310,12 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'hyperliquidspot': {
       const { base, quote } = parseBinanceSymbol(symbol);
       return `${base}/${quote}`;
+    }
+
+    // -- TxFlow: BTCUSDC / BTCUSDT → BTC-USDC / BTC-USDT -------------------
+    case 'txflow': {
+      const { base, quote } = parseBinanceSymbol(symbol);
+      return `${base}-${quote}`;
     }
 
     // -- Kraken: BTCUSD → PF_XBTUSD ----------------------------------------
