@@ -151,9 +151,15 @@ fn binance_futures_resends_a_signature_rejection_once_on_the_native_host() {
                 counter.set(counter.get() + 1);
                 let rejection =
                     json!({"code":-1022,"msg":"Signature for this request is not valid."});
-                (counter.get() == 1).then(|| match status {
-                    Some(status) => json!({"__status": status, "body": rejection}),
-                    None => rejection,
+                (counter.get() == 1).then(|| {
+                    // Native Date.now has integer milliseconds. Make the second
+                    // attempt's signing input distinct even on a fast loopback
+                    // response, so the assertion measures re-signing.
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                    match status {
+                        Some(status) => json!({"__status": status, "body": rejection}),
+                        None => rejection,
+                    }
                 })
             }))
             .await;
