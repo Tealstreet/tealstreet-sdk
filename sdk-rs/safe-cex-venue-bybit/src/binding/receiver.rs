@@ -209,7 +209,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let g = rt.clone();
         this.define_accessor(
             "isDemo",
-            Some(Rc::new(move |_| Ok(Js::Bool(venue(&g)?.base.is_demo)))),
+            Some(Rc::new(move |_| {
+                Ok(Js::Bool(venue(&g)?.uses_bybit_demo_environment()))
+            })),
             None,
         );
     }
