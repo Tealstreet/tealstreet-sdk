@@ -232,7 +232,8 @@
       "safe-cex-venue-hyperliquid",
       "safe-cex-venue-polymarket",
       "safe-cex-venue-kucoin",
-      "safe-cex-venue-mexc"
+      "safe-cex-venue-mexc",
+      "safe-cex-venue-woo"
     ],
     "reason": "The registry's Rust constructor table (safe-cex-registry/CONSTRUCTION.md). Each bound venue is listed by its own follow-up; an unlisted registry -> venue edge fails, and a listed venue without a live edge is stale."
   },
