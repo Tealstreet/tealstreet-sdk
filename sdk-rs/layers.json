@@ -226,7 +226,9 @@
       "safe-cex-venue-blofin",
       "safe-cex-venue-coinbase",
       "safe-cex-venue-okx",
-      "safe-cex-venue-kraken"
+      "safe-cex-venue-kraken",
+      "safe-cex-venue-kucoin",
+      "safe-cex-venue-mexc"
     ],
     "reason": "The registry's Rust constructor table (safe-cex-registry/CONSTRUCTION.md). Each bound venue is listed by its own follow-up; an unlisted registry -> venue edge fails, and a listed venue without a live edge is stale."
   },
