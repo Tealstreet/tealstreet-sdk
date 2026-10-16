@@ -348,6 +348,21 @@ pub async fn binance_harness_on(
     options: Value,
     signer: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
 ) -> Harness {
+    binance_harness_over(
+        extra,
+        options,
+        signer,
+        safe_cex_exchange::native::native_runtime(),
+    )
+    .await
+}
+/// As `binance_harness_on`, over a caller-built native runtime (e.g. the Tealstreet transport).
+pub async fn binance_harness_over(
+    extra: Handler,
+    options: Value,
+    signer: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+    runtime: Rc<NativeRuntime>,
+) -> Harness {
     let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ws = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let http_origin = format!("http://{}", http.local_addr().unwrap());
@@ -358,7 +373,7 @@ pub async fn binance_harness_on(
     let received = Rc::new(RefCell::new(vec![]));
     tokio::task::spawn_local(serve_ws(ws, peers.clone(), received.clone()));
     let host = Rc::new(LocalDial {
-        inner: safe_cex_exchange::native::native_runtime(),
+        inner: runtime,
         origin: ws_origin,
     });
     let adapters = Rc::new(move || {

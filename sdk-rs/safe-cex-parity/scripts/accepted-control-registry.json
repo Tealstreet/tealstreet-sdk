@@ -100,7 +100,8 @@
       "alternate constructors returning a local type alias remain inventoried",
       "explicit owner regression scope cannot turn the default matrix inventory green",
       "inherent factories returning a different decoded owner remain inventoried",
-      "alias defaults respect lexical parameter scopes and nested applications without weakening cycle refusal"
+      "alias defaults respect lexical parameter scopes and nested applications without weakening cycle refusal",
+      "unsupported receivers and uninstantiated defaults pass only with a reviewed source pin"
     ],
     "accepted-loader-future-native.test.mjs": [
       "loader future actual compiler coverage refuses removal and restores the named assertion"
@@ -143,6 +144,9 @@
       "new debt requires same-commit nominal birth and cannot follow a rename",
       "opaque history, dormant declarations, and recreated names cannot claim nominal birth",
       "sibling introductions cannot launder delayed debt but genuine new-owner merges pass"
+    ],
+    "accepted-reviewed-aliases.test.mjs": [
+      "reviewed generic aliases return only their spec-owned fixed instantiation"
     ],
     "accepted-scanner.test.mjs": [
       "scanner receipts bind the SDK package and actual fresh executable",
