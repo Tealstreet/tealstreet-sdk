@@ -89,6 +89,8 @@ impl From<&ExchangeOptions> for RoutingOptions {
             orderly_exchange_id: _,
             tuning: _,
             extra: _,
+            // Venue credentials/signature mode do not select transport routing.
+            polymarket: _,
             remote_signer: _,
             transport: _,
             payload_signer: _,

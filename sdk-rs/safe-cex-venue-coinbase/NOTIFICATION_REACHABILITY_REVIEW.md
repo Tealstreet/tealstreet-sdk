@@ -1,5 +1,20 @@
 # Coinbase notification reachability review
 
+## Production binding follow-up
+
+The production binding supplies a native Store publication bridge and witnesses
+startup commit-before-failure, subscriber cause identity and stopped fanout. The
+fourteen existing notification finding roots remain individually classified; this
+new startup witness does not promote the other roots or reprice their audit floor.
+See [binding gates](BINDING_GATES.md) for the executed scope.
+
+The ES256 primitive in #148 reclassified `getSigningKey` and `sign` as CHOSEN
+platform-error/nonce output choices. Both remain in the notification walk under
+an exact two-root `crypto-choice` classification. The current 262-root census is
+246 ported, fourteen notification findings and two crypto choices. A negative
+control refuses assigning that choice to any other root. All thirteen direct
+Store sites and the 29 finding-root call paths remain pinned.
+
 ## Concrete snapshot error bridge
 
 The resumed tomllib census at merged parent `a58f9ce8f1650bfb3d88347cb3e9071ab39b44ae`

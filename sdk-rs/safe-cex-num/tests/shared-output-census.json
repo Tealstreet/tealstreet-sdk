@@ -28,6 +28,7 @@
     "ExchangeOptionsExtraKucoinBroker",
     "ExchangeOptionsExtraLighterBuilderFeeMode",
     "ExchangeOptionsHyperliquidBuilder",
+    "ExchangeOptionsPolymarket",
     "ExchangeOptionsTuning",
     "Execution",
     "ExecutionPositionSide",

@@ -712,6 +712,8 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
             ExchangeName::Breakoutprop,
+            ExchangeName::Coinbase,
+            ExchangeName::Coinbasespot,
             ExchangeName::Hyperliquid,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,

@@ -57,6 +57,7 @@ pub struct NativeVenueHost {
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
     remote: Option<HostedSigner>,
+    coinbase_keys: Rc<safe_cex_venue_coinbase::cdp_signing::CdpSigningCache>,
     kraken_nonces: Rc<safe_cex_venue_kraken::api::FuturesModule>,
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
     hyperliquid_limiter: Rc<HyperliquidRateLimiter>,
@@ -83,6 +84,7 @@ pub fn native_venue_host_with(
         runtime,
         adapter,
         remote: None,
+        coinbase_keys: Rc::default(),
         kraken_nonces: Rc::default(),
         kraken_spot_ids: kraken_spot_ids(),
         hyperliquid_limiter: limiter,
@@ -101,6 +103,7 @@ pub fn native_venue_host_signed(
         runtime,
         adapter,
         remote: Some((signer, account_name)),
+        coinbase_keys: Rc::default(),
         kraken_nonces: Rc::default(),
         kraken_spot_ids: kraken_spot_ids(),
         hyperliquid_limiter: limiter,
@@ -269,6 +272,21 @@ impl RustVenueHost for NativeVenueHost {
                 (self.adapter)()?,
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+
+    fn coinbase(&self) -> Result<safe_cex_venue_coinbase::CoinbaseDependencies, ExchangeError> {
+        Ok(safe_cex_venue_coinbase::CoinbaseDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            signing_cache: self.coinbase_keys.clone(),
+            // Native SDK date helpers use a UTC host profile; wire timestamps carry offsets.
+            local_wall_time_to_utc: Rc::new(|millis| millis),
         })
     }
 
