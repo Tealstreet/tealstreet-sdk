@@ -483,3 +483,11 @@ primary local-write adapter computes remaining from the original filled amount;
 its record-options initializer shares the identical Spot implementation. Bare
 parseFloat lookup captures the raw callable before evaluating its argument, then
 invokes it without a global receiver. Concrete class binding remains pending.
+
+
+primary_startup is an unaccepted startup extraction over SnapshotHost; the
+manifest row remains pending. It retains cached public-only mode, eager margin
+probe/cache launch and post-market parser ordering. Its detached cache rejection
+callback reports the original value instead of the source empty continuation.
+This deliberate visible-error correction requires a separate source/native
+witness before any divergent annotation; concrete startup binding is pending.
