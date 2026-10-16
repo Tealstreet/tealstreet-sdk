@@ -64,6 +64,7 @@ const EXCHANGE_NAMES = [
   'mode',
   'salsadex',
   'tealstreet-dex',
+  'txflow',
   'what',
   'weex',
   'woo',
