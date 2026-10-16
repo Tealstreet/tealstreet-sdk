@@ -1,5 +1,9 @@
 //! Base JS host traits over the production realm.
-use super::{Realm, promise::ValueFuture, value::*};
+use super::{
+    Realm,
+    promise::ValueFuture,
+    value::{PropKey, Value},
+};
 use crate::{
     cache_orders::CacheOrdersHost,
     cross_cache::CrossCacheHost,

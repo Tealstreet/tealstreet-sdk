@@ -12,6 +12,11 @@ pub struct SigningPayload {
     wire: Value,
     encoding: JsJsonValue,
 }
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_signing_clone.rs"]
+mod accepted_clone;
+
 pub trait SigningInput {
     fn encoding_view(&self) -> Cow<'_, JsJsonValue>;
 }
