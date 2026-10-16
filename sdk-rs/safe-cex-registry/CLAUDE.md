@@ -131,3 +131,9 @@ Kraken Futures/Spot native inputs use the shared hosted signer bridge for privat
 HTTP and Futures websocket challenges. Both retain the hosted account name with
 empty local secrets. The native witness verifies signed HTTP bytes and challenge
 subscription fields; the account metadata comes from live injected options.
+
+ApexOmni now has its own Rust table entry and native host factory. It uses the
+shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
+`tests/native_host_apexomni.rs` covers signed startup, placement, private WS order
+delivery and cancellation over local native transports; its constructor-removal
+control lives in the venue's scripts/registry-control.py.

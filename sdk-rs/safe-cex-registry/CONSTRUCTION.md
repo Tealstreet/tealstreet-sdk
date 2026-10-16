@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
 Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
@@ -259,3 +259,9 @@ findings, live-source registry equivalence and all 88 layer assertions. Strict
 host all-target and wasm library clippy passed. Independently removing each of
 the three production table entries compiled and failed its native construction
 test with exit 101; exact source restoration passed both native test functions.
+
+ApexOmni is assembled through its shared js_runtime binding with a real
+OmniKey-seeded zkLink contract signer. Its native proof observes HTTP/WS startup,
+wire HMAC over the transmitted order form, caller ID, private WS order delivery
+and cancellation. Unsupported hosted signing/wallet-provider operations reject
+visibly. The module-host path remains the default.
