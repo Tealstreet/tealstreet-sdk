@@ -45,3 +45,7 @@ pub mod classes;
 
 pub mod binding;
 pub use binding::exchange::{KrakenDependencies, KrakenExchange, spot_client_ids};
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_record_shapes.rs"]
+mod accepted_record_shapes_support;
