@@ -722,3 +722,39 @@ reviewed against its36 committed call sites and its sole guarded delegation;
 all other lanes' inventory rows remain unchanged. The compiled negative-control
 receipts precede this final master refresh; the positive suites above were rerun
 against the resulting shared dependencies.
+
+
+## Native hosted signing
+
+Source audit: generic Base signHttpRequest and Apex private auth support the
+shared browser relay; WS uses apexomni-base64 (base64-spelled secret as HMAC key).
+Source validate/place still initialize the L2 signer from omniKeySeed. Native
+HTTP/WS signing now shares the account capability; the API secret stays remote
+while the source-required Omni seed remains local for contract signing.
+
+The original compiled hosted native E2E fails the not-wired refusal, then passes.
+Five native loopback tests cover local and remote lifecycles, actual transmitted
+HTTP/WS HMAC, fractional placement/caller ID, account-name presence/absence,
+delayed auth-before-subscribe, HTTP refusal without unsigned requests and WS
+refusal/throw without private frames or an auth-invalid diagnostic.
+
+Four independent capability/ownership substitutions each compile and fail the
+named native assertion, then restore to pass (hosted-signing-controls.py). A
+stronger disposal witness retains the wrapper and disposes synchronously inside
+the signer's first poll. It compiled and failed before the post-poll disposal
+guard; after repair both ordinary and reentrant disposal close the signing
+future without private frames. Source detached Promises continue; this native
+P4 cancellation choice is explicit in the onOpen row.
+
+On master263d9a8c81 plus the hosted implementation, source oracle161, assembled27,
+native5 + registry14, layers88/registry equivalence, cancellation6 (one explicit
+exporter ignored), host/wasm strict Clippy, fmt, live TS override1 and global
+parity0 (7459 rows/17146 public items) pass. After the final disposal guard,
+native5, assembled27, host/wasm Clippy, fmt and parity0 pass again. The full
+shared dispatch guard remains blocked by Backpack's stale disposal evidence,
+owned by #213; none of that lane's rows are edited. Own36 call sites retain
+exact discovery after reviewing just the two constructor fingerprints.
+
+The shared form-string prerequisite is landed #232. Its actual-source remote
+adapter/Axios witness covers four string representations; original bridge fails
+and repaired bridge passes. Opaque encoded bytes still refuse before signing.

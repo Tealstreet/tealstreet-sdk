@@ -374,6 +374,15 @@ struct ReviewedDelegations {
 }
 impl ReviewedDelegations {
     fn load(repo: &Path, overrides: &serde_json::Value) -> Self {
+        let source_review = Command::new("node")
+            .arg(repo.join("sdk-rs/safe-cex-exchange/scripts/dispose-source.cjs"))
+            .output()
+            .expect("Node and TypeScript required for disposal source review");
+        assert!(
+            source_review.status.success(),
+            "dispose classification disagrees with TypeScript source: {}",
+            String::from_utf8_lossy(&source_review.stderr)
+        );
         let reviewed: serde_json::Value =
             serde_json::from_str(include_str!("override-base-delegations.json")).unwrap();
         assert_eq!(
@@ -445,6 +454,20 @@ impl ReviewedDelegations {
             );
         }
     }
+}
+#[test]
+fn disposal_source_classification_rejects_mismatched_reviews() {
+    let output = Command::new("node")
+        .args(["--test", "scripts/dispose-source.test.cjs"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("Node and TypeScript required for disposal source controls");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 #[test]
 fn production_callers_do_not_bypass_exchange_override_hooks() {

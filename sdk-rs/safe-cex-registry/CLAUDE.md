@@ -153,3 +153,8 @@ shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
 `tests/native_host_apexomni.rs` covers signed startup, placement, private WS order
 delivery and cancellation over local native transports; its constructor-removal
 control lives in the venue's scripts/registry-control.py.
+
+ApexOmni's signed native host shares the account capability with HTTP and private
+WS auth, retaining remote accountName while keeping the API secret in the browser.
+`native_host_apexomni` verifies both signed wire paths and pending-signature
+cancellation; the Omni seed remains necessary for source L2 contract signing.
