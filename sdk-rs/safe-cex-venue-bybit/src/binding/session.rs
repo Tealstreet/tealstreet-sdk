@@ -96,7 +96,10 @@ impl SessionHost for Rt {
         let member = bound_member(&owner, key)?;
         if owner.is_array()
             && member.is_callable()
-            && matches!(key, "map" | "filter" | "some" | "find" | "reduce")
+            && matches!(
+                key,
+                "map" | "filter" | "some" | "find" | "reduce" | "forEach"
+            )
         {
             member.define(OWNER, owner)?;
             member.define(NAME, Js::str(key))?;
@@ -167,7 +170,25 @@ impl SessionHost for Rt {
                 }
                 Ok(Js::array(out))
             }
-            "capturedMember" => self.select(arg(&args, 0), "map"),
+            "capturedMember" => {
+                let selected = arg(&args, 1);
+                selected.define(OWNER, arg(&args, 0))?;
+                selected.define(NAME, Js::str("map"))?;
+                Ok(selected)
+            }
+            "destructure2" => {
+                let values = arg(&args, 0)
+                    .array_values()
+                    .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
+                Ok(Js::array(vec![
+                    values.first().cloned().unwrap_or(Js::Undefined),
+                    values.get(1).cloned().unwrap_or(Js::Undefined),
+                ]))
+            }
+            "greaterEqual" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::greater_equal(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
             "intervalRegex" => safe_cex_exchange::js_runtime::regexp::regexp(
                 &r"(\d+)([a-zA-Z]+)".encode_utf16().collect::<Vec<_>>(),
                 &[],

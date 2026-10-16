@@ -40,6 +40,7 @@ fn scripted(wire: &support::Wire) {
     wire.ok("POST", "/v5/order/create", json!({"orderId":"created"}));
     wire.ok("POST", "/v5/order/amend", json!({"orderId":"existing"}));
     wire.ok("POST", "/v5/order/cancel", json!({"orderId":"existing"}));
+    wire.ok("POST", "/v5/order/cancel-batch", json!({}));
 }
 
 #[test]
@@ -90,7 +91,7 @@ fn spot_methods_use_spot_requests_and_inherited_refusals() {
     })).unwrap();
     let venue = h.venue();
     let ids = h
-        .drive(Box::pin(venue.base().place_order(venue, options)))
+        .drive(Box::pin(venue.base().place_order(venue, options.clone())))
         .unwrap();
     assert_eq!(ids, ["created"]);
     let sent = h.wire.calls("/v5/order/create");
@@ -99,6 +100,57 @@ fn spot_methods_use_spot_requests_and_inherited_refusals() {
     assert_eq!(sent[0].body["orderType"], "Limit");
     assert_eq!(orders[0].side, OrderSide::Buy);
     assert_eq!(orders[0].r#type, OrderType::Limit);
+    let batch = h
+        .drive(Box::pin(
+            venue
+                .base()
+                .place_orders(venue, vec![options.clone(), options]),
+        ))
+        .unwrap();
+    assert_eq!(batch, ["created", "created"]);
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            orders: Some(orders.clone()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let amended = h
+        .drive(
+            h.venue().update_order(
+                serde_json::from_value(json!({
+                    "order":orders[0], "update":{"price":25100}
+                }))
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(amended, ["existing"]);
+    assert_eq!(h.wire.calls("/v5/order/amend")[0].body["category"], "spot");
+    h.drive(h.venue().cancel_orders(orders)).unwrap();
+    assert_eq!(
+        h.wire.calls("/v5/order/cancel-batch")[0].body["category"],
+        "spot"
+    );
+    assert_eq!(
+        h.store.orders().len(),
+        1,
+        "default route waits for private WS to retire an order"
+    );
+    assert_eq!(
+        h.drive(h.venue().fetch_symbol_max_leverage("BTCUSDT".into()))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(
+        h.drive(h.venue().fetch_public_trades("BTCUSDT".into(), None))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
     for result in [
         h.drive(h.venue().set_leverage("BTCUSDT".into(), 2., None)),
         h.drive(h.venue().change_position_mode(true, None)),
@@ -128,5 +180,66 @@ fn public_only_spot_start_uses_spot_socket_and_skips_account_reads() {
     );
     assert!(h.wire.calls("/v5/account/info").is_empty());
     assert!(h.wire.calls("/v5/account/wallet-balance").is_empty());
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_spot_start_publishes_snapshot_and_subscribes_only_to_orders() {
+    let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
+    h.drive(h.venue().start()).unwrap();
+    h.advance(2000.);
+    let loaded = h.store.loaded().clone();
+    assert!(
+        loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders,
+        "Spot snapshot: {loaded:?}; logs={:?}",
+        h.runtime.logs.borrow()
+    );
+    assert_eq!(h.store.orders()[0].id, "existing");
+    assert!(h.store.positions().is_empty());
+    let sockets = h.runtime.sockets.borrow();
+    assert_eq!(sockets.len(), 2);
+    let private = &sockets
+        .iter()
+        .find(|(url, _)| url.contains("/v5/private"))
+        .unwrap()
+        .1;
+    let frames: Vec<serde_json::Value> = private
+        .sent
+        .borrow()
+        .iter()
+        .map(|frame| serde_json::from_str(frame).unwrap())
+        .collect();
+    let auth = frames
+        .iter()
+        .position(|frame| frame["op"] == "auth")
+        .unwrap();
+    let subscribe = frames
+        .iter()
+        .position(|frame| frame["op"] == "subscribe")
+        .unwrap();
+    assert!(auth < subscribe);
+    assert_eq!(frames[subscribe]["args"], json!(["order"]));
+    assert!(h.wire.calls("/v5/position/list").is_empty());
+    h.venue().dispose().unwrap();
+    assert!(sockets.iter().all(|(_, socket)| socket.closed.get()));
+}
+
+#[test]
+fn brazil_spot_cancel_retires_the_local_order_fallback() {
+    let mut options = support::options();
+    options.bybit_site_id = Some(safe_cex_types::ExchangeOptionsBybitSiteId::BraBtl);
+    let h = support::harness_as(ExchangeName::Bybitspot, options, scripted);
+    let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            orders: Some(orders.clone()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.drive(h.venue().cancel_orders(orders)).unwrap();
+    assert!(h.store.orders().is_empty());
     h.venue().dispose().unwrap();
 }

@@ -28,7 +28,9 @@ fn error(message: impl AsRef<str>) -> Thrown {
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     rt.this.define("isSpot", Js::Bool(true))?;
     method(rt, "start", start)?;
-    method(rt, "fetchPositions", |_, _| Ok(Js::array(vec![])))?;
+    method(rt, "fetchPositions", |rt, _| {
+        Ok(rt.spawn(Box::pin(async { Ok(Js::array(vec![])) })))
+    })?;
     for name in ["setLeverage", "changeMarginType", "changePositionMode"] {
         method(rt, name, |rt, _| {
             Ok(rt.spawn(Box::pin(async { Err(error("Not implemented")) })))
