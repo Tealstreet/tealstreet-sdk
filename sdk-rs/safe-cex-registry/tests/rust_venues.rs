@@ -25,7 +25,7 @@ use safe_cex_venue_binance::{
         CapturedAction, NativePrivateSocket, PrivateBase, PrivateCallback, PrivateParent,
         PrivateTimers,
     },
-    private_event_value::{EventValue, record, string},
+    private_event_value::{EventOps, EventValue, record, string},
     private_rest::{SnapshotCompletion, SnapshotRequestFuture},
     private_session::{Factory, Venue},
     protocol_types::BinanceOrderBookApplyResult,
@@ -329,11 +329,11 @@ impl ExchangeImports for Imports {
         _: Rc<dyn Fn(EventValue) -> Result<EventValue, Failure>>,
         _: Option<safe_cex_venue_binance::private_session::RateHook>,
     ) -> Result<EventValue, Failure> {
-        Ok(EventValue::Array(Rc::new(RefCell::new(vec![
+        Ok(EventValue::array(vec![
             client("route"),
             client("primary"),
             client("secondary"),
-        ]))))
+        ]))
     }
     fn rate_limit(&self, client: EventValue, _: f64) -> Result<EventValue, Failure> {
         Ok(client)

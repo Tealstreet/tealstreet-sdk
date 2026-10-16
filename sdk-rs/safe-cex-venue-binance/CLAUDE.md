@@ -387,3 +387,13 @@ for POST/PUT — never an axios config object; every call site passes that shape
 Binance ledger ids arrive as JSON numbers and the class keeps them raw as TS
 does; `income_records` projects them through `String()` only at the typed
 `IncomeRecord` boundary (trait income methods, pager, fold).
+
+The family value graph is the canonical `js_runtime::value::Js`: `EventValue`
+is an alias and `EventOps` retains the decoded-data operations without separate
+storage. Closed categorical constructors now create source string primitives.
+Fresh decoded objects capture the existing native `PrototypeRealm` through
+`Js::Builtin`, retaining live intrinsic referents used by core statistics.
+These native referents support the existing data/reference profile, not arbitrary
+intrinsic execution or full descriptors. Typed DTO conversion uses the shared
+native bridge. See [shared value evidence](SHARED_VALUES.md); the separately
+planned typed JS-string cutover remains outside this change.

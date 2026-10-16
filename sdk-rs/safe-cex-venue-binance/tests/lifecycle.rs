@@ -41,26 +41,23 @@ fn wire(v: &EventValue) -> Value {
                 json!(v)
             }
         }
-        EventValue::String(v) => json!(v),
-        EventValue::Array(v) => Value::Array(v.borrow().iter().map(wire).collect()),
-        EventValue::Object(v) => Value::Object(
-            v.borrow()
-                .fields
+        EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
+        EventValue::Array(v) => Value::Array(array_values(v).iter().map(wire).collect()),
+        EventValue::Object(_) => Value::Object(
+            v.spread()
                 .iter()
                 .map(|(k, v)| (k.clone(), wire(v)))
                 .collect(),
         ),
-        EventValue::Enum(v) => v.wire(),
-        EventValue::Inherited(_) => panic!("no inherited callable in authored lifecycle graph"),
-        EventValue::Builtin(_) => panic!("no builtin referent in authored lifecycle graph"),
+        _ => panic!("no unsupported value in authored lifecycle graph"),
     }
 }
 fn p(v: &EventValue, key: &str) -> EventValue {
     v.get(key).unwrap()
 }
 fn own(v: &EventValue, key: &str) -> bool {
-    if let EventValue::Object(o) = v {
-        o.borrow().fields.contains_key(key)
+    if matches!(v, EventValue::Object(_)) {
+        v.has_own(key)
     } else {
         false
     }
@@ -84,7 +81,11 @@ fn s(v: EventValue, expected: &str, label: &str) {
     let EventValue::String(actual) = v else {
         panic!("{label}: native String variant")
     };
-    assert_eq!(actual, expected, "{label}: native string");
+    assert_eq!(
+        actual.as_ref(),
+        expected.encode_utf16().collect::<Vec<_>>(),
+        "{label}: native string"
+    );
 }
 fn boolean(v: EventValue, expected: bool, label: &str) {
     let EventValue::Bool(actual) = v else {
@@ -96,7 +97,7 @@ fn arr(v: &EventValue) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("native Array")
     };
-    a.borrow().clone()
+    array_values(a)
 }
 fn syn(k: LifecycleSync) -> &'static str {
     match k {
@@ -273,8 +274,9 @@ impl LifecycleBindings for Bind {
         }
         if k == LifecycleSync::Log && st.name() == "log-mutates-lengths" {
             if let EventValue::Array(a) = &st.tickers {
-                a.borrow_mut()
+                EventValue::Array(a.clone())
                     .push(decoded(json!({"id":"ticker-C","last":6.7})))
+                    .unwrap()
             }
         }
         if k == LifecycleSync::Update && st.name() == "capture-version-mutation" {
@@ -449,7 +451,7 @@ impl LifecycleBindings for Bind {
                 let EventValue::Array(a) = &st.count else {
                     panic!()
                 };
-                a.borrow_mut().push(number(16.0));
+                EventValue::Array(a.clone()).push(number(16.0)).unwrap();
             }
             let st = st.clone();
             Ok(Rc::new(move |args| {
