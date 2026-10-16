@@ -131,3 +131,28 @@ comparison test executes nineteen trait calls, including signed zero, the source
 code1000 cases, object coercion count and original thrown-object identity. The
 complete Private owner retains its separate API obligations. This batch does not
 claim whole-crate gate completion.
+
+## Complete exchange owner and borrowed Fields
+
+The GrvtExchange contract retains all eleven compiler-selected APIs. Its
+constructor has a specific typed capability role; six raw methods observe native
+results, Store state and HTTP requests. Four inherited rejections use only the
+reviewed per-method source, signature, fixture and adapter policy. Each rejection
+observes the actual Error name/message and unchanged HTTP/state effects.
+
+Fields<bool> retains its Rc/RefCell/IndexMap identity and static borrowed string
+keys. Its finite borrowed-map contract executes all 36 immutable route witnesses:
+static text, retained static borrowed Value and owned Value. Native key order,
+bool payloads, source-text offsets and borrowed Value key pointers are observed.
+Escaped text and nonempty owned Values refuse; an empty owned map admits. No
+caller projection, ownership change or permission for other generic arguments
+is added. All nineteen reviewed GRVT aliases now have their own stored contracts.
+
+Both new complete owners pass production execution on native and wasm. The
+combined stored set passes with 70 runtime results and thirteen explicit
+classifications per target (83 total before the two helper PRs merge). A compiled
+production position-size drift fails both fetch_positions observations while all
+36 Fields routes remain green; exact byte restoration passes both owners again.
+The merged Fields tooling additionally proves native identity, member-order and
+removed-policy controls. These receipts retain the ordinary guards and do not
+complete the remaining nominal, receiver or local-scope review.
