@@ -48,32 +48,30 @@ pub(super) fn settings(h: &Host) -> ExchangeSettings {
         )),
     }
 }
+fn table<T: serde::Serialize>(values: &[(&str, T)]) -> Result<Js, Thrown> {
+    let result = Js::object(vec![]);
+    for (key, value) in values {
+        result.define_key(&from_typed(key)?.to_js_string()?, from_typed(value)?)?;
+    }
+    Ok(result)
+}
 pub(super) fn constant(name: &str) -> Result<Js, Thrown> {
     use crate::types::*;
-    macro_rules! table {
-        ($values:expr) => {{
-            let result = Js::object(vec![]);
-            for (key, value) in $values {
-                result.define_key(&from_typed(key)?.to_js_string()?, from_typed(value)?)?;
-            }
-            Ok(result)
-        }};
-    }
     match name {
         "GRAFANA_ENDPOINTS_EVERY" => from_typed(GRAFANA_ENDPOINTS_EVERY),
         "GRAFANA_ENDPOINTS_PERIODIC" => from_typed(GRAFANA_ENDPOINTS_PERIODIC),
-        "ENDPOINTS" => table!(ENDPOINTS),
-        "INTERVAL" => table!(INTERVAL),
-        "TIME_IN_FORCE" => table!(TIME_IN_FORCE),
-        "POSITION_MODE" => table!(POSITION_MODE),
-        "MARGIN_TYPE" => table!(MARGIN_TYPE),
-        "REVERSE_POSITION_MODE" => table!(REVERSE_POSITION_MODE),
-        "REVERSE_MARGIN_TYPE" => table!(REVERSE_MARGIN_TYPE),
-        "REVERSE_POSITION_SIDE" => table!(REVERSE_POSITION_SIDE),
-        "REVERSE_ORDER_SIDE" => table!(REVERSE_ORDER_SIDE),
-        "REVERSE_ORDER_TYPE" => table!(REVERSE_ORDER_TYPE),
-        "REVERSE_TIME_IN_FORCE" => table!(REVERSE_TIME_IN_FORCE),
-        "REVERSE_ORDER_TRIGGER_TYPE" => table!(REVERSE_ORDER_TRIGGER_TYPE),
+        "ENDPOINTS" => table(ENDPOINTS),
+        "INTERVAL" => table(INTERVAL),
+        "TIME_IN_FORCE" => table(TIME_IN_FORCE),
+        "POSITION_MODE" => table(POSITION_MODE),
+        "MARGIN_TYPE" => table(MARGIN_TYPE),
+        "REVERSE_POSITION_MODE" => table(REVERSE_POSITION_MODE),
+        "REVERSE_MARGIN_TYPE" => table(REVERSE_MARGIN_TYPE),
+        "REVERSE_POSITION_SIDE" => table(REVERSE_POSITION_SIDE),
+        "REVERSE_ORDER_SIDE" => table(REVERSE_ORDER_SIDE),
+        "REVERSE_ORDER_TYPE" => table(REVERSE_ORDER_TYPE),
+        "REVERSE_TIME_IN_FORCE" => table(REVERSE_TIME_IN_FORCE),
+        "REVERSE_ORDER_TRIGGER_TYPE" => table(REVERSE_ORDER_TRIGGER_TYPE),
         _ => Err(Thrown::type_error(&format!("Unknown WEEX constant {name}"))),
     }
 }

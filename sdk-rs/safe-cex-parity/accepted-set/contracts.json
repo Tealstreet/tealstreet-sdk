@@ -5327,7 +5327,7 @@
       },
       "UNKNOWN",
       "1m ",
-      "\ufeff1m"
+      "﻿1m"
     ]
   },
   "safe_cex_types::Balance": {
@@ -5933,7 +5933,7 @@
       },
       "LONG",
       " long",
-      "long\ufeff",
+      "long﻿",
       "unknown"
     ]
   },
@@ -20612,11 +20612,11 @@
         "output": "-Infinity"
       },
       {
-        "input": "\ufeff2",
+        "input": "﻿2",
         "output": "2"
       },
       {
-        "input": "\u00852",
+        "input": "2",
         "output": "NaN"
       }
     ]
@@ -20683,11 +20683,11 @@
         "output": "Infinity"
       },
       {
-        "input": "\ufeff12.5tail",
+        "input": "﻿12.5tail",
         "output": "12.5"
       },
       {
-        "input": "\u008512.5",
+        "input": "12.5",
         "output": "NaN"
       }
     ]
@@ -20768,12 +20768,12 @@
         "output": null
       },
       {
-        "input": " \ufeffx\n",
+        "input": " ﻿x\n",
         "output": "x"
       },
       {
-        "input": "\u0085",
-        "output": "\u0085"
+        "input": "",
+        "output": ""
       },
       {
         "input": 12,
@@ -21524,11 +21524,11 @@
       },
       {
         "input": "%FF",
-        "output": "\ufffd"
+        "output": "�"
       },
       {
         "input": "%E2%82%AC",
-        "output": "\u20ac"
+        "output": "€"
       }
     ]
   },
@@ -36635,7 +36635,7 @@
       },
       {
         "input": [
-          "\ud83d\ude00",
+          "😀",
           "",
           "_"
         ],
@@ -38439,7 +38439,7 @@
     "cases": [
       {
         "input": {
-          "value": "\ufeffClose Long\ufeff"
+          "value": "﻿Close Long﻿"
         },
         "output": {
           "ok": true,
@@ -38457,7 +38457,7 @@
       },
       {
         "input": {
-          "value": "\u0085long\u0085"
+          "value": "long"
         },
         "output": {
           "ok": true,
@@ -38823,7 +38823,7 @@
     "cases": [
       {
         "input": {
-          "value": " \ufeffx\u00a0 "
+          "value": " ﻿x  "
         },
         "output": {
           "some": true,
@@ -38841,7 +38841,7 @@
       },
       {
         "input": {
-          "value": " \ufeff "
+          "value": " ﻿ "
         },
         "output": {
           "some": false,
@@ -38850,11 +38850,11 @@
       },
       {
         "input": {
-          "value": "\u0085"
+          "value": ""
         },
         "output": {
           "some": true,
-          "value": "\u0085"
+          "value": ""
         }
       },
       {
@@ -38935,7 +38935,7 @@
     "cases": [
       {
         "input": {
-          "value": " \ufeffx\u00a0 "
+          "value": " ﻿x  "
         },
         "output": {
           "some": true,
@@ -38953,7 +38953,7 @@
       },
       {
         "input": {
-          "value": " \ufeff "
+          "value": " ﻿ "
         },
         "output": {
           "some": false,
@@ -38962,11 +38962,11 @@
       },
       {
         "input": {
-          "value": "\u0085"
+          "value": ""
         },
         "output": {
           "some": true,
-          "value": "\u0085"
+          "value": ""
         }
       },
       {
@@ -86422,14 +86422,14 @@
         "input": "c3a9",
         "output": {
           "some": true,
-          "value": "\u00e9"
+          "value": "é"
         }
       },
       {
         "input": "C3A9",
         "output": {
           "some": true,
-          "value": "\u00e9"
+          "value": "é"
         }
       },
       {
@@ -86653,7 +86653,7 @@
         }
       },
       {
-        "input": " \ufeff ",
+        "input": " ﻿ ",
         "output": {
           "kind": "finite",
           "bits": "0000000000000000"
@@ -90030,10 +90030,10 @@
         "output": {
           "map": {
             "0": "first",
-            "keep": true,
             "1": {
               "x": 2
-            }
+            },
+            "keep": true
           },
           "keys": [
             "0",
@@ -90613,7 +90613,7 @@
     "call": "serde_json::json!($type($value.as_str().expect(\"frame\")))",
     "cases": [
       {
-        "input": " PING\u00a0",
+        "input": " PING ",
         "output": true
       },
       {
@@ -94691,18 +94691,6 @@
         ]
       },
       {
-        "2": [
-          null,
-          {
-            "timestamp": 240000,
-            "open": 31.25,
-            "high": 39.5,
-            "low": 27.75,
-            "close": 33.125,
-            "volume": 43.5,
-            "lastSide": "sell"
-          }
-        ],
         "0": [
           {
             "timestamp": 120000,
@@ -94714,6 +94702,18 @@
             "lastSide": "buy"
           },
           null
+        ],
+        "2": [
+          null,
+          {
+            "timestamp": 240000,
+            "open": 31.25,
+            "high": 39.5,
+            "low": 27.75,
+            "close": 33.125,
+            "volume": 43.5,
+            "lastSide": "sell"
+          }
         ]
       }
     ],
@@ -94769,18 +94769,6 @@
         },
         {
           "input": {
-            "2": [
-              null,
-              {
-                "timestamp": 240000,
-                "open": 31.25,
-                "high": 39.5,
-                "low": 27.75,
-                "close": 33.125,
-                "volume": 43.5,
-                "lastSide": "sell"
-              }
-            ],
             "0": [
               {
                 "timestamp": 120000,
@@ -94792,6 +94780,18 @@
                 "lastSide": "buy"
               },
               null
+            ],
+            "2": [
+              null,
+              {
+                "timestamp": 240000,
+                "open": 31.25,
+                "high": 39.5,
+                "low": 27.75,
+                "close": 33.125,
+                "volume": 43.5,
+                "lastSide": "sell"
+              }
             ]
           },
           "output": {
@@ -112659,7 +112659,7 @@
         }
       },
       {
-        "input": "\ufeff2\u00a0",
+        "input": "﻿2 ",
         "output": {
           "bits": "4000000000000000",
           "nan": false
@@ -112913,7 +112913,7 @@
         }
       },
       {
-        "input": "\ud83d\ude80",
+        "input": "🚀",
         "output": {
           "tag": "string",
           "units": [
@@ -113598,7 +113598,7 @@
             }
           },
           {
-            "input": "\ud83d\ude80",
+            "input": "🚀",
             "output": {
               "units": [
                 55357,
@@ -123113,8 +123113,8 @@
         "output": "a__TP"
       },
       {
-        "input": "\ud83d\ude00__tp",
-        "output": "\ud83d\ude00"
+        "input": "😀__tp",
+        "output": "😀"
       },
       {
         "input": "__sl",
@@ -126059,7 +126059,7 @@
       },
       {
         "input": {
-          "value": "\u00df"
+          "value": "ß"
         },
         "output": {
           "value": "SS"
@@ -126188,7 +126188,7 @@
       },
       {
         "input": {
-          "value": "\u00e9 BTC-USDT_1"
+          "value": "é BTC-USDT_1"
         },
         "output": {
           "value": "BTCUSDT1"
@@ -126990,7 +126990,7 @@
         "output": []
       },
       {
-        "input": "A\u0000\u00e9",
+        "input": "A\u0000é",
         "output": [
           65,
           0,
@@ -126998,14 +126998,14 @@
         ]
       },
       {
-        "input": "\ud83d\ude00",
+        "input": "😀",
         "output": [
           55357,
           56832
         ]
       },
       {
-        "input": "e\u0301",
+        "input": "é",
         "output": [
           101,
           769
@@ -134172,7 +134172,7 @@
       {
         "input": {
           "row": {
-            "key": "A\ud83d\ude00"
+            "key": "A😀"
           }
         },
         "output": {
@@ -135294,7 +135294,7 @@
             255
           ]
         },
-        "output": "\ufffd"
+        "output": "�"
       },
       {
         "input": {
@@ -138809,7 +138809,7 @@
           "input": {
             "id": "",
             "symbol": "USD",
-            "mark": 0.0
+            "mark": 0
           },
           "output": {
             "ok": true,
@@ -149286,5 +149286,3045 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_weex::binding::values::capture": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "capture",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_weex::utils::WeexUtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let js=safe_cex_exchange::js_runtime::value::from_json($value);match $type(&js){Ok(input)=>{let raw=input.as_value();serde_json::json!({\"ok\":true,\"array\":raw.is_array(),\"label\":raw.get(\"label\").or_else(||raw.get(0)),\"count\":raw.as_array().map(Vec::len).or_else(||raw.as_object().map(serde_json::Map::len))})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": [
+          "capture-a",
+          true,
+          null
+        ],
+        "output": {
+          "ok": true,
+          "array": true,
+          "label": "capture-a",
+          "count": 3
+        }
+      },
+      {
+        "input": {
+          "label": "capture-b",
+          "flag": false
+        },
+        "output": {
+          "ok": true,
+          "array": false,
+          "label": "capture-b",
+          "count": 2
+        }
+      }
+    ],
+    "evidence": "Reviewed the actual to_typed call at the retained-input boundary. Construct a shared VM array/object, execute capture, inspect actual WeexUtilityInput.as_value shape, label and cardinality directly; no owner serialization."
+  },
+  "safe_cex_venue_weex::binding::values::maybe_capture": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "maybe_capture",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_weex::utils::WeexUtilityInput",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let js=if $value[\"missing\"]==true{safe_cex_exchange::js_runtime::value::Js::Undefined}else{safe_cex_exchange::js_runtime::value::from_json(&$value[\"value\"])};match $type(&js){Ok(None)=>serde_json::json!({\"ok\":true,\"present\":false}),Ok(Some(input))=>serde_json::json!({\"ok\":true,\"present\":true,\"null\":input.as_value().is_null(),\"label\":input.as_value().get(\"label\")}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": {
+          "missing": true
+        },
+        "output": {
+          "ok": true,
+          "present": false
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "null": true,
+          "label": null
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": {
+            "label": "present-c"
+          }
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "null": false,
+          "label": "present-c"
+        }
+      }
+    ],
+    "evidence": "Reviewed undefined-only omission before capture. Execute actual maybe_capture with undefined, present null and a labelled object; inspect Option/native retained value, distinguishing missing from null."
+  },
+  "safe_cex_venue_weex::binding::values::normalize": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize",
+      "signature": {
+        "inputs": [
+          [
+            "kind",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let js=safe_cex_exchange::js_runtime::value::from_json(&$value[\"value\"]);match $type($value[\"kind\"].as_str().unwrap(),js){Ok(safe_cex_exchange::js_runtime::value::Js::String(value))=>serde_json::json!({\"ok\":true,\"text\":String::from_utf16(&value).unwrap()}),Ok(other)=>serde_json::json!({\"ok\":true,\"undefined\":other.is_undefined()}),Err(error)=>{let error=error.to_exchange_error();serde_json::json!({\"ok\":false,\"message\":error.message})}}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "side",
+          "value": "BUY"
+        },
+        "output": {
+          "ok": true,
+          "text": "buy"
+        }
+      },
+      {
+        "input": {
+          "kind": "order_side",
+          "value": "SELL"
+        },
+        "output": {
+          "ok": true,
+          "text": "sell"
+        }
+      },
+      {
+        "input": {
+          "kind": "unsupported",
+          "value": "BUY"
+        },
+        "output": {
+          "ok": false,
+          "message": "Unknown WEEX enum normalizer"
+        }
+      }
+    ],
+    "evidence": "Reviewed concrete kind dispatch into existing native utility normalizers, capture and from_typed projection. Execute side and order_side branches with independently expected shared enum spellings; unknown selector must retain the native error message. Broader seven-utility oracle remains supplementary."
+  },
+  "safe_cex_venue_weex::binding::rt::Host": {
+    "shape": "observed",
+    "evidence": "Reviewed the concrete scope bridge. These adapters invoke the actual Host methods over valid VM receivers and executable capabilities, independently checking selected native values, bound receiver identity and request arguments. No Host serialization or wire-decoder claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "weak",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [],
+                                      "output": {
+                                        "resolved_path": {
+                                          "path": "core::result::Result",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "Self"
+                                                  }
+                                                },
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Returns an already typed weak executable host capability without raw input; concrete weak receiver/release behavior is covered by binding disposal E2Es."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "root",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "path",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual dotted-path lookup against distinct native fields in the root scope.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{Js};let h=fx::host();h.0.this.define(\"branch\",Js::object(vec![(\"left\",Js::str(\"native-left\")),(\"right\",Js::str(\"native-right\"))])).unwrap();let value=$type::root(&h,$value.as_str().unwrap()).unwrap();serde_json::json!({\"value\":fx::text(&value)})}",
+        "cases": [
+          {
+            "input": "branch.left",
+            "output": {
+              "value": "native-left"
+            }
+          },
+          {
+            "input": "branch.right",
+            "output": {
+              "value": "native-right"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "global",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "path",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual dotted-path lookup against distinct native fields in the global scope.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{Js};let h=fx::host();h.0.shared.globals.define(\"branch\",Js::object(vec![(\"left\",Js::str(\"native-left\")),(\"right\",Js::str(\"native-right\"))])).unwrap();let value=$type::global(&h,$value.as_str().unwrap()).unwrap();serde_json::json!({\"value\":fx::text(&value)})}",
+        "cases": [
+          {
+            "input": "branch.left",
+            "output": {
+              "value": "native-left"
+            }
+          },
+          {
+            "input": "branch.right",
+            "output": {
+              "value": "native-right"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "call",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "path",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "args",
+                {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual call_path with the original dotted owner as this and two different native arguments.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{Js,from_json};let h=fx::host();let owner=Js::object(vec![(\"tag\",Js::str(\"bound-native\")),(\"read\",Js::function(\"read\",|this,args|Ok(Js::str(&format!(\"{}:{}\",fx::text(&this.get(\"tag\")?),fx::text(&args[0]))))))]);h.0.this.define(\"bucket\",owner).unwrap();let result=$type::call(&h,\"bucket.read\",vec![from_json($value)]).unwrap();serde_json::json!({\"value\":fx::text(&result)})}",
+        "cases": [
+          {
+            "input": "alpha",
+            "output": {
+              "value": "bound-native:alpha"
+            }
+          },
+          {
+            "input": "beta",
+            "output": {
+              "value": "bound-native:beta"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "request",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "method",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "endpoint",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "config",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::promise::JsFuture",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'static"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual xhr member resolution, original receiver/endpoint/config forwarding, and awaited native result. Scripted executable xhr is the supplied host capability, not a replacement Host implementation.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{Js,from_json};let h=fx::host();let xhr=Js::object(vec![(\"tag\",Js::str(\"xhr-native\"))]);for method in [\"get\",\"post\"] {xhr.define(method,Js::function(method,move |this,args|Ok(Js::object(vec![(\"method\",Js::str(method)),(\"receiver\",this.get(\"tag\")?),(\"endpoint\",args[0].clone()),(\"config\",args[1].clone())])))).unwrap();}h.0.this.define(\"xhr\",xhr).unwrap();let pending=$type::request(&h,$value[\"method\"].as_str().unwrap(),from_json(&$value[\"endpoint\"]),from_json(&$value[\"config\"])).unwrap();let result=fx::settle(pending);serde_json::json!({\"method\":fx::text(&result.get(\"method\").unwrap()),\"receiver\":fx::text(&result.get(\"receiver\").unwrap()),\"endpoint\":fx::text(&result.get(\"endpoint\").unwrap()),\"configFlag\":result.get(\"config\").unwrap().get(\"flag\").unwrap().truthy()})}",
+        "cases": [
+          {
+            "input": {
+              "method": "get",
+              "endpoint": "/alpha",
+              "config": {
+                "flag": true
+              }
+            },
+            "output": {
+              "method": "get",
+              "receiver": "xhr-native",
+              "endpoint": "/alpha",
+              "configFlag": true
+            }
+          },
+          {
+            "input": {
+              "method": "post",
+              "endpoint": "/beta",
+              "config": {
+                "flag": false
+              }
+            },
+            "output": {
+              "method": "post",
+              "receiver": "xhr-native",
+              "endpoint": "/beta",
+              "configFlag": false
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_weex::binding::classes::Factory": {
+    "shape": "observed",
+    "evidence": "Reviewed every selected ClassHost implementation. Adapters execute actual VM property definition, member body dispatch, errors, arrow callback and prototype method linkage. Executable callback/receiver arguments are explicit supplied capabilities; results and receiver effects are inspected without serializing Factory.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_weex::classes::ClassHost",
+          "name": "exchange_runtime",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_venue_weex::lifecycle::WeexExchangeConstructionRuntime",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Returns a typed table of existing constructor capabilities with no raw input. Actual concrete construction of exchange/public/private classes is exercised by production binding E2Es."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_weex::classes::ClassHost",
+          "name": "public_runtime",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_venue_weex::public_feed::WeexPublicConstructionRuntime",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Returns a typed table of existing constructor capabilities with no raw input. Actual concrete construction of exchange/public/private classes is exercised by production binding E2Es."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_weex::classes::ClassHost",
+          "name": "define",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "o",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "k",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "v",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual define method and inspect its native result or property/body effect, with two distinct independent expectations.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{from_json};use crate::classes::{ClassHost};let h=fx::host();let factory=$type(std::rc::Rc::downgrade(&h.0.shared));let key=if $value[\"a\"]==true{\"alpha\"}else{\"beta\"};$type::define(&factory,&h.0.this,key,from_json(&$value[\"value\"])).unwrap();let value=h.0.this.get(key).unwrap();serde_json::json!({\"key\":key,\"value\":fx::text(&value),\"own\":h.0.this.has_own(key)})}",
+        "cases": [
+          {
+            "input": {
+              "a": true,
+              "value": "defined-a"
+            },
+            "output": {
+              "key": "alpha",
+              "value": "defined-a",
+              "own": true
+            }
+          },
+          {
+            "input": {
+              "a": false,
+              "value": "defined-b"
+            },
+            "output": {
+              "key": "beta",
+              "value": "defined-b",
+              "own": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_weex::classes::ClassHost",
+          "name": "member",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "kind",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::classes::ClassKind",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_venue_weex::classes::MemberBinding",
+                                        "args": {
+                                          "angle_bracketed": {
+                                            "args": [
+                                              {
+                                                "type": {
+                                                  "resolved_path": {
+                                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                    "args": null
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "type": {
+                                                  "resolved_path": {
+                                                    "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                                    "args": null
+                                                  }
+                                                }
+                                              }
+                                            ],
+                                            "constraints": []
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual member method and inspect its native result or property/body effect, with two distinct independent expectations.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{from_json};use crate::classes::{ClassHost,ClassKind,ClassReturn};let h=fx::host();let factory=$type(std::rc::Rc::downgrade(&h.0.shared));let member=$type::member(&factory,ClassKind::Exchange,\"isAlgoOrder\").unwrap().unwrap();let value=match (member.body)(h.0.this.clone(),vec![from_json($value)]).unwrap(){ClassReturn::Value(value)=>value,_=>panic!(\"synchronous predicate\")};serde_json::json!({\"algo\":value.truthy()})}",
+        "cases": [
+          {
+            "input": {
+              "type": "limit",
+              "id": "normal-1"
+            },
+            "output": {
+              "algo": false
+            }
+          },
+          {
+            "input": {
+              "type": "limit",
+              "id": "algo__2"
+            },
+            "output": {
+              "algo": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_weex::classes::ClassHost",
+          "name": "binding_error",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::classes::ClassKind",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "reason",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual binding_error method and inspect its native result or property/body effect, with two distinct independent expectations.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use crate::classes::{ClassHost,ClassKind};let h=fx::host();let factory=$type(std::rc::Rc::downgrade(&h.0.shared));let (name,reason)=if $value==\"missing\"{(\"fetchMarkets\",\"missing member\")}else{(\"isAlgoOrder\",\"body mismatch\")};fx::error($type::binding_error(&factory,ClassKind::Exchange,name,reason))}",
+        "cases": [
+          {
+            "input": "missing",
+            "output": {
+              "error": "WEEX fetchMarkets: missing member"
+            }
+          },
+          {
+            "input": "mismatch",
+            "output": {
+              "error": "WEEX isAlgoOrder: body mismatch"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_weex::classes::ClassHost",
+          "name": "arrow",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "body",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::classes::BoundMember",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual arrow method and inspect its native result or property/body effect, with two distinct independent expectations.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{Js,from_json};use crate::classes::{ClassHost,ClassReturn};let h=fx::host();let factory=$type(std::rc::Rc::downgrade(&h.0.shared));let body:crate::classes::BoundMember<Js,safe_cex_exchange::js_runtime::value::Thrown>=std::rc::Rc::new(|args|Ok(ClassReturn::Value(args[0].clone())));let arrow=$type::arrow(&factory,\"acceptedArrow\",body).unwrap();let result=arrow.call(Js::Undefined,vec![from_json($value)]).unwrap();serde_json::json!({\"value\":fx::text(&result)})}",
+        "cases": [
+          {
+            "input": "callback-a",
+            "output": {
+              "value": "callback-a"
+            }
+          },
+          {
+            "input": "callback-b",
+            "output": {
+              "value": "callback-b"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_weex::classes::ClassHost",
+          "name": "prototype",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "kind",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::classes::ClassKind",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "body",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::classes::NativeMember",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual prototype method and inspect its native result or property/body effect, with two distinct independent expectations.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::js_runtime::value::{Js,from_json};use crate::classes::{ClassHost,ClassKind,ClassReturn};let h=fx::host();let factory=$type(std::rc::Rc::downgrade(&h.0.shared));let kind=if $value[\"private\"]==true{ClassKind::Private}else{ClassKind::Public};let body:crate::classes::NativeMember<Js,safe_cex_exchange::js_runtime::value::Thrown>=std::rc::Rc::new(|this,args|Ok(ClassReturn::Value(Js::str(&format!(\"{}:{}\",fx::text(&this.get(\"tag\")?),fx::text(&args[0]))))));$type::prototype(&factory,kind,\"acceptedHook\",body).unwrap();let prototype=h.0.shared.extra.prototypes.borrow().iter().find(|(k,_)|*k==kind).unwrap().1.clone();let receiver=Js::object(vec![(\"tag\",from_json(&$value[\"tag\"]))]);let result=prototype.get(\"acceptedHook\").unwrap().call(receiver,vec![from_json(&$value[\"arg\"])]).unwrap();serde_json::json!({\"own\":prototype.has_own(\"acceptedHook\"),\"value\":fx::text(&result)})}",
+        "cases": [
+          {
+            "input": {
+              "private": false,
+              "tag": "public-native",
+              "arg": "one"
+            },
+            "output": {
+              "own": true,
+              "value": "public-native:one"
+            }
+          },
+          {
+            "input": {
+              "private": true,
+              "tag": "private-native",
+              "arg": "two"
+            },
+            "output": {
+              "own": true,
+              "value": "private-native:two"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_weex::binding::exchange::WeexExchange": {
+    "shape": "observed",
+    "evidence": "Reviewed concrete production WeexExchange composition and its selected raw-input Exchange methods. Every observed adapter constructs the real exchange using scripted HTTP/WS I/O hosts, executes the actual bound native method, and inspects native output fields, original request effects or delivered callbacks. Both fixtures have independently specified symbols and results. No replacement venue method and no owner serialization/redecode. Existing 25 production E2Es and 16 compiled binding-removal controls remain supplementary.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "name",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeName",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "store",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_store::contract::Store",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "deps",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::exchange::WeexDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Name/options/store/dependencies are already typed constructor capabilities; every observed method below constructs the actual exchange through this constructor."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "fetch_order_book",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "limit",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::OrderBook",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual fetch_order_book method through the concrete native binding; inspect native returned fields for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();let book=h.drive($type::fetch_order_book(h.exchange.as_ref(),symbol.into(),Some(5.0))).unwrap();serde_json::json!({\"bidBits\":format!(\"{:016x}\",(book.bids[0].price).to_bits()),\"amountBits\":format!(\"{:016x}\",(book.bids[0].amount).to_bits()),\"askBits\":format!(\"{:016x}\",(book.asks[0].price).to_bits())})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "bidBits": "4059600000000000",
+              "amountBits": "4000000000000000",
+              "askBits": "4059a00000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "bidBits": "4069500000000000",
+              "amountBits": "4000000000000000",
+              "askBits": "4069700000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_positions",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Position",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual fetch_positions method through the concrete native binding; inspect native returned fields for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();let positions=h.drive($type::fetch_positions(h.exchange.as_ref(),Some(vec![symbol.into()]))).unwrap();let p=&positions[0];serde_json::json!({\"len\":positions.len(),\"symbol\":p.symbol,\"entryBits\":format!(\"{:016x}\",(p.entry_price).to_bits()),\"contractsBits\":format!(\"{:016x}\",(p.contracts).to_bits())})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "len": 1,
+              "symbol": "BTCUSDT",
+              "entryBits": "4059000000000000",
+              "contractsBits": "4000000000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "len": 1,
+              "symbol": "ETHUSDT",
+              "entryBits": "4059000000000000",
+              "contractsBits": "4000000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Order",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual fetch_orders method through the concrete native binding; inspect native returned fields for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();let orders=h.drive($type::fetch_orders(h.exchange.as_ref(),Some(vec![symbol.into()]))).unwrap();let o=&orders[0];serde_json::json!({\"len\":orders.len(),\"id\":o.id,\"symbol\":o.symbol,\"priceBits\":format!(\"{:016x}\",(o.price).to_bits()),\"remainingBits\":format!(\"{:016x}\",(o.remaining).to_bits())})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "len": 1,
+              "id": "order-a",
+              "symbol": "BTCUSDT",
+              "priceBits": "4059600000000000",
+              "remainingBits": "3ffc000000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "len": 1,
+              "id": "order-b",
+              "symbol": "ETHUSDT",
+              "priceBits": "4069500000000000",
+              "remainingBits": "3ffc000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_symbol_max_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual fetch_symbol_max_leverage method through the concrete native binding; inspect native returned fields for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();let max=h.drive($type::fetch_symbol_max_leverage(h.exchange.as_ref(),symbol.into())).unwrap();serde_json::json!({\"maxBits\":format!(\"{:016x}\",(max).to_bits()),\"requests\":h.http.sent.lock().unwrap().len()})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "requests": 0,
+              "maxBits": "4054000000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "requests": 0,
+              "maxBits": "4044000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "set_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "leverage",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "side",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::PositionSide",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual set_leverage method through the concrete native binding; inspect native receiver/request/callback effects for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();h.drive($type::set_leverage(h.exchange.as_ref(),symbol.into(),$value[\"leverage\"].as_f64().unwrap(),None)).unwrap();let body=fx::request_body(&h,\"SET_LEVERAGE\");serde_json::json!({\"symbol\":body[\"symbol\"],\"cross\":body[\"crossLeverage\"],\"refreshes\":h.http.calls(fx::endpoint(\"SYMBOL_CONFIG\")).len()})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT",
+              "leverage": 12
+            },
+            "output": {
+              "symbol": "BTCUSDT",
+              "cross": "12",
+              "refreshes": 2
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT",
+              "leverage": 24
+            },
+            "output": {
+              "symbol": "ETHUSDT",
+              "cross": "24",
+              "refreshes": 2
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_position_mode",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "hedged",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual change_position_mode method through the concrete native binding; inspect native receiver/request/callback effects for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();h.drive($type::change_position_mode(h.exchange.as_ref(),$value[\"hedged\"].as_bool().unwrap(),Some(symbol.into()))).unwrap();let body=fx::request_body(&h,\"SET_MARGIN_TYPE\");serde_json::json!({\"symbol\":body[\"symbol\"],\"separated\":body[\"separatedType\"],\"hedged\":h.store.options().is_hedged})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT",
+              "hedged": true
+            },
+            "output": {
+              "symbol": "BTCUSDT",
+              "separated": "SEPARATED",
+              "hedged": true
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT",
+              "hedged": false
+            },
+            "output": {
+              "symbol": "ETHUSDT",
+              "separated": "COMBINED",
+              "hedged": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_margin_type",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "isolated",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual change_margin_type method through the concrete native binding; inspect native receiver/request/callback effects for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();h.drive($type::change_margin_type(h.exchange.as_ref(),$value[\"isolated\"].as_bool().unwrap(),Some(symbol.into()))).unwrap();let body=fx::request_body(&h,\"SET_MARGIN_TYPE\");serde_json::json!({\"symbol\":body[\"symbol\"],\"margin\":body[\"marginType\"],\"refreshes\":h.http.calls(fx::endpoint(\"SYMBOL_CONFIG\")).len()})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT",
+              "isolated": true
+            },
+            "output": {
+              "symbol": "BTCUSDT",
+              "margin": "ISOLATED",
+              "refreshes": 2
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT",
+              "isolated": false
+            },
+            "output": {
+              "symbol": "ETHUSDT",
+              "margin": "CROSSED",
+              "refreshes": 2
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "cancel_symbol_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual cancel_symbol_orders method through the concrete native binding; inspect native receiver/request/callback effects for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();h.drive($type::cancel_symbol_orders(h.exchange.as_ref(),symbol.into())).unwrap();let regular=fx::query_symbol(&h,\"CANCEL_ALL_OPEN_ORDERS\");let algo=fx::query_symbol(&h,\"CANCEL_ALL_ALGO_ORDERS\");serde_json::json!({\"regular\":regular,\"algo\":algo,\"requests\":h.http.sent.lock().unwrap().len()})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "regular": "BTCUSDT",
+              "algo": "BTCUSDT",
+              "requests": 2
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "regular": "ETHUSDT",
+              "algo": "ETHUSDT",
+              "requests": 2
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_public_trades",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "limit",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::PublicTrade",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual fetch_public_trades method through the concrete native binding; inspect native returned fields for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();let trades=h.drive($type::fetch_public_trades(h.exchange.as_ref(),symbol.into(),Some(5.0))).unwrap();let t=&trades[0];serde_json::json!({\"len\":trades.len(),\"id\":t.id,\"symbol\":t.symbol,\"priceBits\":format!(\"{:016x}\",(t.price).to_bits()),\"qtyBits\":format!(\"{:016x}\",(t.qty).to_bits())})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "len": 1,
+              "id": "trade-a",
+              "symbol": "BTCUSDT",
+              "priceBits": "4059600000000000",
+              "qtyBits": "3fe0000000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "len": 1,
+              "id": "trade-b",
+              "symbol": "ETHUSDT",
+              "priceBits": "4069500000000000",
+              "qtyBits": "3fe0000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_income_history_range",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "start",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "end",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "kind",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::IncomeRecord",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual fetch_income_history_range method through the concrete native binding; inspect native returned fields for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let records=h.drive($type::fetch_income_history_range(h.exchange.as_ref(),1700000000000.0,1700000000100.0,Some(\"FUNDING_FEE\".into()))).unwrap();let r=&records[0];serde_json::json!({\"len\":records.len(),\"id\":r.tran_id,\"symbol\":r.symbol,\"incomeBits\":format!(\"{:016x}\",(r.income).to_bits())})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "len": 1,
+              "id": "income-a",
+              "symbol": "BTCUSDT",
+              "incomeBits": "3ff4000000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "len": 1,
+              "id": "income-b",
+              "symbol": "ETHUSDT",
+              "incomeBits": "4004000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "update_symbol_metadata",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual update_symbol_metadata method through the concrete native binding; inspect native receiver/request/callback effects for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();h.drive($type::update_symbol_metadata(h.exchange.as_ref(),symbol.into())).unwrap();let cache=h.exchange.host.root(\"symbolSettings\").unwrap();let has=cache.call_method(\"has\",vec![safe_cex_exchange::js_runtime::value::Js::str(symbol)]).unwrap().truthy();let config=cache.call_method(\"get\",vec![safe_cex_exchange::js_runtime::value::Js::str(symbol)]).unwrap();let other=if alternate{\"BTCUSDT\"}else{\"ETHUSDT\"};serde_json::json!({\"cached\":has,\"crossBits\":format!(\"{:016x}\",(config.get(\"crossLeverage\").unwrap().to_number().unwrap()).to_bits()),\"otherCached\":cache.call_method(\"has\",vec![safe_cex_exchange::js_runtime::value::Js::str(other)]).unwrap().truthy(),\"requests\":h.http.calls(fx::endpoint(\"SYMBOL_CONFIG\")).len(),\"cachedSymbol\":if cache.call_method(\"has\",vec![safe_cex_exchange::js_runtime::value::Js::str(\"BTCUSDT\")]).unwrap().truthy(){\"BTCUSDT\"}else{\"ETHUSDT\"}})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "cached": true,
+              "otherCached": false,
+              "requests": 1,
+              "cachedSymbol": "BTCUSDT",
+              "crossBits": "4034000000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT"
+            },
+            "output": {
+              "cached": true,
+              "otherCached": false,
+              "requests": 1,
+              "cachedSymbol": "ETHUSDT",
+              "crossBits": "4034000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "listen_order_book",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "resolved_path": {
+                                                "path": "safe_cex_types::OrderBook",
+                                                "args": null
+                                              }
+                                            }
+                                          ],
+                                          "output": null
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ListenerCleanup",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual listen_order_book method through the concrete native binding; inspect native receiver/request/callback effects for two independently authored fixtures.",
+        "call": "{#[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/weex-binding-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange;let alternate=$value[\"alternate\"].as_bool().unwrap();let h=fx::setup(alternate);let symbol=$value[\"symbol\"].as_str().unwrap();h.drive(h.venue().start()).unwrap();h.runtime.pump();let books=std::rc::Rc::new(std::cell::RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let delivered=books.clone();let cleanup=$type::listen_order_book(h.exchange.as_ref(),symbol.into(),std::rc::Rc::new(move|book|delivered.borrow_mut().push(book))).unwrap();h.runtime.pump();let socket=h.venue().base().get_public_sockets()[0].clone();let price=if alternate{202.5}else{101.5};socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"e\":\"depth\",\"s\":symbol,\"U\":18,\"u\":18,\"b\":[[price,$value[\"amount\"]]],\"a\":[]}).to_string())).unwrap();let before=books.borrow().len();let amount=books.borrow().last().unwrap().bids[0].amount;cleanup().unwrap();socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"e\":\"depth\",\"s\":symbol,\"U\":19,\"u\":19,\"b\":[[price,99]],\"a\":[]}).to_string())).unwrap();let after=books.borrow().len();h.venue().dispose().unwrap();serde_json::json!({\"amountBits\":format!(\"{:016x}\",(amount).to_bits()),\"afterCleanup\":after,\"beforeCleanup\":before})}",
+        "cases": [
+          {
+            "input": {
+              "alternate": false,
+              "symbol": "BTCUSDT",
+              "amount": 4
+            },
+            "output": {
+              "afterCleanup": 2,
+              "beforeCleanup": 2,
+              "amountBits": "4010000000000000"
+            }
+          },
+          {
+            "input": {
+              "alternate": true,
+              "symbol": "ETHUSDT",
+              "amount": 7
+            },
+            "output": {
+              "afterCleanup": 2,
+              "beforeCleanup": 2,
+              "amountBits": "401c000000000000"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_weex::binding::classes::table": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "table",
+      "signature": {
+        "inputs": [
+          [
+            "values",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "generic": "T"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::ser::Serialize",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs a VM table from an existing typed static slice of constant key/value pairs using from_typed; it serializes already typed values and defines outbound properties rather than admitting a decoded wire owner.",
+    "evidence": "Reviewed the module-scope helper extracted unchanged from the local expression macro. Native compiler inventory pins its exact generic Serialize API; actual constant tables are exercised by concrete exchange/socket construction and binding method E2Es. The generic helper does not grant input-domain eligibility to its type argument."
   }
 }
