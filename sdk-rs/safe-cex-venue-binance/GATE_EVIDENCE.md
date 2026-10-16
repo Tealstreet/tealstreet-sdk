@@ -3567,3 +3567,16 @@ existing Binance contracts remain unchanged; only four reviewed decoder-output
 entries are added. Discovery counts remain 235 owners, 80 aliases and two
 construction policies. Other owners, aliases, locals and feature/wasm coverage
 remain outside this four-function evidence.
+
+Latest master integration at `c2546620c7` includes the shared numeric-ingress
+enum-access repair. Its single-variant Object/MapAccess path replaces the prior
+MapDeserializer path; the incoming diff was reviewed. Binance implementations
+remain unchanged. Because a native dependency changed, a fresh pinned-toolchain
+Cargo run repeats all five native/live tests successfully, including the
+11,828/5,471 source comparisons. The earlier compiled controls and selected-test
+Clippy keep their pre-integration provenance.
+
+After that integration, fresh ordinary native/default discovery again executes
+all four production decoder-output probes with zero failed owners. Formatting,
+frozen dependency installation and parity-check also pass (7,459 rows and
+17,198 public Rust items).
