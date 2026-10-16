@@ -281,4 +281,3 @@ constructs the bound venue using production native inputs and the shared host
 limiter argument, then checks its identity, distinct market precision steps,
 real local HTTP dispatch and Store read purity. The registry passes through the
 account's hosted signer and external-public-data provider to the venue binding.
-
