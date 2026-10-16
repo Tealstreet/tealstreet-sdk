@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.ws-public.ts"
-rust_files = [ "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/ws_public.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs" ]
 
 [[symbol]]
 ts = "BybitPublicWebsocket"
@@ -13,10 +13,10 @@ note = ""
 [[symbol]]
 ts = "BybitPublicWebsocket.constructor"
 kind = "constructor"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public.rs::PublicProtocol::new", "safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::new", "safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics" ]
+status = "divergent"
+note = "CHOSEN: concrete PublicProtocol::new and PublicTopics::new receive the shared typed base, weak venue, runtime and category rather than a JS class receiver. They retain ticker topics and listener identity; the Spot profile registers activeTickerSymbols:changed during construction, before any dial. Primary profiles retain category-wide selection and register no active callback. Core BaseWebSocket owns transport and cancellation. tests/public_topic_binding.rs executes actual facade construction and socket pumps, including 24 maintained-source constructor/handler compositions and six compiled consumer controls. This constructor/state claim does not complete the class OHLCV/order-book methods or timer-recovery binding. Renamed Rust target: safe-cex-venue-bybit/src/ws_public.rs::PublicProtocol::new. Renamed Rust target: safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::new. Renamed Rust target: safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.connectAndSubscribe"
@@ -30,9 +30,9 @@ note = "Extracted connection operation to safe-cex-venue-bybit/src/ws_public.rs:
 ts = "BybitPublicWebsocket.onOpen"
 kind = "field-fn"
 layer = "mirror"
-rs = [ "safe-cex-venue-bybit/src/public_data_recovery.rs::on_open", "safe-cex-venue-bybit/src/public_data_recovery.rs::Topics", "safe-cex-venue-bybit/src/public_data_recovery.rs::Markets", "safe-cex-venue-bybit/src/public_data_recovery.rs::Market" ]
-status = "ported"
-note = "Body port: disposal guard, category/quote filter and fresh ticker topics; subscribe/ping/timer arming precede off/on markets:changed and optional reconnect event. Deferred assignment and emitter-operation factories preserve receiver capture before reentrant category/handler getters. Source oracle asserts sequence, allocation contents and old/new receiver effects. Subscription starter owns eager work; async subscription settlement and full constructor composition remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::on_open. Carrier split: safe-cex-venue-bybit/src/public_data_recovery.rs::Topics is the shared topic-array handle, safe-cex-venue-bybit/src/public_data_recovery.rs::Markets the live markets list of safe-cex-venue-bybit/src/public_data_recovery.rs::Market symbol/quote records read by this body and onMarketsChanged; they retain source array identity and add no behavior."
+rs = [ "safe-cex-venue-bybit/src/public_data_recovery.rs::on_open", "safe-cex-venue-bybit/src/public_data_recovery.rs::Topics", "safe-cex-venue-bybit/src/public_data_recovery.rs::Markets", "safe-cex-venue-bybit/src/public_data_recovery.rs::Market", "safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::on_open" ]
+status = "divergent"
+note = "CHOSEN: existing generic body preserves disposal, category filtering, replacement topic array, eager subscribe, ping, recovery-arm callback and markets off/on order. The concrete typed ticker-only adapter supplies Store snapshots, prefilters option records, retains ticker state and binds markets:changed through weak socket callbacks and core-owned operations. Primary linear/inverse subscribe all eligible category markets regardless of active symbols; they do not install an active callback. No OHLCV handlers are installed by this facade, so timer recovery remains separately pending. Three concrete tests include 24 actual maintained-source constructor/handler compositions (360 snapshots), category/option filtering, duplicate additions and reopen listener replacement; source helpers keep their independent recovery tests. Owned Store/options boundaries and core cancellation remain explicit; no full public class claim. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::on_open. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::Topics. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::Markets. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::Market. Renamed Rust target: safe-cex-venue-bybit/src/ws_public/topics.rs::PublicTopics::on_open."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#clearOhlcvNoDataTimeout"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = [ "safe-cex-venue-bybit/src/public_data_recovery.rs::on_markets_changed", "safe-cex-venue-bybit/src/public_data_recovery.rs::TopicSlot" ]
 status = "ported"
-note = "Body port: empty/ws/disposal guards, category filter, fresh spread ticker array and snapshot chunks of 10; first send and sleep(5) factory execute before future polling, subsequent chunks await in sequence without disposal recheck. Deferred setter preserves receiver before ticker getter replacement. Source oracle covers Unicode string spread, 21 topics, failure and mid-send disposal; decoded native frame fields precede wire assertions. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::on_markets_changed. Carrier split: safe-cex-venue-bybit/src/public_data_recovery.rs::TopicSlot is the single-string or topic-array value of the tickers subscription slot this body reads."
+note = "Body port: empty/ws/disposal guards, category filter, fresh spread ticker array and snapshot chunks of 10; first send and sleep(5) factory execute before future polling, subsequent chunks await in sequence without disposal recheck. Deferred setter preserves receiver before ticker getter replacement. Source oracle covers Unicode string spread, 21 topics, failure and mid-send disposal; decoded native frame fields precede wire assertions. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::on_markets_changed. Carrier split: safe-cex-venue-bybit/src/public_data_recovery.rs::TopicSlot is the single-string or topic-array value of the tickers subscription slot this body reads. Concrete PublicTopics now binds the retained ticker slot and native markets emitter to this body, prefiltering option records and preserving category selection, duplicates and five-ms chunk tails under core ownership."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.ping"

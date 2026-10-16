@@ -48,7 +48,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::spot_get_ticker_symbols_for_public_stream"
 status = "divergent"
-note = "CHOSEN: typed Market rows and UTF-8 strings exclude malformed/executable rows and lone UTF-16 surrogates. An explicit host callback replaces the inherited subscription method; every market symbol is passed in source order with duplicates retained, and its return value is forwarded. Constructor composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::spot_get_ticker_symbols_for_public_stream."
+note = "CHOSEN: typed Market rows and UTF-8 strings exclude malformed/executable rows and lone UTF-16 surrogates. An explicit host callback replaces the inherited subscription method; every market symbol is passed in source order with duplicates retained, and its return value is forwarded. Constructor composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::spot_get_ticker_symbols_for_public_stream. The production Spot receiver now installs this selector, then calls its live getTickerSymbolsForSubscription receiver member backed by the canonical typed BaseExchange implementation. PublicTopics invokes the live parent getter for every synchronization; concrete active/fallback/retention witnesses are in public_topic_binding, independently from the helper oracle."
 
 [[symbol]]
 ts = "BybitSpotExchange.dispose"
