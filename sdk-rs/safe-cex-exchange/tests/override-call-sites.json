@@ -6024,6 +6024,54 @@
     "file": "safe-cex-venue-okx/src/binding/typed_members.rs"
   },
   {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: dispose",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: start",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: set_leverage",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: set_all_leverage",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: update_order",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: cancel_orders",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "new",
+    "body": "1bd95ab145a6277e",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-orderly/src/native_exchange.rs"
+  },
+  {
+    "function": "drop",
+    "body": "515bd8a12d555002",
+    "call": "self . dispose ()",
+    "file": "safe-cex-venue-orderly/src/native_exchange.rs"
+  },
+  {
     "function": "sync",
     "body": "56d16d1e30503abd",
     "reference": "crate :: lifecycle :: dispose",
