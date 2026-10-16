@@ -572,3 +572,131 @@ fn chained_rate_limits_hold_a_request_until_every_window_has_room() {
     }
     assert_eq!(sent_at, [0.0, 0.0, 0.0, 0.0, 1000.0, 6000.0]);
 }
+
+impl safe_cex_exchange::websocket::WsRuntime for Runtime {
+    fn transport(&self) -> std::sync::Arc<dyn safe_cex_transport::TransportProvider> {
+        std::sync::Arc::new(safe_cex_transport::DirectTransport)
+    }
+    fn tunnel_host(&self) -> Rc<dyn safe_cex_transport::socket::TunnelHost> {
+        panic!("no tunnel in js_runtime tests")
+    }
+    fn dial(
+        &self,
+        _: String,
+        _: Vec<String>,
+        _: safe_cex_exchange::websocket::WebSocketConnectionOptions,
+        _: bool,
+    ) -> ExchangeFuture<'static, Rc<dyn safe_cex_exchange::websocket::WsSocket>> {
+        panic!("no sockets in js_runtime tests")
+    }
+    fn headers_capable(&self) -> bool {
+        false
+    }
+    fn enable_reconnecting(&self) -> bool {
+        false
+    }
+    fn min_reconnection_delay_ms(&self) -> f64 {
+        1000.0
+    }
+    fn library_min_reconnection_delay_ms(&self) -> f64 {
+        1000.0
+    }
+    fn diagnostics_enabled(&self) -> bool {
+        false
+    }
+    fn lifecycle_logs_enabled(&self) -> bool {
+        false
+    }
+}
+
+fn base_exchange(options: Value) -> Result<Js, Thrown> {
+    use safe_cex_exchange::{
+        client_order_id::pattern_client_order_id_rule,
+        exchange::ExchangeSettings,
+        js_runtime::{base_exchange, sockets::JsSocketContext, value::from_json},
+    };
+    let runtime = Rc::new(Runtime::default());
+    let context = JsSocketContext::new(runtime);
+    let settings = ExchangeSettings {
+        client_order_id_rule: Some(pattern_client_order_id_rule(
+            "OKX".into(),
+            "/^[A-Za-z0-9]{1,32}$/".into(),
+            Rc::new(|id: &str| {
+                (1..=32).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric())
+            }),
+            Default::default(),
+        )),
+        ..Default::default()
+    };
+    let parts = base_exchange::BaseExchangeParts {
+        name: safe_cex_types::ExchangeName::Okx,
+        options: serde_json::from_value(options.clone()).unwrap(),
+        store: Rc::new(safe_cex_store::store::DefaultStore::new()),
+        settings,
+        external_public_data: None,
+    };
+    let (this, _) = base_exchange::create(
+        &context,
+        parts,
+        Js::str("okx"),
+        from_json(&options),
+        Js::object(vec![]),
+    )?;
+    Ok(this)
+}
+
+#[test]
+fn base_exchange_bridges_client_order_ids_algo_derivation_and_tick_interval() {
+    use safe_cex_exchange::js_runtime::value::from_json;
+    let this = base_exchange(json!({"key": "k", "secret": "s"})).unwrap();
+    let order = |id: &str| {
+        from_json(&json!({
+            "symbol": "BTCUSDT", "type": "limit", "side": "buy", "amount": 1, "price": 100,
+            "clientOrderId": id,
+        }))
+    };
+    let resolved = this
+        .call_method("resolveCallerClientOrderId", vec![order("abc123")])
+        .unwrap();
+    assert_eq!(to_json(&resolved).unwrap(), json!("abc123"));
+    let refused = this.call_method("resolveCallerClientOrderId", vec![order("bad id!")]);
+    let refused = refused.unwrap_err().message();
+    assert!(refused.contains("OKX"), "{refused}");
+    let duplicate = Js::array(vec![order("a1"), order("a1")]);
+    assert!(
+        this.call_method("assertCallerClientOrderIds", vec![duplicate])
+            .is_err()
+    );
+    let bracket = from_json(&json!({
+        "symbol": "BTCUSDT", "type": "limit", "side": "buy", "amount": 1, "price": 100,
+        "stopLoss": 90,
+    }));
+    let derived = this
+        .call_method(
+            "deriveAlgoOrdersFromNormalOrdersOpts",
+            vec![Js::array(vec![bracket])],
+        )
+        .unwrap();
+    let derived = to_json(&derived).unwrap();
+    assert_eq!(derived[0]["type"], json!("stop_market"));
+    assert_eq!(derived[0]["side"], json!("sell"));
+    assert_eq!(derived[0]["price"].as_f64(), Some(90.0));
+    assert!(
+        this.call_method("getTickInterval", vec![])
+            .unwrap()
+            .is_undefined()
+    );
+}
+
+#[test]
+fn base_exchange_refuses_external_public_data_without_a_provider() {
+    let refused = base_exchange(
+        json!({"key": "k", "secret": "s", "externalPublicData": {"type": "websocket", "url": "wss://gateway", "exchangeId": "okx"}}),
+    );
+    assert!(
+        refused
+            .unwrap_err()
+            .message()
+            .contains("no external public data provider")
+    );
+}
