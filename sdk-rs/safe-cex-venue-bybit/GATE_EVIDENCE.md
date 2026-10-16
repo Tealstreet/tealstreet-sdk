@@ -4044,3 +4044,12 @@ The disposal citation independently describes TS BybitInverseExchange.dispose
 at lines 260–264, including its actual super.dispose call. All six override
 checks, including live source, and all seven cancellation inventory tests,
 including discovery export, pass without a new cancellation classification.
+
+Host all-features/all-targets and wasm-library clippy pass for the venue and
+registry with warnings denied. Registry equivalence passes for all 48 ordered
+source names, its corruption control passes, and all 88 layer checks pass.
+The extractor dry run reports zero updates, additions or orphaned symbols.
+
+The mandatory full `venue-oracle:bybit` command passes all 214 tests across 51
+test binaries (44 contain tests), with zero failures or ignored tests.
+It uses the installed compiler through SAFE_CEX_TYPESCRIPT_PATH.
