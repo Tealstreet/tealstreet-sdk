@@ -35,7 +35,11 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     credentials and proxy override. The native host routes signed requests through
     the shared transport stack and supplies the external-data gateway factory.
     `tests/native_host_asterdex.rs` verifies a signed account read server-side.
-  - `backpack`, built with `BackpackExchange::new`.
+  - `backpack`, built with `BackpackExchange::new`. Its native inputs retain
+    the shared hosted HTTP signer and account name. Public requests bypass signing;
+    private WebSocket auth continues to use the local secret as TypeScript does.
+    `native_host_backpack_hosted` checks real HTTP and source failure/log behavior;
+    `scripts/backpack-hosted-controls.py` proves signer, capability and log omissions.
   - `binance`, built with `BinanceExchange::new`.
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
     `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a

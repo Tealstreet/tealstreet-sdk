@@ -394,13 +394,14 @@ pub fn cryptocom_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.backpack()?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
         let exchange = BackpackExchange::new(
             base,
             deps.build_http,

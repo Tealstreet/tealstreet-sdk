@@ -510,14 +510,10 @@ impl RustVenueHost for NativeVenueHost {
         ))
     }
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for backpack on the native host",
-            ));
-        }
-        let inputs = safe_cex_venue_backpack::native_host::native_inputs(
+        let inputs = safe_cex_venue_backpack::native_host::native_inputs_signed(
             self.runtime.clone(),
             (self.adapter)()?,
+            self.remote.clone(),
         );
         Ok(BackpackDependencies {
             runtime: inputs.runtime,
