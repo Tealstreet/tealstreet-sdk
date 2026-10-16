@@ -117558,35 +117558,35 @@
         "where_predicates": []
       }
     },
-    "evidence": "Reviewed exchange.rs and actual breakoutprop.exchange.ts parseDxSessionTimeoutMs: split/Number coercion, exactly three finite nonnegative parts, minute/second bounds, then milliseconds. Independent native cases include fractional hours/seconds, JS whitespace/hex, empty Number components, malformed count and bounds; primitive output does not make this a non-decoder.",
-    "call": "{ match super::parse_dx_session_timeout_ms($value.as_str().expect(\"timeout text\")) { Ok(ms) => serde_json::json!({\"ok\":true,\"milliseconds\":ms}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error}) } }",
+    "evidence": "Reviewed exchange.rs and actual breakoutprop.exchange.ts parseDxSessionTimeoutMs: split/Number coercion, exactly three finite nonnegative parts, minute/second bounds, then milliseconds. Independent native cases include fractional hours/seconds, JS whitespace/hex, empty Number components, malformed count and bounds; primitive output does not make this a non-decoder. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "call": "{ match super::parse_dx_session_timeout_ms($value.as_str().expect(\"timeout text\")) { Ok(ms) => serde_json::json!({\"ok\":true,\"milliseconds\":format!(\"{:016x}\", ms.to_bits())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error}) } }",
     "cases": [
       {
         "input": "01:02:03",
         "output": {
           "ok": true,
-          "milliseconds": 3723000
+          "milliseconds": "414c677c00000000"
         }
       },
       {
         "input": "0.5:00:00.25",
         "output": {
           "ok": true,
-          "milliseconds": 1800250
+          "milliseconds": "413b783a00000000"
         }
       },
       {
         "input": " 0x2 : :1",
         "output": {
           "ok": true,
-          "milliseconds": 7201000
+          "milliseconds": "415b783a00000000"
         }
       },
       {
         "input": "::",
         "output": {
           "ok": true,
-          "milliseconds": 0
+          "milliseconds": "0000000000000000"
         }
       },
       {
@@ -117880,13 +117880,13 @@
       "timeout": "01:02:03"
     },
     "entrypoints": [],
-    "evidence": "Login payload separates opaque session token from timeout text. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Login payload separates opaque session token from timeout text. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "token",
         "timeout"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"token\": decoded.session_token, \"timeout\": decoded.timeout}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"token\": decoded.session_token, \"timeout\": decoded.timeout}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -117936,6 +117936,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"sessionToken\":\"first-token\",\"timeout\":\"01:02:03\"}"
+          },
+          "output": {
+            "ok": true,
+            "token": "first-token",
+            "timeout": "01:02:03"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"first-token\",\"01:02:03\"]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -117953,13 +117971,13 @@
       "positionBased": true
     },
     "entrypoints": [],
-    "evidence": "Account eligibility uses status and independent account identity; positionBased is a boolean. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Account eligibility uses status and independent account identity; positionBased is a boolean. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "account",
         "positionBased"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"account\": decoded.account, \"positionBased\": decoded.position_based}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"account\": decoded.account, \"positionBased\": decoded.position_based}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118027,6 +118045,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"owner\":\"alice\",\"account\":\"demo:A\",\"version\":7.5,\"baseCurrency\":\"USD\",\"registrationTime\":\"2025-01-02\",\"accountStatus\":\"FULL_TRADING\",\"pricingStream\":\"a,b\",\"positionBased\":true}"
+          },
+          "output": {
+            "ok": true,
+            "account": "demo:A",
+            "positionBased": true
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"alice\",\"demo:A\",7.5,\"USD\",\"2025-01-02\",\"FULL_TRADING\",\"a,b\",true]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -118063,13 +118099,13 @@
       "username": "alice@desk"
     },
     "entrypoints": [],
-    "evidence": "A user detail nests ordered accounts under login/domain identity. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "A user detail nests ordered accounts under login/domain identity. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "username",
         "accounts"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"username\": decoded.username, \"accounts\": decoded.accounts.len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"username\": decoded.username, \"accounts\": decoded.accounts.len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118184,6 +118220,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"login\":\"alice\",\"domain\":\"desk\",\"version\":5,\"fullName\":\"Alice A\",\"accounts\":[{\"owner\":\"alice\",\"account\":\"demo:A\",\"version\":7.5,\"baseCurrency\":\"USD\",\"registrationTime\":\"2025-01-02\",\"accountStatus\":\"FULL_TRADING\",\"pricingStream\":\"a,b\",\"positionBased\":true},{\"owner\":\"bob\",\"account\":\"demo:B\",\"version\":-2.25,\"baseCurrency\":\"EUR\",\"registrationTime\":\"2025-02-03\",\"accountStatus\":\"CLOSED\",\"pricingStream\":\"c\",\"positionBased\":false}],\"username\":\"alice@desk\"}"
+          },
+          "output": {
+            "ok": true,
+            "username": "alice@desk",
+            "accounts": 2
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"alice\",\"desk\",5,\"Alice A\",[{\"owner\":\"alice\",\"account\":\"demo:A\",\"version\":7.5,\"baseCurrency\":\"USD\",\"registrationTime\":\"2025-01-02\",\"accountStatus\":\"FULL_TRADING\",\"pricingStream\":\"a,b\",\"positionBased\":true},{\"owner\":\"bob\",\"account\":\"demo:B\",\"version\":-2.25,\"baseCurrency\":\"EUR\",\"registrationTime\":\"2025-02-03\",\"accountStatus\":\"CLOSED\",\"pricingStream\":\"c\",\"positionBased\":false}],\"alice@desk\"]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -118243,13 +118297,13 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "The response object owns the userDetails vector, distinct from a bare array. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "The response object owns the userDetails vector, distinct from a bare array. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "count",
         "firstLogin"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.user_details.len(), \"firstLogin\": decoded.user_details.first().map(|v| &v.login)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.user_details.len(), \"firstLogin\": decoded.user_details.first().map(|v| &v.login)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118414,6 +118468,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"userDetails\":[{\"login\":\"alice\",\"domain\":\"desk\",\"version\":5,\"fullName\":\"Alice A\",\"accounts\":[{\"owner\":\"alice\",\"account\":\"demo:A\",\"version\":7.5,\"baseCurrency\":\"USD\",\"registrationTime\":\"2025-01-02\",\"accountStatus\":\"FULL_TRADING\",\"pricingStream\":\"a,b\",\"positionBased\":true},{\"owner\":\"bob\",\"account\":\"demo:B\",\"version\":-2.25,\"baseCurrency\":\"EUR\",\"registrationTime\":\"2025-02-03\",\"accountStatus\":\"CLOSED\",\"pricingStream\":\"c\",\"positionBased\":false}],\"username\":\"alice@desk\"},{\"login\":\"bob\",\"domain\":\"other\",\"version\":9,\"fullName\":\"Bob B\",\"accounts\":[{\"owner\":\"bob\",\"account\":\"demo:B\",\"version\":-2.25,\"baseCurrency\":\"EUR\",\"registrationTime\":\"2025-02-03\",\"accountStatus\":\"CLOSED\",\"pricingStream\":\"c\",\"positionBased\":false}],\"username\":\"bob@other\"}]}"
+          },
+          "output": {
+            "ok": true,
+            "count": 2,
+            "firstLogin": "alice"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[[{\"login\":\"alice\",\"domain\":\"desk\",\"version\":5,\"fullName\":\"Alice A\",\"accounts\":[{\"owner\":\"alice\",\"account\":\"demo:A\",\"version\":7.5,\"baseCurrency\":\"USD\",\"registrationTime\":\"2025-01-02\",\"accountStatus\":\"FULL_TRADING\",\"pricingStream\":\"a,b\",\"positionBased\":true},{\"owner\":\"bob\",\"account\":\"demo:B\",\"version\":-2.25,\"baseCurrency\":\"EUR\",\"registrationTime\":\"2025-02-03\",\"accountStatus\":\"CLOSED\",\"pricingStream\":\"c\",\"positionBased\":false}],\"username\":\"alice@desk\"},{\"login\":\"bob\",\"domain\":\"other\",\"version\":9,\"fullName\":\"Bob B\",\"accounts\":[{\"owner\":\"bob\",\"account\":\"demo:B\",\"version\":-2.25,\"baseCurrency\":\"EUR\",\"registrationTime\":\"2025-02-03\",\"accountStatus\":\"CLOSED\",\"pricingStream\":\"c\",\"positionBased\":false}],\"username\":\"bob@other\"}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -118427,13 +118499,13 @@
       "currency": "USD"
     },
     "entrypoints": [],
-    "evidence": "Balance account/currency identify a numeric value independently of version. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Balance account/currency identify a numeric value independently of version. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "currency",
         "value"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"currency\": decoded.currency, \"value\": decoded.value}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"currency\": decoded.currency, \"value\": format!(\"{:016x}\", decoded.value.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118445,7 +118517,7 @@
           "output": {
             "ok": true,
             "currency": "USD",
-            "value": 123.75
+            "value": "405ef00000000000"
           }
         },
         {
@@ -118458,7 +118530,7 @@
           "output": {
             "ok": true,
             "currency": "EUR",
-            "value": -46.5
+            "value": "c047400000000000"
           }
         },
         {
@@ -118489,6 +118561,34 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"version\":2,\"value\":-0.0,\"currency\":\"USD\"}"
+          },
+          "output": {
+            "ok": true,
+            "currency": "USD",
+            "value": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"version\":2,\"value\":123.75,\"currency\":\"USD\"}"
+          },
+          "output": {
+            "ok": true,
+            "currency": "USD",
+            "value": "405ef00000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"demo:A\",2,123.75,\"USD\"]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -118509,13 +118609,13 @@
       "marginRate": 0.1
     },
     "entrypoints": [],
-    "evidence": "Position code and quantity retain native position identity and signed amount. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Position code and quantity retain native position identity and signed amount. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "positionCode",
         "quantity"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"positionCode\": decoded.position_code, \"quantity\": decoded.quantity}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"positionCode\": decoded.position_code, \"quantity\": format!(\"{:016x}\", decoded.quantity.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118534,7 +118634,7 @@
           "output": {
             "ok": true,
             "positionCode": "p1",
-            "quantity": 1.25
+            "quantity": "3ff4000000000000"
           }
         },
         {
@@ -118554,7 +118654,7 @@
           "output": {
             "ok": true,
             "positionCode": "p2",
-            "quantity": -2.5
+            "quantity": "c004000000000000"
           }
         },
         {
@@ -118592,6 +118692,34 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":-0.0,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}"
+          },
+          "output": {
+            "ok": true,
+            "positionCode": "p1",
+            "quantity": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":1.25,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}"
+          },
+          "output": {
+            "ok": true,
+            "positionCode": "p1",
+            "quantity": "3ff4000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"demo:A\",4,\"p1\",\"ETHUSD\",1.25,\"BUY\",2500,\"start-a\",2000,\"end-a\",0.1]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -118611,13 +118739,13 @@
       "averagePrice": 122.25
     },
     "entrypoints": [],
-    "evidence": "Leg quantity fields deliberately differ so fill/remaining confusion is observable. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Leg quantity fields deliberately differ so fill/remaining confusion is observable. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "filled",
         "remaining"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"filled\": decoded.filled_quantity, \"remaining\": decoded.remaining_quantity}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"filled\": format!(\"{:016x}\", decoded.filled_quantity.to_bits()), \"remaining\": format!(\"{:016x}\", decoded.remaining_quantity.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118634,8 +118762,8 @@
           },
           "output": {
             "ok": true,
-            "filled": 3,
-            "remaining": 4
+            "filled": "4008000000000000",
+            "remaining": "4010000000000000"
           }
         },
         {
@@ -118653,8 +118781,8 @@
           },
           "output": {
             "ok": true,
-            "filled": 2,
-            "remaining": 8
+            "filled": "4000000000000000",
+            "remaining": "4020000000000000"
           }
         },
         {
@@ -118691,6 +118819,34 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":-0.0,\"remainingQuantity\":4,\"averagePrice\":122.25}"
+          },
+          "output": {
+            "ok": true,
+            "filled": "8000000000000000",
+            "remaining": "4010000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}"
+          },
+          "output": {
+            "ok": true,
+            "filled": "4008000000000000",
+            "remaining": "4010000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"ETHUSD\",\"OPEN\",\"p1\",\"BUY\",123.5,2,7,3,4,122.25]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -118715,13 +118871,13 @@
       "marginRate": 0.1
     },
     "entrypoints": [],
-    "evidence": "Execution identity and notional values are independent of order and last-fill quantities. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Execution identity and notional values are independent of order and last-fill quantities. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "executionCode",
         "filledNotional"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"executionCode\": decoded.execution_code, \"filledNotional\": decoded.filled_quantity_notional}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"executionCode\": decoded.execution_code, \"filledNotional\": format!(\"{:016x}\", decoded.filled_quantity_notional.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118744,7 +118900,7 @@
           "output": {
             "ok": true,
             "executionCode": "e1",
-            "filledNotional": 360
+            "filledNotional": "4076800000000000"
           }
         },
         {
@@ -118768,7 +118924,7 @@
           "output": {
             "ok": true,
             "executionCode": "e2",
-            "filledNotional": 1800
+            "filledNotional": "409c200000000000"
           }
         },
         {
@@ -118807,6 +118963,34 @@
         },
         {
           "input": "record",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":-0.0,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}"
+          },
+          "output": {
+            "ok": true,
+            "executionCode": "e1",
+            "filledNotional": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}"
+          },
+          "output": {
+            "ok": true,
+            "executionCode": "e1",
+            "filledNotional": "4076800000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"demo:A\",\"e1\",\"o1\",13,2,\"c1\",\"a1\",\"WORKING\",false,3,1,360,120,\"time-a\",0.1]"
+          },
           "output": {
             "ok": false
           }
@@ -118873,14 +119057,14 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "Order vectors and opaque cash transactions remain separate fields; custom cash decoder must retain its array guard. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Order vectors and opaque cash transactions remain separate fields; custom cash decoder must retain its array guard. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "orderId",
         "legs",
         "cashCount"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"orderId\": decoded.order_id, \"legs\": decoded.legs.len(), \"cashCount\": decoded.cash_transactions.as_array().expect(\"cash array\").len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"orderId\": format!(\"{:016x}\", decoded.order_id.to_bits()), \"legs\": decoded.legs.len(), \"cashCount\": decoded.cash_transactions.as_array().expect(\"cash array\").len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -118941,7 +119125,7 @@
           },
           "output": {
             "ok": true,
-            "orderId": 13,
+            "orderId": "402a000000000000",
             "legs": 1,
             "cashCount": 1
           }
@@ -119033,7 +119217,7 @@
           },
           "output": {
             "ok": true,
-            "orderId": 17,
+            "orderId": "4031000000000000",
             "legs": 2,
             "cashCount": 2
           }
@@ -119113,6 +119297,36 @@
         },
         {
           "input": "record",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"version\":2,\"orderId\":-0.0,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}"
+          },
+          "output": {
+            "ok": true,
+            "orderId": "8000000000000000",
+            "legs": 1,
+            "cashCount": 1
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"version\":2,\"orderId\":13,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}"
+          },
+          "output": {
+            "ok": true,
+            "orderId": "402a000000000000",
+            "legs": 1,
+            "cashCount": 1
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"demo:A\",2,13,\"o1\",\"c1\",\"a1\",1,\"LIMIT\",\"ETHUSD\",\"WORKING\",false,[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"BUY\",\"GTC\",0.1,\"issue-a\",\"time-a\",[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],[{\"fee\":1.5}]]"
+          },
           "output": {
             "ok": false
           }
@@ -119214,14 +119428,14 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "A portfolio groups separate balance, position and order vectors by account. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "A portfolio groups separate balance, position and order vectors by account. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "account",
         "positions",
         "orders"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"account\": decoded.account, \"positions\": decoded.positions.len(), \"orders\": decoded.orders.len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"account\": decoded.account, \"positions\": decoded.positions.len(), \"orders\": decoded.orders.len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -119625,6 +119839,25 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"version\":8,\"balances\":[{\"account\":\"demo:A\",\"version\":2,\"value\":123.75,\"currency\":\"USD\"},{\"account\":\"demo:B\",\"version\":3,\"value\":-46.5,\"currency\":\"EUR\"}],\"positions\":[{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":1.25,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}],\"orders\":[{\"account\":\"demo:A\",\"version\":2,\"orderId\":13,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}]}"
+          },
+          "output": {
+            "ok": true,
+            "account": "demo:A",
+            "positions": 1,
+            "orders": 1
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"demo:A\",8,[{\"account\":\"demo:A\",\"version\":2,\"value\":123.75,\"currency\":\"USD\"},{\"account\":\"demo:B\",\"version\":3,\"value\":-46.5,\"currency\":\"EUR\"}],[{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":1.25,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}],[{\"account\":\"demo:A\",\"version\":2,\"orderId\":13,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -119909,13 +120142,13 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "Root portfolios are wrapped in an object; first account and cardinality remain observable. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Root portfolios are wrapped in an object; first account and cardinality remain observable. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "count",
         "firstAccount"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.portfolios.len(), \"firstAccount\": decoded.portfolios.first().map(|v| &v.account)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.portfolios.len(), \"firstAccount\": decoded.portfolios.first().map(|v| &v.account)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -120693,6 +120926,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"portfolios\":[{\"account\":\"demo:A\",\"version\":8,\"balances\":[{\"account\":\"demo:A\",\"version\":2,\"value\":123.75,\"currency\":\"USD\"},{\"account\":\"demo:B\",\"version\":3,\"value\":-46.5,\"currency\":\"EUR\"}],\"positions\":[{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":1.25,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}],\"orders\":[{\"account\":\"demo:A\",\"version\":2,\"orderId\":13,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}]},{\"account\":\"demo:B\",\"version\":9,\"balances\":[{\"account\":\"demo:B\",\"version\":3,\"value\":-46.5,\"currency\":\"EUR\"}],\"positions\":[{\"account\":\"demo:B\",\"version\":6,\"positionCode\":\"p2\",\"symbol\":\"XBTUSD\",\"quantity\":-2.5,\"side\":\"SELL\",\"quantityNotional\":10000,\"openTime\":\"start-b\",\"openPrice\":4000,\"lastUpdateTime\":\"end-b\",\"marginRate\":0.2},{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":1.25,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}],\"orders\":[{\"account\":\"demo:B\",\"version\":5,\"orderId\":17,\"orderCode\":\"o2\",\"clientOrderId\":\"c2\",\"actionCode\":\"a2\",\"legCount\":2,\"type\":\"STOP\",\"instrument\":\"XBTUSD\",\"status\":\"DONE\",\"finalStatus\":true,\"legs\":[{\"instrument\":\"XBTUSD\",\"positionEffect\":\"CLOSE\",\"positionCode\":\"p2\",\"side\":\"SELL\",\"price\":234.75,\"legRatio\":3,\"quantity\":10,\"filledQuantity\":2,\"remainingQuantity\":8,\"averagePrice\":231.5},{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"SELL\",\"tif\":\"IOC\",\"marginRate\":0.2,\"issueTime\":\"issue-b\",\"transactionTime\":\"time-b\",\"executions\":[{\"account\":\"demo:B\",\"executionCode\":\"e2\",\"orderCode\":\"o2\",\"updateOrderId\":17,\"version\":5,\"clientOrderId\":\"c2\",\"actionCode\":\"a2\",\"status\":\"DONE\",\"finalStatus\":true,\"filledQuantity\":9,\"lastQuantity\":2,\"filledQuantityNotional\":1800,\"lastQuantityNotional\":400,\"transactionTime\":\"time-b\",\"marginRate\":0.2},{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[null,7]},{\"account\":\"demo:A\",\"version\":2,\"orderId\":13,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}]}]}"
+          },
+          "output": {
+            "ok": true,
+            "count": 2,
+            "firstAccount": "demo:A"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[[{\"account\":\"demo:A\",\"version\":8,\"balances\":[{\"account\":\"demo:A\",\"version\":2,\"value\":123.75,\"currency\":\"USD\"},{\"account\":\"demo:B\",\"version\":3,\"value\":-46.5,\"currency\":\"EUR\"}],\"positions\":[{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":1.25,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}],\"orders\":[{\"account\":\"demo:A\",\"version\":2,\"orderId\":13,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}]},{\"account\":\"demo:B\",\"version\":9,\"balances\":[{\"account\":\"demo:B\",\"version\":3,\"value\":-46.5,\"currency\":\"EUR\"}],\"positions\":[{\"account\":\"demo:B\",\"version\":6,\"positionCode\":\"p2\",\"symbol\":\"XBTUSD\",\"quantity\":-2.5,\"side\":\"SELL\",\"quantityNotional\":10000,\"openTime\":\"start-b\",\"openPrice\":4000,\"lastUpdateTime\":\"end-b\",\"marginRate\":0.2},{\"account\":\"demo:A\",\"version\":4,\"positionCode\":\"p1\",\"symbol\":\"ETHUSD\",\"quantity\":1.25,\"side\":\"BUY\",\"quantityNotional\":2500,\"openTime\":\"start-a\",\"openPrice\":2000,\"lastUpdateTime\":\"end-a\",\"marginRate\":0.1}],\"orders\":[{\"account\":\"demo:B\",\"version\":5,\"orderId\":17,\"orderCode\":\"o2\",\"clientOrderId\":\"c2\",\"actionCode\":\"a2\",\"legCount\":2,\"type\":\"STOP\",\"instrument\":\"XBTUSD\",\"status\":\"DONE\",\"finalStatus\":true,\"legs\":[{\"instrument\":\"XBTUSD\",\"positionEffect\":\"CLOSE\",\"positionCode\":\"p2\",\"side\":\"SELL\",\"price\":234.75,\"legRatio\":3,\"quantity\":10,\"filledQuantity\":2,\"remainingQuantity\":8,\"averagePrice\":231.5},{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"SELL\",\"tif\":\"IOC\",\"marginRate\":0.2,\"issueTime\":\"issue-b\",\"transactionTime\":\"time-b\",\"executions\":[{\"account\":\"demo:B\",\"executionCode\":\"e2\",\"orderCode\":\"o2\",\"updateOrderId\":17,\"version\":5,\"clientOrderId\":\"c2\",\"actionCode\":\"a2\",\"status\":\"DONE\",\"finalStatus\":true,\"filledQuantity\":9,\"lastQuantity\":2,\"filledQuantityNotional\":1800,\"lastQuantityNotional\":400,\"transactionTime\":\"time-b\",\"marginRate\":0.2},{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[null,7]},{\"account\":\"demo:A\",\"version\":2,\"orderId\":13,\"orderCode\":\"o1\",\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"legCount\":1,\"type\":\"LIMIT\",\"instrument\":\"ETHUSD\",\"status\":\"WORKING\",\"finalStatus\":false,\"legs\":[{\"instrument\":\"ETHUSD\",\"positionEffect\":\"OPEN\",\"positionCode\":\"p1\",\"side\":\"BUY\",\"price\":123.5,\"legRatio\":2,\"quantity\":7,\"filledQuantity\":3,\"remainingQuantity\":4,\"averagePrice\":122.25}],\"side\":\"BUY\",\"tif\":\"GTC\",\"marginRate\":0.1,\"issueTime\":\"issue-a\",\"transactionTime\":\"time-a\",\"executions\":[{\"account\":\"demo:A\",\"executionCode\":\"e1\",\"orderCode\":\"o1\",\"updateOrderId\":13,\"version\":2,\"clientOrderId\":\"c1\",\"actionCode\":\"a1\",\"status\":\"WORKING\",\"finalStatus\":false,\"filledQuantity\":3,\"lastQuantity\":1,\"filledQuantityNotional\":360,\"lastQuantityNotional\":120,\"transactionTime\":\"time-a\",\"marginRate\":0.1}],\"cashTransactions\":[{\"fee\":1.5}]}]}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -120712,14 +120963,14 @@
       "firstCurrency": "ETH"
     },
     "entrypoints": [],
-    "evidence": "Instrument price increment differs from pip size, lot size and multiplier. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Instrument price increment differs from pip size, lot size and multiplier. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "symbol",
         "priceIncrement",
         "lotSize"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"symbol\": decoded.symbol, \"priceIncrement\": decoded.price_increment, \"lotSize\": decoded.lot_size}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"symbol\": decoded.symbol, \"priceIncrement\": format!(\"{:016x}\", decoded.price_increment.to_bits()), \"lotSize\": format!(\"{:016x}\", decoded.lot_size.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -120737,8 +120988,8 @@
           "output": {
             "ok": true,
             "symbol": "ETHUSD",
-            "priceIncrement": 0.25,
-            "lotSize": 2
+            "priceIncrement": "3fd0000000000000",
+            "lotSize": "4000000000000000"
           }
         },
         {
@@ -120757,8 +121008,8 @@
           "output": {
             "ok": true,
             "symbol": "EURUSD",
-            "priceIncrement": 0.0005,
-            "lotSize": 1000
+            "priceIncrement": "3f40624dd2f1a9fc",
+            "lotSize": "408f400000000000"
           }
         },
         {
@@ -120792,6 +121043,36 @@
         },
         {
           "input": "record",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"version\":3,\"description\":\"Ether\",\"priceIncrement\":-0.0,\"pipSize\":0.01,\"currency\":\"USD\",\"lotSize\":2,\"multiplier\":5,\"firstCurrency\":\"ETH\"}"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD",
+            "priceIncrement": "8000000000000000",
+            "lotSize": "4000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"version\":3,\"description\":\"Ether\",\"priceIncrement\":0.25,\"pipSize\":0.01,\"currency\":\"USD\",\"lotSize\":2,\"multiplier\":5,\"firstCurrency\":\"ETH\"}"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD",
+            "priceIncrement": "3fd0000000000000",
+            "lotSize": "4000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"CFD\",\"ETHUSD\",3,\"Ether\",0.25,0.01,\"USD\",2,5,\"ETH\"]"
+          },
           "output": {
             "ok": false
           }
@@ -120830,13 +121111,13 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "Instrument listings preserve wrapper, first identity and list cardinality. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Instrument listings preserve wrapper, first identity and list cardinality. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "count",
         "firstSymbol"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.instruments.len(), \"firstSymbol\": decoded.instruments.first().map(|v| &v.symbol)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.instruments.len(), \"firstSymbol\": decoded.instruments.first().map(|v| &v.symbol)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -120946,6 +121227,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"instruments\":[{\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"version\":3,\"description\":\"Ether\",\"priceIncrement\":0.25,\"pipSize\":0.01,\"currency\":\"USD\",\"lotSize\":2,\"multiplier\":5,\"firstCurrency\":\"ETH\"},{\"type\":\"FX\",\"symbol\":\"EURUSD\",\"version\":8,\"description\":\"Euro\",\"priceIncrement\":0.0005,\"pipSize\":0.0001,\"currency\":\"USD\",\"lotSize\":1000,\"multiplier\":10,\"firstCurrency\":\"EUR\"}]}"
+          },
+          "output": {
+            "ok": true,
+            "count": 2,
+            "firstSymbol": "ETHUSD"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[[{\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"version\":3,\"description\":\"Ether\",\"priceIncrement\":0.25,\"pipSize\":0.01,\"currency\":\"USD\",\"lotSize\":2,\"multiplier\":5,\"firstCurrency\":\"ETH\"},{\"type\":\"FX\",\"symbol\":\"EURUSD\",\"version\":8,\"description\":\"Euro\",\"priceIncrement\":0.0005,\"pipSize\":0.0001,\"currency\":\"USD\",\"lotSize\":1000,\"multiplier\":10,\"firstCurrency\":\"EUR\"}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -120957,13 +121256,13 @@
       "limitType": "ABSOLUTE"
     },
     "entrypoints": [],
-    "evidence": "Maximum amount combines a numeric value and an open limit-type string. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Maximum amount combines a numeric value and an open limit-type string. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "value",
         "limitType"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"value\": decoded.value, \"limitType\": decoded.limit_type}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"value\": format!(\"{:016x}\", decoded.value.to_bits()), \"limitType\": decoded.limit_type}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -120972,7 +121271,7 @@
           },
           "output": {
             "ok": true,
-            "value": 12.5,
+            "value": "4029000000000000",
             "limitType": "ABSOLUTE"
           }
         },
@@ -120983,7 +121282,7 @@
           },
           "output": {
             "ok": true,
-            "value": 37.25,
+            "value": "4042a00000000000",
             "limitType": "RELATIVE"
           }
         },
@@ -121013,6 +121312,34 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"value\":-0.0,\"limitType\":\"ABSOLUTE\"}"
+          },
+          "output": {
+            "ok": true,
+            "value": "8000000000000000",
+            "limitType": "ABSOLUTE"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"value\":12.5,\"limitType\":\"ABSOLUTE\"}"
+          },
+          "output": {
+            "ok": true,
+            "value": "4029000000000000",
+            "limitType": "ABSOLUTE"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[12.5,\"ABSOLUTE\"]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -121024,13 +121351,13 @@
       "value": 0.1
     },
     "entrypoints": [],
-    "evidence": "Tier endVolume remains text while its margin value is numeric. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Tier endVolume remains text while its margin value is numeric. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "endVolume",
         "value"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"endVolume\": decoded.end_volume, \"value\": decoded.value}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"endVolume\": decoded.end_volume, \"value\": format!(\"{:016x}\", decoded.value.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121040,7 +121367,7 @@
           "output": {
             "ok": true,
             "endVolume": "100",
-            "value": 0.1
+            "value": "3fb999999999999a"
           }
         },
         {
@@ -121051,7 +121378,7 @@
           "output": {
             "ok": true,
             "endVolume": "unlimited",
-            "value": 0.2
+            "value": "3fc999999999999a"
           }
         },
         {
@@ -121080,6 +121407,34 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"endVolume\":\"100\",\"value\":-0.0}"
+          },
+          "output": {
+            "ok": true,
+            "endVolume": "100",
+            "value": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"endVolume\":\"100\",\"value\":0.1}"
+          },
+          "output": {
+            "ok": true,
+            "endVolume": "100",
+            "value": "3fb999999999999a"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"100\",0.1]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -121100,13 +121455,13 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "Rate type is independent of ordered margin tiers. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Rate type is independent of ordered margin tiers. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "rateType",
         "tiers"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"rateType\": decoded.rate_type, \"tiers\": decoded.tiers.len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"rateType\": decoded.rate_type, \"tiers\": decoded.tiers.len()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121179,6 +121534,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}"
+          },
+          "output": {
+            "ok": true,
+            "rateType": "FIXED",
+            "tiers": 2
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"FIXED\",[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -121211,14 +121584,14 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Trading details use amount precision separately from price precision in Instrument. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Trading details use amount precision separately from price precision in Instrument. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "symbol",
         "minSize",
         "increment"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"symbol\": decoded.symbol, \"minSize\": decoded.min_order_size, \"increment\": decoded.min_order_size_increment}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"symbol\": decoded.symbol, \"minSize\": format!(\"{:016x}\", decoded.min_order_size.to_bits()), \"increment\": format!(\"{:016x}\", decoded.min_order_size_increment.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121249,8 +121622,8 @@
           "output": {
             "ok": true,
             "symbol": "ETHUSD",
-            "minSize": 0.5,
-            "increment": 0.25
+            "minSize": "3fe0000000000000",
+            "increment": "3fd0000000000000"
           }
         },
         {
@@ -121278,8 +121651,8 @@
           "output": {
             "ok": true,
             "symbol": "EURUSD",
-            "minSize": 2.5,
-            "increment": 0.5
+            "minSize": "4004000000000000",
+            "increment": "3fe0000000000000"
           }
         },
         {
@@ -121326,6 +121699,36 @@
         },
         {
           "input": "record",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"tradingStatus\":\"OPEN\",\"minOrderSize\":-0.0,\"maxOrderSize\":{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},\"minOrderSizeIncrement\":0.25,\"marginRate\":{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}}"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD",
+            "minSize": "8000000000000000",
+            "increment": "3fd0000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"account\":\"demo:A\",\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"tradingStatus\":\"OPEN\",\"minOrderSize\":0.5,\"maxOrderSize\":{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},\"minOrderSizeIncrement\":0.25,\"marginRate\":{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}}"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD",
+            "minSize": "3fe0000000000000",
+            "increment": "3fd0000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"demo:A\",\"CFD\",\"ETHUSD\",\"OPEN\",0.5,{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},0.25,{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}]"
+          },
           "output": {
             "ok": false
           }
@@ -121386,13 +121789,13 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "Detail listing preserves its own camelCase wrapper and list order. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Detail listing preserves its own camelCase wrapper and list order. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "count",
         "firstSymbol"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.instrument_details.len(), \"firstSymbol\": decoded.instrument_details.first().map(|v| &v.symbol)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.instrument_details.len(), \"firstSymbol\": decoded.instrument_details.first().map(|v| &v.symbol)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121555,6 +121958,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"instrumentDetails\":[{\"account\":\"demo:A\",\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"tradingStatus\":\"OPEN\",\"minOrderSize\":0.5,\"maxOrderSize\":{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},\"minOrderSizeIncrement\":0.25,\"marginRate\":{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}},{\"account\":\"demo:B\",\"type\":\"FX\",\"symbol\":\"EURUSD\",\"tradingStatus\":\"CLOSED\",\"minOrderSize\":2.5,\"maxOrderSize\":{\"value\":37.25,\"limitType\":\"RELATIVE\"},\"minOrderSizeIncrement\":0.5,\"marginRate\":{\"rateType\":\"FLOATING\",\"tiers\":[{\"endVolume\":\"unlimited\",\"value\":0.2}]}}]}"
+          },
+          "output": {
+            "ok": true,
+            "count": 2,
+            "firstSymbol": "ETHUSD"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[[{\"account\":\"demo:A\",\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"tradingStatus\":\"OPEN\",\"minOrderSize\":0.5,\"maxOrderSize\":{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},\"minOrderSizeIncrement\":0.25,\"marginRate\":{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}},{\"account\":\"demo:B\",\"type\":\"FX\",\"symbol\":\"EURUSD\",\"tradingStatus\":\"CLOSED\",\"minOrderSize\":2.5,\"maxOrderSize\":{\"value\":37.25,\"limitType\":\"RELATIVE\"},\"minOrderSizeIncrement\":0.5,\"marginRate\":{\"rateType\":\"FLOATING\",\"tiers\":[{\"endVolume\":\"unlimited\",\"value\":0.2}]}}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -121569,13 +121990,13 @@
       "time": "quote-a"
     },
     "entrypoints": [],
-    "evidence": "Ask and bid remain distinct numeric fields on symbol/type/time. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Ask and bid remain distinct numeric fields on symbol/type/time. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "ask",
         "bid"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"ask\": decoded.ask, \"bid\": decoded.bid}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"ask\": format!(\"{:016x}\", decoded.ask.to_bits()), \"bid\": format!(\"{:016x}\", decoded.bid.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121587,8 +122008,8 @@
           },
           "output": {
             "ok": true,
-            "ask": 123.5,
-            "bid": 121.25
+            "ask": "405ee00000000000",
+            "bid": "405e500000000000"
           }
         },
         {
@@ -121601,8 +122022,8 @@
           },
           "output": {
             "ok": true,
-            "ask": 1.125,
-            "bid": 1.1
+            "ask": "3ff2000000000000",
+            "bid": "3ff199999999999a"
           }
         },
         {
@@ -121634,6 +122055,34 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"symbol\":\"ETHUSD\",\"type\":\"QUOTE\",\"ask\":123.5,\"bid\":-0.0,\"time\":\"quote-a\"}"
+          },
+          "output": {
+            "ok": true,
+            "ask": "405ee00000000000",
+            "bid": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"symbol\":\"ETHUSD\",\"type\":\"QUOTE\",\"ask\":123.5,\"bid\":121.25,\"time\":\"quote-a\"}"
+          },
+          "output": {
+            "ok": true,
+            "ask": "405ee00000000000",
+            "bid": "405e500000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"ETHUSD\",\"QUOTE\",123.5,121.25,\"quote-a\"]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -121659,13 +122108,13 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "Ticker events are wrapped and maintain first symbol independently of count. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Ticker events are wrapped and maintain first symbol independently of count. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "count",
         "firstSymbol"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.events.len(), \"firstSymbol\": decoded.events.first().map(|v| &v.symbol)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.events.len(), \"firstSymbol\": decoded.events.first().map(|v| &v.symbol)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121750,6 +122199,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"events\":[{\"symbol\":\"ETHUSD\",\"type\":\"QUOTE\",\"ask\":123.5,\"bid\":121.25,\"time\":\"quote-a\"},{\"symbol\":\"EURUSD\",\"type\":\"SNAPSHOT\",\"ask\":1.125,\"bid\":1.1,\"time\":\"quote-b\"}]}"
+          },
+          "output": {
+            "ok": true,
+            "count": 2,
+            "firstSymbol": "ETHUSD"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[[{\"symbol\":\"ETHUSD\",\"type\":\"QUOTE\",\"ask\":123.5,\"bid\":121.25,\"time\":\"quote-a\"},{\"symbol\":\"EURUSD\",\"type\":\"SNAPSHOT\",\"ask\":1.125,\"bid\":1.1,\"time\":\"quote-b\"}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -121768,14 +122235,14 @@
       "time": "candle-a"
     },
     "entrypoints": [],
-    "evidence": "Candle open/close/high/low are separate; volume and candleType remain independent. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Candle open/close/high/low are separate; volume and candleType remain independent. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "open",
         "close",
         "volume"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"open\": decoded.open, \"close\": decoded.close, \"volume\": decoded.volume}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"open\": format!(\"{:016x}\", decoded.open.to_bits()), \"close\": format!(\"{:016x}\", decoded.close.to_bits()), \"volume\": format!(\"{:016x}\", decoded.volume.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121791,9 +122258,9 @@
           },
           "output": {
             "ok": true,
-            "open": 10.25,
-            "close": 12.5,
-            "volume": 700.25
+            "open": "4024800000000000",
+            "close": "4029000000000000",
+            "volume": "4085e20000000000"
           }
         },
         {
@@ -121810,9 +122277,9 @@
           },
           "output": {
             "ok": true,
-            "open": 1.2,
-            "close": 1.1,
-            "volume": 99.5
+            "open": "3ff3333333333333",
+            "close": "3ff199999999999a",
+            "volume": "4058e00000000000"
           }
         },
         {
@@ -121845,6 +122312,36 @@
         },
         {
           "input": "record",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"symbol\":\"ETHUSD\",\"type\":\"CANDLE\",\"candleType\":\"5m\",\"open\":-0.0,\"close\":12.5,\"high\":14.75,\"low\":9.5,\"volume\":700.25,\"time\":\"candle-a\"}"
+          },
+          "output": {
+            "ok": true,
+            "open": "8000000000000000",
+            "close": "4029000000000000",
+            "volume": "4085e20000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"symbol\":\"ETHUSD\",\"type\":\"CANDLE\",\"candleType\":\"5m\",\"open\":10.25,\"close\":12.5,\"high\":14.75,\"low\":9.5,\"volume\":700.25,\"time\":\"candle-a\"}"
+          },
+          "output": {
+            "ok": true,
+            "open": "4024800000000000",
+            "close": "4029000000000000",
+            "volume": "4085e20000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"ETHUSD\",\"CANDLE\",\"5m\",10.25,12.5,14.75,9.5,700.25,\"candle-a\"]"
+          },
           "output": {
             "ok": false
           }
@@ -121881,13 +122378,13 @@
       ]
     },
     "entrypoints": [],
-    "evidence": "Candle event list is object-wrapped; native cardinality and first timeframe are explicit. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Candle event list is object-wrapped; native cardinality and first timeframe are explicit. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "count",
         "firstType"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.events.len(), \"firstType\": decoded.events.first().map(|v| &v.candle_type)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"count\": decoded.events.len(), \"firstType\": decoded.events.first().map(|v| &v.candle_type)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -121992,6 +122489,24 @@
           "output": {
             "ok": false
           }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"events\":[{\"symbol\":\"ETHUSD\",\"type\":\"CANDLE\",\"candleType\":\"5m\",\"open\":10.25,\"close\":12.5,\"high\":14.75,\"low\":9.5,\"volume\":700.25,\"time\":\"candle-a\"},{\"symbol\":\"EURUSD\",\"type\":\"BAR\",\"candleType\":\"h\",\"open\":1.2,\"close\":1.1,\"high\":1.3,\"low\":1.05,\"volume\":99.5,\"time\":\"candle-b\"}]}"
+          },
+          "output": {
+            "ok": true,
+            "count": 2,
+            "firstType": "5m"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[[{\"symbol\":\"ETHUSD\",\"type\":\"CANDLE\",\"candleType\":\"5m\",\"open\":10.25,\"close\":12.5,\"high\":14.75,\"low\":9.5,\"volume\":700.25,\"time\":\"candle-a\"},{\"symbol\":\"EURUSD\",\"type\":\"BAR\",\"candleType\":\"h\",\"open\":1.2,\"close\":1.1,\"high\":1.3,\"low\":1.05,\"volume\":99.5,\"time\":\"candle-b\"}]]"
+          },
+          "output": {
+            "ok": false
+          }
         }
       ]
     }
@@ -122038,13 +122553,13 @@
       }
     },
     "entrypoints": [],
-    "evidence": "Internal fetchCombinedInstruments result pairs the source instrument and instrumentDetails records; quotes.rs decodes each pair before market mapping. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness.",
+    "evidence": "Internal fetchCombinedInstruments result pairs the source instrument and instrumentDetails records; quotes.rs decodes each pair before market mapping. Reviewed the corresponding breakoutprop.types.ts object declaration and Rust field/Serde names. The explicit fixture admits declared records, not arbitrary malformed JS; positional arrays must refuse at trait and qualified entrypoints. Two independently authored positive native projections inspect fields before serialization. Existing tests/parity.rs additionally compares every nested field and numeric bit through direct Serde and all three shared numeric-ingress paths. The explicit full positional-array case lists every field in reviewed declaration order, so an unrelated missing-field error cannot satisfy the shape witness. Numeric projections are exact 16-digit native binary64 bit strings, observed before JSON; counts remain integer counts. Raw-text native cases exercise serde_json::from_str as well; _rawJson is solely the probe envelope and retains -0 through JavaScript contract loading.",
     "nativeObservation": {
       "nativeFields": [
         "symbol",
         "minOrderSize"
       ],
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true, \"symbol\": decoded.instrument.symbol, \"minOrderSize\": decoded.instrument_details.min_order_size}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match if let Some(text) = $value.get(\"_rawJson\").and_then(serde_json::Value::as_str) { serde_json::from_str::<$type>(text) } else { serde_json::from_value::<$type>($value.clone()) } { Ok(decoded) => serde_json::json!({\"ok\":true, \"symbol\": decoded.instrument.symbol, \"minOrderSize\": format!(\"{:016x}\", decoded.instrument_details.min_order_size.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -122089,7 +122604,7 @@
           "output": {
             "ok": true,
             "symbol": "ETHUSD",
-            "minOrderSize": 0.5
+            "minOrderSize": "3fe0000000000000"
           }
         },
         {
@@ -122131,7 +122646,7 @@
           "output": {
             "ok": true,
             "symbol": "EURUSD",
-            "minOrderSize": 2.5
+            "minOrderSize": "4004000000000000"
           }
         },
         {
@@ -122192,6 +122707,34 @@
         },
         {
           "input": "record",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"instrument\":{\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"version\":3,\"description\":\"Ether\",\"priceIncrement\":0.25,\"pipSize\":0.01,\"currency\":\"USD\",\"lotSize\":2,\"multiplier\":5,\"firstCurrency\":\"ETH\"},\"instrumentDetails\":{\"account\":\"demo:A\",\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"tradingStatus\":\"OPEN\",\"minOrderSize\":-0.0,\"maxOrderSize\":{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},\"minOrderSizeIncrement\":0.25,\"marginRate\":{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}}}"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD",
+            "minOrderSize": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"instrument\":{\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"version\":3,\"description\":\"Ether\",\"priceIncrement\":0.25,\"pipSize\":0.01,\"currency\":\"USD\",\"lotSize\":2,\"multiplier\":5,\"firstCurrency\":\"ETH\"},\"instrumentDetails\":{\"account\":\"demo:A\",\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"tradingStatus\":\"OPEN\",\"minOrderSize\":0.5,\"maxOrderSize\":{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},\"minOrderSizeIncrement\":0.25,\"marginRate\":{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}}}"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSD",
+            "minOrderSize": "3fe0000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[{\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"version\":3,\"description\":\"Ether\",\"priceIncrement\":0.25,\"pipSize\":0.01,\"currency\":\"USD\",\"lotSize\":2,\"multiplier\":5,\"firstCurrency\":\"ETH\"},{\"account\":\"demo:A\",\"type\":\"CFD\",\"symbol\":\"ETHUSD\",\"tradingStatus\":\"OPEN\",\"minOrderSize\":0.5,\"maxOrderSize\":{\"value\":12.5,\"limitType\":\"ABSOLUTE\"},\"minOrderSizeIncrement\":0.25,\"marginRate\":{\"rateType\":\"FIXED\",\"tiers\":[{\"endVolume\":\"100\",\"value\":0.1},{\"endVolume\":\"unlimited\",\"value\":0.2}]}}]"
+          },
           "output": {
             "ok": false
           }
@@ -128313,8 +128856,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Balance formatting selects USD cash, then combines unrealized PnL and used margin from decoded positions; empty positions independently isolate USD selection from non-USD balances. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); match super::format_balance(&input, &store, &|v| v, &|_| Ok(())) { Ok(value) => serde_json::json!({\"ok\":true,\"total\":value.total,\"free\":value.free,\"used\":value.used,\"upnl\":value.upnl}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "evidence": "Balance formatting selects USD cash, then combines unrealized PnL and used margin from decoded positions; empty positions independently isolate USD selection from non-USD balances. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); match super::format_balance(&input, &store, &|v| v, &|_| Ok(())) { Ok(value) => serde_json::json!({\"ok\":true,\"total\":format!(\"{:016x}\", value.total.to_bits()),\"free\":format!(\"{:016x}\", value.free.to_bits()),\"used\":format!(\"{:016x}\", value.used.to_bits()),\"upnl\":format!(\"{:016x}\", value.upnl.to_bits())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -128343,10 +128886,10 @@
         },
         "output": {
           "ok": true,
-          "total": 123.75,
-          "free": 123.75,
-          "used": 0,
-          "upnl": 0
+          "total": "405ef00000000000",
+          "free": "405ef00000000000",
+          "used": "0000000000000000",
+          "upnl": "0000000000000000"
         }
       },
       {
@@ -128370,10 +128913,10 @@
         },
         "output": {
           "ok": true,
-          "total": -46.5,
-          "free": -46.5,
-          "used": 0,
-          "upnl": 0
+          "total": "c047400000000000",
+          "free": "c047400000000000",
+          "used": "0000000000000000",
+          "upnl": "0000000000000000"
         }
       }
     ]
@@ -128538,8 +129081,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Position formatting filters explicit symbol inputs and appends missing zero-contract positions after existing rows; actual contracts and entry prices are observed directly. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let symbols = vec![\"ETHUSD\".to_owned(),\"SOLUSD\".to_owned()]; match super::format_positions(&input, &store, Some(&symbols), &|v| v) { Ok(rows) => serde_json::json!({\"ok\":true,\"positions\":rows.iter().map(|p| serde_json::json!({\"symbol\":p.symbol,\"contracts\":p.contracts,\"entry\":p.entry_price})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "evidence": "Position formatting filters explicit symbol inputs and appends missing zero-contract positions after existing rows; actual contracts and entry prices are observed directly. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let symbols = vec![\"ETHUSD\".to_owned(),\"SOLUSD\".to_owned()]; match super::format_positions(&input, &store, Some(&symbols), &|v| v) { Ok(rows) => serde_json::json!({\"ok\":true,\"positions\":rows.iter().map(|p| serde_json::json!({\"symbol\":p.symbol,\"contracts\":format!(\"{:016x}\", p.contracts.to_bits()),\"entry\":format!(\"{:016x}\", p.entry_price.to_bits())})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -128572,13 +129115,13 @@
           "positions": [
             {
               "symbol": "ETHUSD",
-              "contracts": 1.25,
-              "entry": 2000
+              "contracts": "3ff4000000000000",
+              "entry": "409f400000000000"
             },
             {
               "symbol": "SOLUSD",
-              "contracts": 0,
-              "entry": 0
+              "contracts": "0000000000000000",
+              "entry": "0000000000000000"
             }
           ]
         }
@@ -128613,13 +129156,13 @@
           "positions": [
             {
               "symbol": "ETHUSD",
-              "contracts": 0,
-              "entry": 0
+              "contracts": "0000000000000000",
+              "entry": "0000000000000000"
             },
             {
               "symbol": "SOLUSD",
-              "contracts": 0,
-              "entry": 0
+              "contracts": "0000000000000000",
+              "entry": "0000000000000000"
             }
           ]
         }
@@ -128831,8 +129374,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Order formatting decodes first-leg price, quantity/fill/remaining, order-code identity and close effect; native output is inspected before any model serialization. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); match super::format_orders(&input, &store, &|v| v, &|_| Ok(())) { Ok(rows) => serde_json::json!({\"ok\":true,\"orders\":rows.map(|rows| rows.iter().map(|o| serde_json::json!({\"id\":o.id,\"price\":o.price,\"amount\":o.amount,\"filled\":o.filled,\"remaining\":o.remaining,\"reduceOnly\":o.reduce_only})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "evidence": "Order formatting decodes first-leg price, quantity/fill/remaining, order-code identity and close effect; native output is inspected before any model serialization. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); match super::format_orders(&input, &store, &|v| v, &|_| Ok(())) { Ok(rows) => serde_json::json!({\"ok\":true,\"orders\":rows.map(|rows| rows.iter().map(|o| serde_json::json!({\"id\":o.id,\"price\":format!(\"{:016x}\", o.price.to_bits()),\"amount\":format!(\"{:016x}\", o.amount.to_bits()),\"filled\":format!(\"{:016x}\", o.filled.to_bits()),\"remaining\":format!(\"{:016x}\", o.remaining.to_bits()),\"reduceOnly\":o.reduce_only})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -128908,10 +129451,10 @@
           "orders": [
             {
               "id": "o1",
-              "price": 123.5,
-              "amount": 7,
-              "filled": 3,
-              "remaining": 4,
+              "price": "405ee00000000000",
+              "amount": "401c000000000000",
+              "filled": "4008000000000000",
+              "remaining": "4010000000000000",
               "reduceOnly": false
             }
           ]
@@ -129019,10 +129562,10 @@
           "orders": [
             {
               "id": "o2",
-              "price": 234.75,
-              "amount": 10,
-              "filled": 2,
-              "remaining": 8,
+              "price": "406d580000000000",
+              "amount": "4024000000000000",
+              "filled": "4000000000000000",
+              "remaining": "4020000000000000",
               "reduceOnly": true
             }
           ]
@@ -129867,8 +130410,8 @@
         ]
       }
     },
-    "evidence": "Market mapping decodes Combined rows, uses first margin tier and distinct amount/price increments, removes only the first USD occurrence and preserves contract size. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let logger = |_:serde_json::Value| Ok(()); let future = super::fetch_markets(||async move {Ok(input)}, &store, &logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"markets\":rows.iter().map(|m| serde_json::json!({\"symbol\":m.symbol,\"base\":m.base,\"amountStep\":m.precision.amount,\"priceStep\":m.precision.price,\"leverage\":m.limits.leverage.max,\"contractSize\":m.contract_size})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "evidence": "Market mapping decodes Combined rows, uses first margin tier and distinct amount/price increments, removes only the first USD occurrence and preserves contract size. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let logger = |_:serde_json::Value| Ok(()); let future = super::fetch_markets(||async move {Ok(input)}, &store, &logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"markets\":rows.iter().map(|m| serde_json::json!({\"symbol\":m.symbol,\"base\":m.base,\"amountStep\":format!(\"{:016x}\", m.precision.amount.to_bits()),\"priceStep\":format!(\"{:016x}\", m.precision.price.to_bits()),\"leverage\":format!(\"{:016x}\", m.limits.leverage.max.to_bits()),\"contractSize\":m.contract_size.map(|number| format!(\"{:016x}\", number.to_bits()))})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": [
@@ -129918,10 +130461,10 @@
             {
               "symbol": "ETHUSD",
               "base": "ETH",
-              "amountStep": 0.25,
-              "priceStep": 0.25,
-              "leverage": 10,
-              "contractSize": 2
+              "amountStep": "3fd0000000000000",
+              "priceStep": "3fd0000000000000",
+              "leverage": "4024000000000000",
+              "contractSize": "4000000000000000"
             }
           ]
         }
@@ -129970,10 +130513,10 @@
             {
               "symbol": "EURUSD",
               "base": "EUR",
-              "amountStep": 0.5,
-              "priceStep": 0.0005,
-              "leverage": 5,
-              "contractSize": 1000
+              "amountStep": "3fe0000000000000",
+              "priceStep": "3f40624dd2f1a9fc",
+              "leverage": "4014000000000000",
+              "contractSize": "408f400000000000"
             }
           ]
         }
@@ -130572,8 +131115,8 @@
         ]
       }
     },
-    "evidence": "Quote reading decodes events to native Tickers, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let logger = |_:serde_json::Value| Ok(()); let future = super::fetch_tickers_for_symbols(vec![\"ETHUSD\".into()],||async {Ok(\"token\".into())},||async {Ok(\"account\".into())},|_|async move {Ok(input)},&store,&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"tickers\":rows.map(|rows| rows.iter().map(|t| serde_json::json!({\"symbol\":t.symbol,\"bid\":t.bid,\"ask\":t.ask,\"last\":t.last,\"mark\":t.mark,\"index\":t.index})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "evidence": "Quote reading decodes events to native Tickers, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let logger = |_:serde_json::Value| Ok(()); let future = super::fetch_tickers_for_symbols(vec![\"ETHUSD\".into()],||async {Ok(\"token\".into())},||async {Ok(\"account\".into())},|_|async move {Ok(input)},&store,&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"tickers\":rows.map(|rows| rows.iter().map(|t| serde_json::json!({\"symbol\":t.symbol,\"bid\":format!(\"{:016x}\", t.bid.to_bits()),\"ask\":format!(\"{:016x}\", t.ask.to_bits()),\"last\":format!(\"{:016x}\", t.last.to_bits()),\"mark\":format!(\"{:016x}\", t.mark.to_bits()),\"index\":format!(\"{:016x}\", t.index.to_bits())})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -130592,11 +131135,11 @@
           "tickers": [
             {
               "symbol": "ETHUSD",
-              "bid": 121.25,
-              "ask": 123.5,
-              "last": 121.25,
-              "mark": 121.25,
-              "index": 121.25
+              "bid": "405e500000000000",
+              "ask": "405ee00000000000",
+              "last": "405e500000000000",
+              "mark": "405e500000000000",
+              "index": "405e500000000000"
             }
           ]
         }
@@ -130618,11 +131161,11 @@
           "tickers": [
             {
               "symbol": "EURUSD",
-              "bid": 1.1,
-              "ask": 1.125,
-              "last": 1.1,
-              "mark": 1.1,
-              "index": 1.1
+              "bid": "3ff199999999999a",
+              "ask": "3ff2000000000000",
+              "last": "3ff199999999999a",
+              "mark": "3ff199999999999a",
+              "index": "3ff199999999999a"
             }
           ]
         }
@@ -131272,8 +131815,8 @@
         ]
       }
     },
-    "evidence": "Candle reading decodes event OHLCV and converts source date milliseconds to seconds, independently of request limit and host ISO formatting. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let logger = |_:serde_json::Value| Ok(()); let iso = |_:f64| Ok(\"fixture-iso\".to_owned()); let options = safe_cex_types::OHLCVOptions {symbol:\"ETHUSD\".into(),interval:safe_cex_types::Timeframe::M1,from:None,to:None,limit:None}; let future = super::fetch_ohlcv(options,||async {Ok(\"token\".into())},||async {Ok(\"account\".into())},|_|async move {Ok(input)},&iso,&|v| v,&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"candles\":rows.iter().map(|v| serde_json::json!({\"timestamp\":v.timestamp,\"open\":v.open,\"close\":v.close,\"high\":v.high,\"low\":v.low,\"volume\":v.volume})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "evidence": "Candle reading decodes event OHLCV and converts source date milliseconds to seconds, independently of request limit and host ISO formatting. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let logger = |_:serde_json::Value| Ok(()); let iso = |_:f64| Ok(\"fixture-iso\".to_owned()); let options = safe_cex_types::OHLCVOptions {symbol:\"ETHUSD\".into(),interval:safe_cex_types::Timeframe::M1,from:None,to:None,limit:None}; let future = super::fetch_ohlcv(options,||async {Ok(\"token\".into())},||async {Ok(\"account\".into())},|_|async move {Ok(input)},&iso,&|v| v,&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"candles\":rows.iter().map(|v| serde_json::json!({\"timestamp\":format!(\"{:016x}\", v.timestamp.to_bits()),\"open\":format!(\"{:016x}\", v.open.to_bits()),\"close\":format!(\"{:016x}\", v.close.to_bits()),\"high\":format!(\"{:016x}\", v.high.to_bits()),\"low\":format!(\"{:016x}\", v.low.to_bits()),\"volume\":format!(\"{:016x}\", v.volume.to_bits())})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -131295,12 +131838,12 @@
           "ok": true,
           "candles": [
             {
-              "timestamp": 2,
-              "open": 10.25,
-              "close": 12.5,
-              "high": 14.75,
-              "low": 9.5,
-              "volume": 700.25
+              "timestamp": "4000000000000000",
+              "open": "4024800000000000",
+              "close": "4029000000000000",
+              "high": "402d800000000000",
+              "low": "4023000000000000",
+              "volume": "4085e20000000000"
             }
           ]
         }
@@ -131325,12 +131868,12 @@
           "ok": true,
           "candles": [
             {
-              "timestamp": 5,
-              "open": 1.2,
-              "close": 1.1,
-              "high": 1.3,
-              "low": 1.05,
-              "volume": 99.5
+              "timestamp": "4014000000000000",
+              "open": "3ff3333333333333",
+              "close": "3ff199999999999a",
+              "high": "3ff4cccccccccccd",
+              "low": "3ff0cccccccccccd",
+              "volume": "4058e00000000000"
             }
           ]
         }
@@ -131556,7 +132099,7 @@
         },
         "input": "observed",
         "reason": "The symbol routes an output callback; real listener registration, native ticker dispatch, two-row book construction and unsubscribe are executed. It parses no market-data JSON itself.",
-        "call": "{ #[allow(dead_code, unused_imports)] mod fixture { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_hosts.rs\")); } let (socket, _) = fixture::exchange(); let _: &std::rc::Rc<$type> = &socket; let symbol = $value[\"symbol\"].as_str().unwrap().to_owned(); let output = std::rc::Rc::new(std::cell::RefCell::new(None)); let observed = output.clone(); let unsubscribe = socket.listen_order_book(symbol.clone(),std::rc::Rc::new(move |book| { *observed.borrow_mut() = Some(book); Ok(()) })).unwrap(); let parent = socket.socket().unwrap(); let handler = parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow()[0].clone(); handler(&fixture::ticker(symbol.clone(),$value[\"bid\"].as_f64().unwrap(),$value[\"ask\"].as_f64().unwrap())).unwrap(); let book = output.borrow().clone().unwrap(); let book = book.borrow(); let result = serde_json::json!({\"symbol\":symbol,\"bids\":book.bids.iter().map(|v|v.price).collect::<Vec<_>>(),\"asks\":book.asks.iter().map(|v|v.price).collect::<Vec<_>>(),\"amount\":book.bids[0].amount,\"total\":book.asks[0].total}); drop(book); unsubscribe().unwrap(); assert_eq!(parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow().len(),0); result }",
+        "call": "{ #[allow(dead_code, unused_imports)] mod fixture { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_hosts.rs\")); } let (socket, _) = fixture::exchange(); let _: &std::rc::Rc<$type> = &socket; let symbol = $value[\"symbol\"].as_str().unwrap().to_owned(); let output = std::rc::Rc::new(std::cell::RefCell::new(None)); let observed = output.clone(); let unsubscribe = socket.listen_order_book(symbol.clone(),std::rc::Rc::new(move |book| { *observed.borrow_mut() = Some(book); Ok(()) })).unwrap(); let parent = socket.socket().unwrap(); let handler = parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow()[0].clone(); handler(&fixture::ticker(symbol.clone(),$value[\"bid\"].as_f64().unwrap(),$value[\"ask\"].as_f64().unwrap())).unwrap(); let book = output.borrow().clone().unwrap(); let book = book.borrow(); let result = serde_json::json!({\"symbol\":symbol,\"bids\":book.bids.iter().map(|v|format!(\"{:016x}\", v.price.to_bits())).collect::<Vec<_>>(),\"asks\":book.asks.iter().map(|v|format!(\"{:016x}\", v.price.to_bits())).collect::<Vec<_>>(),\"amount\":format!(\"{:016x}\", book.bids[0].amount.to_bits()),\"total\":format!(\"{:016x}\", book.asks[0].total.to_bits())}); drop(book); unsubscribe().unwrap(); assert_eq!(parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow().len(),0); result }",
         "cases": [
           {
             "input": {
@@ -131567,15 +132110,15 @@
             "output": {
               "symbol": "ETHUSD",
               "bids": [
-                7.25,
-                7.25
+                "401d000000000000",
+                "401d000000000000"
               ],
               "asks": [
-                8.5,
-                8.5
+                "4021000000000000",
+                "4021000000000000"
               ],
-              "amount": 1,
-              "total": 1
+              "amount": "3ff0000000000000",
+              "total": "3ff0000000000000"
             }
           },
           {
@@ -131587,15 +132130,15 @@
             "output": {
               "symbol": "SOLUSD",
               "bids": [
-                11.75,
-                11.75
+                "4027800000000000",
+                "4027800000000000"
               ],
               "asks": [
-                13.25,
-                13.25
+                "402a800000000000",
+                "402a800000000000"
               ],
-              "amount": 1,
-              "total": 1
+              "amount": "3ff0000000000000",
+              "total": "3ff0000000000000"
             }
           }
         ]
@@ -131988,7 +132531,7 @@
         },
         "input": "observed",
         "reason": "The symbol routes an output callback; real listener registration, native ticker dispatch, two-row book construction and unsubscribe are executed. It parses no market-data JSON itself.",
-        "call": "{ #[allow(dead_code, unused_imports)] mod fixture { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_hosts.rs\")); } let socket = $type::new(|_|Ok(std::rc::Rc::new(fixture::Ancestor))).unwrap(); let symbol = $value[\"symbol\"].as_str().unwrap().to_owned(); let output = std::rc::Rc::new(std::cell::RefCell::new(None)); let observed = output.clone(); let unsubscribe = socket.listen_order_book(symbol.clone(),std::rc::Rc::new(move |book| { *observed.borrow_mut() = Some(book); Ok(()) })); let parent = socket.clone(); let handler = parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow()[0].clone(); handler(&fixture::ticker(symbol.clone(),$value[\"bid\"].as_f64().unwrap(),$value[\"ask\"].as_f64().unwrap())).unwrap(); let book = output.borrow().clone().unwrap(); let book = book.borrow(); let result = serde_json::json!({\"symbol\":symbol,\"bids\":book.bids.iter().map(|v|v.price).collect::<Vec<_>>(),\"asks\":book.asks.iter().map(|v|v.price).collect::<Vec<_>>(),\"amount\":book.bids[0].amount,\"total\":book.asks[0].total}); drop(book); unsubscribe().unwrap(); assert_eq!(parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow().len(),0); result }",
+        "call": "{ #[allow(dead_code, unused_imports)] mod fixture { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_hosts.rs\")); } let socket = $type::new(|_|Ok(std::rc::Rc::new(fixture::Ancestor))).unwrap(); let symbol = $value[\"symbol\"].as_str().unwrap().to_owned(); let output = std::rc::Rc::new(std::cell::RefCell::new(None)); let observed = output.clone(); let unsubscribe = socket.listen_order_book(symbol.clone(),std::rc::Rc::new(move |book| { *observed.borrow_mut() = Some(book); Ok(()) })); let parent = socket.clone(); let handler = parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow()[0].clone(); handler(&fixture::ticker(symbol.clone(),$value[\"bid\"].as_f64().unwrap(),$value[\"ask\"].as_f64().unwrap())).unwrap(); let book = output.borrow().clone().unwrap(); let book = book.borrow(); let result = serde_json::json!({\"symbol\":symbol,\"bids\":book.bids.iter().map(|v|format!(\"{:016x}\", v.price.to_bits())).collect::<Vec<_>>(),\"asks\":book.asks.iter().map(|v|format!(\"{:016x}\", v.price.to_bits())).collect::<Vec<_>>(),\"amount\":format!(\"{:016x}\", book.bids[0].amount.to_bits()),\"total\":format!(\"{:016x}\", book.asks[0].total.to_bits())}); drop(book); unsubscribe().unwrap(); assert_eq!(parent.handlers(&format!(\"poll_book.{symbol}\")).unwrap().borrow().len(),0); result }",
         "cases": [
           {
             "input": {
@@ -131999,15 +132542,15 @@
             "output": {
               "symbol": "ETHUSD",
               "bids": [
-                7.25,
-                7.25
+                "401d000000000000",
+                "401d000000000000"
               ],
               "asks": [
-                8.5,
-                8.5
+                "4021000000000000",
+                "4021000000000000"
               ],
-              "amount": 1,
-              "total": 1
+              "amount": "3ff0000000000000",
+              "total": "3ff0000000000000"
             }
           },
           {
@@ -132019,15 +132562,15 @@
             "output": {
               "symbol": "SOLUSD",
               "bids": [
-                11.75,
-                11.75
+                "4027800000000000",
+                "4027800000000000"
               ],
               "asks": [
-                13.25,
-                13.25
+                "402a800000000000",
+                "402a800000000000"
               ],
-              "amount": 1,
-              "total": 1
+              "amount": "3ff0000000000000",
+              "total": "3ff0000000000000"
             }
           }
         ]
