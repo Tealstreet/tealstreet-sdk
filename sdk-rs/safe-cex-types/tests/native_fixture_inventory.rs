@@ -113,6 +113,8 @@ fn dynamic_bucket(function: &str) -> &'static str {
         | "order"
         | "boxed_ticker_keeps_native_fields_and_untagged_wire_shapes"
         | "market_perpetual_native_boolean_and_absence"
+        | "market_option_terms_and_price_limit_decode_natively_and_round_trip"
+        | "position_greeks_order_iv_and_market_toggles_decode_natively"
         | "inherited_instrument_members_keep_native_identity_tags" => "decoded-record",
         "union" | "reject_shapes" | "string_union" => "rejected-shape",
         "current_source_accounts"
@@ -125,6 +127,7 @@ fn dynamic_bucket(function: &str) -> &'static str {
         | "encoded_number"
         | "json_comparator_ignores_only_object_key_order"
         | "live_typescript_risk_and_returns"
+        | "fill_increments_match_actual_typescript_at_venue_decimals"
         | "rest_native_signed_zero_extrema" => "numeric-observation",
         "classification_retains_unknown_and_bybit_wire_values"
         | "javascript_trim_and_prototype_lookup_bugs_are_preserved"
@@ -227,9 +230,9 @@ fn parse_native_test_fixtures_and_bit_comparison_functions() {
     assert_eq!(
         inventory.dynamic_buckets,
         BTreeMap::from([
-            ("decoded-record", 16),
+            ("decoded-record", 18),
             ("effect-observation", 19),
-            ("numeric-observation", 10),
+            ("numeric-observation", 12),
             ("operation-result", 16),
             ("rejected-shape", 17),
         ]),
