@@ -292,3 +292,11 @@ trace comparisons. No live order placement or cancellation is performed.
 scripted transport. TS backpack overrides neither `fetchSymbolMaxLeverage`,
 `scheduleCancel` nor `fetchPublicTrades`, so their Rust overrides return the
 inherited `base.ts` 'Not implemented' rejection; do not invent venue bodies.
+
+The adapter's `native_value::Value` is an alias of the shared `js_runtime::Js`,
+so HTTP/socket frames and runtime callers share the same object/array references.
+`NativeValue` retains the existing prepared-data/checked UTF-8 projection profile;
+it does not own a second value enum. Shared native numbers and UTF-16 strings stay
+intact until that explicit projection. The constructed throttle regression in
+`tests/adapter_classes.rs` checks deferred reads of runtime-mutated aliases, native
+numeric bits, nested spread identity, holes and lone-surrogate projection refusal.

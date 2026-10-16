@@ -1659,11 +1659,13 @@
         "future-signature",
         "future-return",
         "async-block",
+        "await",
+        "await",
         "await"
       ],
-      "producer_sha256": "23fedfff2d514542fac7b8be7c001113615406f45e8b6fa6e9f80ce47b3878b1",
+      "producer_sha256": "f6c314fd58ff39a13828edbab73984a23289092d8dfff23f81146512b9b2e7bf",
       "classification": "no-owned-latch",
-      "reason": "Retry loop with a local attempt counter; interceptor lists and the retry condition are cloned out of client state before each await. Reviewed failed-config replay from #112: the next local request retains the effective config and retry stamp after a settled error. No new await, shared borrow, task, waiter or independent latch is introduced; dropping dispatch releases its local request and current send_once future."
+      "reason": "Configured retry loop owns its effective config, counter, delay and timestamps. Options are cloned out of client state before send_once, asynchronous condition and host-sleep awaits; no RefCell borrow, waiter registration or independent latch spans those awaits. Dropping dispatch releases the local config and current child future. The existing Promise owns producer continuation independently of observers, measured by client_retry::dropping_retry_observer_keeps_owned_timer_and_replay_alive; failed host sleep preserves its native error and sends nothing early."
     },
     {
       "owner": "src/js_runtime/client.rs::send_once",

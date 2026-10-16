@@ -156,3 +156,38 @@ has no FINDING rows after removing the currency normalization. Extractor check
 has no Crypto.com drift; remaining base.ts/safeCexAxiosCreate metadata formatting
 belongs to the core lane. Currency consumer correction caa2395524 was merged
 before pushing; it changes one Binance test and canonical TOML spacing only.
+
+## Production disposal matches the source override (2026-10-16)
+
+The binding no longer invokes full BaseExchange.dispose before the source
+CryptocomExchange.dispose body. Shared #158's writable isDisposed facade sets
+the common flag; the original public/private socket cleanup sequence runs alone.
+The new production regression observes both the true flag and retained update
+listener, so source assignment cannot be replaced with superclass cleanup.
+
+All23 binding E2E tests passed. Two compiling disposal controls passed: suppressing
+the source dispose call fails suspended-start cancellation, while adding full
+base disposal fails the retained-listener assertion; exact restoration passes
+both. The shared actual-source disposal witness passed all6 Crypto.com/GRVT cases
+within its single test, including both throwing socket paths. The full override
+contract passed5/5 including its live TypeScript inventory test. Strict venue
+host all-target and wasm library Clippy passed.
+
+The override call inventory was refreshed after reviewing the integrated source:
+four shared facade create-body hashes change with the setter;26 missing calls
+are recorded (25 BingX component delegates and1 Crypto trait start callback).
+Coinbase source-super evidence remains alongside #175's AsterDEX/BingX records.
+No source-super exception is added for Crypto.com.
+
+After merging master aa38a50adf, all23 binding tests, the shared6-case source
+disposal witness,5 override-contract tests and6 nonignored cancellation-inventory
+tests pass. The merged factory combines #158's synchronous writable Cell with
+master's synchronous weak socket lookups; no await/owned reservation changes.
+Its producer/dependency fingerprints were reconciled after that diff review.
+The override inventory additionally records15 Polymarket component/trait calls
+and four updated facade body hashes. Actual Polymarket source calls super.dispose
+only; its one native dispose arm now has reviewed source-super evidence. No
+Crypto.com source-super exception is introduced.
+
+The post-master strict host all-target and wasm library Clippy runs passed.
+Canonical parity passed7459 rows /17096 public Rust items on the merged tree.

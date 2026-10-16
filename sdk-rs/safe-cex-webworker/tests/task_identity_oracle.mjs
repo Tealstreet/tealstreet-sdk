@@ -20,6 +20,7 @@ function shape(node,path,leaves){
  if(node.kind===ts.SyntaxKind.StringKeyword)values=['identity:'+path];
  else if(node.kind===ts.SyntaxKind.NumberKeyword)values=[id+0.25];
  else if(node.kind===ts.SyntaxKind.BooleanKeyword)values=[false,true];
+ else if(ts.isLiteralTypeNode(node)){assert.ok(ts.isStringLiteral(node.literal),'IDENTITY string literal');values=[node.literal.text];}
  else if(ts.isUnionTypeNode(node))values=node.types.map(t=>{assert.ok(ts.isLiteralTypeNode(t)&&ts.isStringLiteral(t.literal),'IDENTITY closed union');return t.literal.text;});
  else if(ts.isEnumDeclaration(node))values=node.members.map(m=>{assert.ok(ts.isStringLiteral(m.initializer),'IDENTITY string enum');return m.initializer.text;});
  if(values){leaves.push({path,values});return values[0];}
