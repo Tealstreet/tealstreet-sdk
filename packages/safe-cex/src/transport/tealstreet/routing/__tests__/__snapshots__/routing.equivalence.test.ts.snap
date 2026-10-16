@@ -14141,7 +14141,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
     },
   },
   "txflow": {
-    "proxy=0 wsRoute=0 region=JA": {
+    "proxy=0 wsRoute=0 region=JA site=BRA_BTL": {
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
@@ -14154,7 +14154,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=0 wsRoute=0 region=NONE": {
+    "proxy=0 wsRoute=0 region=JA site=NONE": {
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
@@ -14167,7 +14167,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=0 wsRoute=0 region=SG": {
+    "proxy=0 wsRoute=0 region=NONE site=BRA_BTL": {
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
@@ -14180,7 +14180,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=0 wsRoute=1 region=JA": {
+    "proxy=0 wsRoute=0 region=NONE site=NONE": {
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
@@ -14193,7 +14193,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=0 wsRoute=1 region=NONE": {
+    "proxy=0 wsRoute=0 region=SG site=BRA_BTL": {
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
@@ -14206,7 +14206,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=0 wsRoute=1 region=SG": {
+    "proxy=0 wsRoute=0 region=SG site=NONE": {
       "howEgress": "sg",
       "restProxyHost": "",
       "wsBusiness": {
@@ -14219,7 +14219,85 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=1 wsRoute=0 region=JA": {
+    "proxy=0 wsRoute=1 region=JA site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=JA site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=NONE site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=NONE site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=SG site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=0 wsRoute=1 region=SG site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=JA site=BRA_BTL": {
       "howEgress": "sg",
       "restProxyHost": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
       "wsBusiness": {
@@ -14232,33 +14310,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=1 wsRoute=0 region=NONE": {
-      "howEgress": "sg",
-      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
-      "wsBusiness": {
-        "tunnelled": false,
-      },
-      "wsPrivate": {
-        "tunnelled": false,
-      },
-      "wsPublic": {
-        "tunnelled": false,
-      },
-    },
-    "proxy=1 wsRoute=0 region=SG": {
-      "howEgress": "sg",
-      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
-      "wsBusiness": {
-        "tunnelled": false,
-      },
-      "wsPrivate": {
-        "tunnelled": false,
-      },
-      "wsPublic": {
-        "tunnelled": false,
-      },
-    },
-    "proxy=1 wsRoute=1 region=JA": {
+    "proxy=1 wsRoute=0 region=JA site=NONE": {
       "howEgress": "sg",
       "restProxyHost": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
       "wsBusiness": {
@@ -14271,7 +14323,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=1 wsRoute=1 region=NONE": {
+    "proxy=1 wsRoute=0 region=NONE site=BRA_BTL": {
       "howEgress": "sg",
       "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
       "wsBusiness": {
@@ -14284,7 +14336,111 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
         "tunnelled": false,
       },
     },
-    "proxy=1 wsRoute=1 region=SG": {
+    "proxy=1 wsRoute=0 region=NONE site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=SG site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=0 region=SG site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=JA site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=JA site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=NONE site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=NONE site=NONE": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=SG site=BRA_BTL": {
+      "howEgress": "sg",
+      "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+      "wsBusiness": {
+        "tunnelled": false,
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+      },
+      "wsPublic": {
+        "tunnelled": false,
+      },
+    },
+    "proxy=1 wsRoute=1 region=SG site=NONE": {
       "howEgress": "sg",
       "restProxyHost": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
       "wsBusiness": {
