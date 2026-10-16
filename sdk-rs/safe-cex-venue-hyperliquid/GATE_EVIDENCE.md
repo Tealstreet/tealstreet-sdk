@@ -1,3 +1,29 @@
+# Placement-record decoder boundary proof
+
+The actual `HyperliquidPlacementRecord` decoder initially failed three named
+native tests: it admitted a complete eight-field positional array, admitted a
+present null `timeInForce`, and rejected raw `1e400` before binary64 capture.
+The two initial native-field/required-field tests passed. The repair retains the
+public serialization schema, uses a private remote decoder behind the existing
+object guard, and captures through `JsNumberInput` with exhaustive output checks.
+
+`tests/placement_record_ingress.rs`: **5/5 pass**, including native enum/field
+identity, optional presence, overflow, negative zero and binary64 integer rounding
+through public Serde and shared numeric entrypoints. No serialized roundtrip is
+used to establish native field identity. The shared capture-depth and scalar
+Unicode boundaries remain declared in crate guidance.
+
+`python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/placement-record-controls.py`:
+**3 compiled named failures / 3 restored passes; final 5/5 pass**. Removing only
+the object guard admits the otherwise valid declaration-order array; removing
+only the present-field adapter admits null; introducing a Value-first buffer
+trips the shared numeric pipeline's explicit buffer refusal. Each control restores
+the production source bytes exactly. Logs remain outside the repository.
+
+This is decoder-boundary evidence. The 570-key accepted-contract review remains
+open: the selected 37-draft formal runner still refuses unresolved local helper
+and import/macro scopes, and no package/dependency/matrix clearance is claimed.
+
 # Hyperliquid pure-phase verification
 
 Scope: types/tables, signing composition, order-response helpers, weighted limiter
