@@ -18,6 +18,8 @@ use safe_cex_num::{js_number, js_truthy};
 use safe_cex_transport::{
     RestBody, RestRequest,
     retry::{ReadClassification, reads_and_posted},
+    signature_rejection::{IsSignatureRejection, SignatureRetry, resend_on_rejected_data},
+    signing::try_parse_json,
 };
 use safe_cex_types::{ExchangeOptions, retained_json::RetainedJsonInput};
 use serde_json::{Value, json};
@@ -39,11 +41,13 @@ pub trait ApiHost {
         options: &ExchangeOptions,
         exchange: &Rc<BaseExchange>,
     ) -> Result<Rc<dyn ReadTransport>, ExchangeError>;
+    /// axios-retry with networkErrorOnRead(reads) || signatureRejectedResponse(signature).
     fn retry(
         &self,
         client: &Rc<dyn ReadTransport>,
         retries: usize,
         reads: ReadClassification,
+        signature: IsSignatureRejection,
     ) -> Result<(), ExchangeError>;
     fn install_adapter(
         &self,
@@ -54,6 +58,37 @@ pub trait ApiHost {
     fn serialize(&self, params: &Value) -> Result<String, ExchangeError>;
     fn hmac_sha256_hex(&self, secret: &str, message: &str) -> Result<String, ExchangeError>;
     fn now_ms(&self) -> f64;
+}
+// ts: isBingxSignatureRejection
+pub fn is_bingx_signature_rejection(data: &Value) -> Result<bool, safe_cex_num::JsCoercionError> {
+    let field = |key| data.as_object().and_then(|object| object.get(key));
+    if js_number(field("code"))? == 100001.0 {
+        return Ok(true);
+    }
+    let message = match field("msg").filter(|value| !value.is_null()) {
+        Some(value) => safe_cex_num::js_string(Some(value))?,
+        None => String::new(),
+    };
+    // A non-unicode /i regex never folds a non-ASCII unit onto an ASCII one.
+    Ok(message
+        .to_ascii_lowercase()
+        .contains("signature verification failed"))
+}
+// ts: unsignedPayload. A replayed POST arrives with the body Axios serialized and a
+// replayed GET with the signed params it sent; drop the previous pass's signature.
+pub fn unsigned_payload(payload: Option<Value>) -> serde_json::Map<String, Value> {
+    let mut rest = match payload.map(try_parse_json) {
+        Some(Value::Object(object)) => object,
+        // Object rest over an array copies its index keys.
+        Some(Value::Array(items)) => items
+            .into_iter()
+            .enumerate()
+            .map(|(index, item)| (index.to_string(), item))
+            .collect(),
+        _ => serde_json::Map::new(),
+    };
+    rest.shift_remove("signature");
+    rest
 }
 pub struct BingxApi {
     pub options: ExchangeOptions,
@@ -91,6 +126,7 @@ pub fn create_api(
         &client,
         3,
         reads_and_posted(vec![constants::ENDPOINTS[16].1.into()]),
+        Rc::new(is_bingx_signature_rejection),
     )?;
     if options.public_data_only != Some(true) && options.tealstreet_tunnel != Some(false) {
         host.install_adapter(&client, &options, exchange)?;
@@ -118,19 +154,11 @@ impl BingxApi {
             .map(RestBody::untransformed)
             .transpose()
             .map_err(|e| ExchangeError::new(e.to_string()))?;
-        let data = body
-            .filter(|v| js_truthy(Some(v)))
-            .or_else(|| config.params.as_ref().filter(|v| js_truthy(Some(v))))
-            .cloned()
-            .unwrap_or(json!({}));
-        let mut data = match data {
-            Value::Object(m) => m,
-            _ => {
-                return Err(ExchangeError::new(
-                    "BingX native signing requires an object payload",
-                ));
-            }
-        };
+        let mut data = unsigned_payload(
+            body.filter(|v| js_truthy(Some(v)))
+                .or_else(|| config.params.as_ref().filter(|v| js_truthy(Some(v))))
+                .cloned(),
+        );
         if data.contains_key("__proto__") {
             return Err(ExchangeError::new(
                 "BingX native signing refuses prototype-mutating key",
@@ -172,7 +200,11 @@ impl BingxApi {
             config
                 .headers
                 .insert("Content-Type".into(), "application/json".into());
-            config.body = Some(RestBody::Untransformed(Value::Object(sorted)));
+            // Serialized here: axios-retry resends with an identity transformRequest.
+            let serialized = safe_cex_num::js_json_stringify(&Value::Object(sorted).into())
+                .map_err(|e| ExchangeError::new(e.message))?
+                .expect("an object serializes");
+            config.body = Some(RestBody::Untransformed(Value::String(serialized)));
         }
         Ok(config)
     }
@@ -182,7 +214,26 @@ impl ReadTransport for BingxApi {
         Box::pin(async move {
             let mut request = request;
             request.method = request.method.to_lowercase();
-            self.client.send(self.prepare(request)?).await
+            let retry = SignatureRetry::default();
+            let prepared = self.prepare(request)?;
+            let data = self
+                .client
+                .send_with_signature_retry(prepared.clone(), &retry)
+                .await?;
+            // BingX answers on HTTP 200, and over the tunnel any status resolves.
+            let view =
+                serde_json::to_value(&data).map_err(|e| ExchangeError::new(e.to_string()))?;
+            let predicate: IsSignatureRejection = Rc::new(is_bingx_signature_rejection);
+            if resend_on_rejected_data(&view, &retry, &predicate)
+                .map_err(|e| ExchangeError::new(e.message))?
+            {
+                // The resend runs the whole chain again, re-signing what was sent.
+                return self
+                    .client
+                    .send_with_signature_retry(self.prepare(prepared)?, &retry)
+                    .await;
+            }
+            Ok(data)
         })
     }
 }

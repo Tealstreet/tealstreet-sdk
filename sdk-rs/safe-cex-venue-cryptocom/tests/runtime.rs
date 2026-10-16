@@ -262,6 +262,45 @@ struct Host {
     getter: RefCell<Option<Rc<dyn Fn(V) -> Result<V, E>>>>,
     mode: RefCell<Option<port::NativeMethod<V, E>>>,
     regexes: RefCell<Vec<V>>,
+    weak_members: RefCell<Vec<V>>,
+}
+fn json(v: &V) -> String {
+    match v.as_ref() {
+        Native::Null => "null".into(),
+        Native::B(x) => x.to_string(),
+        Native::N(x) if x.is_finite() => {
+            serde_json::to_string(&serde_json::Number::from_f64(*x).unwrap())
+                .unwrap()
+                .trim_end_matches(".0")
+                .to_string()
+        }
+        Native::N(_) => "null".into(),
+        Native::S(_) => serde_json::to_string(&text(v)).unwrap(),
+        Native::A(items) => format!(
+            "[{}]",
+            items
+                .borrow()
+                .iter()
+                .map(|item| if matches!(item.as_ref(), Native::U) {
+                    "null".into()
+                } else {
+                    json(item)
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Native::O(fields) => format!(
+            "{{{}}}",
+            fields
+                .borrow()
+                .iter()
+                .filter(|(_, value)| !matches!(value.as_ref(), Native::U))
+                .map(|(key, value)| format!("{}:{}", json(key), json(value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        _ => panic!("NATIVE-JSON-FIXTURE-BOUNDARY"),
+    }
 }
 impl Host {
     fn tag(&self, v: V, label: &str) -> V {
@@ -301,6 +340,8 @@ impl Host {
                 "public",
                 "private",
                 "Math",
+                "JSON",
+                "weakset",
                 "BASE_URLS",
                 "LogSeverity",
                 "PositionMode",
@@ -412,6 +453,13 @@ impl Host {
                 object(vec![("min", Rc::new(Native::Builtin("global:min".into())))]),
                 name,
             ),
+            "JSON" => self.tag(
+                object(vec![(
+                    "stringify",
+                    Rc::new(Native::Builtin("global:stringify".into())),
+                )]),
+                name,
+            ),
             "LogSeverity" => self.tag(object(vec![("Error", s("error"))]), name),
             "PositionMode" => self.tag(object(vec![("Hedged", s("hedged"))]), name),
             "ENDPOINTS" => object(vec![("ACCOUNTS", s("/private/get-accounts"))]),
@@ -520,6 +568,41 @@ impl Host {
                         Ok(self.tag(object(vec![]), "ignored:use"))
                     }
                     "global:min" => Ok(n(number(&args[0]).min(number(&args[1])))),
+                    "global:stringify" => Ok(s(&json(&first()))),
+                    "weakset:has" | "weakset:add" => {
+                        assert_eq!(self.label(&receiver).as_deref(), Some("weakset"));
+                        let value = first();
+                        let mut members = self.weak_members.borrow_mut();
+                        if name == "weakset:add" {
+                            members.push(value);
+                            return Ok(receiver);
+                        }
+                        Ok(b(members.iter().any(|member| Rc::ptr_eq(member, &value))))
+                    }
+                    "global:signatureRejectedResponse" => {
+                        assert!(
+                            matches!(first().as_ref(), Native::Builtin(name) if name == "global:isCryptocomSignatureRejection"),
+                            "NATIVE-SIGNATURE-PREDICATE"
+                        );
+                        Ok(Rc::new(Native::Builtin("global:signatureCondition".into())))
+                    }
+                    "global:signatureCondition" => Ok(self
+                        .spec
+                        .get("signature")
+                        .map(decode)
+                        .unwrap_or_else(|| b(false))),
+                    "global:resendOnSignatureRejection" => {
+                        assert!(Rc::ptr_eq(&args[0], &self.xhr), "NATIVE-RESEND-CLIENT");
+                        assert!(
+                            matches!(args[2].as_ref(), Native::Builtin(name) if name == "global:isCryptocomSignatureRejection"),
+                            "NATIVE-RESEND-PREDICATE"
+                        );
+                        Ok(if self.spec["resend"] == true {
+                            self.tag(object(vec![]), "resent")
+                        } else {
+                            u()
+                        })
+                    }
                     "global:sumBy" => {
                         assert!(Rc::ptr_eq(&args[0], &self.positions));
                         Ok(self
@@ -696,6 +779,13 @@ impl Host {
             "Error" => Ok(self.tag(
                 object(vec![("message", args[0].clone())]),
                 "error:constructed",
+            )),
+            "WeakSet" => Ok(self.tag(
+                object(vec![
+                    ("has", Rc::new(Native::Builtin("weakset:has".into()))),
+                    ("add", Rc::new(Native::Builtin("weakset:add".into()))),
+                ]),
+                "weakset",
             )),
             "CryptocomPublicWebSocket" | "CryptocomPrivateWebSocket" => {
                 assert!(Rc::ptr_eq(&args[0], &self.root));
@@ -1018,6 +1108,7 @@ fn host(spec: &Value) -> Rc<Host> {
         getter: RefCell::new(None),
         mode: RefCell::new(None),
         regexes: RefCell::new(vec![]),
+        weak_members: RefCell::new(vec![]),
     });
     for (v, name) in [
         (&h.root, "root"),
@@ -1235,7 +1326,21 @@ fn execute(spec: &Value) -> Measured {
                     );
                     immediate = array(h.events.borrow().clone());
                     let output = run(h.await_value(returned))?;
-                    assert!(Rc::ptr_eq(&output, &response), "NATIVE-RESPONSE-ORIGINAL");
+                    if spec["resend"] == true {
+                        assert_eq!(h.label(&output).as_deref(), Some("resent"), "NATIVE-RESEND");
+                    } else {
+                        assert!(Rc::ptr_eq(&output, &response), "NATIVE-RESPONSE-ORIGINAL");
+                    }
+                    if spec["repeat"] == true {
+                        let again = h.invoke(
+                            h.response.borrow().as_ref().unwrap().clone(),
+                            u(),
+                            vec![response.clone()],
+                        )?;
+                        let again = run(h.await_value(again))?;
+                        assert!(Rc::ptr_eq(&again, &response), "NATIVE-SECOND-PASS");
+                        h.event("second-pass", vec![])?;
+                    }
                     h.event("response-data", vec![get(&response, "data")])?;
                     Ok(output)
                 }
@@ -1360,8 +1465,8 @@ fn execute(spec: &Value) -> Measured {
 #[test]
 fn runtime_bodies_match_maintained_typescript_native() {
     let fixtures: Vec<Value> = serde_json::from_str(include_str!("runtime_fixtures.json")).unwrap();
-    assert_eq!(fixtures.len(), 70, "NATIVE-INDEPENDENT-FIXTURE-FLOOR");
-    assert_eq!(fixtures[69]["name"], "two-fresh-instances");
+    assert_eq!(fixtures.len(), 74, "NATIVE-INDEPENDENT-FIXTURE-FLOOR");
+    assert_eq!(fixtures[73]["name"], "two-fresh-instances");
     let mut command = Command::new("node");
     command
         .arg(concat!(
@@ -1379,7 +1484,7 @@ fn runtime_bodies_match_maintained_typescript_native() {
     let observed: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         observed["rows"].as_array().unwrap().len(),
-        70,
+        74,
         "SOURCE-INDEPENDENT-FIXTURE-FLOOR"
     );
     let mut native = vec![];
@@ -1557,7 +1662,7 @@ fn runtime_bodies_match_maintained_typescript_native() {
         );
     }
     println!(
-        "RUNTIME native floor70 stops index69 two-fresh-instances; application member bridge tested separately by native_bindings"
+        "RUNTIME native floor74 stops index73 two-fresh-instances; application member bridge tested separately by native_bindings"
     );
 }
 #[test]
