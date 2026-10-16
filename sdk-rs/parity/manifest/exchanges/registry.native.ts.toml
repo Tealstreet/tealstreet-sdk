@@ -166,9 +166,9 @@ note = "CHOSEN: native_hyrotrader selects the actual source module ./bybit/hyrot
 ts = "exchangeRegistry.bybitinverse"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bybitinverse"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bybitinverse", "safe-cex-registry/src/rust_venues.rs::bybit_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit" ]
 status = "divergent"
-note = "CHOSEN: native_bybitinverse selects the actual source module ./bybit/bybitinverse.exchange and export BybitInverseExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybitinverse. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_bybitinverse selects the actual source module ./bybit/bybitinverse.exchange and export BybitInverseExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybitinverse. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. The Rust construction table now selects the dedicated BybitInverseExchange facade through the existing Bybit dependency carrier and native signed host. tests/native_host_bybit.rs exercises local and secretless hosted HTTP signing for Inverse with the caller-owned limiter host API; removing only its table entry compiles and fails both construction tests. The existing dependency/layers edge is reused; default module-host routing is unchanged. Renamed Rust targets: safe-cex-registry/src/rust_venues.rs::bybit_constructor, safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit."
 
 [[symbol]]
 ts = "exchangeRegistry.bybitspot"

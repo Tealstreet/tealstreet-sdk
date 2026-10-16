@@ -13,6 +13,19 @@ pub fn connect_and_subscribe(
     is_demo: bool,
     direct_override: Option<&str>,
 ) -> Result<(), ExchangeError> {
+    connect_with_notice(socket, runtime, category, is_demo, direct_override, None)
+}
+
+// Dedicated Inverse has its own source proxy notice and catches listener errors.
+// The public standalone helper above retains its separately reviewed profile.
+fn connect_with_notice(
+    socket: &Rc<BaseWebSocket>,
+    runtime: &dyn safe_cex_exchange::websocket::WsRuntime,
+    category: &str,
+    is_demo: bool,
+    direct_override: Option<&str>,
+    proxy_notice: Option<&str>,
+) -> Result<(), ExchangeError> {
     if socket.is_disposed() {
         return Ok(());
     }
@@ -42,7 +55,11 @@ pub fn connect_and_subscribe(
         .resolve_url(primary, &[route.fallback.as_deref()])
         .to_owned();
     if Some(base.as_str()) == route.fallback.as_deref() {
-        parent.emit("grafana-info", "Using tealstreet bybit public linear proxy")?;
+        if let Some(message) = proxy_notice {
+            let _ = parent.emit("grafana-info", message);
+        } else {
+            parent.emit("grafana-info", "Using tealstreet bybit public linear proxy")?;
+        }
     }
     let options = connection_options(&parent.options(), is_demo);
     // Set every input before starting: an inline host can open during this call.
@@ -390,7 +407,7 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
         let Some(parent) = self.parent.upgrade() else {
             return Ok(());
         };
-        connect_and_subscribe(
+        connect_with_notice(
             &socket,
             self.runtime.as_ref(),
             self.category,
@@ -402,6 +419,11 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
                     "livenet"
                 };
                 crate::spot_types::BASE_WS_URL["public"]["spot"][network].as_str()
+            } else {
+                None
+            },
+            if parent.base.name == safe_cex_types::ExchangeName::Bybitinverse {
+                Some("Using tealstreet bybit public inverse proxy")
             } else {
                 None
             },

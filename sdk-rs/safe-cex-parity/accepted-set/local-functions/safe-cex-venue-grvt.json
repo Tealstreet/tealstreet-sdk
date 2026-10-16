@@ -1,0 +1,7 @@
+{
+  "safe-cex-venue-grvt/src/binding/private.rs::LOCAL_FUNCTION:equal": {
+    "category": "non-decoder",
+    "reason": "Inside PrivateFeedHost::loose_number_equal: compares an existing native Js operand with an existing f64 operand and returns only boolean equality or the original coercion error. Undefined/null are false, Number uses numeric equality, BigInt compares finite integral Number values with canonical zero, String/Bool delegate to_number and objects delegate to_primitive before recursive comparison. This is the protocol code1000 control-flow predicate, not protocol record/model admission. The native_numeric_comparison_keeps_zero_coercion_and_original_errors test executes nineteen actual trait calls, including source1000 cases, signed zero, object coercion count and original thrown-object identity. The complete Private owner retains its independent compiler-selected API and runtime evidence obligations.",
+    "sourceSha256": "b29d3d6078f9ce5424d0c5d76ccbf538ff21b66c38b4658c167c1dc2d1037d5e"
+  }
+}

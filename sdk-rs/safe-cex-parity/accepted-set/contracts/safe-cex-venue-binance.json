@@ -2482,5 +2482,845 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_binance::response_shape::describe_binance_response_shape": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "describe_binance_response_shape",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Inspects an existing optional JSON value only to render its diagnostic typeof/array-length/first-six-own-key shape label; it does not decode a representation into a record or admit/refuse wire shapes.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native accepted_response_shapes::futures_response_descriptor_has_source_key_order_and_cutoff executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::describe_binance_pm_response_shape": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "describe_binance_pm_response_shape",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Inspects an existing optional JSON value only to render its diagnostic typeof/array-length/first-six-own-key shape label; it does not decode a representation into a record or admit/refuse wire shapes.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native accepted_response_shapes::pm_response_descriptor_has_source_key_order_and_cutoff executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::describe": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "describe",
+      "signature": {
+        "inputs": [
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Inspects an existing optional JSON value only to render its diagnostic typeof/array-length/first-six-own-key shape label; it does not decode a representation into a record or admit/refuse wire shapes.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native response_shape::accepted_contract_tests::private_descriptor_preserves_source_shape executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::require_binance_array_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "require_binance_array_response",
+      "signature": {
+        "inputs": [
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "slice": {
+                            "resolved_path": {
+                              "path": "serde_json::value::Value",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::response_shape::BinanceResponseError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "require_binance_array_response admits arrays by returning their original borrowed rows, without cloning or projecting elements. Native fixtures inspect nonempty pointer identity, length, fields and signed-zero bits before serialization. Other JSON shapes produce the exact Binance endpoint/shape/message diagnostic; fallible source String coercion errors retain their name and message. The native tests and maintained live response_shape target pass eight tests with zero ignored, including 1,188 source comparisons. scripts/response-shape-contracts.mjs executes its actual production call. scripts/response-shape-controls.py compiled its wrong output, required this owner's own production result to fail with native output mismatches, then restored exact source and passed all three production outputs. Stock JSON/UTF-8 only; empty-slice data addresses do not prove source array identity, and no arbitrary getter/prototype or full Error-identity claim.",
+    "call": "{match $type($value[\"endpoint\"].as_str().unwrap(),$value.get(\"payload\")){Ok(rows)=>{let original=$value[\"payload\"].as_array().unwrap();assert_eq!(rows.len(),original.len());if !rows.is_empty(){assert!(std::ptr::eq(rows.as_ptr(),original.as_ptr()));}serde_json::json!({\"value\":rows})},Err(e)=>serde_json::json!({\"error\":{\"name\":e.name,\"message\":e.message}})}}",
+    "cases": [
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": []
+        },
+        "output": {
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        },
+        "output": {
+          "value": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/other",
+          "payload": [
+            null,
+            false
+          ]
+        },
+        "output": {
+          "value": [
+            null,
+            false
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received undefined"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": null
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received null"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": false
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received boolean"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": 17
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received number"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": "x"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received string"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {}
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": 0,
+            "msg": "bad"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object(code,msg) (code=0 bad)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": [],
+            "message": "later"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object(msg,message)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": null
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance /path response malformed: expected array, received object(code) (code=null)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": {
+              "toString": null
+            }
+          }
+        },
+        "output": {
+          "error": {
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_shape::require_binance_pm_array_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "require_binance_pm_array_response",
+      "signature": {
+        "inputs": [
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "slice": {
+                            "resolved_path": {
+                              "path": "serde_json::value::Value",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::response_shape::BinanceResponseError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "require_binance_pm_array_response admits arrays by returning their original borrowed rows, without cloning or projecting elements. Native fixtures inspect nonempty pointer identity, length, fields and signed-zero bits before serialization. Other JSON shapes produce the exact Binance PM endpoint/shape/message diagnostic; fallible source String coercion errors retain their name and message. The native tests and maintained live response_shape target pass eight tests with zero ignored, including 1,188 source comparisons. scripts/response-shape-contracts.mjs executes its actual production call. scripts/response-shape-controls.py compiled its wrong output, required this owner's own production result to fail with native output mismatches, then restored exact source and passed all three production outputs. Stock JSON/UTF-8 only; empty-slice data addresses do not prove source array identity, and no arbitrary getter/prototype or full Error-identity claim.",
+    "call": "{match $type($value[\"endpoint\"].as_str().unwrap(),$value.get(\"payload\")){Ok(rows)=>{let original=$value[\"payload\"].as_array().unwrap();assert_eq!(rows.len(),original.len());if !rows.is_empty(){assert!(std::ptr::eq(rows.as_ptr(),original.as_ptr()));}serde_json::json!({\"value\":rows})},Err(e)=>serde_json::json!({\"error\":{\"name\":e.name,\"message\":e.message}})}}",
+    "cases": [
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": []
+        },
+        "output": {
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        },
+        "output": {
+          "value": [
+            "first",
+            17,
+            {
+              "code": "tail"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/other",
+          "payload": [
+            null,
+            false
+          ]
+        },
+        "output": {
+          "value": [
+            null,
+            false
+          ]
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received undefined"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": null
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received null"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": false
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received boolean"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": 17
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received number"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": "x"
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received string"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {}
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": 0,
+            "msg": "bad"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object(code,msg) (code=0 bad)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": [],
+            "message": "later"
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object(msg,message)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "code": null
+          }
+        },
+        "output": {
+          "error": {
+            "name": "Error",
+            "message": "Binance PM /path response malformed: expected array, received object(code) (code=null)"
+          }
+        }
+      },
+      {
+        "input": {
+          "endpoint": "/path",
+          "payload": {
+            "msg": {
+              "toString": null
+            }
+          }
+        },
+        "output": {
+          "error": {
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::response_shape::malformed": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "malformed",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "shape",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_binance::response_shape::BinanceResponseError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs an Error diagnostic from the already typed venue, endpoint, shape and message strings; it formats those arguments without interpreting an input representation or validating a wire schema.",
+    "evidence": "Reviewed the exact production body and corresponding Futures/PM source array-diagnostic helpers. Native response_shape::accepted_contract_tests::private_malformed_constructor_preserves_error_fields executes independently authored expected values through this actual function, including direct private helper calls. scripts/response-shape-controls.py compiled its changed output, required that exact named native test to fail, then restored exact source and required the same named test to pass. The final restored native/live targets pass eight tests with zero ignored, including 1,188 source comparisons. Production accepted-set receipts for this role are classification-only and are not claimed as API execution. JSON/UTF-8 diagnostic scope only, without arbitrary source getters/prototype mutation."
+  },
+  "safe_cex_venue_binance::response_shape::BinanceResponseError": {
+    "shape": "observed",
+    "category": "decoder",
+    "evidence": "The specific From<JsCoercionError> implementation preserves the actual native error class and message; Display writes the message. There is no Deserialize or raw wire constructor. Observe two independent static typed coercion errors through the actual qualified conversion, not through a parent Array validator or serialized owner. The native From fixture passes both static cases and Display before serialization. scripts/response-shape-contracts.mjs executes its direct qualified production conversion. scripts/response-shape-controls.py compiled a changed class field, required this owner and both actual array-guard coercion results to fail with native output mismatches, then restored exact source and passed all three production outputs. No full source Error identity or arbitrary error properties claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::js_coercion::JsCoercionError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual native typed From conversion and inspect both result fields and Display."
+      }
+    ],
+    "call": "{let (name,message)=if $value[\"range\"]==true{(\"RangeError\",\"outside range\")}else{(\"TypeError\",\"wrong type\")};let e=<$type as From<safe_cex_types::js_coercion::JsCoercionError>>::from(safe_cex_types::js_coercion::JsCoercionError{name,message});assert_eq!(e.to_string(),e.message);serde_json::json!({\"name\":e.name,\"message\":e.message})}",
+    "cases": [
+      {
+        "input": {
+          "range": false
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "wrong type"
+        }
+      },
+      {
+        "input": {
+          "range": true
+        },
+        "output": {
+          "name": "RangeError",
+          "message": "outside range"
+        }
+      }
+    ]
   }
 }

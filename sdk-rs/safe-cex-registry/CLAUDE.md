@@ -171,10 +171,11 @@ shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
 delivery and cancellation over local native transports; its constructor-removal
 control lives in the venue's scripts/registry-control.py.
 
-The Bybit host also constructs `Bybitspot` after its distinct Spot receiver is
-bound. Native Bybit loopback HTTP coverage includes Spot for local and hosted
+The Bybit host also constructs `Bybitspot` and `Bybitinverse` through their
+distinct retained receivers. Native Bybit loopback HTTP coverage includes both variants for local and hosted
 signing; its existing registry dependency edge and caller-owned limiter API
-remain shared across these constructors. Inverse/HyroTrader await their bindings.
+remain shared across these constructors. HyroTrader awaits its binding. The Inverse registry removal control compiles,
+then fails both local and hosted construction assertions before exact restoration.
 
 ApexOmni's signed native host shares the account capability with HTTP and private
 WS auth, retaining remote accountName while keeping the API secret in the browser.
@@ -206,3 +207,9 @@ headers; remoteSigner DXtrade login refuses visibly. The native date realm is
 explicitly UTC for offset-less legacy timestamps, while embedding hosts supply
 their own local_to_utc policy. native_host_breakoutprop.rs proves actual native
 HTTP login/startup/reads/placement/cancellation with no websocket dial.
+
+Orderly-family per-options HTTP hosts share the hosted signer and account name,
+with the selected family name bound before requests. Preserve the source local
+signing requirement on private HTTP even with hosted signing. Private WS stays
+local-only; empty-secret recovery follows the existing approved onOpen contract.
+`native_host_orderly_hosted` covers all six names with valid/empty local secrets.

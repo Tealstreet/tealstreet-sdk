@@ -110,10 +110,20 @@ fn leverage_not_modified(data: &Js) -> Result<bool, Thrown> {
 // comparison and publication; a current NaN must differ from every requested
 // leverage, and a refreshed model can contain native nonfinite values.
 pub(crate) fn set_leverage(rt: &Rt, symbol: Js, leverage: Js) -> Result<Js, Thrown> {
+    set_leverage_body(rt, symbol, leverage, true)
+}
+
+// ts: BybitInverseExchange.setLeverage — its source has neither the option
+// refusal nor the primary leverage-not-modified exemption.
+pub(crate) fn set_inverse_leverage(rt: &Rt, symbol: Js, leverage: Js) -> Result<Js, Thrown> {
+    set_leverage_body(rt, symbol, leverage, false)
+}
+
+fn set_leverage_body(rt: &Rt, symbol: Js, leverage: Js, primary: bool) -> Result<Js, Thrown> {
     let rt = rt.clone();
     Ok(rt.clone().spawn(Box::pin(async move {
         let symbol_text = text(&symbol)?;
-        if crate::options::is_bybit_option_symbol(&symbol_text) {
+        if primary && crate::options::is_bybit_option_symbol(&symbol_text) {
             return Err(Thrown::error(
                 "Error",
                 &format!("Bybit has no leverage for options ({symbol_text})"),
@@ -190,7 +200,7 @@ pub(crate) fn set_leverage(rt: &Rt, symbol: Js, leverage: Js) -> Result<Js, Thro
             .await?
             .get("data")?;
             if !get_key(&data, "retMsg")?.strict_equals(&Js::str("OK"))
-                && !leverage_not_modified(&data)?
+                && !(primary && leverage_not_modified(&data)?)
             {
                 let message = get_key(&data, "retMsg")?;
                 rt.this
