@@ -111,6 +111,77 @@ pub fn listen_inverse_order_book<S, C, R, E>(
     )
 }
 
+// ts: BybitExchange#publicSocketFor —
+// (getCategoryForSymbol(symbol) === 'inverse' && this.inversePublicWebsocket) || this.publicWebsocket
+fn public_socket_for<S, E>(
+    symbol: &str,
+    websocket: &mut impl FnMut(&str) -> Result<S, E>,
+    secondary: &mut impl FnMut() -> Result<Option<S>, E>,
+) -> Result<S, E> {
+    if crate::inverse_symbol::is_bybit_inverse_symbol(symbol)
+        && !crate::options::is_bybit_option_symbol(symbol)
+        && let Some(socket) = secondary()?
+    {
+        return Ok(socket);
+    }
+    websocket("publicWebsocket")
+}
+
+/// The bybit connection routes an inverse symbol to its inverse public socket.
+pub fn listen_primary_ohlcv<S, O, C, R, E>(
+    options: O,
+    symbol: &str,
+    callback: C,
+    mut websocket: impl FnMut(&str) -> Result<S, E>,
+    mut secondary: impl FnMut() -> Result<Option<S>, E>,
+    call: impl FnOnce(S, &str, O, C) -> Result<R, E>,
+) -> Result<R, E> {
+    let socket = public_socket_for(symbol, &mut websocket, &mut secondary)?;
+    call(socket, "listenOHLCV", options, callback)
+}
+
+pub fn listen_primary_order_book<S, C, R, E>(
+    symbol: &str,
+    callback: C,
+    mut websocket: impl FnMut(&str) -> Result<S, E>,
+    mut secondary: impl FnMut() -> Result<Option<S>, E>,
+    call: impl FnOnce(S, &str, &str, C) -> Result<R, E>,
+) -> Result<R, E> {
+    let socket = public_socket_for(symbol, &mut websocket, &mut secondary)?;
+    call(socket, "listenOrderBook", symbol, callback)
+}
+
+/// Symbols group by socket in first-seen order; each socket gets `{ ...opts, symbols }`
+/// and the source discards every socket method's return.
+#[allow(clippy::too_many_arguments)]
+pub fn listen_primary_ohlcvs<S, O, C: Clone, R, E>(
+    symbols: Result<Vec<String>, E>,
+    callback: C,
+    mut websocket: impl FnMut(&str) -> Result<S, E>,
+    mut secondary: impl FnMut() -> Result<Option<S>, E>,
+    same: impl Fn(&S, &S) -> bool,
+    with_symbols: impl Fn(Vec<String>) -> O,
+    mut call: impl FnMut(S, &str, O, C) -> Result<R, E>,
+) -> Result<(), E> {
+    let mut by_socket: Vec<(S, Vec<String>)> = Vec::new();
+    for symbol in symbols? {
+        let socket = public_socket_for(&symbol, &mut websocket, &mut secondary)?;
+        match by_socket.iter_mut().find(|(seen, _)| same(seen, &socket)) {
+            Some((_, group)) => group.push(symbol),
+            None => by_socket.push((socket, vec![symbol])),
+        }
+    }
+    for (socket, group) in by_socket {
+        call(
+            socket,
+            "listenOHLCVs",
+            with_symbols(group),
+            callback.clone(),
+        )?;
+    }
+    Ok(())
+}
+
 fn dispose_sockets<S, R, E>(
     public_property: &str,
     base_dispose: impl FnOnce() -> Result<R, E>,
