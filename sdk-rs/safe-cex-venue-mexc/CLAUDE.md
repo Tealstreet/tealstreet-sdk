@@ -285,3 +285,11 @@ Response parsing and request-attempt wrappers forward the inner success receipt.
 Typed venue-refusal errors retain its effective request configuration. That native
 provenance field is distinct from a claim that the source attaches error.config
 when constructing its venue error.
+
+The native registry supplies a hosted account to configured HTTP, the existing
+BaseExchange signer and MexcSocketDependencies.remote_account_name. Keep all
+three connected: public HTTP bypasses hosted signing, private HTTP signs remotely,
+and WS login uses the same account with trimmed API key plus request time. A
+signer error or absent signature preserves the source “Remote WS signing
+unavailable” message and sends no login or private filters. Native registry
+E2Es and compiled omission controls are documented in HOSTED_SIGNER_EVIDENCE.md.

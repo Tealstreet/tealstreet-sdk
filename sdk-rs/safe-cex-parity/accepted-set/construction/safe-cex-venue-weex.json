@@ -1,0 +1,8 @@
+{
+  "safe_cex_venue_weex::utils::WeexUtilityInput": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed utils.rs::WeexUtilityInput: derived Clone copies the already captured owned JSON Value, preserving its numeric passthrough representation. as_value borrows the capture and pick_retained copies a selected retained value; cloning runs neither ingress parsing nor a new enum normalization and carries no consumed validation authority See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
+  }
+}
