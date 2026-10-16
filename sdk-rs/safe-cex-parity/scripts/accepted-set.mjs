@@ -119,6 +119,15 @@ for (const pkg of members) {
     const [file, ident, row, column] = line.split('\t');
     if ((ident.startsWith('LOCAL_FUNCTION:') || ident.startsWith('LOCAL_TRAIT_IMPL:'))) {
       const label = `${path.relative(root, file)}::${ident}`;
+      const enclosing = ident.startsWith('LOCAL_TRAIT_IMPL:') ? ident.match(/@([A-Za-z_][A-Za-z0-9_]*)$/)?.[1] : undefined;
+      if (enclosing) {
+        const owners = result.types.filter(owner => owner.deserialize && owner.ident === enclosing && fs.realpathSync(path.resolve(root, owner.span.filename)) === fs.realpathSync(file));
+        assert.equal(owners.length, 1, `${label}: accepted-set assertion: serde helper needs its unique enclosing Deserialize owner`);
+        const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/contracts.json');
+        requireNativeDecoderObservations(owners[0], JSON.parse(fs.readFileSync(contractPath, 'utf8'))[owners[0].name], label);
+        delegatedLocals.push({ name: `${label}@${row}:${column}`, runtimeOwner: owners[0].name });
+        return null;
+      }
       const contract = localFunctionContracts[label];
       assert.ok(['non-decoder', 'decoder-helper'].includes(contract?.category) && contract.reason?.trim(), `${label}: accepted-set assertion: unclassified nested free function; move decoders to module scope`);
       if (contract.category === 'decoder-helper') {
