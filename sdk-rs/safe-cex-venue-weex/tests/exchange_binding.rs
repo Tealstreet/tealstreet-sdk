@@ -539,7 +539,13 @@ fn income_page_and_range_use_bound_post_normalizer_and_shared_pager() {
         ))
         .unwrap();
     assert_eq!(range.len(), 2);
-    assert_eq!(range.iter().map(|record| record.tran_id.as_str()).collect::<Vec<_>>(), ["income-b", "income-a"]);
+    assert_eq!(
+        range
+            .iter()
+            .map(|record| record.tran_id.as_str())
+            .collect::<Vec<_>>(),
+        ["income-b", "income-a"]
+    );
     let calls = h.http.calls(endpoint("INCOME"));
     assert!(calls.len() >= 2);
     assert_eq!(body(&calls[1])["startTime"], 1700000000000.0);
