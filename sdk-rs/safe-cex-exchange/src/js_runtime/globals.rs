@@ -338,11 +338,14 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             })
         }),
     );
+    // ts: Number(value) is ToNumeric, then a BigInt rounds to the nearest double.
     let number = Js::function("Number", |_, a| {
-        Ok(Js::Number(if a.is_empty() {
-            0.0
-        } else {
-            a[0].to_number()?
+        Ok(Js::Number(match a.first() {
+            None => 0.0,
+            Some(value) => match super::ops::to_numeric(value)? {
+                Js::BigInt(n) => n.to_string().parse().unwrap_or(f64::NAN),
+                numeric => numeric.to_number()?,
+            },
         }))
     });
     for (key, value) in [
