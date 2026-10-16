@@ -42,6 +42,15 @@ The control requires exactly those eleven failed owner receipts and refuses
 compiler errors as evidence. Exact-byte restoration must pass all eleven owners.
 This grouped control does not claim ten isolated mutation builds.
 
+The measured grouped mutation reached all eleven native owner assertions with
+zero classification-only receipts. Each owner reported a direct native
+observation mismatch for a formerly refused tagged map. For example, API version
+`{"v1":null}` changed from refusal to native `V1`/ordinal zero. The assertion
+failure followed actual Rust execution; no compile failure counted as evidence.
+Exact-byte restoration passed all eleven owners again, with zero failed owners
+and zero classification-only receipts. All 173 maintained-source shape
+observations also passed before baseline, mutation and restoration.
+
 The scope is the selected native/default enum owners under the canonical
 [string boundary](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary) and
 [divergence taxonomy](../parity/MANIFEST-SPEC.md#divergence-taxonomy). It excludes
