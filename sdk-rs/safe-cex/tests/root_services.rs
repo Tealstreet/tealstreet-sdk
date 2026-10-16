@@ -334,3 +334,114 @@ fn facade_construction_preserves_polymarket_patch_credentials_and_native_signer_
         .is_none()
     );
 }
+
+#[test]
+fn option_and_inverse_toggles_reach_constructors_with_source_metadata_and_override_precedence() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/root_option_toggles_source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows.len(),
+        1728,
+        "48 venues x 3 toggles x 3 account states x 4 override states"
+    );
+    let constructor: ExchangeConstructor<Fixture> = Rc::new(|name, options, store| {
+        Ok(Fixture {
+            name,
+            options,
+            store,
+        })
+    });
+    let loader: ExchangeLoader<Fixture> = Rc::new(move || {
+        let constructor = constructor.clone();
+        Box::pin(async move { Ok(constructor) })
+    });
+    let factory = ExchangeFactory::new(
+        rows.iter()
+            .map(|row| {
+                (
+                    row["account"]["exchange"].as_str().unwrap().into(),
+                    loader.clone(),
+                )
+            })
+            .collect(),
+        VirtualClock::default(),
+        TransportRegistry::default(),
+    );
+    assert_eq!(factory.get_available_exchanges().len(), 48);
+    let registry = TransportRegistry::default();
+    let warnings = std::cell::RefCell::new(Vec::<String>::new());
+    let warn = |message: &str| warnings.borrow_mut().push(message.to_owned());
+    let host = AccountOptionsHost {
+        transport: &registry,
+        instance: None,
+        environment: &|_| None,
+        warn: &warn,
+    };
+    for row in rows {
+        let account: ExchangeAccountConfig =
+            serde_json::from_value(row["account"].clone()).unwrap();
+        let value = match row["override"].as_str() {
+            Some("absent") => None,
+            Some("undefined") => Some(None),
+            None => Some(Some(row["override"].as_bool().unwrap())),
+            _ => panic!("unknown source override state"),
+        };
+        let mut patch = ExchangeOptionsPatch::default();
+        match row["field"].as_str().unwrap() {
+            "enableSpotMarkets" => patch.enable_spot_markets = value,
+            "enableOptionMarkets" => patch.enable_option_markets = value,
+            "enableInverseMarkets" => patch.enable_inverse_markets = value,
+            _ => panic!("unknown source toggle"),
+        }
+        warnings.borrow_mut().clear();
+        let instance = ready(create_exchange_from_account(
+            &factory,
+            &account,
+            Some(&patch),
+            &host,
+        ))
+        .unwrap();
+        let native = &instance.options;
+        let mut projected = serde_json::Map::new();
+        for (field, value) in [
+            ("enableSpotMarkets", native.enable_spot_markets),
+            ("enableOptionMarkets", native.enable_option_markets),
+            ("enableInverseMarkets", native.enable_inverse_markets),
+        ] {
+            if let Some(value) = value {
+                projected.insert(field.into(), serde_json::json!(value));
+            }
+        }
+        assert_eq!(
+            serde_json::Value::Object(projected),
+            row["expected"],
+            "source case {row}"
+        );
+        assert_eq!(
+            serde_json::json!(*warnings.borrow()),
+            row["warnings"],
+            "metadata warning case {row}"
+        );
+        assert_eq!(instance.name, account.exchange);
+    }
+    let patch = ExchangeOptionsPatch {
+        enable_option_markets: Some(Some(true)),
+        enable_inverse_markets: Some(Some(false)),
+        ..Default::default()
+    };
+    let public =
+        ready(factory.create_public_exchange("bybit", Some(&patch), false, None, None)).unwrap();
+    assert_eq!(public.options.enable_option_markets, Some(true));
+    assert_eq!(public.options.enable_inverse_markets, Some(false));
+}
