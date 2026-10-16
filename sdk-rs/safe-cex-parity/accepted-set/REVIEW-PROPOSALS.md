@@ -20,6 +20,13 @@ that require one. This sets both the Cargo environment and rustdoc job flag.
 Targets run sequentially. Follow any crate restriction on concurrent Cargo
 processes when scheduling other commands alongside the helper.
 
+The accepted-set runner supports the same bounded flag, for example
+`node sdk-rs/safe-cex-parity/scripts/accepted-set.mjs --package=safe-cex-venue-bitunix --jobs=1`.
+It applies to compiler discovery, the host scanner build and native/wasm probe
+compilation. Callers of `runProbes` can set `configuration.jobs` to `1`;
+omitting it retains two jobs. This controls compiler concurrency only and does
+not change inventory, classification requirements or runtime assertions.
+
 Each proposal includes the exact compiler owner/API, source spans and file
 hashes, bounded source excerpts, candidate classifications and required native
 witnesses. Text references in maintained test files are suggestions to inspect;
@@ -40,6 +47,9 @@ compiler declarations fail explicitly. Alias proposals expose raw compiler
 targets; expanded aliases, root identity and actual conversion traits still
 need their normal checks. Selected census keys do not establish complete
 discovery, local-scope coverage or the feature/wasm matrix.
+
+For positional-array widening of TS object records, use the shared
+[object-only ingress recipe and proof requirements](MAP-ONLY-INGRESS.md).
 
 Use the maintained boundary decisions when reviewing
 [strings](../../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),

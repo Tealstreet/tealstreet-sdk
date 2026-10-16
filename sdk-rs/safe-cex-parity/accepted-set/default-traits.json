@@ -255,10 +255,10 @@
   "safe_cex_exchange::exchange::Exchange": {
     "category": "reviewed-exchange-defaults",
     "declarationEnd": [
-      518,
+      520,
       2
     ],
-    "evidence": "sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; source review of the exact 16 compiler-selected raw-input/decoded-output candidates. Other defaults and concrete overrides retain ordinary coverage. Re-reviewed origin 53ee502232..0286f63437: the only source delta is BaseExchange::wait_for_remote_signer eager future construction at lines 1189 onward; Exchange trait declaration, all fifty default bodies and the sixteen classified candidates are unchanged. The whole-file pin is refreshed for that separately maintained method; it does not classify the signer-wait algorithm. Re-reviewed origin 1b79e7b880..03e37cae55 (c95c90da16, mexc raw error reporting): the only source deltas are the error_reporting import list at lines 9-10 and BaseExchange::handle_error raw-input projection at lines 950 onward; lines 1-503, including the Exchange trait declaration, all fifty default bodies and the sixteen classified candidates, are unchanged. The pin is refreshed for that separately maintained method; it does not classify raw error reporting.",
+    "evidence": "sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; source review of the exact 16 compiler-selected raw-input/decoded-output candidates. Other defaults and concrete overrides retain ordinary coverage. Re-reviewed origin 53ee502232..0286f63437: the only source delta is BaseExchange::wait_for_remote_signer eager future construction at lines 1189 onward; Exchange trait declaration, all fifty default bodies and the sixteen classified candidates are unchanged. The whole-file pin is refreshed for that separately maintained method; it does not classify the signer-wait algorithm. Re-reviewed origin 1b79e7b880..03e37cae55 (c95c90da16, mexc raw error reporting): the only source deltas are the error_reporting import list at lines 9-10 and BaseExchange::handle_error raw-input projection at lines 950 onward; lines 1-503, including the Exchange trait declaration, all fifty default bodies and the sixteen classified candidates, are unchanged. The pin is refreshed for that separately maintained method; it does not classify raw error reporting. Re-reviewed 08e1c1ef3a^..eb2949866a: SocketRegistration adds a lazy Lookup arm before Exchange, moving its unchanged declaration by two lines; the remaining additions are BaseExchange::set_disposed_flag and set_socket_lookup after the trait. All fifty-three default APIs and bodies and the sixteen reviewed candidate roles are unchanged. This refresh does not classify those separately maintained socket/disposal methods.",
     "file": "safe-cex-exchange/src/exchange.rs",
     "methods": [
       {
@@ -3854,6 +3854,6 @@
         "reason": "No-op returns Ok(()) and ignores its symbol selector."
       }
     ],
-    "sourceSha256": "f74dba4cce58600bf2df0fd455c4580a301decd76ab5ceb0fd226164cead4823"
+    "sourceSha256": "5a9f1df2a0f8887e8385a451e743aafd70ee2e2a775dee0c5ee6b088cf31f587"
   }
 }

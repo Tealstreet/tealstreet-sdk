@@ -3704,6 +3704,34 @@ No startup mutation ran, and its row remains pending with zero new row credit.
 Final checkpoint formatting and workspace build must be measured against the
 checkpoint SHA separately from the accepted three-row local-order delivery.
 
+## Spot production facade and registry (ddi2il-18, first variant)
+
+`tests/spot_binding.rs` constructs `BybitExchange::create(Bybitspot, ...)`, then
+calls the concrete Exchange trait and typed core preflight over scripted HTTP
+and real core socket orchestration. Five E2Es pin spot/1x market mapping,
+tickers, account and validation/balance, empty positions with no position query,
+order reads/placement/batch/amend/cancel, exact inherited refusals, public/private
+startup, loaded flags, order-only private subscribe after auth, both socket
+closures and Brazil's local order retirement. Caller IDs are sent verbatim;
+invalid and split IDs reject before any write.
+
+`python3 sdk-rs/safe-cex-venue-bybit/scripts/spot-binding-controls.py` compiled
+17 independent trait-consumer mutations: start, get_account, validate_account,
+fetch_positions, fetch_orders, fetch_markets, fetch_tickers, place_order,
+place_orders, update_order, cancel_orders, set_leverage, change_position_mode,
+change_margin_type, fetch_symbol_max_leverage, schedule_cancel and
+fetch_public_trades. Each failed an executed assertion, with no compiler error;
+source restored byte-identically and all five Spot tests passed. The runner
+writes temporary output under `/tmp`, never repository evidence artifacts.
+Removing the Bybitspot RUST_VENUES entry separately compiled and failed the
+exact registry membership assertion, then the entry was restored.
+
+The existing source-driven Spot read/write and variant account-refresh oracles
+remain separate from these production construction proofs. The source class is
+carried by the discriminated Rust `BybitExchange` type with a distinct Spot
+receiver and class_name; that API representation choice is declared on its
+class/constructor rows. No Inverse or HyroTrader constructor claim is made here.
+
 ## Production private event delivery (ddi2il-27)
 
 The private socket previously used WsProtocol's unimplemented message default.
@@ -3749,3 +3777,47 @@ Deleting just that three-line registration reproduces the previous receiver
 file byte-identically. The selector dynamically calls the already-bound
 category/option/inverse members; it does not capture a BaseExchange method.
 No delegation classification or bypass exemption is added.
+
+
+## Spot facade and registry composition
+
+Production checkpoint `2fb414e5e1`, witness/mapping checkpoint `86e247c10e`:
+`exchange_binding` 22, `option_binding` 1, `private_event_delivery` 6 and
+`spot_binding` 6 all pass, including ignored live source comparisons. The primary
+order-write oracle retains 92 cases; private delivery independently asserts 48
+source/native compositions (two actual handlers/mappers, four flag modes, six
+scenes). Spot private frames publish live orders and replay-suppressed fills;
+position/execution/wallet topics retain the source ignores. Valid-array corpus
+coverage does not establish malformed-frame error-message parity.
+
+The serial Spot control runner compiled and caught 17 trait consumer mutations
+plus removal of the early source isSpot initializer. It restored exact production
+bytes and all six Spot E2Es passed. The typed base now receives is_spot=true before
+Rc publication through the single shared factory from #233; no venue-name policy
+is placed in core. Unsupported source BaseExchange hooks retain their exact
+Not implemented rejection, including max-leverage lookup, public trades and
+schedule cancel; market metadata separately advertises Spot leverage 1.
+
+The override inventory review retains all existing references and adds only eight
+Bybit references: six actual Spot helper-body delegates plus emitter name reads
+for order-only subscriptions and Spot ticker projection. The 13 existing receiver
+references retain their targets; only its enclosing install body changes when
+Spot members are installed. Account validation keeps the primary consumer while
+selecting the existing derived validator for Spot. No delegation exemption is
+added, and foreign inventory rows are preserved.
+
+FINDING ddi2il-38 remains explicit: the shared public protocol's active-symbol
+selection, both live change callbacks and retained topic reconciliation are not
+wired yet. The public class/constructor rows remain pending. This facade/registry
+slice does not claim that public composition or the remaining Inverse/HyroTrader
+constructors.
+
+Final scoped gates: native Bybit registry 3 passed (local/hosted signing and
+untouched demo origin), registry constructors 14 passed, core cancellation
+inventory 6 passed plus one explicit export ignored, override contract 4 passed
+plus one existing live-source inventory ignored. Host all-targets and wasm library
+clippy for Bybit/registry passed. Parity reports 7459 rows / 17145 public items
+with zero findings; extractor reports zero changed/added/orphaned. Registry-data
+and layers checks pass. The 1073 existing override entries are retained and the
+eight reviewed Bybit entries give a total of 1081; the incoming eight-row Binance
+repair is the owner's commit 04bfb16ccf, not an independent reclassification.

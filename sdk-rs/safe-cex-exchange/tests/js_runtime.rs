@@ -25,6 +25,7 @@ struct Runtime {
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
+    dial_socket: RefCell<Option<Rc<dyn safe_cex_exchange::websocket::WsSocket>>>,
     dials: RefCell<
         Vec<(
             String,
@@ -1229,7 +1230,8 @@ impl safe_cex_exchange::websocket::WsRuntime for Runtime {
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn safe_cex_exchange::websocket::WsSocket>> {
         self.dials.borrow_mut().push((url, protocols, options));
-        Box::pin(async { Err(ExchangeError::new("recorded dial")) })
+        let socket = self.dial_socket.borrow().clone();
+        Box::pin(async move { socket.ok_or_else(|| ExchangeError::new("recorded dial")) })
     }
     fn headers_capable(&self) -> bool {
         self.headers_capable.get()
@@ -1263,6 +1265,13 @@ fn base_exchange(options: Value) -> Result<Js, Thrown> {
 }
 
 fn assemble(options: Value) -> Result<Assembled, Thrown> {
+    assemble_with_fields(options, |_| Ok(()))
+}
+
+fn assemble_with_fields(
+    options: Value,
+    initialize_fields: impl FnOnce(&Js) -> Result<(), Thrown>,
+) -> Result<Assembled, Thrown> {
     use safe_cex_exchange::{
         client_order_id::pattern_client_order_id_rule,
         exchange::ExchangeSettings,
@@ -1294,6 +1303,7 @@ fn assemble(options: Value) -> Result<Assembled, Thrown> {
         Js::str("okx"),
         from_json(&options),
         Js::object(vec![]),
+        initialize_fields,
     )?;
     Ok(Assembled {
         this,
@@ -3431,6 +3441,47 @@ mod ws_options;
 mod socket_dispose;
 
 #[test]
+fn source_identity_fields_are_read_before_the_typed_base_is_published() {
+    for (spot, demo, expected_spot, expected_demo) in [
+        (Js::Bool(true), Js::Bool(false), true, false),
+        (Js::Bool(false), Js::Bool(true), false, true),
+        (Js::str("source truthy"), Js::Number(0.0), true, false),
+        (Js::Null, Js::object(vec![]), false, true),
+    ] {
+        let assembled = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+            receiver.define_accessor("isSpot", Some(Rc::new(move |_| Ok(spot.clone()))), None);
+            receiver.define("isDemo", demo)
+        })
+        .unwrap();
+        assert_eq!(
+            assembled.base.is_spot, expected_spot,
+            "source isSpot projection"
+        );
+        assert_eq!(
+            assembled.base.is_demo, expected_demo,
+            "source isDemo projection"
+        );
+        assert_eq!(
+            assembled.this.get("isSpot").unwrap().truthy(),
+            expected_spot
+        );
+        assert_eq!(
+            assembled.this.get("isDemo").unwrap().truthy(),
+            expected_demo
+        );
+    }
+    let inherited = assemble(json!({"key":"k","secret":"s"})).unwrap();
+    assert!(!inherited.base.is_spot && !inherited.base.is_demo);
+    let cause = Thrown::error("RangeError", "source flag getter");
+    let expected = cause.value.clone();
+    let result = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+        receiver.define_accessor("isDemo", Some(Rc::new(move |_| Err(cause.clone()))), None);
+        Ok(())
+    });
+    assert!(result.err().unwrap().value.strict_equals(&expected));
+}
+
+#[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
     use safe_cex_transport::signing::*;
@@ -3544,3 +3595,9 @@ fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
         );
     }
 }
+
+#[path = "support/js_string_coercion.rs"]
+mod string_coercion;
+
+#[path = "support/js_raw_socket_close.rs"]
+mod raw_socket_close;
