@@ -139,7 +139,7 @@ Venue code implements hooks that receive validated payloads; callers invoke the
 base entrypoints with ordinary `PlaceOrderOpts`. No venue constructs the private
 validated fields. This example runs as a crate doctest: it constructs the production Store and all
 five BaseExchange arguments, places one order and one native batch, and verifies
-a rejected batch sends nothing. The recording runtime implements all nine host
+a rejected batch sends nothing. The recording runtime implements all ten host
 methods explicitly; its unused I/O paths panic rather than pretending to work.
 
 ```rust
@@ -169,6 +169,7 @@ impl ExchangeRuntime for RecordingRuntime {
     fn is_worker(&self) -> bool { false }
     fn random(&self) -> f64 { 0.5 }
     fn report_exception(&self, error: &ExchangeError, _: &Value) { eprintln!("{}: {}", error.name, error.message); }
+    fn report_raw_exception(&self, _: &Value, _: &Value) { panic!("unexpected raw exception report") }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker request")
     }
