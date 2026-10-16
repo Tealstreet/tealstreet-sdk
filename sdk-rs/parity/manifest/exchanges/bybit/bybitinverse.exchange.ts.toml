@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::reinit_on_throw"
 status = "divergent"
-note = "CHOSEN: generic Rust Future and caller-owned Cell flag replace JS Promise identity and microtask scheduling. Rejection is observed only on future resolution and forwards the original native error/value without cloning; success leaves the flag unchanged. Explicit host polling is the chosen async ABI. Constructor/request composition remains pending."
+note = "CHOSEN: generic Rust Future and caller-owned Cell flag replace JS Promise identity and microtask scheduling. Rejection is observed only on future resolution and forwards the original native error/value without cloning; success leaves the flag unchanged. Explicit host polling is the chosen async ABI. Constructor/request composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::reinit_on_throw."
 
 [[symbol]]
 ts = "BybitInverseExchange#getExecutionQueryWindows"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::get_inverse_execution_query_windows"
 status = "ported"
-note = "Exact interval algorithm over the explicit numeric EXECUTION_QUERY_MAX_RANGE_MS context field. Option endpoints retain undefined and IEEE number values; strict loop guards and source terminal-singleton omission are preserved. Source default and bounded alternate context values are directly asserted."
+note = "Exact interval algorithm over the explicit numeric EXECUTION_QUERY_MAX_RANGE_MS context field. Option endpoints retain undefined and IEEE number values; strict loop guards and source terminal-singleton omission are preserved. Source default and bounded alternate context values are directly asserted. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::get_inverse_execution_query_windows."
 
 [[symbol]]
 ts = "BybitInverseExchange.get accountType"
@@ -72,7 +72,7 @@ kind = "accessor"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::account_type"
 status = "ported"
-note = "Strict numeric 1 selects CONTRACT; all other retained values select UNIFIED. Shared with the identical spot getter."
+note = "Strict numeric 1 selects CONTRACT; all other retained values select UNIFIED. Shared with the identical spot getter. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::account_type."
 
 [[symbol]]
 ts = "BybitInverseExchange.get cachedApiKeyInfo"
@@ -88,7 +88,7 @@ kind = "accessor"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::inverse_supported_categories"
 status = "ported"
-note = "Returns a fresh inverse-only vector on each call."
+note = "Returns a fresh inverse-only vector on each call. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::inverse_supported_categories."
 
 [[symbol]]
 ts = "BybitInverseExchange.getSettleCoinsForCategory"
@@ -96,7 +96,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::inverse_get_settle_coins_for_category"
 status = "divergent"
-note = "CHOSEN: explicit captured margin status and synchronous logging callback replace this-bound dependencies. Native Option elements preserve the inverse [undefined] result. UTF-8 category inputs exclude lone UTF-16 surrogates; ExchangeError retains name/message/metadata but excludes JS stack and thrown object identity. Host logging failure propagates before the venue error."
+note = "CHOSEN: explicit captured margin status and synchronous logging callback replace this-bound dependencies. Native Option elements preserve the inverse [undefined] result. UTF-8 category inputs exclude lone UTF-16 surrogates; ExchangeError retains name/message/metadata but excludes JS stack and thrown object identity. Host logging failure propagates before the venue error. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::inverse_get_settle_coins_for_category."
 
 [[symbol]]
 ts = "BybitInverseExchange.getCategoryForSymbol"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::inverse_get_category_for_symbol"
 status = "divergent"
-note = "CHOSEN: typed Market rows and UTF-8 symbol strings use the shared native model boundary; executable/getter rows and lone UTF-16 surrogates are excluded. Console warning is an explicit host callback and runs only for a missing symbol in a nonempty market list. Returns inverse in every branch. Constructor/store composition remains pending."
+note = "CHOSEN: typed Market rows and UTF-8 symbol strings use the shared native model boundary; executable/getter rows and lone UTF-16 surrogates are excluded. Console warning is an explicit host callback and runs only for a missing symbol in a nonempty market list. Returns inverse in every branch. Constructor/store composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::inverse_get_category_for_symbol."
 
 [[symbol]]
 ts = "BybitInverseExchange.getTickerSymbolsForPublicStream"
@@ -112,7 +112,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::inverse_get_ticker_symbols_for_public_stream"
 status = "divergent"
-note = "CHOSEN: typed Market rows and UTF-8 strings exclude malformed/executable rows and lone UTF-16 surrogates. An explicit host callback replaces the inherited subscription method; it receives ordered inverse-only symbols, retaining duplicates, and its return value is forwarded. Live source assertions capture the actual delegation argument before comparing results. Constructor composition remains pending."
+note = "CHOSEN: typed Market rows and UTF-8 strings exclude malformed/executable rows and lone UTF-16 surrogates. An explicit host callback replaces the inherited subscription method; it receives ordered inverse-only symbols, retaining duplicates, and its return value is forwarded. Live source assertions capture the actual delegation argument before comparing results. Constructor composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::inverse_get_ticker_symbols_for_public_stream."
 
 [[symbol]]
 ts = "BybitInverseExchange.constructor"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/stream_delegation.rs::dispose_inverse_exchange"
 status = "ported"
-note = "Exact synchronous BybitInverseExchange disposal body: calls base disposal before publicInverseWebsocket then privateWebsocket disposal, preserves getter/call ordering and short-circuits with original error identity. A public disposal that changes the private socket is observed before private lookup. Socket/constructor composition remains separate rows."
+note = "Exact synchronous BybitInverseExchange disposal body: calls base disposal before publicInverseWebsocket then privateWebsocket disposal, preserves getter/call ordering and short-circuits with original error identity. A public disposal that changes the private socket is observed before private lookup. Socket/constructor composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::dispose_inverse_exchange."
 
 [[symbol]]
 ts = "BybitInverseExchange#shouldUseLocalRestOrderLifecycleFallback"
@@ -136,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::should_use_local_rest_order_lifecycle_fallback"
 status = "ported"
-note = "Exact strict equality with the maintained Brazil site constant; no truthiness or coercion."
+note = "Exact strict equality with the maintained Brazil site constant; no truthiness or coercion. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::should_use_local_rest_order_lifecycle_fallback."
 
 [[symbol]]
 ts = "BybitInverseExchange.markOrderSeen"
@@ -144,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::mark_order_seen"
 status = "divergent"
-note = "CHOSEN: ordered native Map storage and UTF-8 string keys exclude JS Map subclass/method overrides and lone UTF-16 surrogates. Deletes only the requested cache key; constructors and websocket composition remain pending."
+note = "CHOSEN: ordered native Map storage and UTF-8 string keys exclude JS Map subclass/method overrides and lone UTF-16 surrogates. Deletes only the requested cache key; constructors and websocket composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::mark_order_seen."
 
 [[symbol]]
 ts = "BybitInverseExchange#remainingInStoreUnits"
@@ -168,7 +168,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::record_recently_placed_order"
 status = "divergent"
-note = "CHOSEN: typed shared Order/UTF-8 models exclude arbitrary executable rows and lone UTF-16 surrogates. Rc/RefCell retains mutable order identity; key evaluation precedes the explicit clock callback. Cache replacement retains insertion order. Site settings are read through a delayed callback after the clock and cache insertion. Explicit synchronous store callback receives native order references and can reenter or fail after insertion; ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Constructor and REST consumer wiring remain pending."
+note = "CHOSEN: typed shared Order/UTF-8 models exclude arbitrary executable rows and lone UTF-16 surrogates. Rc/RefCell retains mutable order identity; key evaluation precedes the explicit clock callback. Cache replacement retains insertion order. Site settings are read through a delayed callback after the clock and cache insertion. Explicit synchronous store callback receives native order references and can reenter or fail after insertion; ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Constructor and REST consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::record_recently_placed_order."
 
 [[symbol]]
 ts = "BybitInverseExchange#retireCancelledOrders"
@@ -176,7 +176,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::retire_cancelled_orders"
 status = "divergent"
-note = "CHOSEN: typed UTF-8 order IDs exclude lone UTF-16 surrogates and arbitrary JS method overrides. Site settings are read after cache deletion. Explicit synchronous remove callback receives the ordered IDs instead of fresh JS {id} objects, preserving duplicate IDs and callback failure after cache deletion. ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Empty input skips all host work. Constructor and cancel consumer wiring remain pending."
+note = "CHOSEN: typed UTF-8 order IDs exclude lone UTF-16 surrogates and arbitrary JS method overrides. Site settings are read after cache deletion. Explicit synchronous remove callback receives the ordered IDs instead of fresh JS {id} objects, preserving duplicate IDs and callback failure after cache deletion. ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Empty input skips all host work. Constructor and cancel consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::retire_cancelled_orders."
 
 [[symbol]]
 ts = "BybitInverseExchange#applyLocalOrderUpdateAfterRestWrite"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::preserve_recently_placed_orders"
 status = "divergent"
-note = "CHOSEN: typed shared Order/UTF-8 models exclude executable/getter rows, JS Map method overrides and lone UTF-16 surrogates. Store orders are read lazily after the clock and for each preserved key. Store accessor callbacks model ordinary field reads; executable store getters that mutate the cache during iteration are excluded. Ordered native cache and Rc/RefCell preserve mutable order identity, first matching store reference, strict 8000ms expiration and IEEE nonfinite clock behavior. Chosen caller-owned native Vec snapshots carry ordered references; JavaScript fetched-array membership edits inside the clock and appended-result array object identity are outside this ABI. Empty/no-preservation results return the input vector. Constructor and snapshot consumer wiring remain pending."
+note = "CHOSEN: typed shared Order/UTF-8 models exclude executable/getter rows, JS Map method overrides and lone UTF-16 surrogates. Store orders are read lazily after the clock and for each preserved key. Store accessor callbacks model ordinary field reads; executable store getters that mutate the cache during iteration are excluded. Ordered native cache and Rc/RefCell preserve mutable order identity, first matching store reference, strict 8000ms expiration and IEEE nonfinite clock behavior. Chosen caller-owned native Vec snapshots carry ordered references; JavaScript fetched-array membership edits inside the clock and appended-result array object identity are outside this ABI. Empty/no-preservation results return the input vector. Constructor and snapshot consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::preserve_recently_placed_orders."
 
 [[symbol]]
 ts = "BybitInverseExchange.getAccount"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::get_account"
 status = "divergent"
-note = "CHOSEN: standalone async transport callback receives the maintained ACCOUNT endpoint and returns a plain owned JSON data record; an ordered (userId, affiliateId) tuple replaces the anonymous JavaScript object. Optional values distinguish missing from null. Executable/getter/prototype properties, primitive/null top-level data, nested object alias identity, lone UTF-16 surrogates and JavaScript stack/prototype identity are excluded. Strict numeric retCode, Error message coercion, distinct native IDs and original transport-error Rc identity are checked against exact maintained bodies; class construction and HTTP composition remain pending."
+note = "CHOSEN: standalone async transport callback receives the maintained ACCOUNT endpoint and returns a plain owned JSON data record; an ordered (userId, affiliateId) tuple replaces the anonymous JavaScript object. Optional values distinguish missing from null. Executable/getter/prototype properties, primitive/null top-level data, nested object alias identity, lone UTF-16 surrogates and JavaScript stack/prototype identity are excluded. Strict numeric retCode, Error message coercion, distinct native IDs and original transport-error Rc identity are checked against exact maintained bodies; class construction and HTTP composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::get_account."
 
 [[symbol]]
 ts = "BybitInverseExchange.validateAccount"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/api_validation.rs::validate_derived_account"
 status = "divergent"
-note = "CHOSEN: owned plain JSON and optional-value tuple results replace the source anonymous object; executable properties, getters, prototypes, mutable nested aliases and callback mutation of response/error records are outside this host boundary. Rc JSON error records retain original callback rejection identity but omit JavaScript error stacks/prototypes. Rust Future starts on first poll and cancels on drop rather than Promise scheduling. Inverse synchronous balance invocation failure is caught and logged inside validation; its asynchronous rejection is swallowed. Decoded object-only response ingress preserves retMsg includes behavior and distinct response.data.message versus msg fallbacks. Transport, formatBalance and constructor composition are separate pending claims."
+note = "CHOSEN: owned plain JSON and optional-value tuple results replace the source anonymous object; executable properties, getters, prototypes, mutable nested aliases and callback mutation of response/error records are outside this host boundary. Rc JSON error records retain original callback rejection identity but omit JavaScript error stacks/prototypes. Rust Future starts on first poll and cancels on drop rather than Promise scheduling. Inverse synchronous balance invocation failure is caught and logged inside validation; its asynchronous rejection is swallowed. Decoded object-only response ingress preserves retMsg includes behavior and distinct response.data.message versus msg fallbacks. Transport, formatBalance and constructor composition are separate pending claims. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::validate_derived_account."
 
 [[symbol]]
 ts = "BybitInverseExchange.start"
@@ -248,7 +248,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::fetch_margin_account_infos"
 status = "divergent"
-note = "CHOSEN: explicit async transport and fallible state/log callbacks replace receiver-owned XHR and properties. Plain owned JSON records exclude executable getters, callback mutation of the response, primitive/null top-level data, nested value alias identity and lone UTF-16 surrogates. Logging precedes throwing and marginType precedes unifiedMarginStatus; callback failures preserve Rc error identity and partial updates. Native Error carries name/message without JavaScript stack/prototype identity. Linear/inverse set marginType; spot deliberately updates only unifiedMarginStatus. Constructors and transport composition remain pending."
+note = "CHOSEN: explicit async transport and fallible state/log callbacks replace receiver-owned XHR and properties. Plain owned JSON records exclude executable getters, callback mutation of the response, primitive/null top-level data, nested value alias identity and lone UTF-16 surrogates. Logging precedes throwing and marginType precedes unifiedMarginStatus; callback failures preserve Rc error identity and partial updates. Native Error carries name/message without JavaScript stack/prototype identity. Linear/inverse set marginType; spot deliberately updates only unifiedMarginStatus. Constructors and transport composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::fetch_margin_account_infos."
 
 [[symbol]]
 ts = "BybitInverseExchange.tick"
@@ -264,7 +264,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::fetch_balance"
 status = "divergent"
-note = "CHOSEN: native generic future and lazy disposal/store/formatter callbacks replace JavaScript receiver access and Promise scheduling; Rust begins execution when polled. Reads occur after the raw request resolves, formatter is skipped when disposed, and raw/stored/formatted values plus rejection identity are forwarded unchanged. Native assertions compare retained Rc values before callback observations. Lifecycle composition remains pending."
+note = "CHOSEN: native generic future and lazy disposal/store/formatter callbacks replace JavaScript receiver access and Promise scheduling; Rust begins execution when polled. Reads occur after the raw request resolves, formatter is skipped when disposed, and raw/stored/formatted values plus rejection identity are forwarded unchanged. Native assertions compare retained Rc values before callback observations. Lifecycle composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::fetch_balance."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchRawBalance"
@@ -288,7 +288,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/api_validation.rs::fetch_api_key_info"
 status = "divergent"
-note = "CHOSEN: BybitInverseExchange uses immutable owned plain-object response data and JSON result with an explicit cache setter: primitive or null top-level responses are excluded (source primitive v lookup throws TypeError, native lookup treats it as missing); executable getters, prototype lookup, mutable nested aliases and response mutation during callbacks are excluded. Source v alias lookup and Number coercion, emission before creating an Error, and setter rejection order are preserved; Rc records omit JS Error stack/prototype identity. The captured retMsg is not reread after emission. Future first-poll/cancellation differs from Promise scheduling; concrete typed cache/transport/constructor composition is pending."
+note = "CHOSEN: BybitInverseExchange uses immutable owned plain-object response data and JSON result with an explicit cache setter: primitive or null top-level responses are excluded (source primitive v lookup throws TypeError, native lookup treats it as missing); executable getters, prototype lookup, mutable nested aliases and response mutation during callbacks are excluded. Source v alias lookup and Number coercion, emission before creating an Error, and setter rejection order are preserved; Rc records omit JS Error stack/prototype identity. The captured retMsg is not reread after emission. Future first-poll/cancellation differs from Promise scheduling; concrete typed cache/transport/constructor composition is pending. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::fetch_api_key_info."
 
 [[symbol]]
 ts = "BybitInverseExchange#fetchAndCacheApiKeyInfo"
@@ -296,7 +296,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/api_validation.rs::fetch_and_cache_inverse_api_key_info"
 status = "divergent"
-note = "CHOSEN: BybitInverseExchange explicit callbacks adapt the anonymous user-data object to its bound bybitinverseApiKeyInfo key and optional retained Rc JSON value. Owned plain JSON excludes executable getters/prototypes and mutable nested aliases; API-info state is reread after batch/user callbacks, and fallback log rejection propagates. Native Future starts on first poll and cancels on drop rather than Promise scheduling. Concrete store/typed-cache construction remains pending; this body preserves source catch/log and partial update order."
+note = "CHOSEN: BybitInverseExchange explicit callbacks adapt the anonymous user-data object to its bound bybitinverseApiKeyInfo key and optional retained Rc JSON value. Owned plain JSON excludes executable getters/prototypes and mutable nested aliases; API-info state is reread after batch/user callbacks, and fallback log rejection propagates. Native Future starts on first poll and cancels on drop rather than Promise scheduling. Concrete store/typed-cache construction remains pending; this body preserves source catch/log and partial update order. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::fetch_and_cache_inverse_api_key_info."
 
 [[symbol]]
 ts = "BybitInverseExchange#updateBatchLimitBasedOnVipLevel"
@@ -304,7 +304,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/api_validation.rs::update_batch_limit_based_on_vip_level"
 status = "ported"
-note = "BybitInverseExchange method body preserves declared string VIP getter rereads, strict UNIFIED selection, the maintained primary rate table (also imported by inverse), and the >=20 upgrade without resetting a lower-rate batch. Setter precedes logging and callback failures propagate with partial state. Actual typed table fields and f64 batch values are read directly; explicit getters/setter/log callbacks supply the receiver. No constructor/cache population claim."
+note = "BybitInverseExchange method body preserves declared string VIP getter rereads, strict UNIFIED selection, the maintained primary rate table (also imported by inverse), and the >=20 upgrade without resetting a lower-rate batch. Setter precedes logging and callback failures propagate with partial state. Actual typed table fields and f64 batch values are read directly; explicit getters/setter/log callbacks supply the receiver. No constructor/cache population claim. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::update_batch_limit_based_on_vip_level."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchOrders"
@@ -344,7 +344,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers_without_parse"
 status = "ported"
-note = "BybitInverseExchange: exact eagerly-started reader body, awaits raw result before disposal lookup, returns a fresh empty array when disposed and otherwise the original raw value including null/undefined. Mutable array/object aliases and original callback errors are retained. Maintained dependencies and class composition remain separate rows."
+note = "BybitInverseExchange: exact eagerly-started reader body, awaits raw result before disposal lookup, returns a fresh empty array when disposed and otherwise the original raw value including null/undefined. Mutable array/object aliases and original callback errors are retained. Maintained dependencies and class composition remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers_without_parse."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchTickers"
@@ -352,7 +352,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers"
 status = "ported"
-note = "BybitInverseExchange: exact eagerly-started parsed reader body, awaits raw result before disposal, returns original stored tickers if disposed and otherwise calls parse with the original raw value and preserves its return/error. Mutable alias effects in disposal/parse callbacks are witnessed. Parser and constructor composition remain separate rows."
+note = "BybitInverseExchange: exact eagerly-started parsed reader body, awaits raw result before disposal, returns original stored tickers if disposed and otherwise calls parse with the original raw value and preserves its return/error. Mutable alias effects in disposal/parse callbacks are witnessed. Parser and constructor composition remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchTickersRaw"
@@ -360,7 +360,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ticker_readers.rs::fetch_inverse_tickers_raw"
 status = "ported"
-note = "BybitInverseExchange: exact categories-before-bind evaluation, one captured helper binding even for empty categories, eager indexed requests with original category-array handle, host Promise.all equivalent, ordered spread flattening (including string codepoints), and null-sentinel failure. Retains element identities and original rejection; host all contract is ordered results/first rejection/continued sibling ownership, with settlement asserted before sibling drain. Host scheduler/transport and class construction remain separate dependencies."
+note = "BybitInverseExchange: exact categories-before-bind evaluation, one captured helper binding even for empty categories, eager indexed requests with original category-array handle, host Promise.all equivalent, ordered spread flattening (including string codepoints), and null-sentinel failure. Retains element identities and original rejection; host all contract is ordered results/first rejection/continued sibling ownership, with settlement asserted before sibling drain. Host scheduler/transport and class construction remain separate dependencies. Renamed Rust target: safe-cex-venue-bybit/src/ticker_readers.rs::fetch_inverse_tickers_raw."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchTickersRawHelper"
@@ -368,7 +368,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers_raw_helper"
 status = "ported"
-note = "BybitInverseExchange: exact eager ticker GET with supplied category, strict get-key retMsg/ret_msg OK status, original error-message logging and fresh [null] sentinel on rejection; successful data.result.list is forwarded with identity, missing/undefined/null/nonarray values retained and malformed result access errors preserved. TickerValue carries mutable retained transport records, arrays and primitive/undefined values; executable prototypes/accessors and full transport/class construction are outside the maintained JSON ingress dependency."
+note = "BybitInverseExchange: exact eager ticker GET with supplied category, strict get-key retMsg/ret_msg OK status, original error-message logging and fresh [null] sentinel on rejection; successful data.result.list is forwarded with identity, missing/undefined/null/nonarray values retained and malformed result access errors preserved. TickerValue carries mutable retained transport records, arrays and primitive/undefined values; executable prototypes/accessors and full transport/class construction are outside the maintained JSON ingress dependency. Renamed Rust target: safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers_raw_helper."
 
 [[symbol]]
 ts = "BybitInverseExchange.parseTickers"
@@ -472,7 +472,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcv"
 status = "ported"
-note = "Exact synchronous BybitInverseExchange body: resolves publicInverseWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows."
+note = "Exact synchronous BybitInverseExchange body: resolves publicInverseWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcv."
 
 [[symbol]]
 ts = "BybitInverseExchange.listenOHLCVs"
@@ -480,7 +480,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs"
 status = "ported"
-note = "Exact synchronous BybitInverseExchange bulk candle wrapper: forwards original options and callback to publicInverseWebsocket.listenOHLCVs, deliberately discards the method return and propagates original lookup/call/callback errors. Native unit corresponds to source undefined. Receiver replacement and argument mutation are checked; full class/socket composition remains separate rows."
+note = "Exact synchronous BybitInverseExchange bulk candle wrapper: forwards original options and callback to publicInverseWebsocket.listenOHLCVs, deliberately discards the method return and propagates original lookup/call/callback errors. Native unit corresponds to source undefined. Receiver replacement and argument mutation are checked; full class/socket composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs."
 
 [[symbol]]
 ts = "BybitInverseExchange.listenOrderBook"
@@ -488,7 +488,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_order_book"
 status = "ported"
-note = "Exact synchronous BybitInverseExchange body: resolves publicInverseWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include unchanged symbol forwarding, callback invocation and socket replacement during method lookup. Class/socket construction remains separate pending rows."
+note = "Exact synchronous BybitInverseExchange body: resolves publicInverseWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include unchanged symbol forwarding, callback invocation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_order_book."
 
 [[symbol]]
 ts = "BybitInverseExchange._hasFullSizedPositionOppositeSide"
@@ -504,7 +504,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::get_order_execution_params"
 status = "divergent"
-note = "CHOSEN: already-decoded immutable BybitPlaceOrderOpts reuse the maintained native execution validator, including its stronger extension/input boundaries. Category and logging operations are explicit synchronous host callbacks with Rc ExchangeError name/message/metadata identity; arbitrary JS thrown primitives, error prototypes/stack, executable option getters and category/log callback mutation of the immutable option object are excluded. A logger failure replaces the caught error exactly; original error is forwarded when logging succeeds. Constructor/order consumer wiring remains pending."
+note = "CHOSEN: already-decoded immutable BybitPlaceOrderOpts reuse the maintained native execution validator, including its stronger extension/input boundaries. Category and logging operations are explicit synchronous host callbacks with Rc ExchangeError name/message/metadata identity; arbitrary JS thrown primitives, error prototypes/stack, executable option getters and category/log callback mutation of the immutable option object are excluded. A logger failure replaces the caught error exactly; original error is forwarded when logging succeeds. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::get_order_execution_params."
 
 [[symbol]]
 ts = "BybitInverseExchange.placeOrder"
@@ -608,7 +608,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::set_inverse_leverage"
 status = "divergent"
-note = "CHOSEN: native immutable market-limit tuple is read at lookup rather than rereading a mutable market after the initial awaited fetch; retained plain JSON positions require declared numeric leverage, exclude executable properties, and preserve missing/null default one. First-poll Futures replace eager JavaScript invocation. Inverse body retains NaN/signed-zero clamp semantics, strict change detection and strict OK status rejection (including not-modified responses), initial upsert and post-success refresh; fetched batch allocations and host errors are retained. Full class/constructor composition remains pending."
+note = "CHOSEN: native immutable market-limit tuple is read at lookup rather than rereading a mutable market after the initial awaited fetch; retained plain JSON positions require declared numeric leverage, exclude executable properties, and preserve missing/null default one. First-poll Futures replace eager JavaScript invocation. Inverse body retains NaN/signed-zero clamp semantics, strict change detection and strict OK status rejection (including not-modified responses), initial upsert and post-success refresh; fetched batch allocations and host errors are retained. Full class/constructor composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::set_inverse_leverage."
 
 [[symbol]]
 ts = "BybitInverseExchange.changePositionMode"
@@ -616,7 +616,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_position_mode"
 status = "divergent"
-note = "CHOSEN: inverse async wrapper executes at native Future first poll and cancellation follows drop, whereas TypeScript invokes its helper eagerly and its promise remains active. Awaited body preserves explicit symbol reset, then exactly three helper arguments hedged/linear/USDT and original callback rejection. Standard declared string/bool inputs are retained; full class/helper composition remains separate rows."
+note = "CHOSEN: inverse async wrapper executes at native Future first poll and cancellation follows drop, whereas TypeScript invokes its helper eagerly and its promise remains active. Awaited body preserves explicit symbol reset, then exactly three helper arguments hedged/linear/USDT and original callback rejection. Standard declared string/bool inputs are retained; full class/helper composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_position_mode."
 
 [[symbol]]
 ts = "BybitInverseExchange.changePositionModeHelper"
@@ -624,7 +624,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper"
 status = "divergent"
-note = "CHOSEN: inverse optional undefined category/coin/symbol properties become omitted native request-map keys, and first-poll Futures replace eager promises; plain JSON response records exclude executable properties. Native body still refreshes all positions and optional symbol positions before checking direct retMsg, logs partial success without throwing, and propagates the original callback error/batch allocation. Constructor wiring remains pending."
+note = "CHOSEN: inverse optional undefined category/coin/symbol properties become omitted native request-map keys, and first-poll Futures replace eager promises; plain JSON response records exclude executable properties. Native body still refreshes all positions and optional symbol positions before checking direct retMsg, logs partial success without throwing, and propagates the original callback error/batch allocation. Constructor wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper."
 
 [[symbol]]
 ts = "BybitInverseExchange.changeMarginType"
@@ -632,7 +632,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_margin_type"
 status = "divergent"
-note = "CHOSEN: inverse MarginType setter and host operations are explicit callbacks on plain retained JSON records; executable reason coercion/prototypes and eager promise timing are outside this boundary. Native body preserves short-circuit status/code checks, truthy reason-message filtering and joined-message precedence, ignores symbol, sets margin type before awaiting positions, and does not refresh on rejected status. Full class construction remains pending."
+note = "CHOSEN: inverse MarginType setter and host operations are explicit callbacks on plain retained JSON records; executable reason coercion/prototypes and eager promise timing are outside this boundary. Native body preserves short-circuit status/code checks, truthy reason-message filtering and joined-message precedence, ignores symbol, sets margin type before awaiting positions, and does not refresh on rejected status. Full class construction remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_margin_type."
 
 [[symbol]]
 ts = "BybitInverseExchange.mapPosition"
@@ -656,7 +656,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::fetch_inverse_position_mode"
 status = "divergent"
-note = "CHOSEN: retained JSON and first-poll Futures exclude executable properties/eager promise timing; mapper receives row/index without the JavaScript original array third argument, and missing mapped mode returns None. Inverse body retains strict OK status, cached first-position precedence, optional missing/null list upsert as None, nonarray-list TypeError, and first mapped mode. Undefined response and position properties are represented by absence. Full class construction remains pending."
+note = "CHOSEN: retained JSON and first-poll Futures exclude executable properties/eager promise timing; mapper receives row/index without the JavaScript original array third argument, and missing mapped mode returns None. Inverse body retains strict OK status, cached first-position precedence, optional missing/null list upsert as None, nonarray-list TypeError, and first mapped mode. Undefined response and position properties are represented by absence. Full class construction remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::fetch_inverse_position_mode."
 
 [[symbol]]
 ts = "BybitInverseExchange#getOrderPositionIdx"
@@ -664,7 +664,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::get_order_position_idx"
 status = "divergent"
-note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Inert UTF-8 JSON option maps retain arbitrary own field values; inherited/getter fields and lone UTF-16 surrogates are excluded. Symbol is captured before await as an owned JSON snapshot; malformed object/array-valued symbols retain values but exclude nested JS alias identity, chosen for the owned async host argument ABI. Side/reduceOnly are read from the live RefCell after await, with strict buy comparison and JS truthiness. Host errors are forwarded unchanged. Position-mode transport composition remains pending."
+note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Inert UTF-8 JSON option maps retain arbitrary own field values; inherited/getter fields and lone UTF-16 surrogates are excluded. Symbol is captured before await as an owned JSON snapshot; malformed object/array-valued symbols retain values but exclude nested JS alias identity, chosen for the owned async host argument ABI. Side/reduceOnly are read from the live RefCell after await, with strict buy comparison and JS truthiness. Host errors are forwarded unchanged. Position-mode transport composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::get_order_position_idx."
 
 [[symbol]]
 ts = "BybitInverseExchange#getStopOrderPositionIdx"
@@ -672,4 +672,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx"
 status = "divergent"
-note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Owned inert UTF-8 JSON map copies preserve own fields and remove reduceOnly before calling the explicit index host. Nested JS object aliases, inherited/getter fields and lone UTF-16 surrogates are outside this clone ABI. Awaited numeric indexes map 0->0, 1->2, 2->1, with other numbers represented as undefined; native host errors retain identity. Constructor/order consumer wiring remains pending."
+note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Owned inert UTF-8 JSON map copies preserve own fields and remove reduceOnly before calling the explicit index host. Nested JS object aliases, inherited/getter fields and lone UTF-16 surrogates are outside this clone ABI. Awaited numeric indexes map 0->0, 1->2, 2->1, with other numbers represented as undefined; native host errors retain identity. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx."

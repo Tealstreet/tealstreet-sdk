@@ -58,6 +58,8 @@ pub trait ExchangeImports {
         rate: Option<crate::private_session::RateHook>,
     ) -> Result<EventValue, Failure>;
     fn rate_limit(&self, client: EventValue, max_rps: f64) -> Result<EventValue, Failure>;
+    /// `args` is the query params for GET/DELETE (`xhr.get(path, { params })`) and the
+    /// body for POST/PUT (`xhr.post(path, data)`); resolves to `response.data`.
     fn request(
         &self,
         client: EventValue,
@@ -100,6 +102,8 @@ pub trait ExchangeImports {
         &self,
         signer: EventValue,
     ) -> Result<crate::api_factory::RemoteSignCall, Failure>;
+    /// Receives the exchange before any client is created; hosts keep it weakly.
+    fn bind_owner(&self, _owner: Weak<ExchangeState>) {}
     fn virtual_now(&self) -> f64;
     fn uuid(&self) -> String;
     fn dayjs(&self, value: Option<f64>) -> Result<f64, Failure>;
@@ -227,6 +231,23 @@ fn json_value(v: &EventValue) -> Result<Value, Failure> {
     serde_json::from_str(&text).map_err(|e| failure(e.to_string()))
 }
 
+/// The typed IncomeRecord boundary: Binance sends tranId/tradeId as JSON numbers, which
+/// TS keeps raw and every consumer interpolates; the typed record carries String(id).
+pub(crate) fn income_records(
+    value: &EventValue,
+) -> Result<Vec<safe_cex_types::IncomeRecord>, Failure> {
+    let mut rows = json_value(value)?;
+    if let Value::Array(items) = &mut rows {
+        for item in items.iter_mut() {
+            for key in ["tranId", "tradeId"] {
+                if let Some(id) = item.get(key).and_then(Value::as_f64) {
+                    item[key] = Value::String(safe_cex_num::js_number_string(id));
+                }
+            }
+        }
+    }
+    typed(&EventValue::from_json(rows))
+}
 fn typed<T: serde::de::DeserializeOwned>(v: &EventValue) -> Result<T, Failure> {
     crate::class_decode::decode(v.clone()).map_err(|e| failure(e.to_string()))
 }
@@ -300,6 +321,7 @@ impl ExchangeState {
             resync: Default::default(),
             root: OnceCell::new(),
         });
+        owner.imports.bind_owner(Rc::downgrade(&owner));
         let bindings = Rc::new(Constructor(owner.clone(), OnceCell::new(), OnceCell::new()));
         let name = decoded(&owner.base.name)?;
         let store = record([]);
@@ -417,7 +439,7 @@ impl ExchangeState {
             .update(update, false)
             .map_err(|error| Rc::new(error.into()))
     }
-    fn emit(&self, message: EventValue) -> Result<(), Failure> {
+    pub(crate) fn emit(&self, message: EventValue) -> Result<(), Failure> {
         self.base
             .emit_and_log_error(
                 safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(message.text()?),
@@ -575,6 +597,12 @@ impl crate::private_session::ConstructorBindings for Constructor {
                         virtual_now: Rc::new(move || time.virtual_now()),
                     },
                 )?;
+                if let Some(socket) = child.base.core_socket() {
+                    self.0.base.set_borrowed_socket(
+                        safe_cex_exchange::socket_lifecycle::SocketSlot::Private,
+                        &socket,
+                    );
+                }
                 self.0
                     .private
                     .set(Rc::downgrade(&child))
@@ -1224,9 +1252,11 @@ impl crate::order_operations::OrderBindings for Context {
         }))
     }
     fn capture_is_algo(&mut self) -> Result<crate::order_operations::Sync, Failure> {
+        // SDK callers arrive with the decoded string spelling, class callers with the native enum.
         Ok(Rc::new(|value| {
-            let EventValue::Enum(PrivateEnum::Type(kind)) = value else {
-                return Err(failure("native order type required"));
+            let kind = match value {
+                EventValue::Enum(PrivateEnum::Type(kind)) => kind,
+                other => typed::<safe_cex_types::OrderType>(&other)?,
             };
             Ok(EventValue::Bool(crate::order_logic::is_algo_order_type(
                 kind,
@@ -1543,7 +1573,7 @@ impl crate::public_rest::RestBindings for RestContext {
             if let Some(limit) = p.limit {
                 value.define("limit", number(limit));
             }
-            record([("params", value)])
+            value
         });
         let request = self.0.http(
             match client {
@@ -1639,49 +1669,53 @@ impl crate::public_rest::RestBindings for RestContext {
     }
 }
 fn market_value(m: &crate::public_rest::RestMarket) -> Result<EventValue, Failure> {
-    Ok(record([
-        ("id", string(&m.id)),
-        (
-            "symbol",
-            m.symbol
-                .clone()
-                .map_or(EventValue::Undefined, crate::private_session::native),
-        ),
-        (
-            "base",
-            m.base
-                .clone()
-                .map_or(EventValue::Undefined, crate::private_session::native),
-        ),
-        (
-            "quote",
-            m.quote
-                .clone()
-                .map_or(EventValue::Undefined, crate::private_session::native),
-        ),
-        ("active", EventValue::Bool(m.active)),
-        (
-            "isSpot",
-            m.is_spot.map_or(EventValue::Undefined, EventValue::Bool),
-        ),
-        ("precision", decoded(&m.precision)?),
-        (
-            "limits",
-            record([
-                ("amount", decoded(&m.amount)?),
-                (
-                    "leverage",
-                    record([
-                        ("min", number(m.leverage_min)),
-                        (
-                            "max",
-                            crate::private_session::native(m.leverage_max.clone()),
-                        ),
-                    ]),
-                ),
-            ]),
-        ),
-    ]))
+    // Only the Spot literal writes isSpot (binancespot.exchange.ts:220); Futures/PM omit the key.
+    let is_spot = m.is_spot.map(|v| ("isSpot", EventValue::Bool(v)));
+    Ok(record(
+        [
+            ("id", string(&m.id)),
+            (
+                "symbol",
+                m.symbol
+                    .clone()
+                    .map_or(EventValue::Undefined, crate::private_session::native),
+            ),
+            (
+                "base",
+                m.base
+                    .clone()
+                    .map_or(EventValue::Undefined, crate::private_session::native),
+            ),
+            (
+                "quote",
+                m.quote
+                    .clone()
+                    .map_or(EventValue::Undefined, crate::private_session::native),
+            ),
+            ("active", EventValue::Bool(m.active)),
+        ]
+        .into_iter()
+        .chain(is_spot)
+        .chain([
+            ("precision", decoded(&m.precision)?),
+            (
+                "limits",
+                record([
+                    ("amount", decoded(&m.amount)?),
+                    (
+                        "leverage",
+                        record([
+                            ("min", number(m.leverage_min)),
+                            (
+                                "max",
+                                crate::private_session::native(m.leverage_max.clone()),
+                            ),
+                        ]),
+                    ),
+                ]),
+            ),
+        ]),
+    ))
 }
 impl ExchangeState {
     pub fn public_only(&self) -> bool {
@@ -1892,6 +1926,9 @@ impl ExchangeState {
 }
 
 impl PrivateParent for ExchangeState {
+    fn socket_parent(&self) -> Option<Rc<dyn WsParent>> {
+        self.this.upgrade().map(|owner| owner as Rc<dyn WsParent>)
+    }
     fn options(&self) -> Result<EventValue, Failure> {
         Ok(self.options.clone())
     }
@@ -2319,10 +2356,7 @@ impl ExchangeState {
                 Client::Private,
                 HttpMethod::Delete,
                 path,
-                Some(record([(
-                    "params",
-                    record([("symbol", string(request.symbol))]),
-                )])),
+                Some(record([("symbol", string(request.symbol))])),
             )?;
             Ok::<_, Failure>(async move { response.await.map(|_| ()) })
         };

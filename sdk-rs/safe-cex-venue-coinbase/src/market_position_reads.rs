@@ -167,6 +167,7 @@ fn position(symbol: String) -> Position {
         info: None,
         extra: None,
         last_update: None,
+        option: None,
     }
 }
 fn all<T: Clone + 'static>(

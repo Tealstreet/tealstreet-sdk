@@ -15,7 +15,13 @@ rest.noteRestSuccess('bybit',response,1120); response.headers['X-BAPI-LIMIT-STAT
 rest.noteRestFailure('bybit',{config,response,code:'ERR_BAD_RESPONSE',message:'Request failed 403',name:'AxiosError'},1200);
 const stats=rest.getVenueRestStats(1200).bybit, sample=rest.drainVenueRestFailureSamples()[0];
 assert.equal(stats.requests,3); assert.equal(stats.totalP50Ms,140); assert.equal(stats.totalP95Ms,200); assert.equal(stats.minQuotaRemaining,7);
-assert.equal(sample.restProxyHeaderSent,'bearer'); assert.equal(sample.bodyKind,'cloudfront'); assert.equal(sample.bodySnippet,'<html>CloudFront denied <redacted></html>'); assert.equal(sample.path,'/wallet-balance'); assert.deepEqual(Object.keys(sample.headers),['server','x-bapi-limit-status']);
+assert.equal(sample.restProxyHeaderSent,'bearer'); assert.equal(sample.bodyKind,'cloudfront'); assert.equal(sample.bodySnippet,'CloudFront denied <redacted>'); assert.equal(sample.path,'/wallet-balance'); assert.deepEqual(Object.keys(sample.headers),['server','x-bapi-limit-status']);
+rest.resetVenueRestDiagnostics();rest.noteRestFailure('signer',{message:'Signing request abc timed out'},5);
+{const unsent=rest.getVenueRestStats(5).signer;assert.deepEqual([unsent.requests,unsent.failures,unsent.unsentSigning],[0,0,1],'REST unsent signing is not a venue failure');assert.deepEqual(unsent.statusCounts,{});}
+rest.noteRestFailure('signer',{message:'Signing request abc timed out',response:{}},6);
+{const answered=rest.getVenueRestStats(6).signer;assert.deepEqual([answered.requests,answered.failures,answered.unsentSigning],[1,1,1],'REST a venue response means the request was sent');}
+assert.deepEqual(rest.drainVenueRestFailureSamples().map(s=>s.unsentSigning),[true,false]);
+for(const [body,visible] of [['<html><head><style>p{}</style><SCRIPT>x</script></head><body> Reason \n here </body></html>','Reason here'],['<html><style>a<p>b</p>','a b']]){rest.noteRestFailure('page',{response:{data:body,headers:{}}},7);assert.equal(rest.drainVenueRestFailureSamples()[0].bodySnippet,visible,'REST visible text');}
 for (const arrivals of [['0','-0'],['-0','0']]) {
  rest.resetVenueRestDiagnostics();for(const value of arrivals)rest.noteRestSuccess('zero',{headers:{'x-bapi-limit-status':value}},1);
  assert.ok(Object.is(rest.getVenueRestStats(1).zero.minQuotaRemaining,-0),'REST native quota Math.min signed zero');

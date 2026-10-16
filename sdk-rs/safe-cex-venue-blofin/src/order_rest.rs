@@ -566,6 +566,7 @@ fn from_order(order: &Order) -> PlaceOrderOpts {
         client_order_id: None,
         max_slippage_pct: None,
         close: order.close,
+        implied_volatility: None,
     }
 }
 pub async fn cancel_orders<E: std::fmt::Display>(

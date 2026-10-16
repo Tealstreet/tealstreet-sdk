@@ -109,6 +109,7 @@ fn actual_typescript_position_reads() {
                 info: None,
                 extra: None,
                 last_update: None,
+                option: None,
             };
             let body = js_deserialize_passthrough(&mut serde_json::Deserializer::from_str(
                 &serde_json::to_string(&f["body"]).unwrap(),

@@ -73,3 +73,20 @@ serialized comparison. The new direct native field supplement catches it.
 Its exact call site, exits and restored results are retained in
 REGISTRY_CHOICE_GATE_EXITS.md; it is neither a hidden survivor nor a runtime
 repair attributed to this96-row rationale cohort.
+
+## Addendum (2026-10-16): Rust constructor table
+
+The sentence "Typed constructor capabilities must not be reported as completed
+static venue linking" no longer covers two names: `backpack` and `binance` are
+statically linked on the native Rust path. `safe-cex-registry/src/rust_venues.rs`
+maps each of those names to its venue constructor, behind `ConstructionPath::Rust`.
+
+This leaves the cohort above unchanged:
+- the 94 loader entries;
+- the 2 registry-object rationales;
+- the default module-host route and its CHOSEN price.
+
+The two `exchangeRegistry.<name>` rows stay divergent, and claim the table entry
+and its selection items as split members. Each further venue joins the table in
+its own follow-up. See [the scope amendment](MANIFEST-SPEC.md#registry-loader-choice)
+and `safe-cex-registry/CONSTRUCTION.md`.

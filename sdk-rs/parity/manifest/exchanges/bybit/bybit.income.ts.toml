@@ -30,9 +30,9 @@ note = "CHOSEN: retained JSON object rows and UTF-8 strings exclude executable/g
 ts = "BybitIncomeContext"
 kind = "type"
 layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::BybitIncomeContext"
+rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::BybitIncomeContext", "safe-cex-venue-bybit/src/ledger_history.rs::IncomeCategory", "safe-cex-venue-bybit/src/ledger_history.rs::IncomeCategory::as_str", "safe-cex-venue-bybit/src/ledger_history.rs::IncomeAccountType", "safe-cex-venue-bybit/src/ledger_history.rs::IncomeAccountType::as_str" ]
 status = "ported"
-note = "Generic XHR/log handles and closed linear/inverse plus UNIFIED/CONTRACT Rust unions mirror the interface; runtime readers use live host property access."
+note = "Generic XHR/log handles and closed linear/inverse plus UNIFIED/CONTRACT Rust unions mirror the interface; runtime readers use live host property access. Union split: safe-cex-venue-bybit/src/ledger_history.rs::BybitIncomeContext is the interface; safe-cex-venue-bybit/src/ledger_history.rs::IncomeCategory with safe-cex-venue-bybit/src/ledger_history.rs::IncomeCategory::as_str and safe-cex-venue-bybit/src/ledger_history.rs::IncomeAccountType with safe-cex-venue-bybit/src/ledger_history.rs::IncomeAccountType::as_str are the closed linear|inverse and UNIFIED|CONTRACT literal unions and their exact wire strings."
 
 [[symbol]]
 ts = "fetchBybitIncomeHistory"

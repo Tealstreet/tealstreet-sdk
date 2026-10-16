@@ -24,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::reinit_on_throw"
 status = "divergent"
-note = "CHOSEN: generic Rust Future and caller-owned Cell flag replace JS Promise identity and microtask scheduling. Rejection is observed only on future resolution and forwards the original native error/value without cloning; success leaves the flag unchanged. Explicit host polling is the chosen async ABI. Constructor/request composition remains pending."
+note = "CHOSEN: generic Rust Future and caller-owned Cell flag replace JS Promise identity and microtask scheduling. Rejection is observed only on future resolution and forwards the original native error/value without cloning; success leaves the flag unchanged. Explicit host polling is the chosen async ABI. Constructor/request composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::reinit_on_throw."
 
 [[symbol]]
 ts = "BybitSpotExchange.get accountType"
@@ -32,7 +32,7 @@ kind = "accessor"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::account_type"
 status = "ported"
-note = "Strict numeric 1 selects CONTRACT; all other retained values select UNIFIED. Shared with the identical inverse getter."
+note = "Strict numeric 1 selects CONTRACT; all other retained values select UNIFIED. Shared with the identical inverse getter. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::account_type."
 
 [[symbol]]
 ts = "BybitSpotExchange.constructor"
@@ -48,7 +48,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::spot_get_ticker_symbols_for_public_stream"
 status = "divergent"
-note = "CHOSEN: typed Market rows and UTF-8 strings exclude malformed/executable rows and lone UTF-16 surrogates. An explicit host callback replaces the inherited subscription method; every market symbol is passed in source order with duplicates retained, and its return value is forwarded. Constructor composition remains pending."
+note = "CHOSEN: typed Market rows and UTF-8 strings exclude malformed/executable rows and lone UTF-16 surrogates. An explicit host callback replaces the inherited subscription method; every market symbol is passed in source order with duplicates retained, and its return value is forwarded. Constructor composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::spot_get_ticker_symbols_for_public_stream."
 
 [[symbol]]
 ts = "BybitSpotExchange.dispose"
@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/stream_delegation.rs::dispose_exchange"
 status = "ported"
-note = "Exact synchronous BybitSpotExchange disposal body: calls base disposal before publicWebsocket then privateWebsocket disposal, preserves getter/call ordering and short-circuits with original error identity. A public disposal that changes the private socket is observed before private lookup. Socket/constructor composition remains separate rows."
+note = "Exact synchronous BybitSpotExchange disposal body: calls base disposal before publicWebsocket then privateWebsocket disposal, preserves getter/call ordering and short-circuits with original error identity. A public disposal that changes the private socket is observed before private lookup. Socket/constructor composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::dispose_exchange."
 
 [[symbol]]
 ts = "BybitSpotExchange#shouldUseLocalRestOrderLifecycleFallback"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::should_use_local_rest_order_lifecycle_fallback"
 status = "ported"
-note = "Exact strict equality with the maintained Brazil site constant; no truthiness or coercion."
+note = "Exact strict equality with the maintained Brazil site constant; no truthiness or coercion. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::should_use_local_rest_order_lifecycle_fallback."
 
 [[symbol]]
 ts = "BybitSpotExchange.markOrderSeen"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::mark_order_seen"
 status = "divergent"
-note = "CHOSEN: ordered native Map storage and UTF-8 string keys exclude JS Map subclass/method overrides and lone UTF-16 surrogates. Deletes only the requested cache key; constructors and websocket composition remain pending."
+note = "CHOSEN: ordered native Map storage and UTF-8 string keys exclude JS Map subclass/method overrides and lone UTF-16 surrogates. Deletes only the requested cache key; constructors and websocket composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::mark_order_seen."
 
 [[symbol]]
 ts = "BybitSpotExchange#recordRecentlyPlacedOrderFromOpts"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::record_recently_placed_order"
 status = "divergent"
-note = "CHOSEN: typed shared Order/UTF-8 models exclude arbitrary executable rows and lone UTF-16 surrogates. Rc/RefCell retains mutable order identity; key evaluation precedes the explicit clock callback. Cache replacement retains insertion order. Site settings are read through a delayed callback after the clock and cache insertion. Explicit synchronous store callback receives native order references and can reenter or fail after insertion; ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Constructor and REST consumer wiring remain pending."
+note = "CHOSEN: typed shared Order/UTF-8 models exclude arbitrary executable rows and lone UTF-16 surrogates. Rc/RefCell retains mutable order identity; key evaluation precedes the explicit clock callback. Cache replacement retains insertion order. Site settings are read through a delayed callback after the clock and cache insertion. Explicit synchronous store callback receives native order references and can reenter or fail after insertion; ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Constructor and REST consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::record_recently_placed_order."
 
 [[symbol]]
 ts = "BybitSpotExchange#retireCancelledOrders"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::retire_cancelled_orders"
 status = "divergent"
-note = "CHOSEN: typed UTF-8 order IDs exclude lone UTF-16 surrogates and arbitrary JS method overrides. Site settings are read after cache deletion. Explicit synchronous remove callback receives the ordered IDs instead of fresh JS {id} objects, preserving duplicate IDs and callback failure after cache deletion. ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Empty input skips all host work. Constructor and cancel consumer wiring remain pending."
+note = "CHOSEN: typed UTF-8 order IDs exclude lone UTF-16 surrogates and arbitrary JS method overrides. Site settings are read after cache deletion. Explicit synchronous remove callback receives the ordered IDs instead of fresh JS {id} objects, preserving duplicate IDs and callback failure after cache deletion. ExchangeError retains name/message/metadata but excludes JS thrown object identity and stack. Empty input skips all host work. Constructor and cancel consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::retire_cancelled_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange#applyLocalOrderUpdateAfterRestWrite"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::apply_local_order_update_after_rest_write"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::apply_local_order_update_after_rest_write."
 
 [[symbol]]
 ts = "BybitSpotExchange#preserveRecentlyPlacedOrders"
@@ -112,7 +112,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/local_order_cache.rs::preserve_recently_placed_orders"
 status = "divergent"
-note = "CHOSEN: typed shared Order/UTF-8 models exclude executable/getter rows, JS Map method overrides and lone UTF-16 surrogates. Store orders are read lazily after the clock and for each preserved key. Store accessor callbacks model ordinary field reads; executable store getters that mutate the cache during iteration are excluded. Ordered native cache and Rc/RefCell preserve mutable order identity, first matching store reference, strict 8000ms expiration and IEEE nonfinite clock behavior. Chosen caller-owned native Vec snapshots carry ordered references; JavaScript fetched-array membership edits inside the clock and appended-result array object identity are outside this ABI. Empty/no-preservation results return the input vector. Constructor and snapshot consumer wiring remain pending."
+note = "CHOSEN: typed shared Order/UTF-8 models exclude executable/getter rows, JS Map method overrides and lone UTF-16 surrogates. Store orders are read lazily after the clock and for each preserved key. Store accessor callbacks model ordinary field reads; executable store getters that mutate the cache during iteration are excluded. Ordered native cache and Rc/RefCell preserve mutable order identity, first matching store reference, strict 8000ms expiration and IEEE nonfinite clock behavior. Chosen caller-owned native Vec snapshots carry ordered references; JavaScript fetched-array membership edits inside the clock and appended-result array object identity are outside this ABI. Empty/no-preservation results return the input vector. Constructor and snapshot consumer wiring remain pending. Renamed Rust target: safe-cex-venue-bybit/src/local_order_cache.rs::preserve_recently_placed_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange.getAccount"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::get_account"
 status = "divergent"
-note = "CHOSEN: standalone async transport callback receives the maintained ACCOUNT endpoint and returns a plain owned JSON data record; an ordered (userId, affiliateId) tuple replaces the anonymous JavaScript object. Optional values distinguish missing from null. Executable/getter/prototype properties, primitive/null top-level data, nested object alias identity, lone UTF-16 surrogates and JavaScript stack/prototype identity are excluded. Strict numeric retCode, Error message coercion, distinct native IDs and original transport-error Rc identity are checked against exact maintained bodies; class construction and HTTP composition remain pending."
+note = "CHOSEN: standalone async transport callback receives the maintained ACCOUNT endpoint and returns a plain owned JSON data record; an ordered (userId, affiliateId) tuple replaces the anonymous JavaScript object. Optional values distinguish missing from null. Executable/getter/prototype properties, primitive/null top-level data, nested object alias identity, lone UTF-16 surrogates and JavaScript stack/prototype identity are excluded. Strict numeric retCode, Error message coercion, distinct native IDs and original transport-error Rc identity are checked against exact maintained bodies; class construction and HTTP composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::get_account."
 
 [[symbol]]
 ts = "BybitSpotExchange.validateAccount"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/api_validation.rs::validate_derived_account"
 status = "divergent"
-note = "CHOSEN: owned plain JSON and optional-value tuple results replace the source anonymous object; executable properties, getters, prototypes, mutable nested aliases and callback mutation of response/error records are outside this host boundary. Rc JSON error records retain original callback rejection identity but omit JavaScript error stacks/prototypes. Rust Future starts on first poll and cancels on drop rather than Promise scheduling. Spot synchronous balance invocation failure is caught and logged inside validation; its asynchronous rejection is swallowed. Decoded object-only response ingress preserves retMsg includes behavior and distinct response.data.message versus msg fallbacks. Transport, formatBalance and constructor composition are separate pending claims."
+note = "CHOSEN: owned plain JSON and optional-value tuple results replace the source anonymous object; executable properties, getters, prototypes, mutable nested aliases and callback mutation of response/error records are outside this host boundary. Rc JSON error records retain original callback rejection identity but omit JavaScript error stacks/prototypes. Rust Future starts on first poll and cancels on drop rather than Promise scheduling. Spot synchronous balance invocation failure is caught and logged inside validation; its asynchronous rejection is swallowed. Decoded object-only response ingress preserves retMsg includes behavior and distinct response.data.message versus msg fallbacks. Transport, formatBalance and constructor composition are separate pending claims. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::validate_derived_account."
 
 [[symbol]]
 ts = "BybitSpotExchange.start"
@@ -168,7 +168,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::spot_fetch_margin_account_infos"
 status = "divergent"
-note = "CHOSEN: explicit async transport and fallible state/log callbacks replace receiver-owned XHR and properties. Plain owned JSON records exclude executable getters, callback mutation of the response, primitive/null top-level data, nested value alias identity and lone UTF-16 surrogates. Logging precedes throwing and marginType precedes unifiedMarginStatus; callback failures preserve Rc error identity and partial updates. Native Error carries name/message without JavaScript stack/prototype identity. Linear/inverse set marginType; spot deliberately updates only unifiedMarginStatus. Constructors and transport composition remain pending."
+note = "CHOSEN: explicit async transport and fallible state/log callbacks replace receiver-owned XHR and properties. Plain owned JSON records exclude executable getters, callback mutation of the response, primitive/null top-level data, nested value alias identity and lone UTF-16 surrogates. Logging precedes throwing and marginType precedes unifiedMarginStatus; callback failures preserve Rc error identity and partial updates. Native Error carries name/message without JavaScript stack/prototype identity. Linear/inverse set marginType; spot deliberately updates only unifiedMarginStatus. Constructors and transport composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::spot_fetch_margin_account_infos."
 
 [[symbol]]
 ts = "BybitSpotExchange.tick"
@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::fetch_balance"
 status = "divergent"
-note = "CHOSEN: native generic future and lazy disposal/store/formatter callbacks replace JavaScript receiver access and Promise scheduling; Rust begins execution when polled. Reads occur after the raw request resolves, formatter is skipped when disposed, and raw/stored/formatted values plus rejection identity are forwarded unchanged. Native assertions compare retained Rc values before callback observations. Lifecycle composition remains pending."
+note = "CHOSEN: native generic future and lazy disposal/store/formatter callbacks replace JavaScript receiver access and Promise scheduling; Rust begins execution when polled. Reads occur after the raw request resolves, formatter is skipped when disposed, and raw/stored/formatted values plus rejection identity are forwarded unchanged. Native assertions compare retained Rc values before callback observations. Lifecycle composition remains pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::fetch_balance."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchRawBalance"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_raw_balance"
 status = "ported"
-note = "Preserves strict retMsg checks, one-time unified promotion and fallback info identity through native capabilities."
+note = "Preserves strict retMsg checks, one-time unified promotion and fallback info identity through native capabilities. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_raw_balance."
 
 [[symbol]]
 ts = "BybitSpotExchange.formatBalance"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::format_balance"
 status = "ported"
-note = "Preserves native account info identity, nullish free-balance fallback, sequential coin assignment and literal zero Spot upnl."
+note = "Preserves native account info identity, nullish free-balance fallback, sequential coin assignment and literal zero Spot upnl. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::format_balance."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchOrders"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_orders"
 status = "ported"
-note = "Preserves cursor/list evaluation, accumulated pages, native bound flatMap and recently placed order preservation. Error paths set needsReinit and retain native errors."
+note = "Preserves cursor/list evaluation, accumulated pages, native bound flatMap and recently placed order preservation. Error paths set needsReinit and retain native errors. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchPositions"
@@ -224,7 +224,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers_without_parse"
 status = "ported"
-note = "BybitSpotExchange: exact eagerly-started reader body, awaits raw result before disposal lookup, returns a fresh empty array when disposed and otherwise the original raw value including null/undefined. Mutable array/object aliases and original callback errors are retained. Maintained dependencies and class composition remain separate rows."
+note = "BybitSpotExchange: exact eagerly-started reader body, awaits raw result before disposal lookup, returns a fresh empty array when disposed and otherwise the original raw value including null/undefined. Mutable array/object aliases and original callback errors are retained. Maintained dependencies and class composition remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers_without_parse."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchTickers"
@@ -232,7 +232,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers"
 status = "ported"
-note = "BybitSpotExchange: exact eagerly-started parsed reader body, awaits raw result before disposal, returns original stored tickers if disposed and otherwise calls parse with the original raw value and preserves its return/error. Mutable alias effects in disposal/parse callbacks are witnessed. Parser and constructor composition remain separate rows."
+note = "BybitSpotExchange: exact eagerly-started parsed reader body, awaits raw result before disposal, returns original stored tickers if disposed and otherwise calls parse with the original raw value and preserves its return/error. Mutable alias effects in disposal/parse callbacks are witnessed. Parser and constructor composition remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/ticker_readers.rs::fetch_tickers."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchTickersRaw"
@@ -240,7 +240,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ticker_readers.rs::fetch_spot_tickers_raw"
 status = "ported"
-note = "BybitSpotExchange: exact eager ticker GET with literal spot category, strict get-key retMsg/ret_msg OK status, original error-message logging and fresh [null] sentinel on rejection; successful data.result.list is forwarded with identity, missing/undefined/null/nonarray values retained and malformed result access errors preserved. TickerValue carries mutable retained transport records, arrays and primitive/undefined values; executable prototypes/accessors and full transport/class construction are outside the maintained JSON ingress dependency."
+note = "BybitSpotExchange: exact eager ticker GET with literal spot category, strict get-key retMsg/ret_msg OK status, original error-message logging and fresh [null] sentinel on rejection; successful data.result.list is forwarded with identity, missing/undefined/null/nonarray values retained and malformed result access errors preserved. TickerValue carries mutable retained transport records, arrays and primitive/undefined values; executable prototypes/accessors and full transport/class construction are outside the maintained JSON ingress dependency. Renamed Rust target: safe-cex-venue-bybit/src/ticker_readers.rs::fetch_spot_tickers_raw."
 
 [[symbol]]
 ts = "BybitSpotExchange.parseTickers"
@@ -256,7 +256,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_markets"
 status = "ported"
-note = "Preserves one-level native flatten, strict-null failure detection and stored-markets identity on failure."
+note = "Preserves one-level native flatten, strict-null failure detection and stored-markets identity on failure. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_markets."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchMarketsHelper"
@@ -272,7 +272,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_ohlcv"
 status = "ported"
-note = "Preserves limit/default truthiness, interval iterator elision, native date arithmetic and optional-list mapping before timestamp sort."
+note = "Preserves limit/default truthiness, interval iterator elision, native date arithmetic and optional-list mapping before timestamp sort. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_ohlcv."
 
 [[symbol]]
 ts = "BybitSpotExchange.listenOHLCV"
@@ -280,7 +280,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv"
 status = "ported"
-note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows."
+note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv."
 
 [[symbol]]
 ts = "BybitSpotExchange.listenOrderBook"
@@ -288,7 +288,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book"
 status = "ported"
-note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include unchanged symbol forwarding, callback invocation and socket replacement during method lookup. Class/socket construction remains separate pending rows."
+note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include unchanged symbol forwarding, callback invocation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book."
 
 [[symbol]]
 ts = "BybitSpotExchange._hasFullSizedPositionOppositeSide"
@@ -296,7 +296,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::has_full_sized_position_opposite_side"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::has_full_sized_position_opposite_side."
 
 [[symbol]]
 ts = "BybitSpotExchange#getOrderExecutionParams"
@@ -304,7 +304,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_execution_params"
 status = "divergent"
-note = "CHOSEN: already-decoded immutable BybitPlaceOrderOpts reuse the maintained native execution validator, including its stronger extension/input boundaries. Category and logging operations are explicit synchronous host callbacks with Rc ExchangeError name/message/metadata identity; arbitrary JS thrown primitives, error prototypes/stack, executable option getters and category/log callback mutation of the immutable option object are excluded. A logger failure replaces the caught error exactly; original error is forwarded when logging succeeds. Constructor/order consumer wiring remains pending."
+note = "CHOSEN: already-decoded immutable BybitPlaceOrderOpts reuse the maintained native execution validator, including its stronger extension/input boundaries. Category and logging operations are explicit synchronous host callbacks with Rc ExchangeError name/message/metadata identity; arbitrary JS thrown primitives, error prototypes/stack, executable option getters and category/log callback mutation of the immutable option object are excluded. A logger failure replaces the caught error exactly; original error is forwarded when logging succeeds. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_execution_params."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeOrder"
@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order"
 status = "ported"
-note = "Preserves preflight/delegation order, payload splitting, native client-ID guard and original unknown-outcome errors. Source attached TP consults slTriggerType; compacted successful responses retain source payload indexing."
+note = "Preserves preflight/delegation order, payload splitting, native client-ID guard and original unknown-outcome errors. Source attached TP consults slTriggerType; compacted successful responses retain source payload indexing. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::place_order."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeOrders"
@@ -320,7 +320,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::place_orders"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::place_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeStopLossOrTakeProfit"
@@ -328,7 +328,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::place_stop_loss_or_take_profit."
 
 [[symbol]]
 ts = "BybitSpotExchange.placeTrailingStopLoss"
@@ -336,7 +336,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::place_trailing_stop_loss"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::place_trailing_stop_loss."
 
 [[symbol]]
 ts = "BybitSpotExchange.updateOrder"
@@ -344,7 +344,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::update_order"
 status = "ported"
-note = "Preserves cancel/replacement sequencing, projected protection type, virtual-parent lookup, not-modified handling and original virtual-update errors."
+note = "Preserves cancel/replacement sequencing, projected protection type, virtual-parent lookup, not-modified handling and original virtual-update errors. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::update_order."
 
 [[symbol]]
 ts = "BybitSpotExchange.cancelOrders"
@@ -352,7 +352,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::cancel_orders"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::cancel_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange.cancelOrdersHelper"
@@ -360,7 +360,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::cancel_orders_helper"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::cancel_orders_helper."
 
 [[symbol]]
 ts = "BybitSpotExchange.cancelSymbolOrders"
@@ -368,7 +368,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::cancel_symbol_orders"
 status = "ported"
-note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures."
+note = "Native Spot-only body preserves supplied receiver/callee ownership, JS operations, row aliases, sync throws and ordered awaited work. Imported helpers and separately mapped venue callees remain explicit host capabilities; bounded 40-scene source/native proof is recorded in GATE_EVIDENCE.md. Concrete exchange/HTTP/socket composition and overridden intrinsics are not proved by these fixtures. Renamed Rust target: safe-cex-venue-bybit/src/spot_order_writes.rs::cancel_symbol_orders."
 
 [[symbol]]
 ts = "BybitSpotExchange.mapOrder"
@@ -376,7 +376,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order"
 status = "ported"
-note = "Preserves native raw-info and shallow extra aliases, remainingNative, inverse precision, Full-mode amount, virtual protection rows and distinct clock calls."
+note = "Preserves native raw-info and shallow extra aliases, remainingNative, inverse precision, Full-mode amount, virtual protection rows and distinct clock calls. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::map_order."
 
 [[symbol]]
 ts = "BybitSpotExchange#getOrderPositionIdx"
@@ -384,7 +384,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_position_idx"
 status = "divergent"
-note = "CHOSEN: native Rust Future/host polling replaces JS Promise identity and microtask scheduling. This async helper ignores its generic input and returns exact numeric zero without any mode request or option reads. Constructor/order consumer wiring remains pending."
+note = "CHOSEN: native Rust Future/host polling replaces JS Promise identity and microtask scheduling. This async helper ignores its generic input and returns exact numeric zero without any mode request or option reads. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::spot_get_order_position_idx."
 
 [[symbol]]
 ts = "BybitSpotExchange#getStopOrderPositionIdx"
@@ -392,4 +392,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx"
 status = "divergent"
-note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Owned inert UTF-8 JSON map copies preserve own fields and remove reduceOnly before calling the explicit index host. Nested JS object aliases, inherited/getter fields and lone UTF-16 surrogates are outside this clone ABI. Awaited numeric indexes map 0->0, 1->2, 2->1, with other numbers represented as undefined; native host errors retain identity. Constructor/order consumer wiring remains pending."
+note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Owned inert UTF-8 JSON map copies preserve own fields and remove reduceOnly before calling the explicit index host. Nested JS object aliases, inherited/getter fields and lone UTF-16 surrogates are outside this clone ABI. Awaited numeric indexes map 0->0, 1->2, 2->1, with other numbers represented as undefined; native host errors retain identity. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx."
