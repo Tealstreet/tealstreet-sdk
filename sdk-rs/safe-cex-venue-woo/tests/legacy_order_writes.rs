@@ -321,9 +321,20 @@ impl Host for H {
                 let r = &a[0];
                 let id = field(r, "order_id");
                 let created = number(&field(r, "created_time")) * 1000.;
+                // The imported mapper uses the method's marketsBySymbol
+                // resolver, then falls back to the original venue symbol.
+                let raw_symbol = field(r, "symbol");
+                let normalized = safe_cex_venue_woo::utils::normalize_symbol(&txt(&raw_symbol));
+                let market = field(&field(&self.roots, "marketsBySymbol"), &normalized);
+                let resolved = field(&market, "symbol");
+                let symbol = if truthy(&resolved) {
+                    resolved
+                } else {
+                    raw_symbol
+                };
                 obj(vec![
                     ("id", id),
-                    ("symbol", strv("BTCUSDT")),
+                    ("symbol", symbol),
                     ("side", strv("buy")),
                     ("type", strv("limit")),
                     ("status", strv("closed")),
@@ -1385,6 +1396,11 @@ fn native_assert(h: &H, result: &Result<V, V>, before: &[String]) {
             );
             if i == 0 || i == 1 {
                 native_str(&field(&idx(v, 0), "id"), "b", "history newest id");
+                native_str(
+                    &field(&idx(v, 0), "symbol"),
+                    "PERP_BTC_USDT",
+                    "history raw-symbol fallback when market has no symbol",
+                );
                 native_num(
                     &field(&idx(v, 0), "createdTime"),
                     2000.,
@@ -1628,6 +1644,27 @@ fn positional_native() {
 #[test]
 fn history_native() {
     family("history", 8)
+}
+
+#[test]
+fn history_mapper_import_observes_resolved_and_missing_market_symbols() {
+    let (h, _) = setup("history", 0);
+    let row = hist("order", 1.);
+    let map = |h: &mut H| h.invoke(Binding::MapHistorical, vec![row.clone()]).unwrap();
+    let raw = map(&mut h.borrow_mut());
+    native_str(
+        &field(&raw, "symbol"),
+        "PERP_BTC_USDT",
+        "history missing-symbol fallback",
+    );
+    let market = field(&field(&h.borrow().roots, "marketsBySymbol"), "BTCUSDT");
+    set(&market, "symbol", strv("resolved-symbol"));
+    let resolved = map(&mut h.borrow_mut());
+    native_str(
+        &field(&resolved, "symbol"),
+        "resolved-symbol",
+        "history live-symbol resolver",
+    );
 }
 #[test]
 fn open_native() {

@@ -971,6 +971,12 @@ compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
 checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
 
+Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
+JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
+`dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
+cases cover successful cleanup and each throwing socket, shared-cell visibility,
+retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
+
 The js_runtime Object.defineProperty binding retains ordinary-object/function data
 attributes, following ToPropertyDescriptor and ValidateAndApplyPropertyDescriptor
 in ECMA-262. New fields default to undefined/false; omitted fields on an existing
@@ -1009,6 +1015,16 @@ The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
 completion hook and reconstructed error properties. Arguments/results use the
 existing JSON worker boundary; it does not create a parallel worker protocol.
+
+
+The shared lodash import table supplies `times` for source order splitting.
+It truncates the coerced count, returns an empty array for invalid/nonpositive
+counts, and treats non-callable iteratees as identity (not a property shorthand).
+Callbacks receive only their index with undefined `this`; results retain their
+values, and a thrown callback stops further calls without replacing its error.
+`js_runtime::library::tests::lodash_times_*` compares 68 installed-lodash cases
+and independently checks native callback/error behavior. The callback-arity
+mutation compiles and fails both tests, then passes after restoration.
 
 Configured js_runtime retries retain `config["axios-retry"]` through the effective
 failed-config replay. The source condition sees the current retryCount; retryDelay

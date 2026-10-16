@@ -27,6 +27,7 @@ use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
+use safe_cex_venue_woo::{WooDependencies, WooExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -101,8 +102,19 @@ pub trait RustVenueHost {
     }
 
     /// Optional hosted account capability; no host-local secret is required.
+    fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "bitrue inputs are unavailable on this host",
+        ))
+    }
+
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
+    }
+    fn woo(&self) -> Result<WooDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "WOO dependencies were not supplied by this RustVenueHost",
+        ))
     }
     /// Bybit linear/options and Demo share the same concrete binding inputs.
     fn bybit(&self) -> Result<safe_cex_venue_bybit::BybitDependencies, ExchangeError> {
@@ -162,6 +174,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitget, bitget_constructor),
     (ExchangeName::Bitgetinverse, bitget_constructor),
     (ExchangeName::Bitgetusdc, bitget_constructor),
+    (ExchangeName::Bitrue, bitrue_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Bybit, bybit_constructor),
@@ -179,6 +192,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
+    (ExchangeName::Woo, woo_constructor),
 ];
 
 pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -342,6 +356,12 @@ fn external_factory(
     }
 }
 
+pub fn woo_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(WooExchange::new(name, options, store, host.woo()?)?)
+    })
+}
+
 pub fn bybit_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange =
@@ -361,6 +381,17 @@ pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn bitrue_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(safe_cex_venue_bitrue::BitrueExchange::new(
+            name,
+            options,
+            store,
+            host.bitrue()?,
+        )?)
     })
 }
 

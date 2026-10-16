@@ -29,7 +29,7 @@ function shape(node,path,fields){
 }
 const records={};
 for(const name of ['ChaserOrderOptions','TwapOptions','TwapState']){const fields=[];const sample=shape(nodes.get(name),'',fields);records[name]={fields,sample};}
-assert.deepEqual(Object.values(records).map(r=>r.fields.length),[5,16,17],'TASK-DOMAIN complete numeric graph inventory');
+assert.deepEqual(Object.values(records).map(r=>r.fields.length),[5,19,20],'TASK-DOMAIN complete numeric graph inventory');
 const bytes=new DataView(new ArrayBuffer(8));
 const numbers=Object.fromEntries(['-0','-0.0','0','1e400','-1e400','1e-400','-1e-400','1.25','1e3','-1e-4000'].map(token=>{bytes.setFloat64(0,JSON.parse(token));return [token,bytes.getBigUint64(0).toString(16).padStart(16,'0')];}));
 process.stdout.write(JSON.stringify({records,numbers}));
