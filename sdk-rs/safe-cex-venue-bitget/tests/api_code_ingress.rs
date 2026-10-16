@@ -50,11 +50,17 @@ fn api_code_direct_decimal_and_signed_zero_keep_native_number_bits() {
 fn api_code_keeps_text_identity_and_refuses_other_json_shapes() {
     for raw in ["\"40085\"", "\"synthetic-denial\""] {
         let expected: String = serde_json::from_str(raw).unwrap();
-        let actual: ApiCode = serde_json::from_str(raw).unwrap();
-        let ApiCode::Text(actual) = actual else {
-            panic!("text API code changed variant")
-        };
-        assert_eq!(actual, expected);
+        let value: serde_json::Value = serde_json::from_str(raw).unwrap();
+        for actual in [
+            serde_json::from_str::<ApiCode>(raw).unwrap(),
+            serde_json::from_value::<ApiCode>(value.clone()).unwrap(),
+            ApiCode::deserialize(&value).unwrap(),
+        ] {
+            let ApiCode::Text(actual) = actual else {
+                panic!("text API code changed variant")
+            };
+            assert_eq!(actual, expected);
+        }
     }
     for raw in [
         "null",
