@@ -1001,8 +1001,4 @@ including GRVT's browser cookie/account fields. It leaves executable Axios hooks
 on the source config. Hosted effective config still spreads that source object,
 then overlays actual adapter fields; terminal extension updates survive too.
 Cookie promotion belongs exclusively to HOW, not the direct HTTP bridge.
-The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
-worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
-completion hook and reconstructed error properties. Arguments/results use the
-existing JSON worker boundary; it does not create a parallel worker protocol.
 
