@@ -150,7 +150,9 @@ fn external_factory(
             "{venue}: externalPublicData is configured but no provider was supplied"
         ))),
         None => Ok(Rc::new(
-            |_: &ExchangeOptionsExternalPublicData| -> Rc<dyn ExternalPublicData> {
+            |_: &ExchangeOptionsExternalPublicData,
+             _: Rc<BaseExchange>|
+             -> Rc<dyn ExternalPublicData> {
                 unreachable!("externalPublicData is unset, so no provider is built")
             },
         )),
@@ -168,13 +170,7 @@ pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
-        let exchange = BitunixVenue::new(
-            base,
-            deps.build,
-            deps.install,
-            deps.runtime,
-            Rc::new(move |config| external(config)),
-        )?;
+        let exchange = BitunixVenue::new(base, deps.build, deps.install, deps.runtime, external)?;
         Ok(exchange)
     })
 }
@@ -195,7 +191,7 @@ pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             base,
             move |options, base_url, budget| http(options, base_url, budget),
             deps.runtime,
-            move |config| external(config),
+            external,
             deps.remote_signer_account_name,
         )?;
         Ok(exchange)
