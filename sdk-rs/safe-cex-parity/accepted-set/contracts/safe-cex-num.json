@@ -1,0 +1,426 @@
+{
+  "safe_cex_num::PrecisionInput": {
+    "shape": "union",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "primitive": "f64"
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "number",
+        "reason": "TypeScript precision input is number | string; every number/string is representable.",
+        "call": "{ let _: $type = $type::from($value); true }",
+        "positive": [
+          1
+        ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "string",
+        "reason": "TypeScript precision input is number | string; every number/string is representable.",
+        "call": "{ let _: $type = $type::from($value.as_str()); true }",
+        "positive": [
+          "sample"
+        ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "alloc::string::String",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "string",
+        "reason": "TypeScript precision input is number | string; every number/string is representable.",
+        "call": "{ let _: $type = $type::from($value); true }",
+        "positive": [
+          "sample"
+        ]
+      }
+    ],
+    "positive": [
+      1,
+      "sample"
+    ],
+    "negative": [
+      null,
+      true,
+      [],
+      {}
+    ]
+  },
+  "safe_cex_num::decimal_string": {
+    "api": {
+      "kind": "function",
+      "name": "decimal_string",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "f64"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-num/src/lib.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Computes precision metadata from textual digits; the numeric exponent parser is separately classified."
+  },
+  "safe_cex_num::is_smaller": {
+    "api": {
+      "kind": "function",
+      "name": "is_smaller",
+      "signature": {
+        "inputs": [
+          [
+            "candidate",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "current",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-num/src/lib.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Compares cursor strings by length and lexical order; does not decode them."
+  },
+  "safe_cex_num::js_split_whitespace": {
+    "api": {
+      "kind": "function",
+      "name": "js_split_whitespace",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": null,
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-num/src/lib.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Splits text into borrowed substrings by the ECMAScript whitespace set; no domain construction."
+  },
+  "safe_cex_num::js_trim": {
+    "api": {
+      "kind": "function",
+      "name": "js_trim",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": null,
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-num/src/lib.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Removes ECMAScript boundary whitespace; no decoding or accepted-shape decision."
+  },
+  "safe_cex_num::js_trim_end": {
+    "api": {
+      "kind": "function",
+      "name": "js_trim_end",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": null,
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-num/src/lib.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Removes trailing ECMAScript whitespace; no decoding or accepted-shape decision."
+  },
+  "safe_cex_num::js_trim_start": {
+    "api": {
+      "kind": "function",
+      "name": "js_trim_start",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": null,
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-num/src/lib.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Removes leading ECMAScript whitespace; no decoding or accepted-shape decision."
+  },
+  "safe_cex_num::number_from_string": {
+    "api": {
+      "kind": "function",
+      "name": "number_from_string",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "f64"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "ECMAScript whole-string numeric conversion; distinguish non-finite values and signed zero before JSON serialization.",
+    "call": "{ let value = $type($value.as_str().expect(\"text witness\")); if value.is_nan() { serde_json::json!(\"NaN\") } else if value == f64::INFINITY { serde_json::json!(\"Infinity\") } else if value == f64::NEG_INFINITY { serde_json::json!(\"-Infinity\") } else if value == 0.0 && value.is_sign_negative() { serde_json::json!(\"-0\") } else { serde_json::json!(value.to_string()) } }",
+    "cases": [
+      {
+        "input": "",
+        "output": "0"
+      },
+      {
+        "input": " 12 ",
+        "output": "12"
+      },
+      {
+        "input": "12tail",
+        "output": "NaN"
+      },
+      {
+        "input": "0x10",
+        "output": "16"
+      },
+      {
+        "input": "0b10",
+        "output": "2"
+      },
+      {
+        "input": "-0",
+        "output": "-0"
+      },
+      {
+        "input": "Infinity",
+        "output": "Infinity"
+      },
+      {
+        "input": "1e400",
+        "output": "Infinity"
+      },
+      {
+        "input": "-Infinity",
+        "output": "-Infinity"
+      },
+      {
+        "input": "﻿2",
+        "output": "2"
+      },
+      {
+        "input": "2",
+        "output": "NaN"
+      }
+    ]
+  }
+}

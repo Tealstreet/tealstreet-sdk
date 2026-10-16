@@ -1,0 +1,445 @@
+{
+  "safe_cex_venue_phemex::private_session::units": {
+    "category": "non-decoder",
+    "evidence": "Reviewed private_session.rs::units against its Phemex host adaptation role. Native private_session::accepted_native_contract::utf16_encoder_preserves_native_units directly calls this production function and checks independently authored values. The existing Rust-str domain is governed by parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; this is not an arbitrary JS-string decoder claim.",
+    "reason": "Encodes already-valid Rust text into UTF-16 for private-session messages and timestamp text; it does not admit or validate a JSON or wire record.",
+    "api": {
+      "kind": "function",
+      "name": "units",
+      "signature": {
+        "inputs": [
+          [
+            "s",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u16"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::public_routing::units": {
+    "category": "non-decoder",
+    "evidence": "Reviewed public_routing.rs::units against its Phemex host adaptation role. Native public_routing::accepted_native_contract::utf16_encoder_preserves_native_units directly calls this production function and checks independently authored values. The existing Rust-str domain is governed by parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; this is not an arbitrary JS-string decoder claim.",
+    "reason": "Encodes already-valid Rust text into UTF-16 for public subscription messages, warnings and topic names; it does not parse an inbound protocol value.",
+    "api": {
+      "kind": "function",
+      "name": "units",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u16"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::rest_data::units": {
+    "category": "non-decoder",
+    "evidence": "Reviewed rest_data.rs::units against its Phemex host adaptation role. Native rest_data::accepted_native_contract::utf16_encoder_preserves_native_units directly calls this production function and checks independently authored values. The existing Rust-str domain is governed by parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; this is not an arbitrary JS-string decoder claim.",
+    "reason": "Encodes already-valid Rust labels into UTF-16 for the supplied DataHost; it does not decode response objects or numbers.",
+    "api": {
+      "kind": "function",
+      "name": "units",
+      "signature": {
+        "inputs": [
+          [
+            "s",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u16"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::start_order_formatting::u": {
+    "category": "non-decoder",
+    "evidence": "Reviewed start_order_formatting.rs::u against its Phemex host adaptation role. Native start_order_formatting::accepted_native_contract::utf16_encoder_preserves_native_units directly calls this production function and checks independently authored values. The existing Rust-str domain is governed by parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; this is not an arbitrary JS-string decoder claim.",
+    "reason": "Encodes already-valid Rust labels into UTF-16 before building host-facing order keys and text; it does not parse the order response.",
+    "api": {
+      "kind": "function",
+      "name": "u",
+      "signature": {
+        "inputs": [
+          [
+            "s",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u16"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::websocket_data::u": {
+    "category": "non-decoder",
+    "evidence": "Reviewed websocket_data.rs::u against its Phemex host adaptation role. Native websocket_data::accepted_native_contract::utf16_encoder_preserves_native_units directly calls this production function and checks independently authored values. The existing Rust-str domain is governed by parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; this is not an arbitrary JS-string decoder claim.",
+    "reason": "Encodes already-valid Rust labels into UTF-16 for socket method/key construction; it does not decode received socket data.",
+    "api": {
+      "kind": "function",
+      "name": "u",
+      "signature": {
+        "inputs": [
+          [
+            "s",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u16"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::rest_account_control::endpoint": {
+    "category": "non-decoder",
+    "evidence": "Reviewed rest_account_control.rs::endpoint against its Phemex host adaptation role. Native rest_account_control::accepted_native_contract::endpoint_lookup_preserves_selected_wire_paths directly calls this production function and checks independently authored values.",
+    "reason": "Looks up a trusted internal ENDPOINTS constant name for account-setting requests. Unknown names retain the existing caller-precondition panic; this is outbound endpoint selection, not response admission.",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::rest_order_control::endpoint": {
+    "category": "non-decoder",
+    "evidence": "Reviewed rest_order_control.rs::endpoint against its Phemex host adaptation role. Native rest_order_control::accepted_native_contract::endpoint_lookup_preserves_selected_wire_paths directly calls this production function and checks independently authored values.",
+    "reason": "Looks up a trusted internal ENDPOINTS constant name for cancellation/order requests. Unknown names retain the existing caller-precondition panic; no inbound order is decoded here.",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::rest_data::endpoint": {
+    "category": "non-decoder",
+    "evidence": "Reviewed rest_data.rs::endpoint against its Phemex host adaptation role. Native rest_data::accepted_native_contract::endpoint_lookup_preserves_selected_wire_paths directly calls this production function and checks independently authored values.",
+    "reason": "Selects an outbound REST path from the existing ENDPOINTS table by an internal constant name. Unknown names still panic; response mapping remains in separate DataHost bodies.",
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_phemex::ticker_parser::type_error": {
+    "category": "non-decoder",
+    "evidence": "Reviewed ticker_parser.rs::type_error against its Phemex host adaptation role. Native ticker_parser::accepted_native_contract::type_error_constructor_preserves_name_and_message directly calls this production function and checks independently authored values.",
+    "reason": "Constructs ExchangeError from a typed message and sets its name to TypeError, representing implicit JavaScript parser exceptions. It does not interpret or validate the message as an input schema.",
+    "api": {
+      "kind": "function",
+      "name": "type_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  }
+}

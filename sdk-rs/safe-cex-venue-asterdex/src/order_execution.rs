@@ -135,7 +135,7 @@ impl OrderExecution {
         let result=async {
             let opts=self.owner.options();
             if opts.key.is_empty(){return Err(ExchangeError::new("Missing required credentials: API key"));}
-            if opts.remote_signer.is_none(){
+            if opts.remote_signer.is_none() && self.owner.signers.remote_signer.is_none(){
                 let auth=helpers::resolve_aster_dex_v3_auth_context(&opts);
                 if self.version==AsterDEXAPIVersion::V1 && helpers::is_aster_dex_address(Some(&opts.key)) && helpers::is_aster_dex_v3_private_key(Some(&opts.secret)) && auth.user_address.is_none(){ return Err(ExchangeError::new(crate::tables::ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE)); }
                 if self.version==AsterDEXAPIVersion::V3 {
