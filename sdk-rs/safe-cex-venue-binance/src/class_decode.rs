@@ -46,6 +46,15 @@ impl<'de> de::Deserializer<'de> for Native {
             visitor.visit_some(self)
         }
     }
+    // Shared retained-JSON/numeric capture is a newtype; buffered-content capture
+    // must see the native value itself, never the map form of its raw-token path.
+    fn deserialize_newtype_struct<V: Visitor<'de>>(
+        self,
+        _: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error> {
+        visitor.visit_newtype_struct(self)
+    }
     fn deserialize_enum<V: Visitor<'de>>(
         self,
         _: &'static str,
@@ -63,7 +72,7 @@ impl<'de> de::Deserializer<'de> for Native {
         };
         visitor.visit_enum(text.into_deserializer())
     }
-    serde::forward_to_deserialize_any! {bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf unit unit_struct newtype_struct seq tuple tuple_struct map struct identifier ignored_any}
+    serde::forward_to_deserialize_any! {bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf unit unit_struct seq tuple tuple_struct map struct identifier ignored_any}
 }
 impl<'de> IntoDeserializer<'de, de::value::Error> for Native {
     type Deserializer = Self;
