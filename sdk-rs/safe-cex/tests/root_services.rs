@@ -244,3 +244,93 @@ fn account_native_forwarding_overrides_and_broker_clear() {
     assert_eq!(created.name, ExchangeName::Bybit);
     assert_eq!(created.options, options[0]);
 }
+
+#[test]
+fn facade_construction_preserves_polymarket_patch_credentials_and_native_signer_type() {
+    let constructor: ExchangeConstructor<Fixture> = Rc::new(|name, options, store| {
+        Ok(Fixture {
+            name,
+            options,
+            store,
+        })
+    });
+    let loader: ExchangeLoader<Fixture> = Rc::new(move || {
+        let constructor = constructor.clone();
+        Box::pin(async move { Ok(constructor) })
+    });
+    let factory = ExchangeFactory::new(
+        [("polymarket".into(), loader)].into_iter().collect(),
+        VirtualClock::default(),
+        TransportRegistry::default(),
+    );
+    let account: ExchangeAccountConfig = serde_json::from_value(serde_json::json!({
+        "exchange":"polymarket", "name":"account", "apiKey":"", "apiSecret":""
+    }))
+    .unwrap();
+    let registry = TransportRegistry::default();
+    let host = AccountOptionsHost {
+        transport: &registry,
+        instance: None,
+        environment: &|_| None,
+        warn: &|_| {},
+    };
+    assert!(
+        factory
+            .build_public_exchange_options("polymarket", None, false, None)
+            .unwrap()
+            .polymarket
+            .is_none()
+    );
+    for signer_type in [0.0, 1.0, 2.0, 3.0, -0.0, f64::NAN, f64::INFINITY] {
+        let patch = ExchangeOptionsPatch {
+            polymarket: Some(Some(safe_cex_types::ExchangeOptionsPolymarket {
+                api_key: Some("supplied-key".into()),
+                api_secret: Some("supplied-secret".into()),
+                api_passphrase: Some("supplied-passphrase".into()),
+                signer_type: Some(signer_type),
+                funder_address: Some("supplied-funder".into()),
+            })),
+            ..Default::default()
+        };
+        let account_instance = ready(create_exchange_from_account(
+            &factory,
+            &account,
+            Some(&patch),
+            &host,
+        ))
+        .unwrap();
+        let public_instance =
+            ready(factory.create_public_exchange("polymarket", Some(&patch), false, None, None))
+                .unwrap();
+        for instance in [account_instance, public_instance] {
+            let options = instance.options.polymarket.unwrap();
+            assert_eq!(options.api_key.as_deref(), Some("supplied-key"));
+            assert_eq!(options.api_secret.as_deref(), Some("supplied-secret"));
+            assert_eq!(
+                options.api_passphrase.as_deref(),
+                Some("supplied-passphrase")
+            );
+            assert_eq!(options.funder_address.as_deref(), Some("supplied-funder"));
+            assert_eq!(
+                options.signer_type.unwrap().to_bits(),
+                signer_type.to_bits()
+            );
+        }
+    }
+    let clear = ExchangeOptionsPatch {
+        polymarket: Some(None),
+        ..Default::default()
+    };
+    assert!(
+        ready(create_exchange_from_account(
+            &factory,
+            &account,
+            Some(&clear),
+            &host
+        ))
+        .unwrap()
+        .options
+        .polymarket
+        .is_none()
+    );
+}

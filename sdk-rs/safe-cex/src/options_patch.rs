@@ -4,7 +4,8 @@ use safe_cex_types::{
     ExchangeOptionsExternalPublicData, ExchangeOptionsExtra,
     ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraKucoinBroker,
     ExchangeOptionsExtraLighterBuilderFeeMode, ExchangeOptionsHyperliquidBuilder,
-    ExchangeOptionsTuning, PayloadSignerCapability, RemoteSignerCapability, TransportCapability,
+    ExchangeOptionsPolymarket, ExchangeOptionsTuning, PayloadSignerCapability,
+    RemoteSignerCapability, TransportCapability,
 };
 
 #[derive(Clone, Default)]
@@ -104,6 +105,7 @@ pub struct ExchangeOptionsPatch {
     pub application_id: Option<Option<String>>,
     pub api_key_index: Option<Option<String>>,
     pub hyperliquid_builder: Option<Option<ExchangeOptionsHyperliquidBuilder>>,
+    pub polymarket: Option<Option<ExchangeOptionsPolymarket>>,
     pub testnet: Option<Option<bool>>,
     pub enable_spot_markets: Option<Option<bool>>,
     pub bybit_site_id: Option<Option<ExchangeOptionsBybitSiteId>>,
@@ -177,6 +179,9 @@ pub(crate) fn apply_patch(patch: &ExchangeOptionsPatch, options: &mut ExchangeOp
     }
     if let Some(value) = &patch.hyperliquid_builder {
         options.hyperliquid_builder = value.clone();
+    }
+    if let Some(value) = &patch.polymarket {
+        options.polymarket = value.clone();
     }
     if let Some(value) = &patch.testnet {
         options.testnet = *value;
@@ -256,6 +261,7 @@ pub(crate) fn empty_options() -> ExchangeOptions {
         application_id: None,
         api_key_index: None,
         hyperliquid_builder: None,
+        polymarket: None,
         testnet: None,
         enable_spot_markets: None,
         bybit_site_id: None,
