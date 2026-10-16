@@ -1,3 +1,33 @@
+# Reviewed inherited refusals: complete native owner cohort
+
+After merging the shared inherited-refusal mechanism, this branch installs only
+five independently reviewed Breakout specs in
+`accepted-set/inherited-constant-outputs/safe-cex-venue-breakoutprop.json`.
+Their Rust source, maintained TS base/venue, fixture, compiler APIs, native adapters
+and cases match the approved v2 bytes. No source or fixture rollback was used.
+The lifecycle owner retains all nine actual compiler entrypoints; get_account and
+schedule_cancel are not invented as indexed APIs.
+
+Fresh default native rustdoc/check, actual compiler artifacts, alias claims,
+macro origins and local-scope guards cover **60 owners + 7 aliases**. All
+**67/67 native receipts pass** (47 production runtime results, 20 explicit
+classifications, zero failed owners). This includes the complete nine-API
+lifecycle owner and the ten actual refusal observations: exact Error/Not
+implemented, default metadata, zero HTTP and unchanged observed native state.
+The ProductionHost Clone construction obligation remains separately classified.
+
+The cohort-aware shared policy tests pass 2/2, including three actually executed
+source/fixture/adapter guard mutations with named refusal/restored pass. The
+previous five compiled dispatch controls and the full earlier native controls
+remain documented below; their source and fixture bytes are unchanged.
+
+This is the complete selected Breakout owner/alias cohort, not transitive or
+matrix clearance. The ordinary full transitive run after #297 passes all 227
+shared-types receipts, then stops at two E0063 errors for SocketCore.disposing in
+shared native probe adapters. Shared repair #325 owns that compile blocker;
+compiler failures are not native runtime evidence. Re-run the ordinary full gate
+when its repair lands. No guard was relaxed or unresolved scope omitted.
+
 # Account lookup, validation and session invalidation
 
 This slice follows fetched integration b46ce8b19a2e67d6add3cf454450997f75150d12.
