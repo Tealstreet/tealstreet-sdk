@@ -3520,3 +3520,135 @@ and two live targets execute five passing tests again. This is documented binary
 reuse after input comparison, not a fresh Cargo test build. Controls and Clippy
 keep their pre-merge provenance. Every master contract entry remains unchanged;
 only these three reviewed predicates are added to the Binance shard.
+
+
+### Four observed error-output functions
+
+The Futures and PM response-message wrappers and their private shared body
+preserve object-code presence, source-truthy msg/message/error precedence, shared
+fallible String coercion and the final space join. Non-object/array inputs
+produce empty text rather than an input-refusal error. The rejection-reason
+mapper consumes its actual typed Map input and observes native Some(PostOnly),
+None and coercion errors. Its substring/case behavior is preserved, including
+array String coercion and a leading BOM before an otherwise matching substring.
+
+Three independent public native tests inspect returned strings, actual rejection
+variants/absence and the native TypeError name before any enum serialization.
+They pass with the maintained live response-message and rejection targets: five
+tests, zero ignored, including 11,828 and 5,471 source comparisons. Selected
+`accepted_error_outputs` Clippy passes with warnings denied.
+
+The maintained `error-output-contracts.mjs` completes fresh ordinary native/default
+discovery and four actual production decoder-output results with zero failed
+owners. The private helper is called directly from its own instrumented module;
+its public callers are separate results. These are executed output observations,
+not non-decoder classification receipts. Fixture scope is stock JSON/UTF-8,
+including the declared native fallback and coercion-error names; arbitrary
+getters, prototype mutation and full Error identity are not asserted.
+
+`python3 sdk-rs/safe-cex-venue-binance/scripts/error-output-controls.py` completes
+four compiled wrong-output controls and four restored passes. Each control
+generates fresh compiler metadata for the changed body and executes all four
+actual production APIs. The changed owner's own result must contain native
+function-output mismatches; compilation failures and classification refusals
+cannot count. For the private helper, its own result and the two actual public
+callers fail. Restoring each exact source file passes all four production
+outputs again. The mapper's wrong-None result likewise fails its direct native
+variant witness, then restoration passes. Both production files finally compare
+byte-identical to the original revision.
+
+After the final evidence update, fresh ordinary discovery and all four actual
+production output probes pass again with zero failed owners. The restored
+existing compiled native target and two live targets execute five passing tests
+with zero ignored; this is actual binary execution after exact source
+restoration, not a second Cargo test build. Formatting, frozen dependency
+installation and parity-check pass (7,459 rows; 17,198 public Rust items). All ten
+existing Binance contracts remain unchanged; only four reviewed decoder-output
+entries are added. Discovery counts remain 235 owners, 80 aliases and two
+construction policies. Other owners, aliases, locals and feature/wasm coverage
+remain outside this four-function evidence.
+
+Latest master integration at `c2546620c7` includes the shared numeric-ingress
+enum-access repair. Its single-variant Object/MapAccess path replaces the prior
+MapDeserializer path; the incoming diff was reviewed. Binance implementations
+remain unchanged. Because a native dependency changed, a fresh pinned-toolchain
+Cargo run repeats all five native/live tests successfully, including the
+11,828/5,471 source comparisons. The earlier compiled controls and selected-test
+Clippy keep their pre-integration provenance.
+
+After that integration, fresh ordinary native/default discovery again executes
+all four production decoder-output probes with zero failed owners. Formatting,
+frozen dependency installation and parity-check also pass (7,459 rows and
+17,198 public Rust items).
+
+
+### Seven response-shape owners
+
+Both array validators preserve the original nonempty borrowed slice, its length
+and native elements, including negative-zero bits before serialization. The
+qualified From<JsCoercionError> conversion preserves native name/message fields
+and Display in two independently authored typed cases. Private malformed is a
+diagnostic constructor from already typed strings; it is not a new JSON schema
+admission boundary. The three shape descriptors likewise render existing values
+rather than decode records. These four roles have individual non-decoder reasons,
+exact compiler APIs and direct native tests; neither private helper is exempted
+through its parent.
+
+Fresh pinned-toolchain Cargo tests from sdk-rs/, with RUSTC_BOOTSTRAP=1 and one
+job, pass the two private native tests, five public native tests and the maintained
+live response_shape target: eight tests, zero ignored, 1,188 source comparisons.
+The descriptor fixtures pin None/null/primitive kinds, JS numeric-key ordering
+and the first-six cutoff. Error fixtures pin class/message, typed construction,
+optional message suffix and coercion-error precedence independently of Serialize.
+Selected accepted_response_shapes Clippy passes with warnings denied.
+
+The maintained response-shape-controls.py completes seven compiled changed-output
+controls and seven exact-restoration passes. Four diagnostic controls require
+their own exact named native test to fail after compilation, then that same test
+to pass after restoration. Before the three production controls, fresh discovery
+and actual API probes establish three runtime results plus four explicit diagnostic
+classifications with zero failed owners. Each array-validator control fails its
+own direct production result. Changing the conversion's class field fails that
+owner's own result and both real array-guard coercion results. Every restoration
+passes all three production outputs and four diagnostic classifications again;
+compilation failures and classification refusals cannot count as controls.
+
+After final exact source restoration and comparison of unchanged native fixtures,
+dependency/compiler inputs and source-oracle inputs, the existing compiled private,
+public and live targets execute all eight tests again with zero ignored. This is
+actual binary reuse after input comparison, not another Cargo test build. The
+production function bodies match the starting revision; source additions are the
+two private tests. Fresh ordinary native/default discovery remains scoped to these
+seven owners; classification receipts are never claimed as function execution.
+
+All 14 prior Binance contract rows retain their exact original text apart from the
+required append comma. Only these seven reviewed rows are added. Discovery remains
+235 owners, 80 aliases and two construction policies. Stock JSON/UTF-8 and the
+stated native typed conversion are the scope; empty-slice addresses do not prove
+source array identity, and arbitrary getters/prototype mutation or full source
+Error identity are not asserted. Other owners, aliases, locals, construction
+policies and feature/wasm coverage remain outside this evidence.
+
+After the final evidence update, fresh discovery and three production runtime
+results plus four explicit classifications pass again with zero failed owners.
+Formatting, frozen dependency installation and parity-check pass (7,459 rows;
+17,204 public Rust items). This is a selected seven-owner tranche, not a
+whole-venue accepted-set zero claim.
+
+
+Policy storage integration at e2c1181ea9 preserves every master shard. All five
+Binance direct runners now use the shared loadPolicy API. Parsed merged
+receiver-trait and default-trait maps compare exactly equal to the complete
+pre-cutover maps used by the controls. No native source, test, dependency, lock,
+compiler or source-oracle input changed across this integration; the restored
+compiled targets execute all eight tests again with zero ignored. Earlier
+compiled controls and selected-test Clippy retain their pre-integration provenance.
+
+Fresh post-cutover gates pass independently for records (four runtime results),
+string enums (three runtime results), predicates (three classification receipts),
+error outputs (four runtime results) and response shapes (three runtime results,
+four classification receipts). All five report zero failed owners: fourteen
+runtime results and seven explicit classifications in these disjoint selected
+scopes. This does not turn classification receipts into behavioral execution or
+establish coverage for the remaining inventory. Post-integration formatting,
+frozen installation and parity-check pass (7,459 rows; 17,204 public Rust items).

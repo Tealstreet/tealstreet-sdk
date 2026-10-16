@@ -2144,24 +2144,6 @@
       ]
     },
     {
-      "type": "safe_cex_crypto::Encoding",
-      "owner": {
-        "crate": "safe-cex-crypto",
-        "agent": "codex-edeozt"
-      },
-      "status": "outstanding",
-      "failures": [
-        "[native;] Deserialize accepted {\"base64\":null}",
-        "[native;] Deserialize accepted {\"hex\":null}",
-        "[native;] qualified decoder accepted {\"base64\":null}",
-        "[native;] qualified decoder accepted {\"hex\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"base64\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"hex\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"base64\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"hex\":null}"
-      ]
-    },
-    {
       "type": "safe_cex_crypto::WsAuth",
       "owner": {
         "crate": "safe-cex-crypto",
@@ -2187,44 +2169,6 @@
         "[native;] qualified decoder accepted [null,null,null]",
         "[wasm32-unknown-unknown;] Deserialize accepted [null,null,null]",
         "[wasm32-unknown-unknown;] qualified decoder accepted [null,null,null]"
-      ]
-    },
-    {
-      "type": "safe_cex_crypto::WsOutputFormat",
-      "owner": {
-        "crate": "safe-cex-crypto",
-        "agent": "codex-edeozt"
-      },
-      "status": "outstanding",
-      "failures": [
-        "[native;] Deserialize accepted {\"apexomni-base64\":null}",
-        "[native;] Deserialize accepted {\"base64\":null}",
-        "[native;] Deserialize accepted {\"bitunix-double-sha256\":null}",
-        "[native;] Deserialize accepted {\"coinbase-jwt\":null}",
-        "[native;] Deserialize accepted {\"hex\":null}",
-        "[native;] Deserialize accepted {\"hex-base64\":null}",
-        "[native;] Deserialize accepted {\"kraken-challenge\":null}",
-        "[native;] qualified decoder accepted {\"apexomni-base64\":null}",
-        "[native;] qualified decoder accepted {\"base64\":null}",
-        "[native;] qualified decoder accepted {\"bitunix-double-sha256\":null}",
-        "[native;] qualified decoder accepted {\"coinbase-jwt\":null}",
-        "[native;] qualified decoder accepted {\"hex\":null}",
-        "[native;] qualified decoder accepted {\"hex-base64\":null}",
-        "[native;] qualified decoder accepted {\"kraken-challenge\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"apexomni-base64\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"base64\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"bitunix-double-sha256\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"coinbase-jwt\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"hex\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"hex-base64\":null}",
-        "[wasm32-unknown-unknown;] Deserialize accepted {\"kraken-challenge\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"apexomni-base64\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"base64\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"bitunix-double-sha256\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"coinbase-jwt\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"hex\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"hex-base64\":null}",
-        "[wasm32-unknown-unknown;] qualified decoder accepted {\"kraken-challenge\":null}"
       ]
     },
     {

@@ -100,10 +100,21 @@
       "local future alias pins reject output lifetime and generic redirection",
       "local future alias probes require actual compiler dependency and sysroot context"
     ],
+    "accepted-grvt-fields.test.mjs": [
+      "exact borrowed Fields policy retains every route and refuses compiler or witness redirects",
+      "borrowed Fields executes actual static and owned routes and rejects native drift"
+    ],
     "accepted-identity-alias.test.mjs": [
       "identity aliases select one internal actual-alias monomorphization",
       "generic identity probes reject bounds defaults synthetic parameters and where clauses",
       "expanded identity cannot conceal a nonidentity source target"
+    ],
+    "accepted-inherited-constant-output-native.test.mjs": [
+      "reviewed inherited refusals execute the complete production owner and reject native error or HTTP drift"
+    ],
+    "accepted-inherited-constant-output.test.mjs": [
+      "reviewed inherited refusals retain exact compiler source fixture and native witnesses",
+      "reviewed inherited refusal source fixture and adapter pins reject executed mutations"
     ],
     "accepted-inventory.test.mjs": [
       "compiler impl identity sees manual private Deserialize and deduplicates reexports",
@@ -141,10 +152,16 @@
     "accepted-number-output.test.mjs": [
       "numeric expression permission requires the canonical SDK compiler binding",
       "numeric provider recipe and unconditional source route reject executed mutations",
-      "numeric source inspection refuses opaque arguments later shadows and every glob"
+      "numeric source inspection refuses opaque arguments later shadows and every glob",
+      "numeric definition coverage retains exact export and declaration positions"
     ],
     "accepted-object-map-construction-native.test.mjs": [
       "object-map Clone classification follows the actual compiler owner and exact traits"
+    ],
+    "accepted-policy-files.test.mjs": [
+      "per-crate policy tables preserve compiler and source records exactly",
+      "policy shards refuse missing malformed misplaced duplicate symlink and obsolete inputs",
+      "policy shard ownership complete merge and direct cutover reject executed mutations"
     ],
     "accepted-ratchet.test.mjs": [
       "outstanding debt exactly matches measured and owned failures",
@@ -326,6 +343,20 @@
     "Weex kline native identity",
     "Weex kline policy routing",
     "contract shard namespace",
-    "contract shard complete merge"
+    "contract shard complete merge",
+    "numeric provider unrelated export attribute",
+    "numeric definition export coverage",
+    "numeric definition export position",
+    "policy shard ownership",
+    "policy shard complete merge",
+    "policy shard direct cutover",
+    "inherited refusal maintained source pin",
+    "inherited refusal native fixture pin",
+    "inherited refusal native adapter pin",
+    "inherited refusal native error identity",
+    "inherited refusal native zero HTTP",
+    "Fields identity",
+    "Fields members",
+    "Fields route"
   ]
 }

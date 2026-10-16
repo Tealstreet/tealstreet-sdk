@@ -271,3 +271,17 @@ Private numeric comparison preserves BigInt equality across both Number zero
 signs. Native trait-method tests pin coercion effects, original thrown-object
 identity and the source error-code comparisons to 1000. Current TypeScript call
 sites use 1000; zero cases exercise the broader native comparison helper.
+
+The assembly exposes its ten private scalar field accessors as ordinary Rust
+closures and imports the client-ID rule type explicitly. The original four
+numeric and six boolean macro calls produced local-macro discovery refusals;
+the wildcard import also prevented macro-origin certainty. The source scanner
+accepts the explicit assembly without an exception or shared guard change.
+
+The private_scalar_views_keep_each_native_cell_live_and_independent unit test
+inspects every native cell and its descriptor in both directions. Numeric writes
+preserve Number bits and reject non-Numbers without changing state; boolean
+writes retain the existing truthiness behavior. Wiring only requestId's setter
+to the session-attempt counter compiles and fails the named native-write
+assertion; exact restoration passes. This source visibility repair does not
+classify the complete Host owner or any of its remaining raw APIs.

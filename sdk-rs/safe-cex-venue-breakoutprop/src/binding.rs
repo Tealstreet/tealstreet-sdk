@@ -16,7 +16,10 @@ use safe_cex_exchange::{
     },
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_types::*;
+use safe_cex_types::{
+    ExchangeAccount, Market, Order, PlaceOrderOpts, Position, PositionSide, PublicTrade, Ticker,
+    UpdateOrderOpts, ValidateAccountResult,
+};
 use std::rc::Rc;
 
 pub(crate) fn capabilities() -> ExchangeCapabilities {

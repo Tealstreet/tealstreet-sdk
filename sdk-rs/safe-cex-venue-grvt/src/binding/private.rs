@@ -809,3 +809,27 @@ mod numeric_comparison_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod accepted_clone_tests {
+    use super::*;
+
+    #[test]
+    fn key_clone_retains_value_identity_and_same_value_zero() {
+        let original = Key(Js::object(vec![("marker", Js::Number(7.0))]));
+        let cloned = original.clone();
+        assert!(
+            original == cloned,
+            "GRVT Key clone must retain object identity"
+        );
+        cloned.0.set("marker", Js::Number(9.0)).unwrap();
+        let Js::Number(marker) = original.0.get("marker").unwrap() else {
+            panic!("GRVT Key clone lost the native field");
+        };
+        assert_eq!(marker.to_bits(), 9.0_f64.to_bits());
+        for value in [Js::Number(f64::NAN), Js::Number(-0.0), Js::str("key")] {
+            let key = Key(value);
+            assert!(key == key.clone(), "GRVT Key cloned equality");
+        }
+    }
+}

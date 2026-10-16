@@ -1,0 +1,258 @@
+{
+  "safe_cex_venue_bitrue::wire::BitrueOrderType": {
+    "shape": "string",
+    "literals": [
+      "LIMIT",
+      "MARKET",
+      "STOP_MARKET",
+      "TAKE_PROFIT_MARKET"
+    ],
+    "entrypoints": [],
+    "evidence": "BitrueOrderType reviewed against actual bitrue.types.ts string literal union; exact native variant and retained Serialize output observed through owned/borrowed/JSON-text/qualified decoder routes. New maintained tests compiled and failed on accepted valid tagged objects before the repair. Both per-owner concrete String guard removals compiled and failed their named valid-tagged-object assertions; exact bytes were restored and both tests passed. Native maintained tests execute all six variants, exact serialization and four decode routes; fresh selected compiler APIs match completely and production native/wasm probes pass (four receipts, scoped ratchet zero); other Bitrue nominal/function/alias/local owners remain independently unreviewed. The full inventory still refuses 32 unsupported receiver methods; those and all other owners remain open.",
+    "observation": {
+      "call": "{ let observe=|d:$type| { let variant=match &d{$type::Limit => \"Limit\",$type::Market => \"Market\",$type::StopMarket => \"StopMarket\",$type::TakeProfitMarket => \"TakeProfitMarket\"}; serde_json::json!({\"variant\":variant,\"wire\":serde_json::to_value(&d).unwrap()}) }; let raw=$value.to_string(); let mut decoder=serde_json::Deserializer::from_str(&raw); match (serde_json::from_value::<$type>($value.clone()), <$type as serde::Deserialize>::deserialize($value), serde_json::from_str::<$type>(&raw), <$type as serde::Deserialize>::deserialize(&mut decoder)) { (Ok(owned),Ok(borrowed),Ok(text),Ok(qualified)) => { decoder.end().unwrap(); let result=observe(owned); assert_eq!(result,observe(borrowed),\"BITRUE enum borrowed native identity\"); assert_eq!(result,observe(text),\"BITRUE enum text native identity\"); assert_eq!(result,observe(qualified),\"BITRUE enum qualified native identity\"); result }, (Err(_),Err(_),Err(_),Err(_)) => serde_json::json!({\"error\":true}), _ => panic!(\"BITRUE enum route admission disagreement\") } }",
+      "cases": [
+        {
+          "input": "LIMIT",
+          "output": {
+            "variant": "Limit",
+            "wire": "LIMIT"
+          }
+        },
+        {
+          "input": {
+            "LIMIT": null
+          },
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "MARKET",
+          "output": {
+            "variant": "Market",
+            "wire": "MARKET"
+          }
+        },
+        {
+          "input": {
+            "MARKET": null
+          },
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "STOP_MARKET",
+          "output": {
+            "variant": "StopMarket",
+            "wire": "STOP_MARKET"
+          }
+        },
+        {
+          "input": {
+            "STOP_MARKET": null
+          },
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "TAKE_PROFIT_MARKET",
+          "output": {
+            "variant": "TakeProfitMarket",
+            "wire": "TAKE_PROFIT_MARKET"
+          }
+        },
+        {
+          "input": {
+            "TAKE_PROFIT_MARKET": null
+          },
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": [
+            "LIMIT"
+          ],
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "__UNKNOWN_BITRUE_LITERAL__",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "limit",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": " LIMIT",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "LIMIT ",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "﻿LIMIT",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitrue::wire::FetchOrdersResponseDataItemSide": {
+    "shape": "string",
+    "literals": [
+      "BUY",
+      "SELL"
+    ],
+    "entrypoints": [],
+    "evidence": "FetchOrdersResponseDataItemSide reviewed against actual bitrue.types.ts string literal union; exact native variant and retained Serialize output observed through owned/borrowed/JSON-text/qualified decoder routes. New maintained tests compiled and failed on accepted valid tagged objects before the repair. Both per-owner concrete String guard removals compiled and failed their named valid-tagged-object assertions; exact bytes were restored and both tests passed. Native maintained tests execute all six variants, exact serialization and four decode routes; fresh selected compiler APIs match completely and production native/wasm probes pass (four receipts, scoped ratchet zero); other Bitrue nominal/function/alias/local owners remain independently unreviewed. The full inventory still refuses 32 unsupported receiver methods; those and all other owners remain open.",
+    "observation": {
+      "call": "{ let observe=|d:$type| { let variant=match &d{$type::Buy => \"Buy\",$type::Sell => \"Sell\"}; serde_json::json!({\"variant\":variant,\"wire\":serde_json::to_value(&d).unwrap()}) }; let raw=$value.to_string(); let mut decoder=serde_json::Deserializer::from_str(&raw); match (serde_json::from_value::<$type>($value.clone()), <$type as serde::Deserialize>::deserialize($value), serde_json::from_str::<$type>(&raw), <$type as serde::Deserialize>::deserialize(&mut decoder)) { (Ok(owned),Ok(borrowed),Ok(text),Ok(qualified)) => { decoder.end().unwrap(); let result=observe(owned); assert_eq!(result,observe(borrowed),\"BITRUE enum borrowed native identity\"); assert_eq!(result,observe(text),\"BITRUE enum text native identity\"); assert_eq!(result,observe(qualified),\"BITRUE enum qualified native identity\"); result }, (Err(_),Err(_),Err(_),Err(_)) => serde_json::json!({\"error\":true}), _ => panic!(\"BITRUE enum route admission disagreement\") } }",
+      "cases": [
+        {
+          "input": "BUY",
+          "output": {
+            "variant": "Buy",
+            "wire": "BUY"
+          }
+        },
+        {
+          "input": {
+            "BUY": null
+          },
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "SELL",
+          "output": {
+            "variant": "Sell",
+            "wire": "SELL"
+          }
+        },
+        {
+          "input": {
+            "SELL": null
+          },
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": [
+            "BUY"
+          ],
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "__UNKNOWN_BITRUE_LITERAL__",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "buy",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": " BUY",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "BUY ",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "﻿BUY",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  }
+}

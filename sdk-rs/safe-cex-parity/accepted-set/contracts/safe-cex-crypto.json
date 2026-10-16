@@ -1,12 +1,83 @@
 {
   "safe_cex_crypto::Encoding": {
     "shape": "string",
-    "evidence": "Production JSON record/union contract; see safe-cex-crypto/CLAUDE.md",
+    "evidence": "Maintained literal union: packages/safe-cex/src/types.ts PayloadSignerRequest and utils/payloadSigner.ts encoding. Concrete Deserialize admits String only before private serde remote enum decoding; serialization metadata is preserved. string_enum_ingress asserts every native variant, exact literal serialization and valid tagged-map refusals through raw, owned, borrowed and qualified paths. Independent native variant observations below; compiling frontdoor-removal/restoration control is required.",
     "entrypoints": [],
     "literals": [
       "hex",
       "base64"
-    ]
+    ],
+    "observation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded)=>serde_json::json!({\"ok\":true,\"variant\":match decoded {$type::Hex=>\"Hex\",$type::Base64=>\"Base64\"}}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "hex",
+          "output": {
+            "ok": true,
+            "variant": "Hex"
+          }
+        },
+        {
+          "input": "base64",
+          "output": {
+            "ok": true,
+            "variant": "Base64"
+          }
+        },
+        {
+          "input": {
+            "hex": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "base64": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": true,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "unknown",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   },
   "safe_cex_crypto::WsAuth": {
     "shape": "map",
@@ -35,7 +106,7 @@
   },
   "safe_cex_crypto::WsOutputFormat": {
     "shape": "string",
-    "evidence": "Production JSON record/union contract; see safe-cex-crypto/CLAUDE.md",
+    "evidence": "Maintained literal union: packages/safe-cex/src/types.ts RemoteSignerRequest.wsAuth.outputFormat. Concrete Deserialize admits String only before private serde remote enum decoding; serialization metadata is preserved. string_enum_ingress asserts every native variant, exact literal serialization and valid tagged-map refusals through raw, owned, borrowed and qualified paths. Independent native variant observations below; compiling frontdoor-removal/restoration control is required.",
     "entrypoints": [],
     "literals": [
       "hex",
@@ -45,7 +116,153 @@
       "apexomni-base64",
       "bitunix-double-sha256",
       "coinbase-jwt"
-    ]
+    ],
+    "observation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded)=>serde_json::json!({\"ok\":true,\"variant\":match decoded {$type::Hex=>\"Hex\",$type::Base64=>\"Base64\",$type::HexBase64=>\"HexBase64\",$type::KrakenChallenge=>\"KrakenChallenge\",$type::ApexomniBase64=>\"ApexomniBase64\",$type::BitunixDoubleSha256=>\"BitunixDoubleSha256\",$type::CoinbaseJwt=>\"CoinbaseJwt\"}}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "hex",
+          "output": {
+            "ok": true,
+            "variant": "Hex"
+          }
+        },
+        {
+          "input": "base64",
+          "output": {
+            "ok": true,
+            "variant": "Base64"
+          }
+        },
+        {
+          "input": "hex-base64",
+          "output": {
+            "ok": true,
+            "variant": "HexBase64"
+          }
+        },
+        {
+          "input": "kraken-challenge",
+          "output": {
+            "ok": true,
+            "variant": "KrakenChallenge"
+          }
+        },
+        {
+          "input": "apexomni-base64",
+          "output": {
+            "ok": true,
+            "variant": "ApexomniBase64"
+          }
+        },
+        {
+          "input": "bitunix-double-sha256",
+          "output": {
+            "ok": true,
+            "variant": "BitunixDoubleSha256"
+          }
+        },
+        {
+          "input": "coinbase-jwt",
+          "output": {
+            "ok": true,
+            "variant": "CoinbaseJwt"
+          }
+        },
+        {
+          "input": {
+            "hex": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "base64": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "hex-base64": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "kraken-challenge": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "apexomni-base64": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "bitunix-double-sha256": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "coinbase-jwt": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": true,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "unknown",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   },
   "safe_cex_crypto::encode": {
     "api": {

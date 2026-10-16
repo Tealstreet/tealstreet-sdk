@@ -1,7 +1,7 @@
 //! Classic v2 and Unified v3 order aliases, evaluated before typed projection.
 use crate::{
     numeric::{FiniteNumberInput, to_finite_number},
-    protocol::*,
+    protocol::{ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, TIME_IN_FORCE},
 };
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{JsCoercionError, TableHit, js_string, js_table_lookup, js_truthy, parse_float};

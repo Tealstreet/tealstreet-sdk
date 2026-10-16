@@ -60,6 +60,13 @@ Numeric parity compares native f64 bits before serialization on raw, slice,
 owned Value, borrowed Value and the three shared entry functions. Never replace
 this capture with Value-first rebuffering or bypass the private strict decoder.
 
+`cloid::HyperliquidPlacementRecord` uses the same numeric capture and a private
+remote schema behind `strict_decode::object`. Its optional `timeInForce` admits
+absence and rejects present null. `tests/placement_record_ingress.rs` checks native
+fields, presence and binary64 bits through public Serde and shared numeric entry
+paths. It retains the [128-level capture budget](#record-capture-budget) and the
+existing scalar-Unicode `String` boundary for `symbol`.
+
 **History views and tables.** Use shared TableHit on the original SIDE/ORDER_TYPE
 tables. SIDE uses truthiness and ORDER_TYPE nullish fallback; these are distinct.
 Preserve source field coercion before refusing an inherited value at the closed

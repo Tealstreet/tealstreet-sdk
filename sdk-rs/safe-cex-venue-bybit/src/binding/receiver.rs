@@ -100,6 +100,12 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     )?;
     this.define("publicWebsocket", socket(rt, SocketSlot::Public)?)?;
     this.define("privateWebsocket", socket(rt, SocketSlot::Private)?)?;
+    if typed.base.name == safe_cex_types::ExchangeName::Bybitinverse {
+        this.define(
+            "publicInverseWebsocket",
+            socket(rt, SocketSlot::PublicSecondary)?,
+        )?;
+    }
     // ts: BybitExchange.get inversePublicWebsocket — the secondary public slot.
     this.define(
         "inversePublicWebsocket",
@@ -517,6 +523,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     members::batch::install(rt)?;
     if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot {
         members::spot::install(rt)?;
+    }
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitinverse {
+        members::inverse::install(rt)?;
     }
     Ok(())
 }

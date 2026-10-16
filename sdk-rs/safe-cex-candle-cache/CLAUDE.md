@@ -237,7 +237,14 @@ existing shared Candle/OrderSide eligibility; see
 539 native bit comparisons across seven fields, eleven source number spellings
 and seven ingress routes. Shape refusals remain separately pinned.
 
-The private owner request boundary is clean for already-parsed integer -0 in fromMs, toMs, limit and nowMs. Its four-field bit regression distinguishes this direct derived-record decoder from the lossy map-only cache record decoder.
+The private owner Request decoder requires an object at its own Deserialize boundary,
+using the shared shape guard and private remote schema. This preserves direct decimal
+and integer -0 decoding in fromMs, toMs, limit and nowMs, and both optional fields'
+missing/null behavior. The parent JSON-lines command check remains in place.
+The binary tests assert native fields and reject a complete seven-field array through
+raw, owned, borrowed and qualified decoding. Run `scripts/request-object-control.py`
+to remove only the guard, require the named array-admission failure, and restore the
+exact source before the passing rerun.
 
 Cursor write failures abort the active transaction inside the error callback, before the recovered error wakes records(). This applies to clear and eviction; readonly cursor failures still retain the successfully read prefix. Abort failure is attached to the existing reported diagnostic rather than discarded. The cursor_rollback_probe seeds two real chunks, fails the second continuation after deletes have begun, and requires both original chunks plus one report. Its execution coverage is OPEN: it builds and lints but has never run, because the browser environment remains blocked. This does not change the separately declared cancellation/abort-only completion behavior.
 

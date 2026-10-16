@@ -106,6 +106,22 @@ Response-shape helpers use shared js_own_keys before the six-key cutoff. Array
 validators borrow the original rows and preserve TypeError from message coercion.
 The live corpus carries ordered pairs so JSON transport cannot hide key-order bugs.
 
+The response-shape accepted-set review separates three executed outputs (both
+borrowed-array validators and the qualified native error conversion) from four
+diagnostic non-decoder roles (three descriptors and the typed error formatter).
+Classification receipts do not execute those diagnostic functions. Each has its
+own direct named native test, including both private helpers. Preserve nonempty
+slice identity, native element fields/bits, error name/message and Display before
+serialization. `scripts/response-shape-controls.py` requires seven independently
+compiled failures and exact-restoration passes; fresh production observations and
+classification receipts are checked by `scripts/response-shape-contracts.mjs`.
+All five Binance accepted-set runners read reviewed policy shards through the
+shared `loadPolicy` API; never restore deleted flat maps. See the
+[policy storage guide](../safe-cex-parity/accepted-set/POLICY-FILES.md).
+This selected native/default scope does not cover other owners or the feature
+matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
+and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.
+
 Spot order formatting consumes BaseExchange's client-ID resolution and final
 native-count assertion directly. Its market snapshot is cloned before errors
 can emit through the store. Preserve attached-order field inheritance, post-only
@@ -216,6 +232,22 @@ test to fail after compilation, then restore exact source and pass. The separate
 ordinary compiler discovery and those three production classification receipts.
 Those receipts classify the functions; they do not execute their predicate logic
 or discharge another function, owner, alias, local or feature configuration.
+
+The Futures/PM response-message functions and their private shared helper have
+observed native String/error-name contracts; the websocket rejection mapper has
+actual Option<OrderRejectReason> variant/absence witnesses before serialization.
+These functions preserve their fallback behavior: non-object response payloads
+produce empty text, and the typed Map API for rejection reasons is exercised with
+actual maps. Do not replace those output contracts with string-only/map-only
+admission checks. `tests/accepted_error_outputs.rs` supplies public native
+witnesses. `scripts/error-output-contracts.mjs` performs fresh ordinary compiler
+discovery and four actual production output probes, including a direct call to
+the private helper. `scripts/error-output-controls.py` changes one result at a
+time, requires the changed owner's compiled native output mismatch, restores
+exact bytes and requires all four outputs to pass. A private-helper mutation
+also affects its two public callers; the private owner's own result must fail.
+Compiler errors do not count. Run these probes serially and keep other owners,
+aliases, locals and feature/wasm claims outside this focused evidence.
 
 The public-factory response witness now pins the repaired shared provenance
 boundary: direct quoted HTTP text parses once; HOW custom-parser strings pass
