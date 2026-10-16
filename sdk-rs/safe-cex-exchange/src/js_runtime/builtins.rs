@@ -25,7 +25,7 @@ fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
     callback.call(Js::Undefined, args)
 }
 
-pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
+pub(crate) fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
     let name = String::from_utf16_lossy(key);
     let this = receiver.clone();
     match receiver {
