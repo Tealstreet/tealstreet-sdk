@@ -70,3 +70,6 @@ scoped formatting all pass. Parity reports zero findings (7,459 rows, 17,181
 public Rust items). Two reviewed Aster inventory body pins change: the globals
 factory enclosing the unchanged clock.start call, and the typed canSign bridge.
 No new base-delegation exception is needed.
+
+Latest master refresh 71107baba8: native registry 4/4 and all-feature/ignored
+override 6/6 pass; parity remains zero (7,459 rows; 17,183 public items).
