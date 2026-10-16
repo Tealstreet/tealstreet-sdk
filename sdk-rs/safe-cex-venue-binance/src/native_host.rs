@@ -75,7 +75,7 @@ pub fn native_dependencies(
     }
 }
 
-pub struct NativeImports {
+struct NativeImports {
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
     host: Rc<dyn HttpHost>,
@@ -89,10 +89,7 @@ pub struct NativeImports {
     this: Weak<NativeImports>,
 }
 type Emitter = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
-pub fn native_imports(
-    runtime: Rc<dyn WsRuntime>,
-    adapter: Arc<dyn RestAdapter>,
-) -> Rc<NativeImports> {
+fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
         timers: native_timers(runtime.clone()),
         runtime,
@@ -908,7 +905,7 @@ impl ExchangeImports for NativeImports {
 }
 
 /// setTimeout/clearTimeout with numeric tickets.
-pub struct NativeTimers {
+struct NativeTimers {
     runtime: Rc<dyn WsRuntime>,
     next: Cell<f64>,
     live: RefCell<HashMap<u64, Box<dyn ExchangeTask>>>,

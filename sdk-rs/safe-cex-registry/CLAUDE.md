@@ -59,3 +59,11 @@ source's retained loaded object. In-process seeding rereads that handle after
 parent notification; copy it only when constructing a parent update. The
 reentrant seed witness is in tests/public_data_providers.rs. Provider policy
 choices cite MANIFEST-SPEC.md#public-data-provider-choice.
+
+`native_host::native_venue_host()` is the production `RustVenueHost` (direct
+transport, real HTTP); `native_venue_host_with` takes a runtime and adapter
+factory. Native registry builds always carry it, since a feature cannot be
+enabled for this crate's own tests without a lateral self-edge; wasm builds do
+not. `tests/native_host_binance.rs` constructs Binance through
+`rust_constructor` against local HTTP/WS servers and verifies the HMAC
+server-side; `native_host_backpack.rs` reads markets through the real adapter.

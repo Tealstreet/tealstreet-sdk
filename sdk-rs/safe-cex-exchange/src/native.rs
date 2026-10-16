@@ -186,7 +186,7 @@ impl WsRuntime for NativeRuntime {
 
 /// A plain (non-reconnecting) socket. Open is delivered first; after Close or
 /// terminate the stream stays pending, as a listener-less socket would.
-pub struct NativeWsSocket {
+struct NativeWsSocket {
     inner: Rc<NativeSocket>,
     opened: Rc<Cell<bool>>,
     ended: Rc<Cell<bool>>,

@@ -26,7 +26,7 @@ use tokio_tungstenite::tungstenite::{
 };
 
 /// One rustls configuration on the ring provider with the platform roots.
-pub fn tls_config() -> Result<Arc<rustls::ClientConfig>, TransportError> {
+fn tls_config() -> Result<Arc<rustls::ClientConfig>, TransportError> {
     static CONFIG: OnceLock<Result<Arc<rustls::ClientConfig>, String>> = OnceLock::new();
     CONFIG
         .get_or_init(|| {
