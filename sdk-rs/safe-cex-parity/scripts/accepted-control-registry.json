@@ -146,6 +146,11 @@
     "accepted-object-map-construction-native.test.mjs": [
       "object-map Clone classification follows the actual compiler owner and exact traits"
     ],
+    "accepted-policy-files.test.mjs": [
+      "per-crate policy tables preserve compiler and source records exactly",
+      "policy shards refuse missing malformed misplaced duplicate symlink and obsolete inputs",
+      "policy shard ownership complete merge and direct cutover reject executed mutations"
+    ],
     "accepted-ratchet.test.mjs": [
       "outstanding debt exactly matches measured and owned failures",
       "repair requires immediate removal, including partial shape repairs",
@@ -326,6 +331,9 @@
     "Weex kline native identity",
     "Weex kline policy routing",
     "contract shard namespace",
-    "contract shard complete merge"
+    "contract shard complete merge",
+    "policy shard ownership",
+    "policy shard complete merge",
+    "policy shard direct cutover"
   ]
 }

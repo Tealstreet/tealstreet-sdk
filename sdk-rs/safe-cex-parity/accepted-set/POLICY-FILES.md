@@ -1,0 +1,42 @@
+# Reviewed policy storage
+
+Reviewed records live in `accepted-set/<table>/<crate>.json`. For example,
+transport Clone reviews belong in `construction/safe-cex-transport.json`; GRVT
+fixed alias identities belong in `generic-aliases/safe-cex-venue-grvt.json`.
+Keep each record's existing compiler owner or source-helper key unchanged.
+
+The tables are `construction`, `default-traits`, `receiver-traits`,
+`generic-aliases`, `function-pointer-aliases`, `constant-outputs`,
+`local-functions` and `local-type-helpers`. Contracts already use the independent
+`contracts/<crate>.json` layout and `loadContracts()`.
+
+JavaScript readers import `loadPolicy` from `scripts/accepted-policy-files.mjs`
+and call, for example, `loadPolicy('construction')`. An isolated fixture may pass
+its accepted-set root as the second argument. The loader merges every shard,
+requires each key to belong to its filename's crate, and refuses missing/empty
+tables, malformed shards, duplicate owners, unexpected files and symlinks. It
+also refuses a restored `<table>.json`; there is no flat-file fallback.
+
+When merging master into an existing review branch, preserve the master shards
+and port only the branch's genuine new or changed records into their crate
+files. Never restore the deleted flat maps. Native mutation controls edit the
+specific crate shard and restore its original bytes in `finally`.
+
+This is storage only. Existing compiler signatures, alias identities, source
+pins, Clone/Copy traits, role reviews and native observations remain required.
+Evidence ledgers, fixed compiler fixtures and control registries retain their
+own formats; they are not maps of independently appended crate reviews.
+
+The initial cutover from master `5515ddd7a4` preserved all 152 records across
+eight tables in 52 shards. The cutover compares every complete parsed old map
+with `loadPolicy`, including native adapter strings and negative zero, using:
+
+```sh
+ACCEPTED_LEGACY_POLICY_DIRECTORY=/path/to/original-tables \
+  node --test sdk-rs/safe-cex-parity/scripts/accepted-policy-files.test.mjs
+```
+
+The permanent fixture covers both compiler and source keys, Unicode, Rust
+adapter text and negative zero. Executed controls remove crate ownership,
+drop a merged record and permit a restored flat file; each must fail its named
+assertion and pass after restoration.

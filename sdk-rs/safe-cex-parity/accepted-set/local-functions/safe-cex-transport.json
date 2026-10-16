@@ -1,0 +1,7 @@
+{
+  "safe-cex-transport/src/relay.rs::LOCAL_FUNCTION:string": {
+    "category": "non-decoder",
+    "reason": "Formats an already decoded JSON error value using JavaScript coercion; no inbound shape acceptance.",
+    "sourceSha256": "6db7e9f4c7c1281c585245da2182a113e6607af5616b291588368bde1ada38a1"
+  }
+}

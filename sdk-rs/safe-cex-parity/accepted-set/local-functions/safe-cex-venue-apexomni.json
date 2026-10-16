@@ -1,0 +1,12 @@
+{
+  "safe-cex-venue-apexomni/src/exchange_utils.rs::LOCAL_FUNCTION:parts": {
+    "category": "non-decoder",
+    "reason": "Inside decimal_multiply: splits an f64's JS number spelling into BigInt mantissa and decimal exponent for exact multiplication. Typed numeric arithmetic on already decoded values; no raw input.",
+    "sourceSha256": "33517207cc7b35729bed8aa5f38612e25954c45e27c5b3b4d4e608cbaae3cae3"
+  },
+  "safe-cex-venue-apexomni/src/exchange.rs::LOCAL_FUNCTION:retained": {
+    "category": "non-decoder",
+    "reason": "Inside fields: converts an already modeled JS JSON value into RetainedJsonInput for diagnostic field projection, refusing undefined/unsupported nodes. It projects outbound data rather than admitting a decoded shape.",
+    "sourceSha256": "0e0a15b25d52ba5c1a2edbe671be9c8ea04678553e156281723eca073749260d"
+  }
+}

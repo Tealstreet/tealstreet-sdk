@@ -1,0 +1,8 @@
+{
+  "safe_cex_transport::signing::RemoteSigner::sign_query": {
+    "category": "non-decoder",
+    "file": "safe-cex-transport/src/signing.rs",
+    "reason": "Reviewed signing.rs: the default ignores its typed HttpSigningRequest and returns TransportError::Host refusing native query signing. It reads no raw input and produces no decoded value; implementors that override it are inventoried at their own impls.",
+    "sourceSha256": "09fb855499e465f6d6fac49e0926a2d2e121806252d3a2bace8ad75c8d1134e8"
+  }
+}
