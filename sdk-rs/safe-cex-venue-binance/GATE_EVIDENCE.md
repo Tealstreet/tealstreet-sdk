@@ -3395,3 +3395,11 @@ production contract probes, formatting and parity-check pass again. The merge
 preserves every master contract entry and re-applies only these four reviewed
 Binance records. The compiled guard controls and all-target Clippy ran before
 this merge; the Binance implementation files are byte-identical across it.
+
+A second integration of master `55e98b428e` preserves every master contract
+entry and places the same four Binance records before the existing table to
+avoid other lanes' append location. Binance and all native dependency source
+files, venue tests and scripts compare unchanged against `9501adec0c`; the
+existing compiled targets execute all 13 live/native tests successfully again.
+Fresh ordinary discovery and four production contract probes pass with zero
+failed owners; parity-check passes 7,459 rows and 17,183 public Rust items.
