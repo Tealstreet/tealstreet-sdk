@@ -62,17 +62,17 @@ note = "CHOSEN: native_binance selects the actual source module ./binance/binanc
 ts = "exchangeRegistry.binancepm"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_binancepm"
+rs = [ "safe-cex-registry/src/loaders.rs::native_binancepm", "safe-cex-registry/src/rust_venues.rs::binancepm_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_binancepm selects the actual source module ./binance/binancepm.exchange and export BinancePMExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_binancepm. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_binancepm selects the actual source module ./binance/binancepm.exchange and export BinancePMExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_binancepm. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split member `safe-cex-registry/src/rust_venues.rs::binancepm_constructor`; the Rust construction route for this name, selected only by ConstructionPath::Rust: the table entry's constructor calls BinancePMExchange::new with the caller's name/options/store and the per-construction ExchangeDependencies from RustVenueHost::binance, which serves all three Binance classes."
 
 [[symbol]]
 ts = "exchangeRegistry.binancespot"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_binancespot"
+rs = [ "safe-cex-registry/src/loaders.rs::native_binancespot", "safe-cex-registry/src/rust_venues.rs::binancespot_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_binancespot selects the actual source module ./binance/binancespot.exchange and export BinanceSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_binancespot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_binancespot selects the actual source module ./binance/binancespot.exchange and export BinanceSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_binancespot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split member `safe-cex-registry/src/rust_venues.rs::binancespot_constructor`; the Rust construction route for this name, selected only by ConstructionPath::Rust: the table entry's constructor calls BinanceSpotExchange::new with the caller's name/options/store and the per-construction ExchangeDependencies from RustVenueHost::binance, which serves all three Binance classes."
 
 [[symbol]]
 ts = "exchangeRegistry.bingx"

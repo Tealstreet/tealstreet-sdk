@@ -13,7 +13,9 @@ use safe_cex_venue_backpack::{
     adapter::{BackpackExchange, DateParser},
     native_http::{BuildHttp, InstallTransport},
 };
-use safe_cex_venue_binance::exchange_classes::{BinanceExchange, ExchangeDependencies};
+use safe_cex_venue_binance::exchange_classes::{
+    BinanceExchange, BinancePMExchange, BinanceSpotExchange, ExchangeDependencies,
+};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
 
@@ -47,6 +49,8 @@ type RustConstructorEntry = fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor;
 pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Backpack, backpack_constructor),
     (ExchangeName::Binance, binance_constructor),
+    (ExchangeName::Binancepm, binancepm_constructor),
+    (ExchangeName::Binancespot, binancespot_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
@@ -77,6 +81,22 @@ pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
 pub fn binance_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = BinanceExchange::new(name, options, store, host.binance()?)
+            .map_err(Rc::unwrap_or_clone)?;
+        Ok(Rc::new(exchange))
+    })
+}
+
+pub fn binancepm_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = BinancePMExchange::new(name, options, store, host.binance()?)
+            .map_err(Rc::unwrap_or_clone)?;
+        Ok(Rc::new(exchange))
+    })
+}
+
+pub fn binancespot_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = BinanceSpotExchange::new(name, options, store, host.binance()?)
             .map_err(Rc::unwrap_or_clone)?;
         Ok(Rc::new(exchange))
     })

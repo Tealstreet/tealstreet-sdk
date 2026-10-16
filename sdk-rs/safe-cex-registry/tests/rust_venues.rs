@@ -587,6 +587,8 @@ fn table_members_are_exactly_the_bound_venues() {
         [
             ExchangeName::Backpack,
             ExchangeName::Binance,
+            ExchangeName::Binancepm,
+            ExchangeName::Binancespot,
             ExchangeName::Okx,
             ExchangeName::Okxdemo,
             ExchangeName::Okxeu,
@@ -666,6 +668,20 @@ fn binance_constructs_through_the_registry_and_reads_its_account() {
         ["/fapi/v3/balance"],
         "REGISTRY binance getAccount request"
     );
+}
+
+#[test]
+fn binance_pm_and_spot_construct_through_the_registry_on_the_binance_inputs() {
+    for name in [ExchangeName::Binancepm, ExchangeName::Binancespot] {
+        let host = venues();
+        let exchange = construct(name.clone(), &host, json!({"key":"key","secret":"secret"}));
+        assert_eq!(exchange.name(), &name, "REGISTRY binance family name");
+        assert_eq!(
+            *host.calls.borrow(),
+            ["binance"],
+            "REGISTRY binance family reuses the binance host inputs once"
+        );
+    }
 }
 
 #[test]
