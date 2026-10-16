@@ -25,6 +25,7 @@ struct Runtime {
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
+    dial_socket: RefCell<Option<Rc<dyn safe_cex_exchange::websocket::WsSocket>>>,
     dials: RefCell<
         Vec<(
             String,
@@ -1229,7 +1230,8 @@ impl safe_cex_exchange::websocket::WsRuntime for Runtime {
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn safe_cex_exchange::websocket::WsSocket>> {
         self.dials.borrow_mut().push((url, protocols, options));
-        Box::pin(async { Err(ExchangeError::new("recorded dial")) })
+        let socket = self.dial_socket.borrow().clone();
+        Box::pin(async move { socket.ok_or_else(|| ExchangeError::new("recorded dial")) })
     }
     fn headers_capable(&self) -> bool {
         self.headers_capable.get()
@@ -3593,3 +3595,6 @@ fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
         );
     }
 }
+
+#[path = "support/js_raw_socket_close.rs"]
+mod raw_socket_close;

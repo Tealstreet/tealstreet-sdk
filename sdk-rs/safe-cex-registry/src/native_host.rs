@@ -366,6 +366,41 @@ impl RustVenueHost for NativeVenueHost {
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
+
+    fn phemex(
+        &self,
+    ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
+        Ok(
+            safe_cex_venue_phemex::binding::exchange::PhemexDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                install_transport: None,
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
     fn woo(&self) -> Result<safe_cex_venue_woo::WooDependencies, ExchangeError> {
         Ok(safe_cex_venue_woo::WooDependencies {
             runtime: self.runtime.clone(),

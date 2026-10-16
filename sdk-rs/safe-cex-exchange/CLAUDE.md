@@ -102,6 +102,11 @@ runtime; the infallible protocol hook still permits core transport cleanup.
 The Weex source-member witness covers timer/listener cleanup, superclass order,
 direct and typed calls, repeated disposal and guard reset after errors.
 
+The returned JS websocket handle uses `close_current_websocket()` for `ws.close()`.
+This closes only the current transport and preserves the superclass force-closed
+flag and retained handles. The raw-close source witness executes both Crypto.com
+no-super disposal overrides and contrasts them with the source `forceClose()`.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.
@@ -1061,6 +1066,13 @@ an exhausted budget rejects the original error before sleeping or sending.
 including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
+
+Dispose delegation reviews name the actual TypeScript class and method span in
+`tests/override-base-delegations.json`. The live `dispose-source.cjs` gate resolves
+inheritance and AST super calls: a socket receiver type alone cannot justify base
+cleanup, and an own no-super override cannot use chosen-base to pass this gate.
+The shared BaseExchange bridge cites its actual base implementation separately.
+See `../parity/DISPOSE_AUDIT.md` for the complete venue sweep and routed mismatches.
 
 Venue overrides whose source calls only `this.ws.close()` use
 `BaseWebSocket::close_current_websocket`. It forwards current native/relay close
