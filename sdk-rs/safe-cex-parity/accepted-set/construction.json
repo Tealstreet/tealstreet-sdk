@@ -350,5 +350,17 @@
       "core::clone::Clone"
     ],
     "reason": "Reviewed runtime_selector.rs::WooV3InvalidModeSelection: derived Clone preserves the readonly route-plan fields (blocked status, route, owned requested-mode JSON, gate, blocker and store-authority label). These values describe a reusable transport-free selection; cloning neither opens a migration gate nor sends a request or writes Store. Private construction fixes result tags/invariants, and duplicating the same plan preserves those fields rather than creating one-use dispatch/validation authority See sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
+  },
+  "safe_cex_exchange::js_runtime::promise::Promise": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed promise.rs::Promise: Clone duplicates the Rc<RefCell<State>> handle. Clones intentionally share settlement, waiters and the owned continuation task; they do not clone or restart that task. Promise results are reusable native data and carry no one-use placement or signing authority. This is shared identity, not a frozen snapshot or independent state; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
+  "safe_cex_exchange::js_runtime::library::Decimal": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed library.rs::Decimal: derived Clone copies its owned BigInt coefficient and i64 scale for reusable bignumber arithmetic. The private fields carry numeric value data, no consumed nonce, validation witness or task authority. This classifies duplication only; parse/format/arithmetic behavior retains its separate inventory and tests."
   }
 }
