@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 getrandom.workspace = true
+regex.workspace = true
 safe-cex-exchange.workspace = true
 safe-cex-types.workspace = true
 safe-cex-num.workspace = true
