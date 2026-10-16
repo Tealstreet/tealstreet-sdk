@@ -87,7 +87,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bybit`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `bybitspot`, `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
 and `woo`.
 
 Each follow-up does four things:
@@ -215,3 +215,15 @@ separate from the venue's local-key signing interceptor.
 trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
 server, and checks both network origins, proxy preservation, info bypass, repeat
 query encoding and limiter identity across separate account hosts.
+
+## Bybit registry proof
+
+`tests/native_host_bybit.rs` constructs Bybit and Demo through the production
+native host and calls `get_account` over loopback HTTP. Each name is exercised
+with local credentials and with a hosted signer plus account name and empty local
+credentials. The server independently verifies the timestamp, API key, receive
+window and generated `requestId` query bytes against HMAC-SHA256. Dropping either
+table entry makes construction fail; dropping typed signer forwarding makes the
+secretless test fail. All three controls were compiled, observed failing, and
+restored before the passing two-test run. The existing 13 registry membership/
+construction tests and 20 Bybit binding tests also pass (one live oracle ignored).
