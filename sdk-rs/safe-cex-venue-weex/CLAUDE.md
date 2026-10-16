@@ -90,6 +90,11 @@ request-construction and host-operation roles with exact compiler signatures.
 Their native receipts are classification evidence. Response owners use the
 separate executed decoder observations above.
 
+Retained-input, typed-error conversion, present-field, optional-boolean and
+public-trade contracts execute direct native adapters. The three generic class
+constructors have typed API classifications; their concrete Factory behavior is
+covered by the production constructor E2E, including both source sockets.
+
 Seven enum normalizers in `src/utils.rs` mirror their source control flow and use
 the actual shared tables. `WeexUtilityInput` captures its opaque `value` with
 `js_deserialize_passthrough` before constructing Value, with explicit passthrough

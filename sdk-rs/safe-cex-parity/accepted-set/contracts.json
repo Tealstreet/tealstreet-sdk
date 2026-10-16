@@ -139213,5 +139213,1081 @@
     "category": "non-decoder",
     "reason": "Finds a prepared native body by static method name, captures its host binding capability, and installs an arrow callback; it does not turn input text into a class or decoder.",
     "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/classes.rs at 106-128. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::fills::optional_bool": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional_bool",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "bool"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_weex::utils::WeexUtilityError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.get(\"present\").and_then(|present|if present.as_bool()==Some(true){Some(&$value[\"value\"])}else{None}),\"reduceOnly\"){Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})} }",
+    "cases": [
+      {
+        "input": {
+          "present": false
+        },
+        "output": {
+          "ok": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": true
+        },
+        "output": {
+          "ok": true,
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": null
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "reduceOnly requires a boolean"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": "false"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "reduceOnly requires a boolean"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": 1
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "reduceOnly requires a boolean"
+        }
+      }
+    ],
+    "evidence": "Reviewed fills.rs optional_bool: missing remains None; present values must be booleans. Actual private function is executed with a fixed declared field name, both booleans and null/string/number refusals. Native Result/Option/error fields are observed directly."
+  },
+  "safe_cex_venue_weex::response_types::deserialize_present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_present",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ if $value[\"consumer\"]==\"text\" { match $type::<_,String>($value[\"input\"].clone()){Ok(value)=>serde_json::json!({\"ok\":true,\"kind\":\"text\",\"value\":value}),Err(_)=>serde_json::json!({\"ok\":false})} } else {match $type::<_,Vec<super::WeexExchangeInfoRecord>>($value[\"input\"].clone()){Ok(Some(records))=>serde_json::json!({\"ok\":true,\"kind\":\"records\",\"records\":records.iter().map(|record|match record{super::WeexExchangeInfoRecord::Object(fields)=>serde_json::json!({\"kind\":\"object\",\"count\":fields.len()}),super::WeexExchangeInfoRecord::Array(items)=>serde_json::json!({\"kind\":\"array\",\"count\":items.len()})}).collect::<Vec<_>>()}),Ok(None)=>panic!(\"present helper lost Some\"),Err(_)=>serde_json::json!({\"ok\":false})}} }",
+    "cases": [
+      {
+        "input": {
+          "consumer": "text",
+          "input": "order-alpha"
+        },
+        "output": {
+          "ok": true,
+          "kind": "text",
+          "value": "order-alpha"
+        }
+      },
+      {
+        "input": {
+          "consumer": "text",
+          "input": "client-beta"
+        },
+        "output": {
+          "ok": true,
+          "kind": "text",
+          "value": "client-beta"
+        }
+      },
+      {
+        "input": {
+          "consumer": "text",
+          "input": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "consumer": "records",
+          "input": [
+            {
+              "asset": "USD"
+            },
+            [
+              "ticker"
+            ]
+          ]
+        },
+        "output": {
+          "ok": true,
+          "kind": "records",
+          "records": [
+            {
+              "kind": "object",
+              "count": 1
+            },
+            {
+              "kind": "array",
+              "count": 1
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "consumer": "records",
+          "input": [
+            [],
+            {},
+            {
+              "a": 3,
+              "b": 4
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "kind": "records",
+          "records": [
+            {
+              "kind": "array",
+              "count": 0
+            },
+            {
+              "kind": "object",
+              "count": 0
+            },
+            {
+              "kind": "object",
+              "count": 2
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "consumer": "records",
+          "input": null
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "Reviewed the actual generic T::deserialize(...).map(Some) body and its String/order-field and Vec<WeexExchangeInfoRecord>/exchange-info consumers. Execute both concrete instantiations, observing actual Some/native values and null refusals. This finite witness makes no claim for every possible T."
+  },
+  "safe_cex_venue_weex::public_trade::normalize_public_trade": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize_public_trade",
+      "signature": {
+        "inputs": [
+          [
+            "raw",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::utils::WeexUtilityInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "local_to_utc",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "f64"
+                            }
+                          ],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::PublicTrade",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_weex::utils::WeexUtilityError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(f64) -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "f64"
+                              }
+                            ],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let raw:crate::utils::WeexUtilityInput=serde_json::from_value($value[\"raw\"].clone()).expect(\"captured trade fixture\");match $type(&raw,$value[\"symbol\"].as_str().unwrap(),|millis|millis){Ok(Some(trade))=>serde_json::json!({\"ok\":true,\"trade\":{\"id\":trade.id,\"symbol\":trade.symbol,\"priceBits\":format!(\"{:016x}\",trade.price.to_bits()),\"qtyBits\":format!(\"{:016x}\",trade.qty.to_bits()),\"quoteBits\":trade.quote_qty.map(|number|format!(\"{:016x}\",number.to_bits())),\"timestampBits\":format!(\"{:016x}\",trade.timestamp.to_bits()),\"side\":match trade.side{safe_cex_types::OrderSide::Buy=>\"buy\",safe_cex_types::OrderSide::Sell=>\"sell\"}}}),Ok(None)=>serde_json::json!({\"ok\":true,\"trade\":null}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})} }",
+    "cases": [
+      {
+        "input": {
+          "raw": {
+            "id": "trade-a",
+            "p": "2.5",
+            "q": "-4",
+            "T": 1700000000000,
+            "quoteQty": "10",
+            "m": true
+          },
+          "symbol": "ETH-USDT"
+        },
+        "output": {
+          "ok": true,
+          "trade": {
+            "id": "trade-a",
+            "symbol": "ETH-USDT",
+            "priceBits": "4004000000000000",
+            "qtyBits": "4010000000000000",
+            "quoteBits": "4024000000000000",
+            "timestampBits": "4278bcfe56800000",
+            "side": "sell"
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": {
+            "id": "trade-b",
+            "price": 3.25,
+            "qty": 2,
+            "time": 1700000001000,
+            "quoteQty": 6.5,
+            "buyer": true
+          },
+          "symbol": "BTC-USDT"
+        },
+        "output": {
+          "ok": true,
+          "trade": {
+            "id": "trade-b",
+            "symbol": "BTC-USDT",
+            "priceBits": "400a000000000000",
+            "qtyBits": "4000000000000000",
+            "quoteBits": "401a000000000000",
+            "timestampBits": "4278bcfe56be8000",
+            "side": "buy"
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": {
+            "price": 0,
+            "qty": 2,
+            "time": 1700000000000
+          },
+          "symbol": "ETH-USDT"
+        },
+        "output": {
+          "ok": true,
+          "trade": null
+        }
+      },
+      {
+        "input": {
+          "raw": null,
+          "symbol": "BTC-USDT"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'price')"
+        }
+      }
+    ],
+    "evidence": "Reviewed public_trade.rs and the source normalizer: retained field aliases, absolute quantity, numeric timestamp, strict maker/buyer flags and null/zero-price exits. These fixtures observe actual PublicTrade fields and independent IEEE-754 bit expectations; no PublicTrade serialization/redecode. The broader actual-source public_trade oracle is supplementary evidence."
+  },
+  "safe_cex_venue_weex::utils::WeexUtilityError": {
+    "shape": "observed",
+    "evidence": "WeexUtilityError has no raw decoder. Its actual From<safe_cex_types::js_coercion::JsCoercionError> conversion copies native name/message from an already typed error. Two explicitly synthetic, valid static-string error values independently witness those fields.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::js_coercion::JsCoercionError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Observe the typed From conversion directly; the JSON selectors choose two fixed native error fixtures rather than decoding the owner."
+      }
+    ],
+    "call": "{ let error=if $value==\"type\" {safe_cex_types::js_coercion::JsCoercionError{name:\"TypeError\",message:\"fixture primitive conversion\"}}else{safe_cex_types::js_coercion::JsCoercionError{name:\"RangeError\",message:\"fixture numeric range\"}};let decoded=$type::from(error);serde_json::json!({\"name\":decoded.name,\"message\":decoded.message}) }",
+    "cases": [
+      {
+        "input": "type",
+        "output": {
+          "name": "TypeError",
+          "message": "fixture primitive conversion"
+        }
+      },
+      {
+        "input": "range",
+        "output": {
+          "name": "RangeError",
+          "message": "fixture numeric range"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_weex::utils::WeexUtilityInput": {
+    "shape": "json",
+    "evidence": "The transparent retained value uses js_deserialize_passthrough before Value construction. Review preserves the documented retained-JSON profile, including opaque passthrough. Native observations inspect the actual private captured value; as_value has its own actual-method witness. Neither adapter serializes the owner.",
+    "nativeObservation": {
+      "call": "{let decoded: $type=serde_json::from_value($value.clone()).expect(\"retained input fixture\");let value=&decoded.value;let (kind,count)=match value{serde_json::Value::Array(items)=>(\"array\",items.len()),serde_json::Value::Object(fields)=>(\"object\",fields.len()),_=>panic!(\"reviewed compound fixture\")};let label=value.get(\"label\").or_else(||value.get(0)).and_then(serde_json::Value::as_str).expect(\"native label\");serde_json::json!({\"ok\":true,\"kind\":kind,\"count\":count,\"label\":label}) }",
+      "nativeFields": [
+        "kind",
+        "count",
+        "label"
+      ],
+      "cases": [
+        {
+          "input": [
+            "native-a",
+            true,
+            null
+          ],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "count": 3,
+            "label": "native-a"
+          }
+        },
+        {
+          "input": {
+            "label": "native-b",
+            "flag": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "count": 2,
+            "label": "native-b"
+          }
+        }
+      ]
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "as_value returns the actual retained value by reference; observe native shape/cardinality/label through that method after a reviewed concrete capture.",
+        "call": "{let decoded: $type=serde_json::from_value($value.clone()).expect(\"retained input fixture\");let value=decoded.as_value();let (kind,count)=match value{serde_json::Value::Array(items)=>(\"array\",items.len()),serde_json::Value::Object(fields)=>(\"object\",fields.len()),_=>panic!(\"reviewed compound fixture\")};let label=value.get(\"label\").or_else(||value.get(0)).and_then(serde_json::Value::as_str).expect(\"native label\");serde_json::json!({\"ok\":true,\"kind\":kind,\"count\":count,\"label\":label}) }",
+        "nativeFields": [
+          "kind",
+          "count",
+          "label"
+        ],
+        "cases": [
+          {
+            "input": [
+              "native-a",
+              true,
+              null
+            ],
+            "output": {
+              "ok": true,
+              "kind": "array",
+              "count": 3,
+              "label": "native-a"
+            }
+          },
+          {
+            "input": {
+              "label": "native-b",
+              "flag": false
+            },
+            "output": {
+              "ok": true,
+              "kind": "object",
+              "count": 2,
+              "label": "native-b"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_weex::classes::WeexExchange": {
+    "shape": "typed",
+    "evidence": "Reviewed the generic ClassHost constructor body. It assembles already supplied host values and executable capabilities, with no Deserialize or raw parser. The production constructor E2E executes all three concrete classes through Factory and inspects their actual assembled fields/sockets. This contract receives an exact native compiler classification receipt, without claiming a generic wire domain.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              [
+                "store",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "H"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "ClassHost and its associated Value arguments are already supplied executable host capabilities; the constructor initializes/binds that host object."
+      }
+    ]
+  },
+  "safe_cex_venue_weex::classes::WeexPublicWebsocket": {
+    "shape": "typed",
+    "evidence": "Reviewed the generic ClassHost constructor body. It assembles already supplied host values and executable capabilities, with no Deserialize or raw parser. The production constructor E2E executes all three concrete classes through Factory and inspects their actual assembled fields/sockets. This contract receives an exact native compiler classification receipt, without claiming a generic wire domain.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "parent",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "H"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "ClassHost and its associated Value arguments are already supplied executable host capabilities; the constructor initializes/binds that host object."
+      }
+    ]
+  },
+  "safe_cex_venue_weex::classes::WeexPrivateWebsocket": {
+    "shape": "typed",
+    "evidence": "Reviewed the generic ClassHost constructor body. It assembles already supplied host values and executable capabilities, with no Deserialize or raw parser. The production constructor E2E executes all three concrete classes through Factory and inspects their actual assembled fields/sockets. This contract receives an exact native compiler classification receipt, without claiming a generic wire domain.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "parent",
+                {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "H"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "ClassHost and its associated Value arguments are already supplied executable host capabilities; the constructor initializes/binds that host object."
+      }
+    ]
   }
 }
