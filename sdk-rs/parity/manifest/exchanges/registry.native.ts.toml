@@ -334,7 +334,7 @@ note = "API split: safe-cex-registry/src/rust_venues.rs::phemex_constructor and 
 ts = "exchangeRegistry.polymarket"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-registry/src/loaders.rs::native_polymarket", "safe-cex-registry/src/rust_venues.rs::polymarket_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::polymarket"]
+rs = [ "safe-cex-registry/src/loaders.rs::native_polymarket", "safe-cex-registry/src/rust_venues.rs::polymarket_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::polymarket" ]
 status = "divergent"
 note = "API split: safe-cex-registry/src/rust_venues.rs::polymarket_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::polymarket supply the concrete runtime, HTTP host, and external-data provider for this Rust constructor. CHOSEN: native_polymarket selects the actual source module ./polymarket/polymarket.exchange and export PolymarketExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. ConstructionPath::Rust constructs the concrete PolymarketExchange using RustVenueHost::polymarket and its production native-host override; the default ModuleHost route is retained. tests/rust_venues.rs exercises live account and leverage calls through this entry. Renamed to safe-cex-registry/src/loaders.rs::native_polymarket. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
