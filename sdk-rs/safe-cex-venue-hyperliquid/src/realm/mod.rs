@@ -190,3 +190,6 @@ impl Realm {
 pub(crate) mod test_runtime;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod socket_tests;

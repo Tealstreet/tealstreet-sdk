@@ -33,7 +33,9 @@ impl ApexOmniExchange {
         if name != ExchangeName::Apexomni {
             return Err(ExchangeError::new("ApexOmniExchange requires apexomni"));
         }
-        if options.remote_signer.is_some() || options.payload_signer.is_some() {
+        let remote = deps.http.hosted_signer();
+        if (options.remote_signer.is_some() && remote.is_none()) || options.payload_signer.is_some()
+        {
             return Err(ExchangeError::new(
                 "ApexOmni hosted signing capability unavailable",
             ));
@@ -43,13 +45,14 @@ impl ApexOmniExchange {
                 "ApexOmni externalPublicData requires a provider",
             ));
         }
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options.clone(),
             store.clone(),
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
+        base.signers.remote_signer = remote.map(|(signer, _)| signer);
         let host = Host::new(options, store, deps);
         // A weak imported host capability prevents the socket->parent->host cycle.
         let inner = Bodies::new(base, Rc::new(HostLink(Rc::downgrade(&host))))?;
