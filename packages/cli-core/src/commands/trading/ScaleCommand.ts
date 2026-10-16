@@ -135,24 +135,6 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const orderSide = args[1] === 'buy' ? OrderSide.Buy : OrderSide.Sell;
-    // Match the buy/sell vs close convention from Phase 0 decision 1:
-    // entries (non-reduce) take % of balance, exits (reduce) take % of
-    // position. Without `allowPercentage=true` the regex-vs-parser
-    // layer mismatch surfaced as confusing throws — see the test
-    // `regex accepts percent-size, parser used to reject it`.
-    let totalSize: number;
-    try {
-      totalSize = this.parseSizeAndConvertIfUsd(
-        exchange,
-        targetSymbol,
-        args[2],
-        true,
-        reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
-        reduceOnly ? 'position' : 'balance',
-      );
-    } catch (e) {
-      return this.error((e as Error).message);
-    }
     const ordersCount = parseInt(args[4], 10);
 
     const currentPrice = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol)?.last;
@@ -165,6 +147,25 @@ export class ScaleCommand extends TradingBaseCommand {
     const priceUpper = Math.max(parseFloat(from), parseFloat(to));
     const priceLower = Math.min(parseFloat(to), parseFloat(from));
     const priceIncrement = subtract(priceUpper, priceLower) / subtract(ordersCount, 1);
+
+    // Entries take a bare % of balance, reduce-only exits a % of position.
+    // Every rung gets the same coin amount: a `$` / `%bal` size is converted
+    // at the midpoint of the range, the mean of the evenly spaced rung prices.
+    // Position and inverse sizes don't depend on price.
+    let totalSize: number;
+    try {
+      totalSize = this.parseSizeAndConvertIfUsd(
+        exchange,
+        targetSymbol,
+        args[2],
+        true,
+        reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
+        reduceOnly ? 'position' : 'balance',
+        (priceLower + priceUpper) / 2,
+      );
+    } catch (e) {
+      return this.error((e as Error).message);
+    }
     const orderSize = totalSize / ordersCount;
 
     const orders = [];

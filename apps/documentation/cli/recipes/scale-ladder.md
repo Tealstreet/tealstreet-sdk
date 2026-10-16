@@ -15,7 +15,8 @@ scale buy $1000 into 10 from -0.25% to -1%
 ```
 
 Ten limit buys totalling $1000 notional, evenly spaced between -0.25% and
--1% from the last price on the focused symbol. Each rung is $100.
+-1% from the last price on the focused symbol. Each rung gets the same coin
+amount, so the ladder averages in at the middle of the range.
 
 ## Variations
 

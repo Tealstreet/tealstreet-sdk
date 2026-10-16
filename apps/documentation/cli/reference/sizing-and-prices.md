@@ -24,6 +24,10 @@ order's limit or `best` price, and a `$` size for a sized `stop` at its `at`
 price. Market orders use the last price; inverse contracts don't depend on
 price.
 
+`scale` converts the size at the midpoint of the price range and gives every
+rung the same coin amount, so the average entry is the midpoint.
+Position-percent and inverse sizes still split evenly in contracts.
+
 ### Default percent scope
 
 Bare `50%` doesn't mean the same thing for every command:
