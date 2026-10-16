@@ -191,7 +191,8 @@ fn venue_with_runtime_and_key(
 ) -> (MexcExchange, Rc<Runtime>) {
     let runtime = Rc::new(Runtime(time, RefCell::default(), Rc::new(Cell::new(0.0))));
     let exchange = MexcExchange {
-        base: BaseExchange::new(
+        external: Rc::new(|_, _| panic!("no externalPublicData configured")),
+        base: Rc::new(BaseExchange::new(
             ExchangeName::Mexc,
             serde_json::from_value::<ExchangeOptions>(
                 json!({"key":key,"secret":"secret","publicDataOnly":public_only}),
@@ -200,7 +201,7 @@ fn venue_with_runtime_and_key(
             store,
             runtime.clone(),
             ExchangeSettings::default(),
-        ),
+        )),
         capabilities: ExchangeCapabilities::default(),
         xhr: Rc::new(NoRequests),
         local_to_utc: Rc::new(|v| v),
@@ -213,6 +214,7 @@ fn venue_with_runtime_and_key(
         symbol_settings: RefCell::new(BTreeMap::new()),
         account_position_mode: RefCell::new(safe_cex_types::PositionMode::Hedged),
         public_socket: RefCell::default(),
+        binding: Default::default(),
     };
     (exchange, runtime)
 }
@@ -2842,7 +2844,7 @@ fn mexc_fetch_orders_live_requests_and_results() {
         let now = case["time"].as_f64().unwrap();
         let runtime = Rc::new(Runtime(now, RefCell::default(), Rc::new(Cell::new(0.0))));
         let mut venue = venue(store, now, case["publicOnly"].as_bool().unwrap());
-        venue.base.runtime = runtime.clone();
+        Rc::get_mut(&mut venue.base).unwrap().runtime = runtime.clone();
         *venue.canceled.borrow_mut() = BTreeMap::from([("201".into(), now)]);
         let wire = Rc::new(OrderWire {
             failure: case["failure"].as_str().map(str::to_owned),
@@ -3851,7 +3853,7 @@ fn mexc_history_reads_markets_per_row_and_preserves_error_precedence() {
         };
         let adapter = Rc::new(StaticResponse(body, RefCell::new(vec![])));
         let mut exchange = venue(Rc::new(DefaultStore::new()), 123.25, false);
-        exchange.base.store = store.clone();
+        Rc::get_mut(&mut exchange.base).unwrap().store = store.clone();
         exchange.xhr = adapter.clone();
         let result =
             futures::executor::block_on(exchange.fetch_historical_fills(ExecutionsOptions {
@@ -4343,7 +4345,7 @@ fn mexc_positions_reads_each_market_and_keeps_symbol_only_caller_lookup() {
             );
         }
         let mut exchange = venue(Rc::new(DefaultStore::new()), 100.0, false);
-        exchange.base.store = store.clone();
+        Rc::get_mut(&mut exchange.base).unwrap().store = store.clone();
         let adapter = Rc::new(StaticResponse(
             serde_json::to_vec(&json!({"data":rows})).unwrap(),
             RefCell::default(),
@@ -4470,7 +4472,7 @@ fn mexc_validation_keeps_raw_detail_and_error_precedence() {
     let mut native = Vec::new();
     for (index, (data, message, wanted)) in cases.into_iter().enumerate() {
         let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
-        exchange.base = reporting_values::raw_reporting_base();
+        exchange.base = Rc::new(reporting_values::raw_reporting_base());
         exchange.xhr = Rc::new(AccountFailure {
             message: message.into(),
             response_data: Some(data),
@@ -4590,7 +4592,7 @@ fn mexc_snapshot_reporters_preserve_object_detail_and_listener_failure() {
     for method in ["fetchMarkets", "fetchTickers", "fetchPositions"] {
         for throws in [false, true] {
             let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
-            exchange.base = reporting_values::raw_reporting_base();
+            exchange.base = Rc::new(reporting_values::raw_reporting_base());
             exchange.xhr = Rc::new(AccountFailure {
                 message: "transport".into(),
                 response_data: Some(json!({"message":{"message":"inner detail","code":313}})),
@@ -4740,7 +4742,7 @@ fn mexc_four_borrowed_methods_price_unpolled_drop_and_first_poll() {
 #[test]
 fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
     let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
-    exchange.base = reporting_values::raw_reporting_base();
+    exchange.base = Rc::new(reporting_values::raw_reporting_base());
     exchange.xhr = Rc::new(AccountFailure {
         message: "transport".into(),
         response_data: Some(
