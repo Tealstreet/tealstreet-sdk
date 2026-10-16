@@ -74,9 +74,15 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
         ("ORDER_STATUS", &*crate::types::ORDER_STATUS),
         ("ORDER_TYPE", &*crate::types::ORDER_TYPE),
         ("ORDER_TIME_IN_FORCE", &*crate::types::ORDER_TIME_IN_FORCE),
-        ("ORDER_TIME_IN_FORCE_OUTBOUND", &*crate::types::ORDER_TIME_IN_FORCE_OUTBOUND),
+        (
+            "ORDER_TIME_IN_FORCE_OUTBOUND",
+            &*crate::types::ORDER_TIME_IN_FORCE_OUTBOUND,
+        ),
         ("ORDER_TRIGGER_TYPE", &*crate::types::ORDER_TRIGGER_TYPE),
-        ("POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE", &*crate::types::POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE),
+        (
+            "POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE",
+            &*crate::types::POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+        ),
     ] {
         def(key, super::value::from_json(value));
     }

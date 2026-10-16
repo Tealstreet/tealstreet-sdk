@@ -126,12 +126,24 @@ impl SessionHost for Rt {
             "subtract" => {
                 safe_cex_exchange::js_runtime::ops::subtract(&arg(&args, 0), &arg(&args, 1))
             }
-            "add" | "addition" => safe_cex_exchange::js_runtime::ops::add(&arg(&args, 0), &arg(&args, 1)),
-            "multiply" => safe_cex_exchange::js_runtime::ops::multiply(&arg(&args, 0), &arg(&args, 1)),
+            "add" | "addition" => {
+                safe_cex_exchange::js_runtime::ops::add(&arg(&args, 0), &arg(&args, 1))
+            }
+            "multiply" => {
+                safe_cex_exchange::js_runtime::ops::multiply(&arg(&args, 0), &arg(&args, 1))
+            }
             "divide" => safe_cex_exchange::js_runtime::ops::divide(&arg(&args, 0), &arg(&args, 1)),
-            "remainder" => Ok(Js::Number(arg(&args, 0).to_number()? % arg(&args, 1).to_number()?)),
-            "greater" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::greater_than(&arg(&args, 0), &arg(&args, 1))?)),
-            "lessEqual" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::less_equal(&arg(&args, 0), &arg(&args, 1))?)),
+            "remainder" => Ok(Js::Number(
+                arg(&args, 0).to_number()? % arg(&args, 1).to_number()?,
+            )),
+            "greater" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::greater_than(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
+            "lessEqual" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::less_equal(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
             "keyGet" | "computed property" => arg(&args, 0).get_key(&arg(&args, 1).to_js_string()?),
             "property key" => Ok(Js::String(arg(&args, 0).to_js_string()?)),
             "computed assignment" => {
@@ -139,19 +151,31 @@ impl SessionHost for Rt {
                 object.set_key(&arg(&args, 1).to_js_string()?, arg(&args, 2))?;
                 Ok(object)
             }
-            "suffixTemplate" => safe_cex_exchange::js_runtime::ops::add(&Js::String(arg(&args, 0).to_js_string()?), &arg(&args, 1)),
+            "suffixTemplate" => safe_cex_exchange::js_runtime::ops::add(
+                &Js::String(arg(&args, 0).to_js_string()?),
+                &arg(&args, 1),
+            ),
             "has" => Ok(Js::Bool(arg(&args, 0).has_own(&text(&arg(&args, 1))?))),
             "arraySpread" => {
                 let mut out = vec![];
                 for value in args {
-                    out.extend(value.array_values().ok_or_else(|| Thrown::type_error("value is not iterable"))?);
+                    out.extend(
+                        value
+                            .array_values()
+                            .ok_or_else(|| Thrown::type_error("value is not iterable"))?,
+                    );
                 }
                 Ok(Js::array(out))
             }
             "capturedMember" => self.select(arg(&args, 0), "map"),
-            "intervalRegex" => safe_cex_exchange::js_runtime::regexp::regexp(&r"(\d+)([a-zA-Z]+)".encode_utf16().collect::<Vec<_>>(), &[]),
+            "intervalRegex" => safe_cex_exchange::js_runtime::regexp::regexp(
+                &r"(\d+)([a-zA-Z]+)".encode_utf16().collect::<Vec<_>>(),
+                &[],
+            ),
             "missingMarket" => Js::Undefined.get("limits"),
-            "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" => self.shared.globals.get(name),
+            "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" => {
+                self.shared.globals.get(name)
+            }
             // Object.assign(target, source) over own enumerable data properties.
             "copyOwnDataProperties" => {
                 let target = arg(&args, 0);
