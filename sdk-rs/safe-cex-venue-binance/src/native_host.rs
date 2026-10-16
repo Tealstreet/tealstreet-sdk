@@ -2,9 +2,11 @@
 //! factory interceptors inside the shared `HttpClient` over real HTTP; the
 //! private socket is a core `BaseWebSocket` (id 3). Requires a tokio `LocalSet`.
 use crate::{
-    api_factory::{self, ApiConfig, ApiFuture, ApiRejection, ClientMode, FactoryBindings,
-        RemoteSignCall, RequestBindings, RequestInterceptor, RequestReturn, ResponseBindings,
-        ResponseInterceptor, ResponseReturn, ResponseTransform, RetryRead},
+    api_factory::{
+        self, ApiConfig, ApiFuture, ApiRejection, ClientMode, FactoryBindings, RemoteSignCall,
+        RequestBindings, RequestInterceptor, RequestReturn, ResponseBindings, ResponseInterceptor,
+        ResponseReturn, ResponseTransform, RetryRead,
+    },
     class_jobs::NativeFuture,
     exchange_classes::{ExchangeDependencies, ExchangeImports, HttpMethod},
     lifecycle::TickTimer,
@@ -22,8 +24,10 @@ use crate::{
     rest_history::PageCall,
 };
 use safe_cex_exchange::{
-    http::{HttpClient, HttpClientOptions, HttpHost, safe_cex_axios_create,
-        safe_cex_axios_create_no_proxy},
+    http::{
+        HttpClient, HttpClientOptions, HttpHost, safe_cex_axios_create,
+        safe_cex_axios_create_no_proxy,
+    },
     native::{NativeHttpHost, NativeRuntime, nanoid},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{BaseWebSocket, WsProtocol, WsRuntime},
@@ -49,8 +53,8 @@ fn exchange_failure(error: ExchangeError) -> Failure {
 }
 /// JSON view of a native value; undefined members are omitted as JSON.stringify does.
 fn to_json(value: &EventValue) -> Result<Value, Failure> {
-    let Some(text) = safe_cex_num::js_json_stringify(&native_json(value))
-        .map_err(|e| failure(e.message))?
+    let Some(text) =
+        safe_cex_num::js_json_stringify(&native_json(value)).map_err(|e| failure(e.message))?
     else {
         return Ok(Value::Null);
     };
@@ -58,7 +62,9 @@ fn to_json(value: &EventValue) -> Result<Value, Failure> {
 }
 
 /// Production Binance dependencies over the given native runtime.
-pub fn native_dependencies(runtime: Rc<NativeRuntime>) -> Result<ExchangeDependencies, ExchangeError> {
+pub fn native_dependencies(
+    runtime: Rc<NativeRuntime>,
+) -> Result<ExchangeDependencies, ExchangeError> {
     let runtime: Rc<dyn WsRuntime> = runtime;
     let adapter: Arc<dyn RestAdapter> =
         Arc::new(ReqwestAdapter::new().map_err(|e| ExchangeError::new(e.to_string()))?);
@@ -109,7 +115,10 @@ impl NativeImports {
     fn register_rc(&self, client: Rc<NativeClient>) -> (Rc<NativeClient>, EventValue) {
         let mut clients = self.clients.borrow_mut();
         clients.push(client.clone());
-        (client, record([("nativeClient", number((clients.len() - 1) as f64))]))
+        (
+            client,
+            record([("nativeClient", number((clients.len() - 1) as f64))]),
+        )
     }
     fn client(&self, handle: &EventValue) -> Result<Rc<NativeClient>, Failure> {
         let index = handle.get("nativeClient")?.number()?;
@@ -145,24 +154,38 @@ struct RateWindow {
 }
 impl NativeClient {
     fn http(&self) -> Result<&HttpClient, Failure> {
-        self.http.as_ref().ok_or_else(|| failure("routing client has no transport"))
+        self.http
+            .as_ref()
+            .ok_or_else(|| failure("routing client has no transport"))
     }
     async fn wait_for_slot(&self, runtime: &Rc<dyn WsRuntime>) -> Result<(), Failure> {
         loop {
             let delay = {
                 let mut limit = self.limit.borrow_mut();
-                let Some(window) = limit.as_mut() else { return Ok(()) };
+                let Some(window) = limit.as_mut() else {
+                    return Ok(());
+                };
                 let now = runtime.monotonic_now_ms();
-                while window.starts.front().is_some_and(|t| now - t >= window.per_ms) {
+                while window
+                    .starts
+                    .front()
+                    .is_some_and(|t| now - t >= window.per_ms)
+                {
                     window.starts.pop_front();
                 }
                 if window.starts.len() < window.max {
                     window.starts.push_back(now);
                     return Ok(());
                 }
-                window.starts.front().map_or(0.0, |t| window.per_ms - (now - t))
+                window
+                    .starts
+                    .front()
+                    .map_or(0.0, |t| window.per_ms - (now - t))
             };
-            runtime.sleep(delay.max(1.0) as u64).await.map_err(exchange_failure)?;
+            runtime
+                .sleep(delay.max(1.0) as u64)
+                .await
+                .map_err(exchange_failure)?;
         }
     }
 }
@@ -183,7 +206,11 @@ async fn run_request(
     args: Option<EventValue>,
 ) -> Result<EventValue, Failure> {
     if let Some((primary, secondary)) = &client.route {
-        let target = if method == HttpMethod::Get { secondary } else { primary };
+        let target = if method == HttpMethod::Get {
+            secondary
+        } else {
+            primary
+        };
         return Box::pin(run_request(imports, target.clone(), method, path, args)).await;
     }
     let mut attempt = 0u32;
@@ -212,7 +239,11 @@ async fn dispatch(
     path: &'static str,
     args: Option<EventValue>,
 ) -> Result<(RestResponse, RestRequest), Dispatch> {
-    let mut request = RestRequest { method: method_name(method).into(), url: path.into(), ..Default::default() };
+    let mut request = RestRequest {
+        method: method_name(method).into(),
+        url: path.into(),
+        ..Default::default()
+    };
     match (method, &args) {
         (HttpMethod::Get | HttpMethod::Delete, Some(config)) if !config.nullish() => {
             let params = config.get("params").ok().filter(|p| !p.nullish());
@@ -225,7 +256,10 @@ async fn dispatch(
     }
     let raised: Rc<RefCell<Option<Failure>>> = Rc::new(RefCell::new(None));
     let http = client.http().map_err(|e| {
-        Dispatch::Transport(RestFailure::pre_transmit(e.message.clone(), RestRequest::default()), Some(e))
+        Dispatch::Transport(
+            RestFailure::pre_transmit(e.message.clone(), RestRequest::default()),
+            Some(e),
+        )
     })?;
     let interceptors = client.request.borrow().clone();
     let slot = raised.clone();
@@ -305,7 +339,11 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
         }
     }
     let params = config.get("params")?;
-    request.params = if params.nullish() { None } else { Some(to_json(&params)?) };
+    request.params = if params.nullish() {
+        None
+    } else {
+        Some(to_json(&params)?)
+    };
     let data = config.get("data")?;
     request.body = if matches!(data, EventValue::Undefined) {
         None
@@ -321,7 +359,9 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
 }
 fn response_data(response: &RestResponse, transform: ResponseTransform) -> Value {
     let text = match &response.body {
-        safe_cex_transport::RestResponseBody::Encoded(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        safe_cex_transport::RestResponseBody::Encoded(bytes) => {
+            String::from_utf8_lossy(bytes).into_owned()
+        }
         safe_cex_transport::RestResponseBody::Untransformed(value)
         | safe_cex_transport::RestResponseBody::Transformed(value) => return value.clone(),
     };
@@ -335,15 +375,25 @@ fn response_data(response: &RestResponse, transform: ResponseTransform) -> Value
         ResponseTransform::Default => safe_cex_transport::how::json_parse(trimmed),
     }
 }
-fn response_value(response: &RestResponse, config: &RestRequest, transform: ResponseTransform) -> Result<EventValue, Failure> {
+fn response_value(
+    response: &RestResponse,
+    config: &RestRequest,
+    transform: ResponseTransform,
+) -> Result<EventValue, Failure> {
     let headers = EventValue::object(Default::default());
     for (name, value) in &response.headers {
         headers.define(name, string(value));
     }
     Ok(record([
-        ("data", EventValue::from_json(response_data(response, transform))),
+        (
+            "data",
+            EventValue::from_json(response_data(response, transform)),
+        ),
         ("status", number(response.status as f64)),
-        ("statusText", string(response.reason.clone().unwrap_or_default())),
+        (
+            "statusText",
+            string(response.reason.clone().unwrap_or_default()),
+        ),
         ("headers", headers),
         ("config", config_value(config)?),
     ]))
@@ -353,10 +403,19 @@ fn error_value(error: &Failure) -> EventValue {
         ("message", string(&error.message)),
         ("name", string(&error.name)),
     ]);
-    value.define("code", error.code.clone().map_or(EventValue::Undefined, EventValue::from_json));
+    value.define(
+        "code",
+        error
+            .code
+            .clone()
+            .map_or(EventValue::Undefined, EventValue::from_json),
+    );
     value.define(
         "response",
-        error.response.clone().map_or(EventValue::Undefined, EventValue::from_json),
+        error
+            .response
+            .clone()
+            .map_or(EventValue::Undefined, EventValue::from_json),
     );
     value
 }
@@ -384,10 +443,14 @@ async fn respond(
             ResponseStage::Guard(a, b) => ResponseStage::Guard(a.clone(), b.clone()),
         })
         .collect();
-    let mut bindings = NativeResponseBindings { emitter: client.emitter.clone() };
+    let mut bindings = NativeResponseBindings {
+        emitter: client.emitter.clone(),
+    };
     for stage in stages {
         state = match (stage, state) {
-            (ResponseStage::Api(success, _), Ok(response)) => api_outcome(success(response, &mut bindings)?, None),
+            (ResponseStage::Api(success, _), Ok(response)) => {
+                api_outcome(success(response, &mut bindings)?, None)
+            }
             (ResponseStage::Api(_, failed), Err(error)) => {
                 api_outcome(failed(error_value(&error), &mut bindings)?, Some(error))
             }
@@ -400,10 +463,22 @@ async fn respond(
 fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<EventValue, Failure> {
     match result {
         ResponseReturn::Value(response) => Ok(response),
-        ResponseReturn::Rejected(ApiRejection::Original(value)) => Err(original.unwrap_or_else(|| {
-            failure(value.get("message").and_then(|m| m.text()).unwrap_or_default())
-        })),
-        ResponseReturn::Rejected(ApiRejection::New { name, message, code, response }) => {
+        ResponseReturn::Rejected(ApiRejection::Original(value)) => {
+            Err(original.unwrap_or_else(|| {
+                failure(
+                    value
+                        .get("message")
+                        .and_then(|m| m.text())
+                        .unwrap_or_default(),
+                )
+            }))
+        }
+        ResponseReturn::Rejected(ApiRejection::New {
+            name,
+            message,
+            code,
+            response,
+        }) => {
             let mut error = ExchangeError::new(message);
             error.name = name.into();
             error.code = to_json(&code).ok().filter(|v| !v.is_null());
@@ -434,19 +509,34 @@ impl RequestBindings for NativeRequestBindings {
         };
         let text = |key: &str| -> Result<String, Failure> {
             let value = options.get(key)?;
-            if value.nullish() { Ok(String::new()) } else { value.text() }
+            if value.nullish() {
+                Ok(String::new())
+            } else {
+                value.text()
+            }
         };
         let (key, secret) = (text("key")?, text("secret")?);
         let remote = options.get("remoteSigner")?.truthy();
         let exchange: safe_cex_types::ExchangeName =
-            serde_json::from_value(Value::String(name.text()?)).map_err(|e| failure(e.to_string()))?;
+            serde_json::from_value(Value::String(name.text()?))
+                .map_err(|e| failure(e.to_string()))?;
         let window = recv_window.number()?;
         Ok(Box::pin(async move {
-            let signing = safe_cex_crypto::SigningOptions { key: &key, secret: &secret, payload_signer: None };
-            let signed: Map<String, Value> =
-                crate::signing::sign_binance_request(&map, &signing, exchange, remote, window, &VIRTUAL_CLOCK)
-                    .await
-                    .map_err(failure)?;
+            let signing = safe_cex_crypto::SigningOptions {
+                key: &key,
+                secret: &secret,
+                payload_signer: None,
+            };
+            let signed: Map<String, Value> = crate::signing::sign_binance_request(
+                &map,
+                &signing,
+                exchange,
+                remote,
+                window,
+                &VIRTUAL_CLOCK,
+            )
+            .await
+            .map_err(failure)?;
             Ok(EventValue::from_json(Value::Object(signed)))
         }))
     }
@@ -457,7 +547,8 @@ struct NativeResponseBindings {
 impl ResponseBindings for NativeResponseBindings {
     fn emit(&mut self, message: EventValue) -> Result<(), Failure> {
         let emit = self.emitter.borrow().clone();
-        let emit = emit.ok_or_else(|| failure("response emitted before the exchange bound its emitter"))?;
+        let emit =
+            emit.ok_or_else(|| failure("response emitted before the exchange bound its emitter"))?;
         emit(message)
     }
 }
@@ -479,8 +570,12 @@ impl FactoryBindings for Factorizer<'_> {
         let typed: safe_cex_types::ExchangeOptions =
             crate::class_decode::decode(options.clone()).map_err(|e| failure(e.to_string()))?;
         let name: safe_cex_types::ExchangeName =
-            serde_json::from_value(Value::String(exchange.get("name")?.text()?)).map_err(|e| failure(e.to_string()))?;
-        let mut request = RestRequest { base_url: Some(config.base_url.text()?), ..Default::default() };
+            serde_json::from_value(Value::String(exchange.get("name")?.text()?))
+                .map_err(|e| failure(e.to_string()))?;
+        let mut request = RestRequest {
+            base_url: Some(config.base_url.text()?),
+            ..Default::default()
+        };
         if !config.timeout.nullish() {
             request.timeout_ms = Some(config.timeout.number()? as i64);
         }
@@ -494,7 +589,9 @@ impl FactoryBindings for Factorizer<'_> {
         let runtime: Rc<dyn ExchangeRuntime> = self.imports.runtime.clone();
         let serializer = config.serializer;
         let http_options = HttpClientOptions {
-            params_serializer: Some(Arc::new(move |params: &Value| Ok(serializer.serialize(params)))),
+            params_serializer: Some(Arc::new(move |params: &Value| {
+                Ok(serializer.serialize(params))
+            })),
             response_transform: None,
             exchange: name,
             options: typed,
@@ -532,12 +629,22 @@ impl FactoryBindings for Factorizer<'_> {
         Ok(self.handle.clone())
     }
     fn retry(&mut self, _client: EventValue, retries: u32, read: RetryRead) -> Result<(), Failure> {
-        let client = self.pending.as_ref().ok_or_else(|| failure("retry before create"))?;
+        let client = self
+            .pending
+            .as_ref()
+            .ok_or_else(|| failure("retry before create"))?;
         *client.retry.borrow_mut() = Some((retries, read));
         Ok(())
     }
-    fn request_use(&mut self, _client: EventValue, handler: RequestInterceptor) -> Result<(), Failure> {
-        let client = self.pending.as_ref().ok_or_else(|| failure("interceptor before create"))?;
+    fn request_use(
+        &mut self,
+        _client: EventValue,
+        handler: RequestInterceptor,
+    ) -> Result<(), Failure> {
+        let client = self
+            .pending
+            .as_ref()
+            .ok_or_else(|| failure("interceptor before create"))?;
         client.request.borrow_mut().push(handler);
         Ok(())
     }
@@ -558,24 +665,46 @@ impl FactoryBindings for Factorizer<'_> {
         success: ResponseInterceptor,
         failed: ResponseInterceptor,
     ) -> Result<(), Failure> {
-        let client = self.pending.as_ref().ok_or_else(|| failure("interceptor before create"))?;
-        client.response.borrow_mut().push(ResponseStage::Api(success, failed));
+        let client = self
+            .pending
+            .as_ref()
+            .ok_or_else(|| failure("interceptor before create"))?;
+        client
+            .response
+            .borrow_mut()
+            .push(ResponseStage::Api(success, failed));
         Ok(())
     }
 }
 
 impl ExchangeImports for NativeImports {
-    fn factory(&self, venue: Venue, kind: Factory, opts: EventValue, owner: EventValue) -> Result<EventValue, Failure> {
-        let mut b = Factorizer { imports: self, pending: None, handle: EventValue::Undefined };
+    fn factory(
+        &self,
+        venue: Venue,
+        kind: Factory,
+        opts: EventValue,
+        owner: EventValue,
+    ) -> Result<EventValue, Failure> {
+        let mut b = Factorizer {
+            imports: self,
+            pending: None,
+            handle: EventValue::Undefined,
+        };
         match (venue, kind) {
-            (Venue::Futures, Factory::PublicAPI) => api_factory::create_futures_public_api(opts, owner, &mut b)?,
+            (Venue::Futures, Factory::PublicAPI) => {
+                api_factory::create_futures_public_api(opts, owner, &mut b)?
+            }
             (Venue::Futures, _) => api_factory::create_futures_api(opts, owner, &mut b)?,
-            (Venue::PM, Factory::PublicAPI) => api_factory::create_pm_public_api(opts, owner, &mut b)?,
+            (Venue::PM, Factory::PublicAPI) => {
+                api_factory::create_pm_public_api(opts, owner, &mut b)?
+            }
             (Venue::PM, Factory::FAPI) => api_factory::create_fapi(opts, owner, &mut b)?,
             (Venue::PM, _) => api_factory::create_papi(opts, owner, &mut b)?,
             (Venue::Spot, _) => api_factory::create_spot_api(opts, owner, &mut b)?,
         };
-        let client = b.pending.ok_or_else(|| failure("factory created no client"))?;
+        let client = b
+            .pending
+            .ok_or_else(|| failure("factory created no client"))?;
         let (client, handle) = self.register_rc(Rc::new(client));
         if kind == Factory::PublicAPI {
             *self.public_client.borrow_mut() = Some(client);
@@ -636,8 +765,11 @@ impl ExchangeImports for NativeImports {
         Ok(triple(handle, primary, secondary))
     }
     fn rate_limit(&self, client: EventValue, max_rps: f64) -> Result<EventValue, Failure> {
-        *self.client(&client)?.limit.borrow_mut() =
-            Some(RateWindow { max: max_rps.max(1.0) as usize, per_ms: 1000.0, starts: VecDeque::new() });
+        *self.client(&client)?.limit.borrow_mut() = Some(RateWindow {
+            max: max_rps.max(1.0) as usize,
+            per_ms: 1000.0,
+            starts: VecDeque::new(),
+        });
         Ok(client)
     }
     fn request(
@@ -648,9 +780,15 @@ impl ExchangeImports for NativeImports {
         args: Option<EventValue>,
     ) -> Result<SnapshotRequestFuture, Failure> {
         let target = self.client(&client)?;
-        let imports = self.this.upgrade().ok_or_else(|| failure("native imports dropped"))?;
+        let imports = self
+            .this
+            .upgrade()
+            .ok_or_else(|| failure("native imports dropped"))?;
         Ok(Box::pin(async move {
-            SnapshotCompletion { reaction_order: 0, result: run_request(imports, target, method, path, args).await }
+            SnapshotCompletion {
+                reaction_order: 0,
+                result: run_request(imports, target, method, path, args).await,
+            }
         }))
     }
     fn register_weight_guard(
@@ -664,7 +802,10 @@ impl ExchangeImports for NativeImports {
         if let Some((primary, _)) = &target.route {
             target = primary.clone();
         }
-        target.response.borrow_mut().push(ResponseStage::Guard(fulfilled, rejected));
+        target
+            .response
+            .borrow_mut()
+            .push(ResponseStage::Guard(fulfilled, rejected));
         Ok(())
     }
     fn external_provider(
@@ -691,7 +832,9 @@ impl ExchangeImports for NativeImports {
         self.timers.clone()
     }
     fn remote_sign(&self, _signer: EventValue) -> Result<RemoteSignCall, Failure> {
-        Err(failure("remote signing is not available on the native direct host"))
+        Err(failure(
+            "remote signing is not available on the native direct host",
+        ))
     }
     fn virtual_now(&self) -> f64 {
         VIRTUAL_CLOCK.get_current_time_ms()
@@ -713,18 +856,34 @@ impl ExchangeImports for NativeImports {
         };
         Ok(end - amount * ms)
     }
-    fn paginate(&self, _fetch: PageCall, _opts: EventValue) -> Result<NativeFuture<EventValue>, Failure> {
-        Err(failure("income range paging is not wired on the native host yet"))
+    fn paginate(
+        &self,
+        _fetch: PageCall,
+        _opts: EventValue,
+    ) -> Result<NativeFuture<EventValue>, Failure> {
+        Err(failure(
+            "income range paging is not wired on the native host yet",
+        ))
     }
     fn iso(&self, time: EventValue) -> Result<String, Failure> {
         iso_string(time.number()?)
     }
-    fn fold_closed_positions(&self, _opts: EventValue, _symbol_scoped: bool) -> Result<NativeFuture<EventValue>, Failure> {
-        Err(failure("closed-position folding is not wired on the native host yet"))
+    fn fold_closed_positions(
+        &self,
+        _opts: EventValue,
+        _symbol_scoped: bool,
+    ) -> Result<NativeFuture<EventValue>, Failure> {
+        Err(failure(
+            "closed-position folding is not wired on the native host yet",
+        ))
     }
     fn loop_timer(&self, callback: TickTimer, interval: EventValue) -> Result<(), Failure> {
         let runtime = self.runtime.clone();
-        let interval = if interval.nullish() { None } else { Some(interval.number()?) };
+        let interval = if interval.nullish() {
+            None
+        } else {
+            Some(interval.number()?)
+        };
         if interval == Some(f64::INFINITY) {
             return Ok(());
         }
@@ -741,7 +900,10 @@ impl ExchangeImports for NativeImports {
                 Err(error) => Err(error),
             };
             if let Err(error) = result {
-                reporter.report_exception(&error, &serde_json::json!({"operation":"binance tick loop"}));
+                reporter.report_exception(
+                    &error,
+                    &serde_json::json!({"operation":"binance tick loop"}),
+                );
             }
         }));
         Ok(())
@@ -757,12 +919,23 @@ pub struct NativeTimers {
 }
 impl NativeTimers {
     fn new(runtime: Rc<dyn WsRuntime>) -> Rc<Self> {
-        Rc::new_cyclic(|this| Self { runtime, next: Cell::new(0.0), live: RefCell::new(HashMap::new()), this: this.clone() })
+        Rc::new_cyclic(|this| Self {
+            runtime,
+            next: Cell::new(0.0),
+            live: RefCell::new(HashMap::new()),
+            this: this.clone(),
+        })
     }
     fn live_self(&self) -> Result<Rc<Self>, Failure> {
-        self.this.upgrade().ok_or_else(|| failure("timer owner dropped"))
+        self.this
+            .upgrade()
+            .ok_or_else(|| failure("timer owner dropped"))
     }
-    fn schedule(self: &Rc<Self>, action: Rc<dyn Fn() -> Result<(), Failure>>, delay: f64) -> EventValue {
+    fn schedule(
+        self: &Rc<Self>,
+        action: Rc<dyn Fn() -> Result<(), Failure>>,
+        delay: f64,
+    ) -> EventValue {
         let id = self.next.get() + 1.0;
         self.next.set(id);
         let (runtime, timers) = (self.runtime.clone(), Rc::downgrade(self));
@@ -815,7 +988,11 @@ impl ListenerHost for NativeListenerOperations {
     fn send(&self, _payload: EventValue) -> Result<(), Failure> {
         Err(failure("listener sends belong to the public socket"))
     }
-    fn set_timeout(&self, callback: public_listeners::Action, delay: f64) -> Result<EventValue, Failure> {
+    fn set_timeout(
+        &self,
+        callback: public_listeners::Action,
+        delay: f64,
+    ) -> Result<EventValue, Failure> {
         Ok(self.timers.live_self()?.schedule(callback, delay))
     }
     fn clear_timeout(&self, ticket: EventValue) -> Result<(), Failure> {
@@ -827,28 +1004,52 @@ impl ListenerHost for NativeListenerOperations {
     fn nanoid(&self) -> Result<String, Failure> {
         Ok(nanoid())
     }
-    fn get_snapshot(&self, venue: public_listeners::Venue, symbol: &str, limit: f64) -> Result<Snapshot, Failure> {
-        let imports = self.imports.upgrade().ok_or_else(|| failure("native imports dropped"))?;
+    fn get_snapshot(
+        &self,
+        venue: public_listeners::Venue,
+        symbol: &str,
+        limit: f64,
+    ) -> Result<Snapshot, Failure> {
+        let imports = self
+            .imports
+            .upgrade()
+            .ok_or_else(|| failure("native imports dropped"))?;
         let client = imports
             .public_client
             .borrow()
             .clone()
             .ok_or_else(|| failure("order book snapshot before the public client exists"))?;
         let path = if venue == public_listeners::Venue::Spot {
-            crate::binancespot_types::ENDPOINTS.iter().find(|(k, _)| *k == "ORDERBOOK")
+            crate::binancespot_types::ENDPOINTS
+                .iter()
+                .find(|(k, _)| *k == "ORDERBOOK")
         } else {
-            crate::binance_types::ENDPOINTS.iter().find(|(k, _)| *k == "ORDERBOOK")
+            crate::binance_types::ENDPOINTS
+                .iter()
+                .find(|(k, _)| *k == "ORDERBOOK")
         }
         .map(|(_, path)| *path)
         .ok_or_else(|| failure("generated ORDERBOOK endpoint"))?;
-        let args = record([("params", record([("symbol", string(symbol)), ("limit", number(limit))]))]);
-        Ok(Box::pin(run_request(imports, client, HttpMethod::Get, path, Some(args))))
+        let args = record([(
+            "params",
+            record([("symbol", string(symbol)), ("limit", number(limit))]),
+        )]);
+        Ok(Box::pin(run_request(
+            imports,
+            client,
+            HttpMethod::Get,
+            path,
+            Some(args),
+        )))
     }
     fn spawn(&self, job: Job) {
         let runtime = self.runtime.clone();
         self.runtime.spawn_local(Box::pin(async move {
             if let Err(error) = job.await {
-                runtime.report_exception(&error, &serde_json::json!({"operation":"binance listener job"}));
+                runtime.report_exception(
+                    &error,
+                    &serde_json::json!({"operation":"binance listener job"}),
+                );
             }
         }));
     }
@@ -858,7 +1059,9 @@ impl ListenerHost for NativeListenerOperations {
     }
     fn load(&self, book: Book, data: EventValue, sync: SyncState) -> Result<(), Failure> {
         let rows = |key: &str| -> Result<Vec<Vec<String>>, Failure> {
-            let EventValue::Array(levels) = data.get(key)? else { return Ok(vec![]) };
+            let EventValue::Array(levels) = data.get(key)? else {
+                return Ok(vec![]);
+            };
             let levels = levels.borrow().clone();
             levels
                 .iter()
@@ -874,7 +1077,11 @@ impl ListenerHost for NativeListenerOperations {
         );
         Ok(())
     }
-    fn buffered(&self, updates: Vec<EventValue>, last_id: EventValue) -> Result<Vec<EventValue>, Failure> {
+    fn buffered(
+        &self,
+        updates: Vec<EventValue>,
+        last_id: EventValue,
+    ) -> Result<Vec<EventValue>, Failure> {
         let last = last_id.number()?;
         let mut kept = vec![];
         for update in updates {
@@ -884,12 +1091,23 @@ impl ListenerHost for NativeListenerOperations {
         }
         Ok(kept)
     }
-    fn apply(&self, book: Book, data: EventValue, sync: SyncState, previous: bool) -> Result<BinanceOrderBookApplyResult, Failure> {
+    fn apply(
+        &self,
+        book: Book,
+        data: EventValue,
+        sync: SyncState,
+        previous: bool,
+    ) -> Result<BinanceOrderBookApplyResult, Failure> {
         let Value::Object(map) = to_json(&data)? else {
             return Err(failure("depth update must be an object"));
         };
-        apply_binance_depth_update(&mut book.borrow_mut(), &map, &mut sync.borrow_mut(), previous)
-            .map_err(|e| failure(e.message))
+        apply_binance_depth_update(
+            &mut book.borrow_mut(),
+            &map,
+            &mut sync.borrow_mut(),
+            previous,
+        )
+        .map_err(|e| failure(e.message))
     }
     fn total(&self, book: Book) -> Result<(), Failure> {
         safe_cex_store::orderbook::calc_order_book_total(&mut book.borrow_mut());
@@ -901,6 +1119,8 @@ impl ListenerHost for NativeListenerOperations {
 /// forwards open/message to the listeners the venue registers.
 struct CorePrivateBase {
     socket: Rc<BaseWebSocket>,
+    /// The base owns its current `ws`, as TS BaseWebSocket does; callers hold it weakly.
+    current: RefCell<Option<Rc<CoreSocketHandle>>>,
     listeners: Rc<RefCell<Vec<(&'static str, PrivateCallback)>>>,
     hooks: Rc<RefCell<Option<(Action, Action)>>>,
 }
@@ -922,7 +1142,9 @@ impl ListenerProtocol {
             .collect();
         for callback in targets {
             match (&callback, &data) {
-                (PrivateCallback::Message(f), Some(data)) => f(data.clone()).map_err(into_exchange)?,
+                (PrivateCallback::Message(f), Some(data)) => {
+                    f(data.clone()).map_err(into_exchange)?
+                }
                 (PrivateCallback::Action(f), _) => f().map_err(into_exchange)?,
                 (PrivateCallback::Message(_), None) => {}
             }
@@ -935,15 +1157,27 @@ impl WsProtocol for ListenerProtocol {
         let hook = self.hooks.borrow().as_ref().map(|(ping, _)| ping.clone());
         hook.map_or(Ok(()), |ping| ping().map_err(into_exchange))
     }
-    fn connect_and_subscribe(&self, _socket: Rc<BaseWebSocket>, _is_reconnect: bool) -> Result<(), ExchangeError> {
-        let hook = self.hooks.borrow().as_ref().map(|(_, connect)| connect.clone());
+    fn connect_and_subscribe(
+        &self,
+        _socket: Rc<BaseWebSocket>,
+        _is_reconnect: bool,
+    ) -> Result<(), ExchangeError> {
+        let hook = self
+            .hooks
+            .borrow()
+            .as_ref()
+            .map(|(_, connect)| connect.clone());
         hook.map_or(Ok(()), |connect| connect().map_err(into_exchange))
     }
     fn on_open(&self, _socket: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
         let result = self.fire("open", None);
         Box::pin(async move { result })
     }
-    fn on_message(&self, _socket: &Rc<BaseWebSocket>, frame: &SocketFrame) -> Result<(), ExchangeError> {
+    fn on_message(
+        &self,
+        _socket: &Rc<BaseWebSocket>,
+        frame: &SocketFrame,
+    ) -> Result<(), ExchangeError> {
         let data = match frame {
             SocketFrame::Text(text) => string(text.clone()),
             SocketFrame::Binary(bytes) => string(String::from_utf8_lossy(bytes).into_owned()),
@@ -953,11 +1187,22 @@ impl WsProtocol for ListenerProtocol {
     }
 }
 impl CorePrivateBase {
-    fn new(parent: Rc<dyn safe_cex_exchange::websocket::WsParent>, runtime: Rc<dyn WsRuntime>) -> Rc<Self> {
+    fn new(
+        parent: Rc<dyn safe_cex_exchange::websocket::WsParent>,
+        runtime: Rc<dyn WsRuntime>,
+    ) -> Rc<Self> {
         let listeners = Rc::new(RefCell::new(vec![]));
         let hooks = Rc::new(RefCell::new(None));
-        let protocol = Rc::new(ListenerProtocol { listeners: listeners.clone(), hooks: hooks.clone() });
-        Rc::new(Self { socket: BaseWebSocket::new(3, parent, runtime, protocol), listeners, hooks })
+        let protocol = Rc::new(ListenerProtocol {
+            listeners: listeners.clone(),
+            hooks: hooks.clone(),
+        });
+        Rc::new(Self {
+            socket: BaseWebSocket::new(3, parent, runtime, protocol),
+            current: RefCell::new(None),
+            listeners,
+            hooks,
+        })
     }
 }
 struct CoreSocketHandle {
@@ -965,12 +1210,24 @@ struct CoreSocketHandle {
     listeners: Rc<RefCell<Vec<(&'static str, PrivateCallback)>>>,
 }
 impl NativePrivateSocket for CoreSocketHandle {
-    fn remove_listener(&self, event: &'static str, callback: &PrivateCallback) -> Result<(), Failure> {
-        self.listeners.borrow_mut().retain(|(name, c)| *name != event || !c.same(callback));
+    fn remove_listener(
+        &self,
+        event: &'static str,
+        callback: &PrivateCallback,
+    ) -> Result<(), Failure> {
+        self.listeners
+            .borrow_mut()
+            .retain(|(name, c)| *name != event || !c.same(callback));
         Ok(())
     }
     fn ready_state(&self) -> Result<f64, Failure> {
-        Ok(if self.socket.is_connected() { 1.0 } else if self.socket.has_websocket() { 0.0 } else { 3.0 })
+        Ok(if self.socket.is_connected() {
+            1.0
+        } else if self.socket.has_websocket() {
+            0.0
+        } else {
+            3.0
+        })
     }
     fn close(&self) -> Result<(), Failure> {
         self.socket.force_close();
@@ -1005,7 +1262,9 @@ impl PrivateBase for CorePrivateBase {
             EventValue::String(text) => Value::String(text.clone()),
             other => to_json(other)?,
         };
-        ex(self.socket.emit_ws_diagnostic_receive(&value, &Default::default()))
+        ex(self
+            .socket
+            .emit_ws_diagnostic_receive(&value, &Default::default()))
     }
     fn stats(&self, topic: &str) -> Result<(), Failure> {
         ex(self.socket.record_message_handler_stats(topic))
@@ -1015,7 +1274,9 @@ impl PrivateBase for CorePrivateBase {
         Ok(())
     }
     fn diagnostic_send(&self, payload: &str) -> Result<(), Failure> {
-        ex(self.socket.emit_ws_diagnostic_send(payload, &Default::default()))
+        ex(self
+            .socket
+            .emit_ws_diagnostic_send(payload, &Default::default()))
     }
     fn pong(&self) -> Result<(), Failure> {
         ex(self.socket.handle_pong_event(5_000))
@@ -1025,7 +1286,12 @@ impl PrivateBase for CorePrivateBase {
     }
     fn create(&self, url: String) -> Result<Rc<dyn NativePrivateSocket>, Failure> {
         self.socket.start_websocket(url, vec![], None);
-        Ok(Rc::new(CoreSocketHandle { socket: self.socket.clone(), listeners: self.listeners.clone() }))
+        let handle = Rc::new(CoreSocketHandle {
+            socket: self.socket.clone(),
+            listeners: self.listeners.clone(),
+        });
+        *self.current.borrow_mut() = Some(handle.clone());
+        Ok(handle)
     }
     fn on_close(&self) -> Result<(), Failure> {
         ex(self.socket.on_close(None, ""))
@@ -1071,7 +1337,11 @@ fn iso_string(ms: f64) -> Result<String, Failure> {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    let year = if (0..=9999).contains(&year) { format!("{year:04}") } else { format!("{year:+07}") };
+    let year = if (0..=9999).contains(&year) {
+        format!("{year:04}")
+    } else {
+        format!("{year:+07}")
+    };
     Ok(format!(
         "{year}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
         rem / 3_600_000,
@@ -1086,7 +1356,10 @@ struct UnavailableExternalData(Rc<dyn WsRuntime>);
 const NO_EXTERNAL: &str = "externalPublicData is not available on the native direct host";
 impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData {
     fn connect(&self) {
-        self.0.report_exception(&ExchangeError::new(NO_EXTERNAL), &serde_json::json!({"operation":"external public data"}));
+        self.0.report_exception(
+            &ExchangeError::new(NO_EXTERNAL),
+            &serde_json::json!({"operation":"external public data"}),
+        );
     }
     fn dispose(&self) {}
     fn is_initialized(&self) -> bool {

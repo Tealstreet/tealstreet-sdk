@@ -15,13 +15,13 @@ pub use registry::TransportRegistry;
 pub use routing::{
     HowEgress, ResolvedRouting, ResolvedWs, RoutingOptions, resolve_exchange_routing,
 };
-#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
-pub mod native;
 pub mod codec;
 pub mod fallback;
 #[path = "../../../infra/tradetunnel/src/frames.rs"]
 mod frames;
 pub mod how;
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod native;
 pub mod relay;
 pub mod socket;
 

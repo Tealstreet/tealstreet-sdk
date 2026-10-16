@@ -3927,12 +3927,19 @@ dependencies = [
 name = "safe-cex-registry"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "hmac 0.12.1",
  "safe-cex-exchange",
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
+ "safe-cex-venue-backpack",
+ "safe-cex-venue-binance",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

@@ -14,3 +14,13 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# tests/native_host_*.rs build venues on the production native host over local sockets.
+safe-cex-venue-binance = { path = "../safe-cex-venue-binance", features = ["native"] }
+safe-cex-venue-backpack = { path = "../safe-cex-venue-backpack", features = ["native"] }
+tokio = { workspace = true, features = ["rt", "net", "time", "io-util", "sync"] }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+hmac.workspace = true
+sha2.workspace = true

@@ -3,8 +3,10 @@
 use crate::{
     NetworkFailure, RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportFuture,
-    socket::{SocketCapabilities, SocketFrame, SocketRuntime, TunnelDialOptions, TunnelHost,
-        TunnelSocket, TunnelTask},
+    socket::{
+        SocketCapabilities, SocketFrame, SocketRuntime, TunnelDialOptions, TunnelHost,
+        TunnelSocket, TunnelTask,
+    },
 };
 use futures_util::{SinkExt, StreamExt};
 use std::{
@@ -31,7 +33,9 @@ pub fn tls_config() -> Result<Arc<rustls::ClientConfig>, TransportError> {
             let mut roots = rustls::RootCertStore::empty();
             let loaded = rustls_native_certs::load_native_certs();
             for cert in loaded.certs {
-                roots.add(cert).map_err(|e| format!("native root rejected: {e}"))?;
+                roots
+                    .add(cert)
+                    .map_err(|e| format!("native root rejected: {e}"))?;
             }
             if roots.is_empty() {
                 return Err(format!("no native TLS roots loaded: {:?}", loaded.errors));
@@ -65,7 +69,11 @@ fn request_url(request: &RestRequest) -> String {
     if request.url.starts_with("http") {
         request.url.clone()
     } else {
-        format!("{}{}", request.base_url.as_deref().unwrap_or(""), request.url)
+        format!(
+            "{}{}",
+            request.base_url.as_deref().unwrap_or(""),
+            request.url
+        )
     }
 }
 /// Axios buildURL's default params encoding for params no factory codec consumed.
@@ -115,7 +123,10 @@ fn network_failure(error: &reqwest::Error, request: &RestRequest) -> RestFailure
         let ms = request.timeout_ms.unwrap_or(0);
         ("ECONNABORTED", format!("timeout of {ms}ms exceeded"))
     } else if error.is_connect() {
-        ("ECONNREFUSED", format!("connect ECONNREFUSED {}", request_url(request)))
+        (
+            "ECONNREFUSED",
+            format!("connect ECONNREFUSED {}", request_url(request)),
+        )
     } else {
         ("ECONNRESET", format!("socket hang up: {error}"))
     };
@@ -128,7 +139,11 @@ impl RestAdapter for ReqwestAdapter {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         Box::pin(async move {
             let mut url = request_url(&request);
-            if let Some(params) = request.params.as_ref().filter(|p| safe_cex_num::js_truthy(Some(p))) {
+            if let Some(params) = request
+                .params
+                .as_ref()
+                .filter(|p| safe_cex_num::js_truthy(Some(p)))
+            {
                 let query = axios_default_query(params);
                 if !query.is_empty() {
                     if let Some(hash) = url.find('#') {
@@ -139,7 +154,9 @@ impl RestAdapter for ReqwestAdapter {
                 }
             }
             let method = reqwest::Method::from_bytes(request.method.to_uppercase().as_bytes())
-                .map_err(|e| RestFailure::pre_transmit(format!("HTTP method: {e}"), request.clone()))?;
+                .map_err(|e| {
+                    RestFailure::pre_transmit(format!("HTTP method: {e}"), request.clone())
+                })?;
             let mut builder = self.client.request(method, &url);
             for (name, value) in &request.headers {
                 builder = builder.header(name, value);
@@ -165,7 +182,11 @@ impl RestAdapter for ReqwestAdapter {
             let headers: BTreeMap<String, String> = response
                 .headers()
                 .iter()
-                .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_owned(), v.to_owned())))
+                .filter_map(|(k, v)| {
+                    v.to_str()
+                        .ok()
+                        .map(|v| (k.as_str().to_owned(), v.to_owned()))
+                })
                 .collect();
             let body = response
                 .bytes()
@@ -180,7 +201,11 @@ impl RestAdapter for ReqwestAdapter {
             if status.is_success() {
                 return Ok(response);
             }
-            let code = if status.is_client_error() { "ERR_BAD_REQUEST" } else { "ERR_BAD_RESPONSE" };
+            let code = if status.is_client_error() {
+                "ERR_BAD_REQUEST"
+            } else {
+                "ERR_BAD_RESPONSE"
+            };
             Err(RestFailure {
                 code: Some(code.into()),
                 transport_error: None,
@@ -211,12 +236,15 @@ pub async fn connect_websocket(
     protocols: &[String],
     headers: &BTreeMap<String, String>,
 ) -> Result<NativeSocket, TransportError> {
-    let host_error = |e: &dyn std::fmt::Display| TransportError::Host(format!("WebSocket {url}: {e}"));
+    let host_error =
+        |e: &dyn std::fmt::Display| TransportError::Host(format!("WebSocket {url}: {e}"));
     let mut request = url.into_client_request().map_err(|e| host_error(&e))?;
     for (name, value) in headers {
         let name = tokio_tungstenite::tungstenite::http::HeaderName::from_bytes(name.as_bytes())
             .map_err(|e| host_error(&e))?;
-        request.headers_mut().insert(name, value.parse().map_err(|e| host_error(&e))?);
+        request
+            .headers_mut()
+            .insert(name, value.parse().map_err(|e| host_error(&e))?);
     }
     if !protocols.is_empty() {
         request.headers_mut().insert(
@@ -225,14 +253,15 @@ pub async fn connect_websocket(
         );
     }
     let connector = tokio_tungstenite::Connector::Rustls(tls_config()?);
-    let (stream, _) = tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
-        .await
-        .map_err(|e| {
-            TransportError::Network(NetworkFailure::from_code(
-                format!("WebSocket {url}: {e}"),
-                Some("ECONNREFUSED".into()),
-            ))
-        })?;
+    let (stream, _) =
+        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
+            .await
+            .map_err(|e| {
+                TransportError::Network(NetworkFailure::from_code(
+                    format!("WebSocket {url}: {e}"),
+                    Some("ECONNREFUSED".into()),
+                ))
+            })?;
     let (mut sink, mut source) = stream.split();
     let state = Rc::new(Cell::new(1));
     let (outgoing, mut queued) = mpsc::unbounded_channel::<Message>();
@@ -249,15 +278,27 @@ pub async fn connect_websocket(
     });
     let reader_state = state.clone();
     let reader = tokio::task::spawn_local(async move {
-        let mut close = SocketFrame::Close { code: 1006, reason: String::new(), was_clean: false };
+        let mut close = SocketFrame::Close {
+            code: 1006,
+            reason: String::new(),
+            was_clean: false,
+        };
         while let Some(message) = source.next().await {
             let frame = match message {
                 Ok(Message::Text(text)) => SocketFrame::Text(text.to_string()),
                 Ok(Message::Binary(bytes)) => SocketFrame::Binary(bytes.to_vec()),
                 Ok(Message::Close(frame)) => {
                     close = frame.map_or(
-                        SocketFrame::Close { code: 1005, reason: String::new(), was_clean: true },
-                        |f| SocketFrame::Close { code: f.code.into(), reason: f.reason.to_string(), was_clean: true },
+                        SocketFrame::Close {
+                            code: 1005,
+                            reason: String::new(),
+                            was_clean: true,
+                        },
+                        |f| SocketFrame::Close {
+                            code: f.code.into(),
+                            reason: f.reason.to_string(),
+                            was_clean: true,
+                        },
                     );
                     break;
                 }
@@ -272,7 +313,12 @@ pub async fn connect_websocket(
         let _ = deliver.send(close);
     })
     .abort_handle();
-    Ok(NativeSocket { state, outgoing, incoming: Rc::new(Mutex::new(incoming)), reader })
+    Ok(NativeSocket {
+        state,
+        outgoing,
+        incoming: Rc::new(Mutex::new(incoming)),
+        reader,
+    })
 }
 impl TunnelSocket for NativeSocket {
     fn ready_state(&self) -> u16 {
@@ -285,9 +331,10 @@ impl TunnelSocket for NativeSocket {
         let message = match frame {
             SocketFrame::Text(text) => Message::text(text),
             SocketFrame::Binary(bytes) => Message::binary(bytes),
-            SocketFrame::Close { code, reason, .. } => {
-                Message::Close(Some(CloseFrame { code: CloseCode::from(code), reason: reason.into() }))
-            }
+            SocketFrame::Close { code, reason, .. } => Message::Close(Some(CloseFrame {
+                code: CloseCode::from(code),
+                reason: reason.into(),
+            })),
         };
         self.outgoing
             .send(message)
@@ -309,7 +356,10 @@ impl TunnelSocket for NativeSocket {
             return Ok(());
         }
         self.state.set(2);
-        let frame = CloseFrame { code: CloseCode::from(code.unwrap_or(1000)), reason: reason.to_owned().into() };
+        let frame = CloseFrame {
+            code: CloseCode::from(code.unwrap_or(1000)),
+            reason: reason.to_owned().into(),
+        };
         self.outgoing
             .send(Message::Close(Some(frame)))
             .map_err(|_| TransportError::Host("WebSocket writer closed".into()))
@@ -340,7 +390,11 @@ impl TunnelHost for NativeTunnelHost {
         Box::new(LocalTask(spawn_local_task(future)))
     }
     fn capabilities(&self) -> SocketCapabilities {
-        SocketCapabilities { runtime: SocketRuntime::Native, upgrade_headers: true, alpn: false }
+        SocketCapabilities {
+            runtime: SocketRuntime::Native,
+            upgrade_headers: true,
+            alpn: false,
+        }
     }
     fn now_ms(&self) -> u64 {
         wall_clock_ms() as u64
@@ -352,7 +406,11 @@ impl TunnelHost for NativeTunnelHost {
             Ok(())
         })
     }
-    fn connect(&self, url: String, options: TunnelDialOptions) -> TransportFuture<'static, Rc<dyn TunnelSocket>> {
+    fn connect(
+        &self,
+        url: String,
+        options: TunnelDialOptions,
+    ) -> TransportFuture<'static, Rc<dyn TunnelSocket>> {
         Box::pin(async move {
             let socket = connect_websocket(&url, options.protocols(), options.headers()).await?;
             Ok(Rc::new(socket) as Rc<dyn TunnelSocket>)

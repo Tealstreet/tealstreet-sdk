@@ -31,7 +31,10 @@ fn random_bytes<const N: usize>() -> [u8; N] {
 /// nanoid's default alphabet and length.
 pub fn nanoid() -> String {
     const ALPHABET: &[u8] = b"useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
-    random_bytes::<21>().iter().map(|b| ALPHABET[(b & 63) as usize] as char).collect()
+    random_bytes::<21>()
+        .iter()
+        .map(|b| ALPHABET[(b & 63) as usize] as char)
+        .collect()
 }
 /// RFC 4122 version-4 UUID, as `uuid.v4()` spells it.
 pub fn uuid_v4() -> String {
@@ -39,7 +42,14 @@ pub fn uuid_v4() -> String {
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 struct LocalTask(tokio::task::AbortHandle);
@@ -109,7 +119,10 @@ impl ExchangeRuntime for NativeRuntime {
         random_unit()
     }
     fn report_exception(&self, error: &ExchangeError, context: &Value) {
-        eprintln!("[safe-cex uncaught] {}: {} {context}", error.name, error.message);
+        eprintln!(
+            "[safe-cex uncaught] {}: {} {context}",
+            error.name, error.message
+        );
     }
     fn report_raw_exception(&self, error: &Value, context: &Value) {
         eprintln!("[safe-cex uncaught] {error} {context}");
@@ -205,7 +218,10 @@ impl WsSocket for NativeWsSocket {
             match inner.receive().await {
                 Ok(SocketFrame::Close { code, reason, .. }) => {
                     ended.set(true);
-                    Ok(WsEvent::Close { code: Some(code), reason })
+                    Ok(WsEvent::Close {
+                        code: Some(code),
+                        reason,
+                    })
                 }
                 Ok(frame) if !ended.get() => Ok(WsEvent::Message(frame)),
                 Ok(_) => std::future::pending().await,
