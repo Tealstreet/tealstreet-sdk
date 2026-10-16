@@ -1,7 +1,9 @@
-//! Module bindings lighter.ws-private.ts imports that the shared builtins and
-//! library do not provide. Each is defined only when absent, since the public
-//! socket resolves the same names from the same globals object.
-use super::super::realm::{Realm, Shared};
+//! Module bindings both Lighter socket classes import that the shared builtins
+//! and library do not provide, installed once before either class.
+use super::{
+    ops::spread,
+    realm::{Realm, Shared},
+};
 use safe_cex_exchange::{
     js_runtime::{
         sockets::base_websocket_class,
@@ -28,7 +30,7 @@ fn define_absent(owner: &Js, name: &str, value: impl FnOnce() -> Js) -> Result<(
     owner.define(name, value())
 }
 
-pub(super) fn install(realm: &Realm) -> Result<(), Thrown> {
+pub(crate) fn install(realm: &Realm) -> Result<(), Thrown> {
     let globals = &realm.0.globals;
     let weak = Rc::downgrade(&realm.0);
     define_absent(globals, "BaseWebSocket", || {
@@ -57,6 +59,10 @@ pub(super) fn install(realm: &Realm) -> Result<(), Thrown> {
     })?;
     if !globals.has_own("console") {
         globals.define("console", Js::object(vec![]))?;
+    }
+    let array = globals.get("Array")?;
+    if array.get("from")?.is_undefined() {
+        array.define("from", array_from())?;
     }
     let weak = weak.clone();
     define_absent(&globals.get("console")?, "error", move || {
@@ -93,9 +99,12 @@ fn resolve_transport_routing(weak: Weak<Shared>) -> Js {
     Js::function("resolveTransportRouting", move |_, a| {
         let exchange: ExchangeName = to_typed(&arg(&a, 0))?;
         let options: ExchangeOptions = to_typed(&arg(&a, 1))?;
+        // ts: getTransport(options) — options never carry an instance provider
+        // across JS, so the realm's registered default applies.
         let routing = shared(&weak)?
-            .runtime
-            .transport()
+            .extra
+            .registry
+            .get_transport(None)
             .ws_routing(&exchange, &RoutingOptions::from(&options));
         from_typed(&routing)
     })
@@ -183,7 +192,7 @@ fn install_intervals(globals: &Js, weak: &Weak<Shared>) -> Result<(), Thrown> {
 const MS_PER_DAY: i64 = 86_400_000;
 
 /// `new Date(ms).toISOString()`, including its RangeError for an invalid time.
-pub(super) fn iso_string(ms: f64) -> Result<Vec<u16>, Thrown> {
+pub(crate) fn iso_string(ms: f64) -> Result<Vec<u16>, Thrown> {
     let clipped = safe_cex_num::js_time_clip(ms);
     if clipped.is_nan() {
         return Err(Thrown::error("RangeError", "Invalid time value"));
@@ -220,4 +229,28 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
     (year, month, day)
+}
+
+/// `Array.from(iterable, mapFn?)`, which the shared builtins do not yet bind.
+fn array_from() -> Js {
+    Js::function("from", |_, a| {
+        let source = arg(&a, 0);
+        if source.is_nullish() {
+            return Err(Thrown::type_error(&format!(
+                "{} is not iterable (cannot read property Symbol(Symbol.iterator))",
+                source.to_display()
+            )));
+        }
+        let items = spread(&source)?;
+        let map = arg(&a, 1);
+        if map.is_undefined() {
+            return Ok(Js::array(items));
+        }
+        let mapped = items
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| map.call(Js::Undefined, vec![v, Js::Number(i as f64)]))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Js::array(mapped))
+    })
 }

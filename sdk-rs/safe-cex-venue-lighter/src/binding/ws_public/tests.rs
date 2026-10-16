@@ -679,7 +679,6 @@ fn order_book_snapshot_from_rest_then_websocket_delta() {
 /// identity, which binding/value.rs does not keep for functions (a fresh
 /// HostThrownValue per crossing), so the handler is never removed.
 #[test]
-#[ignore = "binding/value.rs: Js functions lose identity crossing to AccountValue"]
 fn order_book_stop_removes_its_parser_and_unsubscribes() {
     let f = fixture();
     f.open();

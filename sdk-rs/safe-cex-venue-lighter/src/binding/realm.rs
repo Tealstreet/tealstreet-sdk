@@ -41,6 +41,8 @@ pub(crate) struct LighterExtra {
     /// Per instance, the BaseExchange members captured before derived fields
     /// run, so `super.member` survives a derived arrow field of the same name.
     pub(crate) supers: std::cell::RefCell<Vec<(Js, Js)>>,
+    /// The host's transport registry (TS `setDefaultTransport` target).
+    pub(crate) registry: Rc<safe_cex_transport::TransportRegistry>,
 }
 
 pub(crate) type Shared = ScopeShared<LighterExtra>;
@@ -356,7 +358,9 @@ impl ExchangeClassRealm for Realm {
     fn finish_class_binding(&self, class: &AccountValue) -> SigningResult<()> {
         // js_runtime functions keep their name natively rather than as a property.
         let Js::Function(function) = to_js(class) else {
-            return Err(to_signing(Thrown::type_error("class binding is not a function")));
+            return Err(to_signing(Thrown::type_error(
+                "class binding is not a function",
+            )));
         };
         let name = function.name.clone();
         self.0

@@ -31,6 +31,8 @@ impl AccountObject for JsObject {
 }
 
 struct Tables {
+    // js function allocation -> the one host handle for it (ptr_eq identity).
+    functions: HashMap<usize, Weak<dyn std::any::Any>>,
     // js allocation -> wrapper, so one JS object always maps to one wrapper.
     forward: HashMap<usize, Weak<JsObject>>,
     // wrapper allocation -> wrapper, to recover the Js behind a host object.
@@ -40,6 +42,7 @@ struct Tables {
 fn tables<R>(f: impl FnOnce(&mut Tables) -> R) -> R {
     thread_local! {
         static TABLES: RefCell<Tables> = RefCell::new(Tables {
+            functions: HashMap::new(),
             forward: HashMap::new(),
             reverse: HashMap::new(),
         });
@@ -91,7 +94,9 @@ pub(crate) fn to_account(value: &Js) -> AccountValue {
         Js::Number(n) => AccountValue::Number(*n),
         Js::BigInt(b) => AccountValue::BigInt((**b).clone()),
         Js::String(s) => AccountValue::String(s.to_vec()),
-        Js::Function(_) => AccountValue::Function(HostThrownValue::new(value.clone())),
+        Js::Function(f) => {
+            AccountValue::Function(function_handle(value, Rc::as_ptr(f) as *const () as usize))
+        }
         other => wrap(other),
     }
 }
@@ -111,6 +116,21 @@ pub(crate) fn to_js(value: &AccountValue) -> Js {
             .expect("host functions are js_runtime values"),
         AccountValue::Object(o) => object_js(o),
     }
+}
+
+/// One host handle per JS function, so ported identity checks (`f !== g`) hold.
+fn function_handle(value: &Js, key: usize) -> HostThrownValue {
+    tables(|t| {
+        if let Some(existing) = t.functions.get(&key).and_then(Weak::upgrade) {
+            return HostThrownValue::from_shared(existing);
+        }
+        if t.functions.len() > 4096 {
+            t.functions.retain(|_, w| w.strong_count() > 0);
+        }
+        let handle = HostThrownValue::new(value.clone());
+        t.functions.insert(key, Rc::downgrade(&handle.shared()));
+        handle
+    })
 }
 
 fn object_js(object: &Rc<dyn AccountObject>) -> Js {

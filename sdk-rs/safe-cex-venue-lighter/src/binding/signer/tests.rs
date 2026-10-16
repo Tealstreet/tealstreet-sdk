@@ -136,6 +136,7 @@ fn realm() -> (Realm, Rc<Runtime>) {
             LighterExtra {
                 microtasks: Microtasks::new(runtime.clone()),
                 supers: Default::default(),
+                registry: Default::default(),
             },
         )
     });

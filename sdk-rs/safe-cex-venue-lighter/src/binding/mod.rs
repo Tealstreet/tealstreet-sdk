@@ -8,6 +8,7 @@ mod ops;
 mod realm;
 mod sdk_client;
 mod signer;
+mod socket_globals;
 mod value;
 mod ws_private;
 mod ws_public;

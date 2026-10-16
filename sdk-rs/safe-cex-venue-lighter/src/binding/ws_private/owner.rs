@@ -220,7 +220,7 @@ impl PrivateSocketHost for Owner {
             .and_then(|v| v.to_number()))
     }
     fn iso_string(&self, ms: f64) -> SigningResult<Vec<u16>> {
-        js(super::imports::iso_string(ms))
+        js(super::super::socket_globals::iso_string(ms))
     }
     fn to_string(&self, value: AccountValue) -> SigningResult<Vec<u16>> {
         js(self.string(to_js(&value)))

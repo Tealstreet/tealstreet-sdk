@@ -366,10 +366,12 @@ fn world_with_token(token: impl FnOnce(&Rc<dyn ExchangeRuntime>) -> Js) -> World
             LighterExtra {
                 microtasks: Microtasks::new(exchange_runtime.clone()),
                 supers: Default::default(),
+                registry: Default::default(),
             },
         )
     });
     let realm = Realm(shared.clone());
+    super::super::socket_globals::install(&realm).unwrap();
     super::install(&realm).unwrap();
     let venue: Rc<dyn Exchange> = Rc::new(Venue {
         base: BaseExchange::new(

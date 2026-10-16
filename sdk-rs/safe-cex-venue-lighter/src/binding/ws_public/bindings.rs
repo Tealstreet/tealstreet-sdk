@@ -2,8 +2,8 @@
 //! the ws-policy/parsers/ohlcv helpers, config, json-parse, transport routing,
 //! lodash/flatten and the host timer/clock globals the socket bodies call.
 use super::super::{
-    ops::{Arithmetic, arithmetic, spread, to_string},
-    realm::{Realm, Shared},
+    ops::{Arithmetic, arithmetic, to_string},
+    realm::Realm,
 };
 use crate::{
     ws_policy::{calculate_lighter_public_reconnect_delay, classify_lighter_public_close},
@@ -18,23 +18,12 @@ use crate::{
     },
 };
 use safe_cex_candle_cache::calendar::get_candle_start_time;
-use safe_cex_exchange::js_runtime::{
-    sockets::base_websocket_class,
-    value::{Js, Thrown, arg, from_typed, to_json, to_typed},
-};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_typed};
 use safe_cex_num::PrecisionInput;
-use safe_cex_transport::RoutingOptions;
-use safe_cex_types::ExchangeName;
 use serde_json::Value;
-use std::rc::{Rc, Weak};
 
 fn text(value: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&to_string(value)?))
-}
-
-fn shared(weak: &Weak<Shared>) -> Result<Rc<Shared>, Thrown> {
-    weak.upgrade()
-        .ok_or_else(|| Thrown::error("Error", "Lighter scope was dropped"))
 }
 
 /// `${marketId}` operand: numbers keep their JS number text.
@@ -211,97 +200,6 @@ fn helpers() -> Vec<(&'static str, Js)> {
     ]
 }
 
-/// Node timer handles: the scope's timer table owns the repeating task.
-fn set_interval(weak: Weak<Shared>) -> Js {
-    Js::function("setInterval", move |_, a| {
-        let shared = shared(&weak)?;
-        let callback = arg(&a, 0);
-        if !callback.is_callable() {
-            return Err(Thrown::type_error(&format!(
-                "The \"callback\" argument must be of type function. Received {}",
-                callback.to_display()
-            )));
-        }
-        let delay = arg(&a, 1).to_number()?;
-        let delay = if (1.0..=2_147_483_647.0).contains(&delay) {
-            delay as u64
-        } else {
-            1
-        };
-        let reporter = shared.runtime.clone();
-        let task = shared.runtime.spawn_local(Box::pin(async move {
-            while reporter.sleep(delay).await.is_ok() {
-                if let Err(error) = callback.call(Js::Undefined, vec![]) {
-                    reporter.report_exception(
-                        &error.to_exchange_error(),
-                        &serde_json::json!({"source": "setInterval"}),
-                    );
-                }
-            }
-        }));
-        let handle = Js::object_with_class("Timeout", vec![]);
-        shared.timers.borrow_mut().push((handle.clone(), task));
-        Ok(handle)
-    })
-}
-
-/// clearInterval/clearTimeout share Node's handle space; the task is cancelled.
-fn clear_interval(weak: Weak<Shared>) -> Js {
-    Js::function("clearInterval", move |_, a| {
-        let shared = shared(&weak)?;
-        let handle = arg(&a, 0);
-        shared.timers.borrow_mut().retain(|(h, task)| {
-            let hit = h.same_reference(&handle);
-            if hit {
-                task.cancel();
-            }
-            !hit
-        });
-        Ok(Js::Undefined)
-    })
-}
-
-fn resolve_transport_routing(weak: Weak<Shared>) -> Js {
-    Js::function("resolveTransportRouting", move |_, a| {
-        let shared = shared(&weak)?;
-        let exchange: ExchangeName = to_typed(&arg(&a, 0))?;
-        let options = arg(&a, 1);
-        let options: RoutingOptions = if options.is_nullish() {
-            RoutingOptions::default()
-        } else {
-            serde_json::from_value(to_json(&options)?).map_err(|e| {
-                Thrown::type_error(&format!("invalid transport routing options: {e}"))
-            })?
-        };
-        from_typed(&shared.runtime.transport().ws_routing(&exchange, &options))
-    })
-}
-
-/// `Array.from(iterable)`: the one js_runtime Array static the ingress bodies
-/// need that the shared builtins do not yet bind.
-fn array_from() -> Js {
-    Js::function("from", |_, a| {
-        let source = arg(&a, 0);
-        if source.is_nullish() {
-            return Err(Thrown::type_error(&format!(
-                "{} is not iterable (cannot read property Symbol(Symbol.iterator))",
-                source.to_display()
-            )));
-        }
-        let items = spread(&source)?;
-        let map = arg(&a, 1);
-        if map.is_undefined() {
-            return Ok(Js::array(items));
-        }
-        let mapped = items
-            .into_iter()
-            .enumerate()
-            .map(|(i, v)| map.call(Js::Undefined, vec![v, Js::Number(i as f64)]))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Js::array(mapped))
-    })
-}
-
 fn define_missing(
     globals: &Js,
     name: &str,
@@ -316,46 +214,9 @@ fn define_missing(
 pub(super) fn install(realm: &Realm) -> Result<(), Thrown> {
     let shared = &realm.0;
     let globals = &shared.globals;
-    let weak = Rc::downgrade(shared);
     for (name, value) in helpers() {
         define_missing(globals, name, || Ok(value))?;
     }
-    define_missing(globals, "BaseWebSocket", || {
-        Ok(base_websocket_class(&shared.sockets))
-    })?;
-    define_missing(globals, "WS_MIN_RECONNECTION_DELAY", || {
-        Ok(Js::Number(shared.runtime.min_reconnection_delay_ms()))
-    })?;
-    define_missing(globals, "jsonParse", || {
-        let parse = globals.get("JSON")?.get("parse")?;
-        Ok(function("jsonParse", move |a| {
-            Ok(parse
-                .call(Js::Undefined, vec![arg(&a, 0)])
-                .unwrap_or(Js::Null))
-        }))
-    })?;
     define_missing(globals, "flatten", || globals.get("lodash")?.get("flatten"))?;
-    define_missing(globals, "resolveTransportRouting", || {
-        Ok(resolve_transport_routing(weak.clone()))
-    })?;
-    define_missing(globals, "setInterval", || Ok(set_interval(weak.clone())))?;
-    define_missing(globals, "clearInterval", || {
-        Ok(clear_interval(weak.clone()))
-    })?;
-    define_missing(globals, "performance", || {
-        let clock = weak.clone();
-        Ok(Js::object(vec![(
-            "now",
-            Js::function("now", move |_, _| Ok(Js::Number(shared_now(&clock)?))),
-        )]))
-    })?;
-    let array = globals.get("Array")?;
-    if array.get("from")?.is_undefined() {
-        array.define("from", array_from())?;
-    }
     Ok(())
-}
-
-fn shared_now(weak: &Weak<Shared>) -> Result<f64, Thrown> {
-    Ok(shared(weak)?.runtime.monotonic_now_ms())
 }
