@@ -326,6 +326,7 @@ fn parts(
     let mut clock = safe_cex_store::virtual_clock::VirtualClock::default();
     clock.now = Arc::new(|| 1_700_000_000_000.0);
     let deps = KucoinDependencies {
+        hosted_signer: None,
         runtime: runtime.clone(),
         http: Rc::new(move |options| HttpClientOptions {
             response_transform: None,

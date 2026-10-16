@@ -549,7 +549,9 @@ impl PrivateFeedHost for Private {
                 Js::Undefined | Js::Null => false,
                 Js::Number(v) => *v == n,
                 Js::BigInt(v) => {
-                    n.is_finite() && n.fract() == 0.0 && v.to_string() == format!("{n:.0}")
+                    n.is_finite()
+                        && n.fract() == 0.0
+                        && v.to_string() == format!("{:.0}", if n == 0.0 { 0.0 } else { n })
                 }
                 Js::String(_) | Js::Bool(_) => v.to_number()? == n,
                 _ => equal(&ops::to_primitive(v)?, n)?,
@@ -735,5 +737,75 @@ impl PrivateFeedHost for Private {
     fn fetch_orders(&self) -> JsResult<Js, JsPromise<Js>> {
         let pending = value(self.parent_call("fetchOrders", vec![]))?;
         Ok(SessionHost::await_value(self, pending))
+    }
+}
+
+#[cfg(test)]
+mod numeric_comparison_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn native_numeric_comparison_keeps_zero_coercion_and_original_errors() {
+        let host = Private {
+            shared: Weak::new(),
+            this: Js::Undefined,
+            state: Rc::new(PrivateCommands::default()),
+        };
+        let equal =
+            |value: Js, number| PrivateFeedHost::loose_number_equal(&host, &value, number).unwrap();
+        assert!(
+            equal(Js::BigInt(Rc::new("0".parse().unwrap())), -0.0),
+            "GRVT BIGINT ZERO equality must match source abstract equality"
+        );
+        assert!(equal(Js::BigInt(Rc::new("0".parse().unwrap())), 0.0));
+        assert!(equal(Js::BigInt(Rc::new("1000".parse().unwrap())), 1000.0));
+        assert!(equal(Js::str("1e3"), 1000.0));
+        assert!(equal(Js::str("0x3e8"), 1000.0));
+        assert!(!equal(Js::str("1000tail"), 1000.0));
+        assert!(equal(Js::BigInt(Rc::new("7".parse().unwrap())), 7.0));
+        assert!(!equal(Js::BigInt(Rc::new("7".parse().unwrap())), 7.5));
+        assert!(!equal(
+            Js::BigInt(Rc::new("7".parse().unwrap())),
+            f64::INFINITY
+        ));
+        assert!(!equal(Js::Undefined, 0.0));
+        assert!(!equal(Js::Null, 0.0));
+        assert!(equal(Js::Number(-0.0), 0.0));
+        assert!(!equal(Js::Number(f64::NAN), 0.0));
+        assert!(equal(Js::Bool(false), 0.0));
+        assert!(equal(Js::Bool(true), 1.0));
+        assert!(equal(Js::str("07"), 7.0));
+        assert!(!equal(Js::str("7tail"), 7.0));
+
+        let calls = Rc::new(Cell::new(0));
+        let observed = calls.clone();
+        let object = Js::object(vec![(
+            "valueOf",
+            Js::function("numericValue", move |_, _| {
+                observed.set(observed.get() + 1);
+                Ok(Js::Number(7.0))
+            }),
+        )]);
+        assert!(equal(object, 7.0));
+        assert_eq!(
+            calls.get(),
+            1,
+            "native comparison must preserve coercion effects"
+        );
+
+        let marker = Js::object(vec![("code", Js::str("coercion marker"))]);
+        let original = marker.clone();
+        let object = Js::object(vec![(
+            "valueOf",
+            Js::function("throwingValue", move |_, _| {
+                Err(Thrown::new(marker.clone()))
+            }),
+        )]);
+        let error = PrivateFeedHost::loose_number_equal(&host, &object, 7.0).unwrap_err();
+        assert!(
+            error.same_value_zero(&original),
+            "native coercion must preserve thrown object identity"
+        );
     }
 }

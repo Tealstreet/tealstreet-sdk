@@ -17323,5 +17323,1430 @@
       }
     ],
     "evidence": "The actual asynchronous account-mode reader requests the source USDT account query exactly once, runs real account-row extraction and returns whether the source mode differs from ONE_WAY. Native boolean and exact request trace include unknown/absent source fallback; String transport fixtures are not substituted for actual Value decoding."
+  },
+  "safe_cex_venue_bitunix::adapter_orders::PlaceFrame": {
+    "shape": "observed",
+    "evidence": "These exact native PlaceOrderHost message methods belong to the concrete production placement adapter. Every inventoried method executes using the real venue constructor and existing mock runtime/REST boundary, with case-sensitive contains, Unicode lowercase and UTF-16 payload observations. No parsing method, alternate host or callback is exempted.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_placement::PlaceOrderHost",
+          "name": "includes",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "message",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "needle",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the concrete PlaceFrame method on a real constructed BitunixVenue with the existing scripted runtime/transport fixture. Native string/UTF-16/boolean outputs observe the selected source host capability, without a receiver exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_placement::PlaceOrderHost;let (venue,_,_,_)=harness::fixture();let mut frame=super::PlaceFrame{venue};let _selected:std::marker::PhantomData<$type>=std::marker::PhantomData;serde_json::json!({\"included\":frame.includes(&$value[\"text\"].as_str().unwrap().to_owned(),\"needle\").unwrap()})}",
+        "cases": [
+          {
+            "input": {
+              "text": "prefix needle suffix"
+            },
+            "output": {
+              "included": true
+            }
+          },
+          {
+            "input": {
+              "text": "Needle"
+            },
+            "output": {
+              "included": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_placement::PlaceOrderHost",
+          "name": "lowercase",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "message",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the concrete PlaceFrame method on a real constructed BitunixVenue with the existing scripted runtime/transport fixture. Native string/UTF-16/boolean outputs observe the selected source host capability, without a receiver exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_placement::PlaceOrderHost;let (venue,_,_,_)=harness::fixture();let mut frame=super::PlaceFrame{venue};let _selected:std::marker::PhantomData<$type>=std::marker::PhantomData;serde_json::json!({\"text\":frame.lowercase(&$value[\"text\"].as_str().unwrap().to_owned()).unwrap()})}",
+        "cases": [
+          {
+            "input": {
+              "text": "MiXeD"
+            },
+            "output": {
+              "text": "mixed"
+            }
+          },
+          {
+            "input": {
+              "text": "UPPERK"
+            },
+            "output": {
+              "text": "upperk"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_placement::PlaceOrderHost",
+          "name": "message_string",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "message",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "primitive": "u16"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the concrete PlaceFrame method on a real constructed BitunixVenue with the existing scripted runtime/transport fixture. Native string/UTF-16/boolean outputs observe the selected source host capability, without a receiver exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_placement::PlaceOrderHost;let (venue,_,_,_)=harness::fixture();let mut frame=super::PlaceFrame{venue};let _selected:std::marker::PhantomData<$type>=std::marker::PhantomData;serde_json::json!({\"units\":frame.message_string(&$value[\"text\"].as_str().unwrap().to_owned()).unwrap()})}",
+        "cases": [
+          {
+            "input": {
+              "text": "ab"
+            },
+            "output": {
+              "units": [
+                97,
+                98
+              ]
+            }
+          },
+          {
+            "input": {
+              "text": "雪😀"
+            },
+            "output": {
+              "units": [
+                38634,
+                55357,
+                56832
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_bitunix::adapter_orders::BatchFrame": {
+    "shape": "observed",
+    "evidence": "All inventoried raw-input methods of concrete BatchFrame execute on a constructed native BitunixVenue. Batch observations distinguish property absence, own null, nonmutating omit and actual POST/response data. Cancellation observes actual POST and selected native Store status changes. REST payload bytes are captured at the existing transport boundary; decoded model owners are never serialized to manufacture expectations.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_placement::BatchOrderHost",
+          "name": "field",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "path",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete BatchFrame production method on the real Bitunix constructor, shared Store and scripted REST transport. Observe native values, request data or actual mutated state; no receiver-derived exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_placement::BatchOrderHost;let (venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue,payloads:vec![]};let _=(&rt,&store,&wire);let value=std::rc::Rc::new(safe_cex_num::JsJsonValue::from($value.clone()));let out=frame.field(&value,&[\"nested\",\"value\"]).unwrap();match out.as_ref(){safe_cex_num::JsJsonValue::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),safe_cex_num::JsJsonValue::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),_=>panic!(\"unexpected native field\")}}",
+        "cases": [
+          {
+            "input": {
+              "nested": {
+                "value": false
+              }
+            },
+            "output": {
+              "kind": "bool",
+              "value": false
+            }
+          },
+          {
+            "input": {
+              "nested": {}
+            },
+            "output": {
+              "kind": "undefined"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_placement::BatchOrderHost",
+          "name": "has_own",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete BatchFrame production method on the real Bitunix constructor, shared Store and scripted REST transport. Observe native values, request data or actual mutated state; no receiver-derived exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_placement::BatchOrderHost;let (venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue,payloads:vec![]};let _=(&rt,&store,&wire);let value=std::rc::Rc::new(safe_cex_num::JsJsonValue::from($value.clone()));serde_json::json!({\"own\":frame.has_own(&value,\"value\").unwrap()})}",
+        "cases": [
+          {
+            "input": {
+              "value": null
+            },
+            "output": {
+              "own": true
+            }
+          },
+          {
+            "input": {},
+            "output": {
+              "own": false
+            }
+          },
+          {
+            "input": [
+              false
+            ],
+            "output": {
+              "own": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_placement::BatchOrderHost",
+          "name": "omit",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete BatchFrame production method on the real Bitunix constructor, shared Store and scripted REST transport. Observe native values, request data or actual mutated state; no receiver-derived exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_placement::BatchOrderHost;let (venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue,payloads:vec![]};let _=(&rt,&store,&wire);let value=std::rc::Rc::new(safe_cex_num::JsJsonValue::from($value.clone()));let out=frame.omit(&value,\"value\").unwrap();let keys=match out.as_ref(){safe_cex_num::JsJsonValue::Object(fields)=>fields.iter().map(|(k,_)|k.clone()).collect::<Vec<_>>(),_=>panic!(\"expected native object\")};serde_json::json!({\"keys\":keys,\"originalOwn\":frame.has_own(&value,\"value\").unwrap()})}",
+        "cases": [
+          {
+            "input": {
+              "value": false,
+              "kept": "x"
+            },
+            "output": {
+              "keys": [
+                "kept"
+              ],
+              "originalOwn": true
+            }
+          },
+          {
+            "input": {
+              "first": null,
+              "last": false
+            },
+            "output": {
+              "keys": [
+                "first",
+                "last"
+              ],
+              "originalOwn": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_placement::BatchOrderHost",
+          "name": "post",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "endpoint",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "payload",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "alloc::rc::Rc",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete BatchFrame production method on the real Bitunix constructor, shared Store and scripted REST transport. Observe native values, request data or actual mutated state; no receiver-derived exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_placement::BatchOrderHost;let (venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue,payloads:vec![]};let _=(&rt,&store,&wire);fn run<F:std::future::Future>(rt:&harness::Runtime,f:F)->F::Output{let mut f=std::pin::pin!(f);for _ in 0..8{let mut cx=std::task::Context::from_waker(std::task::Waker::noop());if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}rt.now.set(rt.now.get()+1000.0);rt.pump();}panic!(\"fixture must settle\")} let endpoint=if $value[\"first\"]==true{\"/accepted-first\"}else{\"/accepted-second\"};wire.bodies.lock().unwrap().insert(endpoint.into(),serde_json::json!({\"value\":if $value[\"first\"]==true{\"first\"}else{\"second\"}}));let out=run(&rt,frame.post(endpoint,std::rc::Rc::new(safe_cex_num::JsJsonValue::from($value[\"body\"].clone())))).unwrap();let value=match out.as_ref(){safe_cex_num::JsJsonValue::Object(fields)=>fields.iter().find(|(k,_)|k==\"value\").map(|(_,v)|match v{safe_cex_num::JsJsonValue::String(v)=>v.clone(),_=>panic!(\"expected native response string\")}).unwrap(),_=>panic!(\"expected native response object\")};let requests=wire.requests.lock().unwrap();assert_eq!(requests.len(),1,\"one actual native POST\");let request=&requests[0];let body=match request.body.as_ref().unwrap(){safe_cex_transport::RestBody::Encoded(bytes)=>serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),safe_cex_transport::RestBody::Untransformed(v)=>v.clone(),safe_cex_transport::RestBody::Transformed(v)=>match v.value(){serde_json::Value::String(text)=>serde_json::from_str::<serde_json::Value>(text).unwrap(),v=>v.clone()}};serde_json::json!({\"method\":request.method.to_uppercase(),\"url\":request.url,\"body\":body,\"returned\":value})}",
+        "cases": [
+          {
+            "input": {
+              "first": true,
+              "body": {
+                "clientOrderId": "one",
+                "reduceOnly": true
+              }
+            },
+            "output": {
+              "method": "POST",
+              "url": "/accepted-first",
+              "body": {
+                "clientOrderId": "one",
+                "reduceOnly": true
+              },
+              "returned": "first"
+            }
+          },
+          {
+            "input": {
+              "first": false,
+              "body": {
+                "clientOrderId": "two",
+                "reduceOnly": false
+              }
+            },
+            "output": {
+              "method": "POST",
+              "url": "/accepted-second",
+              "body": {
+                "clientOrderId": "two",
+                "reduceOnly": false
+              },
+              "returned": "second"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_bitunix::adapter_orders::CancelFrame": {
+    "shape": "observed",
+    "evidence": "All inventoried raw-input methods of concrete CancelFrame execute on a constructed native BitunixVenue. Batch observations distinguish property absence, own null, nonmutating omit and actual POST/response data. Cancellation observes actual POST and selected native Store status changes. REST payload bytes are captured at the existing transport boundary; decoded model owners are never serialized to manufacture expectations.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_cancellation::CancellationHost",
+          "name": "post",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "endpoint",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "body",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "tuple": []
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete CancelFrame production method on the real Bitunix constructor, shared Store and scripted REST transport. Observe native values, request data or actual mutated state; no receiver-derived exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_cancellation::CancellationHost;let (venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue};let _=(&rt,&store,&wire);fn run<F:std::future::Future>(rt:&harness::Runtime,f:F)->F::Output{let mut f=std::pin::pin!(f);for _ in 0..8{let mut cx=std::task::Context::from_waker(std::task::Waker::noop());if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}rt.now.set(rt.now.get()+1000.0);rt.pump();}panic!(\"fixture must settle\")} let endpoint=if $value[\"first\"]==true{\"/accepted-first\"}else{\"/accepted-second\"};wire.bodies.lock().unwrap().insert(endpoint.into(),serde_json::json!({\"value\":if $value[\"first\"]==true{\"first\"}else{\"second\"}}));let _out=run(&rt,frame.post(endpoint,safe_cex_num::JsJsonValue::from($value[\"body\"].clone()))).unwrap();let requests=wire.requests.lock().unwrap();assert_eq!(requests.len(),1,\"one actual native POST\");let request=&requests[0];let body=match request.body.as_ref().unwrap(){safe_cex_transport::RestBody::Encoded(bytes)=>serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),safe_cex_transport::RestBody::Untransformed(v)=>v.clone(),safe_cex_transport::RestBody::Transformed(v)=>match v.value(){serde_json::Value::String(text)=>serde_json::from_str::<serde_json::Value>(text).unwrap(),v=>v.clone()}};serde_json::json!({\"method\":request.method.to_uppercase(),\"url\":request.url,\"body\":body})}",
+        "cases": [
+          {
+            "input": {
+              "first": true,
+              "body": {
+                "clientOrderId": "one",
+                "reduceOnly": true
+              }
+            },
+            "output": {
+              "method": "POST",
+              "url": "/accepted-first",
+              "body": {
+                "clientOrderId": "one",
+                "reduceOnly": true
+              }
+            }
+          },
+          {
+            "input": {
+              "first": false,
+              "body": {
+                "clientOrderId": "two",
+                "reduceOnly": false
+              }
+            },
+            "output": {
+              "method": "POST",
+              "url": "/accepted-second",
+              "body": {
+                "clientOrderId": "two",
+                "reduceOnly": false
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_cancellation::CancellationHost",
+          "name": "update_status",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "ids",
+                {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "primitive": "u16"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "status",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete CancelFrame production method on the real Bitunix constructor, shared Store and scripted REST transport. Observe native values, request data or actual mutated state; no receiver-derived exemption.",
+        "call": "{#[allow(dead_code)] mod harness {extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_cancellation::CancellationHost;let (venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue};let _=(&rt,&store,&wire);use safe_cex_store::Store;let mut input=serde_json::json!({\"id\":\"one\",\"status\":\"open\",\"symbol\":\"BTCUSDT\",\"type\":\"limit\",\"side\":\"buy\",\"price\":1,\"amount\":2,\"filled\":0,\"remaining\":2,\"reduceOnly\":false,\"lastUpdate\":0});let one: safe_cex_types::Order=serde_json::from_value(input.clone()).unwrap();input[\"id\"]=serde_json::json!(\"two\");let two: safe_cex_types::Order=serde_json::from_value(input).unwrap();Store::update(store.as_ref(),safe_cex_store::StoreUpdate{orders:Some(vec![one,two]),..Default::default()},false).unwrap();frame.update_status(vec![$value[\"id\"].as_str().unwrap().encode_utf16().collect()],\"canceled\").unwrap();serde_json::json!({\"orders\":store.orders().iter().map(|o|serde_json::json!({\"id\":o.id,\"canceled\":o.status==safe_cex_types::OrderStatus::Canceled})).collect::<Vec<_>>()})}",
+        "cases": [
+          {
+            "input": {
+              "id": "one"
+            },
+            "output": {
+              "orders": [
+                {
+                  "id": "one",
+                  "canceled": true
+                },
+                {
+                  "id": "two",
+                  "canceled": false
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "id": "two"
+            },
+            "output": {
+              "orders": [
+                {
+                  "id": "one",
+                  "canceled": false
+                },
+                {
+                  "id": "two",
+                  "canceled": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_bitunix::native_http::query_value": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "query_value",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::query_value::QueryValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn observe(value:safe_cex_types::QueryValue)->serde_json::Value {use safe_cex_types::QueryValue as Q;match value{Q::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Q::Null=>serde_json::json!({\"kind\":\"null\"}),Q::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),Q::String(v)=>serde_json::json!({\"kind\":\"string\",\"value\":v}),Q::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),Q::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.into_iter().map(observe).collect::<Vec<_>>()}),Q::Object(values)=>serde_json::json!({\"kind\":\"object\",\"fields\":values.into_iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()})}}observe($type($value))}",
+    "cases": [
+      {
+        "input": {
+          "z": 1.25,
+          "a": [
+            false,
+            null
+          ],
+          "b": "first"
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            {
+              "key": "a",
+              "value": {
+                "kind": "array",
+                "values": [
+                  {
+                    "kind": "bool",
+                    "value": false
+                  },
+                  {
+                    "kind": "null"
+                  }
+                ]
+              }
+            },
+            {
+              "key": "b",
+              "value": {
+                "kind": "string",
+                "value": "first"
+              }
+            },
+            {
+              "key": "z",
+              "value": {
+                "kind": "number",
+                "bits": "3ff4000000000000"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "b": true,
+          "a": {
+            "z": "last",
+            "a": -2.5
+          }
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            {
+              "key": "a",
+              "value": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "a",
+                    "value": {
+                      "kind": "number",
+                      "bits": "c004000000000000"
+                    }
+                  },
+                  {
+                    "key": "z",
+                    "value": {
+                      "kind": "string",
+                      "value": "last"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "key": "b",
+              "value": {
+                "kind": "bool",
+                "value": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "kind": "null"
+        }
+      }
+    ],
+    "evidence": "This actual query Value-to-QueryValue conversion was moved unchanged from query_profile to module scope so its own native outputs are gated. Direct native enum variants, numeric bits, recursive array structure and sorted object keys are independently observed; no JSON serialization of QueryValue is available. This is the existing retained JSON bridge, not a new query profile or permission for arbitrary host values."
+  },
+  "safe_cex_venue_bitunix::event_models::value_precision": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "value_precision",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let n=$type($value.get(\"v\")).unwrap();serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())})}",
+    "cases": [
+      {
+        "input": {
+          "v": "0.0100"
+        },
+        "output": {
+          "bits": "4010000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": 0.25
+        },
+        "output": {
+          "bits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": 10
+        },
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "bits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": null
+        },
+        "output": {
+          "bits": "4000000000000000"
+        }
+      }
+    ],
+    "evidence": "This exact event decimal-precision decoder was moved unchanged from subtract to module scope. String precision retains trailing zero digits, numeric precision uses shared Number rules and nullish inputs default to two. Independently chosen native binary64 results classify the helper directly; subtraction retains its existing separate contract and no nested-helper exemption remains."
   }
 }

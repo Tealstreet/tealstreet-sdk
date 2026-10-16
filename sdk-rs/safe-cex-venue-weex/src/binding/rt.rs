@@ -1,4 +1,4 @@
-use super::*;
+use super::{Js, JsFuture, Thrown, await_js};
 use safe_cex_exchange::js_runtime::{
     base_exchange::ExternalPublicDataFactory,
     scope::{Scope, ScopeShared},
@@ -60,15 +60,15 @@ impl Host {
         config: Js,
     ) -> Result<JsFuture<'static>, Thrown> {
         let xhr = self.root("xhr")?;
-        let pending = xhr.call_method(method, vec![endpoint, config])?;
+        let pending = xhr.call_method(method, std::vec![endpoint, config])?;
         Ok(Box::pin(await_js(pending)))
     }
     pub fn warn(&self, message: Js) -> Result<(), Thrown> {
-        self.call("log", vec![message, Js::str("warning")])?;
+        self.call("log", std::vec![message, Js::str("warning")])?;
         Ok(())
     }
     pub fn emit(&self, message: Js) -> Result<(), Thrown> {
-        self.call("emitAndLogError", vec![message])?;
+        self.call("emitAndLogError", std::vec![message])?;
         Ok(())
     }
 }

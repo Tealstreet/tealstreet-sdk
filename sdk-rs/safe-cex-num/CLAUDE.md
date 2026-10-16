@@ -1,5 +1,11 @@
 # JavaScript numeric and language semantics
 
+The individually reviewed accepted contracts and their native/default evidence
+are described in [ACCEPTED_CONTRACTS.md](ACCEPTED_CONTRACTS.md). Keep decoder
+observations separate from body-specific non-decoder classifications. The
+numeric_output_invariant target checks native changed-bit refusals and nested
+paths; its compiling comparison fault must fail before exact restoration passes.
+
 This crate hosts shared ECMAScript compatibility helpers below services and venues.
 Use `js_trim` when porting JavaScript String.prototype.trim. Its exact set is:
 U+0009–000D, U+0020, U+00A0, U+1680, U+2000–200A, U+2028, U+2029,
@@ -332,3 +338,10 @@ regressions are restored by `scripts/order-policy-controls.py`; failures must
 include the named native assertion, never only a compiler diagnostic.
 
 get_balance_slice returns a borrowed BalanceSlice containing the source account or exact currency row. An available/locked row remains that shape; get_total_balance_from_balance sees its absent total and applies the source zero default. Do not fall back to the account total merely because a present currency row has a different runtime shape.
+
+Externally tagged numeric enum objects enter through MapAccessDeserializer, whose
+EnumAccess bridge invokes the enum visitor. MapDeserializer's ordinary enum hint
+forwards to visit_map and cannot decode these variants. Require exactly one tag
+before dispatch; the bridge alone need not consume extra keys. Raw/owned/borrowed
+regressions inspect unit/newtype/tuple/record variants and numeric bits, while
+shared string-union front guards still reject tagged maps.

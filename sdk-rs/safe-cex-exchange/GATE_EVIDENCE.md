@@ -1553,3 +1553,43 @@ suites. Typed callbacks/read rows/error carriers and native lazy futures retain
 explicit CHOSEN boundaries. V8 comparator schedules for non-transitive mixed-ID
 ties are not claimed. Existing JournalFolder binding and venue fetch composition
 remain outside these standalone symbol mappings.
+
+## Native scalar JS Store patches (ddi2il-43)
+
+A real Bybit Inverse private position frame produced NaN leverage. The old JS
+facade converted it to JSON null, causing updatePositions to reject the patch and
+retain leverage 10. The independent shared fixture reproduced this through the
+production facade and DefaultStore: updatePositions NaN leverage and
+updatePosition NaN entryPrice both failed at runtime before the repair.
+
+`tests/js_store_patch_numbers.rs` now passes three tests: seven native leverage
+bit cases through updatePositions, 192 individually patched values covering all
+32 scalar numeric fields on updatePosition/updateOrder/updateTicker/updateMarket,
+and omission/null/unknown/opaque-info/update-only assertions. The repair uses
+`to_typed::<f64>` from the existing native-number bridge and
+`ModelPatch::set_number`. Opaque info and socket health retain their explicit JSON
+boundaries; nested option terms retain their existing native typed decoder.
+
+`tests/js_store_patch_numbers_controls.py` runs sequential compiled faults:
+replacing the native carrier with JSON projection, and normalizing signed zero.
+Each compiled, failed both named native numeric regressions, then passed all
+three tests after exact byte restoration. The source controls do not count a
+compiler error as regression evidence.
+
+The Inverse branch checkpoint 84b572c4c7 stacks this fix onto its separately
+staged facade. All nine `inverse_binding` E2Es pass, including the real private
+socket order/fill/position delivery that previously failed NaN leverage. This
+validates the shared repair through that construction and socket path; it does
+not claim the remaining Inverse binding closure work is complete.
+
+Final scoped validation: js_runtime 68, typed_js_values 5, new patch regressions
+3, override_contract 6 and cancellable_future_inventory 6 pass. The runtime and
+override suites include their maintained-source tests; only the existing
+cancellation discovery export remains ignored. Host all-feature/all-target and wasm library
+clippy pass; parity has zero findings and extractor reports zero changes.
+After merging the separately owned BreakoutProp classification repair #295,
+the override inventory export passed. Review found exactly one changed enclosing
+body fingerprint among 1164 retained rows: Store facade `35d694b8312ceda6` to
+`c6140fadf0482da7`. Its existing Store `update_order` call is unchanged; the
+facade now selects the JSON-only socket-health helper explicitly. No call was
+added or removed, and no delegation policy or exemption changed.

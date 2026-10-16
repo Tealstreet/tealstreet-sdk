@@ -20,14 +20,14 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
         array: Js::array,
         string: |_, value| Ok(Js::utf16(&value.to_js_string()?)),
         template: |_, value| v::units(value),
-        uppercase: |_, value| value.call_method("toUpperCase", vec![]),
+        uppercase: |_, value| value.call_method("toUpperCase", std::vec![]),
         equals: v::equals,
         strict_true: |v| v.strict_equals(&Js::Bool(true)),
         strict_false: |v| v.strict_equals(&Js::Bool(false)),
         is_string: Js::is_string,
-        is_boolean: |v| matches!(v, Js::Bool(_)),
+        is_boolean: |v| std::matches!(v, Js::Bool(_)),
         is_object: Js::is_object,
-        is_number: |v| matches!(v, Js::Number(_)),
+        is_number: |v| std::matches!(v, Js::Number(_)),
         number_value: |v| if let Js::Number(n) = v { *n } else { f64::NAN },
         to_number: |_, value, default| v::number(&value, default.to_number()?).map(Js::Number),
         integer_string: |_, value| v::integer(&value),
@@ -57,15 +57,16 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
         call: v::invoke,
         call_async: v::invoke_async,
         request: |h, method, endpoint, data| {
-            let pending = h
-                .root("xhr")?
-                .call_method(&method.to_ascii_lowercase(), vec![Js::str(endpoint), data])?;
+            let pending = h.root("xhr")?.call_method(
+                &method.to_ascii_lowercase(),
+                std::vec![Js::str(endpoint), data],
+            )?;
             Ok(Box::pin(await_js(pending)))
         },
         error_value: |e| e.value.clone(),
         error_sink: |h| v::method(h, &h.this(), "emitAndLogError"),
         emit: |_, sink, value| {
-            sink.call(Js::Undefined, vec![value])?;
+            sink.call(Js::Undefined, std::vec![value])?;
             Ok(())
         },
         new_error: |_, value| Thrown::error("Error", &value.to_display()),
@@ -91,28 +92,28 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
         },
         flat_map: |_, value, callback| {
             let mapped = v::map(value, callback)?;
-            mapped.call_method("flat", vec![])
+            mapped.call_method("flat", std::vec![])
         },
         new_set: |h, value| v::set(h, value.clone()),
-        set_has: |_, set, key| Ok(set.call_method("has", vec![key.clone()])?.truthy()),
+        set_has: |_, set, key| Ok(set.call_method("has", std::vec![key.clone()])?.truthy()),
         new_map: |h| v::new_map(h, Js::Undefined),
-        map_has: |_, map, key| Ok(map.call_method("has", vec![key.clone()])?.truthy()),
-        map_get: |_, map, key| map.call_method("get", vec![key.clone()]),
+        map_has: |_, map, key| Ok(map.call_method("has", std::vec![key.clone()])?.truthy()),
+        map_get: |_, map, key| map.call_method("get", std::vec![key.clone()]),
         map_set: |_, map, key, value| {
-            map.call_method("set", vec![key, value])?;
+            map.call_method("set", std::vec![key, value])?;
             Ok(())
         },
         length: |_, value| v::length(value),
         is_array: |_, value| Ok(value.is_array()),
         includes: |_, value, needle| {
             Ok(value
-                .call_method("includes", vec![needle.clone()])?
+                .call_method("includes", std::vec![needle.clone()])?
                 .truthy())
         },
         set_size: |h, values| Ok(v::set(h, values.clone())?.get("size")?.to_number()? as usize),
         push_method: |h, value| v::method(h, value, "push"),
         push: |_, f, array, value| {
-            f.call(array.clone(), vec![value])?;
+            f.call(array.clone(), std::vec![value])?;
             Ok(())
         },
         spread_push: |_, f, array, values| {
@@ -127,7 +128,11 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
         iterator: v::iterator,
         next: v::next,
         close_on_error: |_, _, _| {},
-        contains: |_, value, text| Ok(value.call_method("includes", vec![Js::str(text)])?.truthy()),
+        contains: |_, value, text| {
+            Ok(value
+                .call_method("includes", std::vec![Js::str(text)])?
+                .truthy())
+        },
         has: |_, value, key| Ok(value.has_own(key)),
         valid_order_id: |value| match value {
             Js::String(v) => !v.is_empty(),
@@ -149,10 +154,10 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
             ))
         },
         extract_array: |h, value| v::extract(h, value, &["items", "list", "rows"]),
-        join: |_, value, sep| value.call_method("join", vec![Js::str(sep)]),
+        join: |_, value, sep| value.call_method("join", std::vec![Js::str(sep)]),
         unique_id: |h, value| {
             h.global("uniqBy")?
-                .call(Js::Undefined, vec![value, Js::str("id")])
+                .call(Js::Undefined, std::vec![value, Js::str("id")])
         },
         concat: |_, first, second| {
             let mut values = first
