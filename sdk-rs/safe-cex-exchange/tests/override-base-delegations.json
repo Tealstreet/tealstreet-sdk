@@ -8,6 +8,15 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {"file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts", "contains": "super.dispose();"},
+        {"file": "sdk-rs/safe-cex-venue-bybit/src/binding/exchange.rs", "contains": "|| self.base.dispose(),"}
+      ]
+    },
+    {
       "file": "safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs",
       "finding": "invoke bypasses dynamic hook dispose through base",
       "kind": "source-super",
