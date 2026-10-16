@@ -3330,6 +3330,16 @@ constructors or facade assembly have been supplied. Source/native loader
 witnesses cover the declared finite routes and selected scheduling/value costs;
 they do not establish general JavaScript object or event-loop emulation.
 
+**Scope amendment (2026-10-16).** One exception now applies to the paragraph
+above: the names in `safe-cex-registry/src/rust_venues.rs` (`backpack`,
+`binance`) have concrete, statically linked Rust constructors. A caller reaches
+them only by choosing `ConstructionPath::Rust` for that name. They use the same
+typed `ExchangeConstructor` capability, so none of the three choices above
+changes. The default `ConstructionPath::ModuleHost` keeps every module-host route
+and its price. That is why the `exchangeRegistry.<name>` rows stay divergent and
+claim the Rust route as split members. `Rust` for any other name is a named
+error, never a fallback. The design is in `safe-cex-registry/CONSTRUCTION.md`.
+
 <a id="utility-capability-choice"></a>
 ### Utility capability choices
 
