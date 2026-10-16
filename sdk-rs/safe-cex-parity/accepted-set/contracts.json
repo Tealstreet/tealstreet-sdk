@@ -116932,5 +116932,136 @@
         }
       ]
     }
+  },
+  "safe_cex_exchange::js_runtime::sockets::binary_data": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "binary_data",
+      "signature": {
+        "inputs": [
+          [
+            "bytes",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u8"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "runtime",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "sockets.rs::binary_data; actual native Buffer/browser Blob construction is observed through its backing ArrayBuffer bytes and byteLength, before text decoding or JSON projection. Both independently authored byte sequences include non-ASCII bytes. The target-specific outer class is checked against the compile target; Blob.arrayBuffer is observed via its settled native promise. No UTF-8, venue payload or transport delivery claim.",
+    "call": "{#[allow(dead_code,unused_imports)] mod fx{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/exchange-runtime-fixture.rs\"));}use crate::js_runtime::value::Js;let bytes:Vec<u8>=$value.as_array().unwrap().iter().map(|v|u8::try_from(v.as_u64().unwrap()).expect(\"authored byte\")).collect();let runtime:std::rc::Rc<dyn crate::runtime::ExchangeRuntime>=std::rc::Rc::new(fx::Runtime::default());let frame=super::binary_data(&bytes,runtime);match &frame{Js::Object(data)=>assert_eq!(data.class,if cfg!(target_arch=\"wasm32\"){\"Blob\"}else{\"Buffer\"}),_=>panic!(\"binary frame lost native host object\")};let buffer=if cfg!(target_arch=\"wasm32\"){match frame.call_method(\"arrayBuffer\",vec![]).unwrap(){Js::Promise(p)=>p.result().expect(\"settled arrayBuffer promise\").unwrap(),_=>panic!(\"Blob.arrayBuffer lost promise\")}}else{frame.get(\"buffer\").unwrap()};let class=match &buffer{Js::Object(data)=>data.class,_=>panic!(\"backing buffer lost native object\")};let native=buffer.get(\"bytes\").unwrap().array_values().unwrap();let byte_bits:Vec<String>=native.iter().map(|v|v.to_number().unwrap().to_bits().to_string()).collect();let length=buffer.get(\"byteLength\").unwrap().to_number().unwrap().to_bits().to_string();serde_json::json!({\"classUnits\":class.encode_utf16().collect::<Vec<_>>(),\"byteBits\":byte_bits,\"lengthBits\":length})}",
+    "cases": [
+      {
+        "input": [
+          0,
+          65,
+          255
+        ],
+        "output": {
+          "classUnits": [
+            65,
+            114,
+            114,
+            97,
+            121,
+            66,
+            117,
+            102,
+            102,
+            101,
+            114
+          ],
+          "byteBits": [
+            "0",
+            "4634274385308418048",
+            "4643176031446892544"
+          ],
+          "lengthBits": "4613937818241073152"
+        }
+      },
+      {
+        "input": [
+          128,
+          240,
+          159,
+          154,
+          128
+        ],
+        "output": {
+          "classUnits": [
+            65,
+            114,
+            114,
+            97,
+            121,
+            66,
+            117,
+            102,
+            102,
+            101,
+            114
+          ],
+          "byteBits": [
+            "4638707616191610880",
+            "4642648265865560064",
+            "4639798331726364672",
+            "4639622409865920512",
+            "4638707616191610880"
+          ],
+          "lengthBits": "4617315517961601024"
+        }
+      }
+    ]
   }
 }
