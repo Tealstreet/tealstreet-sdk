@@ -9,6 +9,7 @@ safe-cex-transport.workspace = true
 safe-cex-store.workspace = true
 safe-cex-exchange.workspace = true
 safe-cex-types.workspace = true
+safe-cex-venue-asterdex.workspace = true
 safe-cex-venue-backpack.workspace = true
 safe-cex-venue-binance.workspace = true
 safe-cex-venue-bitget.workspace = true

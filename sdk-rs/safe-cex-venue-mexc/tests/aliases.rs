@@ -54,7 +54,15 @@ fn mexc_mapper_owned_snapshot_vs_live_alias() {
                 .unwrap(),
             "normalizeBalance" => {
                 let balance = normalize_balance(&json!([raw])).unwrap();
-                currency_info = balance.currencies.unwrap().remove("USDT").unwrap().info;
+                currency_info = balance
+                    .currencies
+                    .unwrap()
+                    .remove("USDT")
+                    .unwrap()
+                    .as_balance()
+                    .unwrap()
+                    .info
+                    .clone();
                 balance.info.unwrap()[0].clone()
             }
             _ => panic!("unexpected mapper {name}"),
@@ -167,7 +175,7 @@ fn mexc_balance_prices_heterogeneous_prototype_reads() {
         .currencies
         .unwrap();
     assert_eq!(currencies.keys().collect::<Vec<_>>(), vec!["constructor"]);
-    assert_eq!(currencies["constructor"].free, 2.0);
+    assert_eq!(currencies["constructor"].as_balance().unwrap().free, 2.0);
     // Shared dictionary writes are routed: matching own keys does not recreate
     // the prototype-backed numeric read from this typed currency map.
     assert!(!currencies.contains_key("free"));

@@ -120,7 +120,12 @@ where
             used: 0.0,
             total: total_usd,
             upnl: 0.0,
-            currencies: Some(currencies),
+            currencies: Some(
+                currencies
+                    .into_iter()
+                    .map(|(key, balance)| (key, balance.into()))
+                    .collect(),
+            ),
             coins: None,
             info: Some(balances),
         })

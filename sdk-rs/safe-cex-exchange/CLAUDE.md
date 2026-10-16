@@ -73,6 +73,10 @@ The store contract is `safe-cex-store`'s port of
 that trait directly; it never defines a projection or another store shape.
 `ExchangeRuntime` supplies clock, local task/timer cancellation, runtime logging
 and worker requests. Runtime signing handles stay outside serializable options.
+The native wall clock supplies integer epoch milliseconds for Date.now timestamps
+and signing nonces; its monotonic clock retains fractional milliseconds. The shared
+JS Date.now facade also rounds down an injected wall clock, while performance.now
+keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
