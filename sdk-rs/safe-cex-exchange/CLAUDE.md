@@ -1136,3 +1136,12 @@ valid base, signed/large integers, defaults and scalar/array coercion boundaries
 incorrect rounding and base-two refusal; each must compile, fail the named source
 comparison and pass again after exact restoration. No venue-local radix shim is
 required.
+
+The JS Store facade constructs scalar model patches with the existing native
+number carrier and typed-value bridge. All declared numeric fields of Position,
+Order, Ticker and Market retain NaN, infinities and signed zero through partial
+updates. Opaque `info` retains its explicit JSON policy; nested option terms keep
+their separate typed decoder. Other field admission, omission and atomic patch
+validation retain [the Store patch choice](../parity/MANIFEST-SPEC.md#store-typed-patch-choice).
+`tests/js_store_patch_numbers.rs` exercises all five model patch methods, with
+compiled projection and signed-zero controls in the adjacent Python runner.
