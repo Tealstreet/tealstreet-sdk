@@ -78,6 +78,23 @@ pub fn create_incremental_fills(
 mod tests {
     use super::*;
     #[test]
+    fn fifteen_digit_ties_round_away_from_zero_as_to_precision_does() {
+        // Node: (123456789012344.5).toPrecision(15); ties-to-even would give ...344.
+        for (input, expected) in [
+            (123456789012345.5, 123456789012346.0_f64),
+            (-123456789012345.5, -123456789012346.0),
+            (123456789012344.5, 123456789012345.0),
+        ] {
+            assert_eq!(
+                clean_float(input).to_bits(),
+                expected.to_bits(),
+                "cleanFloat({input})"
+            );
+        }
+        assert_eq!(clean_float(100000.1 - 100000.0), 0.100000000005821);
+        assert_eq!(subtract_decimals(100000.1, 100000.0), 0.1);
+    }
+    #[test]
     fn replays_older_frames_missing_values_and_restarts() {
         let mut fills = create_incremental_fills(500.0);
         assert_eq!(
