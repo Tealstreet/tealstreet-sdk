@@ -1600,7 +1600,25 @@ at this checkpoint.
 The final master integration changed only other packages' accepted contracts and
 their review docs. Kraken source/tests/controls/contracts, all Cargo inputs and
 the maintained probe/indexer sources are byte-identical to the tested checkpoint.
-The separate base-URL/scoped-wrapper repair remains in PR #327; this helper PR
-does not duplicate it. These are selected native/default accepted-contract
+At this original checkpoint the base-URL/scoped-wrapper repair was separate in
+PR #327. The later master integration below includes it without duplicating its
+implementation. These are selected native/default accepted-contract
 receipts; the successful wasm Clippy check does not establish wasm behavioral
 coverage or clear any remaining accepted-set obligation.
+
+
+Helper master refresh at `63f666e668` integrates master `cda5584612`, including
+#327 and the shared cancellation review from #342. The three merge conflicts
+were resolved by retaining every master contract/documentation section, then
+appending only the four unchanged helper contracts and their guidance/evidence.
+All five Kraken rows equal their original branch/master values exactly.
+Fresh full scoped Kraken tests pass **145 / zero failures / zero ignored**;
+separate native and wasm32 all-targets Clippy, frozen install and format pass.
+The checker was rebuilt from this integrated source. The repaired scoped wrapper
+passes **134 rows / 539 public items / zero exemptions**, and the global checker
+passes **7459 rows / 17206 public items**. Fresh production helper verification
+passes **one runtime result / three explicit classifications / zero failed owners**.
+Helper production bodies, native fixtures, controller and runner are byte-identical
+to the checkpoint that executed all four compiled controls and exact restorations.
+Independent merge-preservation review is clean; the obsolete #327-pending wording
+has been corrected. Other accepted-set obligations remain open as listed above.
