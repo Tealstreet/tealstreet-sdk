@@ -656,3 +656,39 @@ At a09c018f263e0b296920a65a453678625f798e2d the complete scoped supplement and c
 The original67-row finding cohort is now classified:10 behavior /57 rationale; this continuation closes53 original finding notes (1 behavior repair,52 rationale), leaving0 original FINDING notes. The73 original CHOSEN-text rows remain outside this audit. Manifest status movement is0; the independently expected census remains28 ported /140 divergent /0 pending,168 rows in16 files, stopped file index15. Static sub-agent verification at a09c018f26 returned MERGE after the taxonomy correction.
 
 After those measurements, origin0286f63437e4320e8c12886d5fef8fc6dfa2eac3 was merged at996e91123279d7b20b9bc738fb2f418a2a46fd06. The ApexOmni source/test/script and manifest trees are unchanged by that merge; shared/integration changes are not assumed behavior-equivalent. The93-test and120-control-attempt exits above cover a09c018f26 only and are NOT rerun or claimed as measured at the post-merge delivery SHA. Per the latest coordinator instruction, post-merge delivery measures ONLY cargo fmt --check and cargo build --workspace --locked --jobs2 at the exact handoff SHA; its separate receipt records both exits. Host clippy, wasm, wiring, layers and routing are centrally owned and NOT RUN by this lane at that SHA. No other runtime, historical, extractor-check, FFI, live-network or CI claim is added. No push, PR or self-merge.
+
+## Assembled Exchange/registry binding
+
+Measured before the final master refresh:
+-26 assembled tests pass:16 mandatory methods,2 listeners, caller ID, private
+  login/subscription/Pong, one legacy resend, repeated refusal, HTTP400 metadata,
+  write503 non-replay and two disposal continuations.
+- `binding-signature.cjs` executes actual source placeOrder and signContract with
+  the pinned real npm zkLink SDK. Its full URL-encoded body equals native: amount
+  1.2345/price100.127 at distinct0.001/0.01 steps become1.235/100.13, with exact
+  signature5212a2f9ea21406e5f25c046c509388bb7b25469400905119ba807a186ed93a2fc89f328a8883dcd3d1c8c6107158554c319bd784d5b7d9b26bebc7dfd610c01.
+  The harness reuses trading.cjs's source/compiler setup and substitutes real
+  SDK imports; it does not generate a native expected signature.
+-18 independent wrong Exchange/listener bodies each compile and fail their
+  named E2E; restored18 bound_ tests pass. Two precision operand swaps compile
+  and fail wire size/price assertions independently; restoration passes.
+- Native registry proof starts real HTTP/WS, signs/places, receives the placed
+  order through private WS and cancels it. A subscriber records the WS update
+  immediately so later REST snapshots cannot erase proof of delivery. HMAC uses
+  the source's base64-spelled UTF8 key and authenticates actual transmitted form
+  bytes. Native proof plus12 registry tests pass.
+- Removing the actual Apex table entry compiles and fails native construction
+  naming the missing Rust-constructed venue; restored native proof passes.
+- Global parity passes with0 findings (7459rows/17101public items). All new
+  binding helpers map to actual class/constructor assembly; imported SDK crypto
+  retains its separate primitive witnesses. No regenerated manifests.
+
+Controls are reproducible through the three scripts named in CLAUDE.md. Logs
+for this execution are /tmp/apex-{binding-controls,precision-controls,registry-controls}.txt.
+The source bodies' existing divergences remain; late-disposal refusal and owned
+book snapshots are explicitly priced. Six inherited methods genuinely reject in
+TypeScript; those are exact source behavior, not newly implemented endpoints.
+
+Final full-venue/oracle, host/wasm lint and post-master integration results are
+recorded in the PR validation text. No live credentials or external venue orders
+were used; P4 live verification remains separately parked on Sam.

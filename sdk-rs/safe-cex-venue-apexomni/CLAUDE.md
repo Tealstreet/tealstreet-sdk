@@ -252,3 +252,52 @@ network calls, with ten-request lots and a one-second delay between lots.
 `pure.cjs`, `signing.cjs` and `exchange.cjs` execute actual source declarations.
 Their compiled controls are scoped to those new bodies; caller and helper
 mutations run separately to prevent a helper failure masking caller evidence.
+
+## Shared runtime binding (October2026)
+
+The root `ApexOmniExchange` now assembles the existing typed bodies through
+`binding` on shared ScopeShared, Axios, Store, globals, timers and BaseWebSocket.
+The host owns both socket bodies; they retain their parent whose HostLink is
+weak, avoiding a parent/socket/host cycle. API interceptors retain Weak<ApexApi>.
+Callbacks release field borrows before reentrant disposal. Dispose cancels owned
+timers/tasks; dropping the host cancels them too.
+
+All16 required trait methods are wired. The source inherits exact
+`Not implemented` rejections for fetchTickers, max leverage, position mode,
+margin type, scheduled cancellation and public trades (base.ts759/799/832/836/989/1138);
+those hooks make no HTTP calls. Both public listeners are also bound. The caller
+client-ID guard is the first placement statement. Client IDs are preserved in
+both wire fields and the contract nonce. The actual TypeScript placeOrder body,
+its real signContract helper and the pinned npm SDK match the complete native
+URL-encoded placement body, including its128-hex signature, fee and expiration.
+
+The native zkLink host uses safe-cex-crypto's proven ContractBuilder/seed-only
+signer. It performs WASM ToInt32/unsigned narrowing before building the contract.
+No wallet provider or other transaction signing is supplied; unused capability
+kinds return explicit errors. Missing/invalid seeds are visible to account
+validation; hosted signing is explicitly unavailable on this host. External
+public data requires an injected factory.
+
+Network failures retry reads only. Apex's signature code20016/401/message
+rejection in an HTTP200 envelope resends once through the existing legacy
+signing body. HTTP failures do not enter that resend. Native errors retain HTTP
+status, response envelope and config. Private login is awaited before subscribe;
+both public/private callbacks use shared socket lifecycle and diagnostics.
+Buffer text conversion is explicit at this venue's typed protocol boundary;
+public browser Blob input preserves the source data.includes TypeError.
+
+P4 disposal guards intentionally stop fetched positions/orders after the HTTP
+await and stop the private position timer before publishing after disposal.
+The source continues in these cases; the row notes price this difference.
+Position reads retain the source's zkLinkConfig initialization while leaving
+Store positions untouched. Order-book callbacks own snapshots; retaining the
+callback result after cleanup differs from source's cleared shared object and
+is declared in the row note.
+
+`tests/binding.rs` has26 assembled tests, including all16 methods, both listeners,
+legacy replay limits, HTTP metadata, write non-replay and disposal. Run
+`scripts/binding-controls.py`, `binding-precision-controls.py` and
+`registry-control.py` serially: they temporarily mutate production bodies and
+restore in finally. The18 method/listener controls and two independent precision
+swaps compile/fail their named assertion; missing registry membership fails the
+real native-host test and restores to pass.

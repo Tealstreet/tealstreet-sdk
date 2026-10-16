@@ -212,11 +212,11 @@ test('moving registry back beside venues rejects its constructor dependency', ()
   policy.exceptions = policy.exceptions.filter(edge => !(edge.from === 'safe-cex-registry' && edge.to === 'safe-cex-exchange'));
   policy.layers.find(layer => layer.name === 'venues').packages.push('safe-cex-registry');
   // Its first real constructor-table edge is the one rejected.
-  assert.throws(() => validateLayers(policy, metadata), /lateral dependency: safe-cex-registry -> safe-cex-venue-asterdex$/);
+  assert.throws(() => validateLayers(policy, metadata), /lateral dependency: safe-cex-registry -> safe-cex-venue-apexomni$/);
 });
 test('registry constructs only the listed venues', () => {
   const { policy, metadata } = inputs();
-  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-okx', 'safe-cex-venue-kraken']);
+  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-apexomni', 'safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-okx', 'safe-cex-venue-kraken']);
   addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-bybit');
   assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-bybit$/);
 });

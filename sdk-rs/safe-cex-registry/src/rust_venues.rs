@@ -77,6 +77,11 @@ pub trait RustVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
     }
+    fn apexomni(&self) -> Result<safe_cex_venue_apexomni::ApexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "ApexOmni dependencies are unavailable on this host",
+        ))
+    }
     fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "BingX dependencies are unavailable on this host",
@@ -106,6 +111,7 @@ type RustConstructorEntry = fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor;
 
 /// Bound venues only; each later venue is added by its own follow-up.
 pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
+    (ExchangeName::Apexomni, apexomni_constructor),
     (ExchangeName::Asterdex, asterdex_constructor),
     (ExchangeName::Backpack, backpack_constructor),
     (ExchangeName::Binance, binance_constructor),
@@ -332,6 +338,13 @@ pub fn native_constructor(
 pub fn bingx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         safe_cex_venue_bingx::BingxExchange::new(name, options, store, host.bingx()?)
+            .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
+}
+
+pub fn apexomni_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        safe_cex_venue_apexomni::ApexOmniExchange::new(name, options, store, host.apexomni()?)
             .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
     })
 }

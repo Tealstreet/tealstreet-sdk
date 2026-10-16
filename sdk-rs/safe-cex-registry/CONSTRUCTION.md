@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for `apexomni`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
 the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
@@ -179,3 +179,9 @@ The native Kraken host shares its Futures nonce counter and Spot client-ID gener
 BingX uses `BingxExchange::new` with shared-js_runtime HTTP/socket dependencies.
 Its native-host E2E test verifies signed startup/placement/cancellation; the venue
 crate proves all 16 Exchange methods, retaining source-inherited rejections.
+
+ApexOmni is assembled through its shared js_runtime binding with a real
+OmniKey-seeded zkLink contract signer. Its native proof observes HTTP/WS startup,
+wire HMAC over the transmitted order form, caller ID, private WS order delivery
+and cancellation. Unsupported hosted signing/wallet-provider operations reject
+visibly. The module-host path remains the default.

@@ -102,3 +102,9 @@ The native host supplies a fresh HTTP host and the common gateway factory; remot
 signer hosts fail visibly until BingX signing is connected.
 `tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
 payload and caller client ID, and cancels the resulting order.
+
+ApexOmni now has its own Rust table entry and native host factory. It uses the
+shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
+`tests/native_host_apexomni.rs` covers signed startup, placement, private WS order
+delivery and cancellation over local native transports; its constructor-removal
+control lives in the venue's scripts/registry-control.py.

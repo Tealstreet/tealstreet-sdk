@@ -1,0 +1,200 @@
+#[path = "support/binding_harness.rs"]
+#[allow(dead_code)]
+mod support;
+use safe_cex_exchange::exchange::Exchange;
+use safe_cex_store::Store;
+use safe_cex_types::*;
+use serde_json::{Value, json};
+use support::{Harness, harness, options};
+
+include!("support/binding_streams.rs");
+include!("support/binding_failures.rs");
+
+fn raw_order() -> Value {
+    json!({"id":"order-1","symbol":"BTC-USDC","type":"LIMIT","side":"BUY","status":"OPEN","timeInForce":"GOOD_TIL_CANCEL","price":"100.12","size":"1.234","cumSuccessFillSize":"0","reduceOnly":false,"triggerPrice":"0","openSlParams":{"triggerPrice":"0"},"openTpParams":{"triggerPrice":"0"}})
+}
+fn contract() -> Value {
+    json!({"symbol":"BTC-USDC","crossSymbolName":"BTCUSDC","baseTokenId":"BTC","settleAssetId":"USDC","l2PairId":"11","enableTrade":true,"stepSize":"0.001","tickSize":"0.01","minOrderSize":"0.001","maxOrderSize":"1000","displayMinLeverage":"1","displayMaxLeverage":"50","initialMarginRate":"0.1"})
+}
+fn fixture() -> Harness {
+    let mut opts = options();
+    opts.omni_key_seed = Some(format!("0x{}1b", "01".repeat(64)));
+    opts.passphrase = Some("fixture-passphrase".into());
+    let h = harness(ExchangeName::Apexomni, opts, |http| {
+        http.ok(
+            "GET",
+            "/v3/symbols",
+            json!({"contractConfig":{"perpetualContract":[contract()]}}),
+        );
+        http.ok("GET", "/v3/account", json!({"id":"16909060","l2key":"fixture-l2","positions":[],"contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"}}));
+        http.ok(
+            "GET",
+            "/v3/account-balance",
+            json!({"totalEquityValue":"100","maintenanceMargin":"2","initialMargin":"10"}),
+        );
+        http.ok("GET", "/v3/user", json!({"id":"16909060"}));
+        http.ok("GET", "/v3/open-orders", json!([raw_order()]));
+        http.ok("POST", "/v3/order", json!({"id":"9007199254740993"}));
+        http.ok("POST", "/v3/delete-order", json!({}));
+        http.ok("POST", "/v3/set-initial-margin-rate", json!({}));
+        http.ok("POST", "/v3/delete-open-orders", json!({}));
+    });
+    Store::update(h.store.as_ref(), serde_json::from_value(json!({"markets":[{"id":"BTC-USDC","symbol":"BTCUSDC","base":"BTC","quote":"USDC","active":true,"precision":{"amount":0.001,"price":0.01},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":50}},"info":contract()}]})).unwrap(), false).unwrap();
+    h.store.update_zk_link_config(Some(json!({"id":"16909060","l2Key":"fixture-l2","contractAccount":{"makerFeeRate":"0.0012","takerFeeRate":"0.0013"},"contractConfig":{"perpetualContract":[contract()]}}))).unwrap();
+    h
+}
+fn placed() -> PlaceOrderOpts {
+    serde_json::from_value(json!({"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1.2345,"price":100.127,"clientOrderId":"tscaller-1"})).unwrap()
+}
+fn done(h: &Harness) {
+    h.venue().dispose().unwrap();
+    h.runtime.pump();
+}
+
+#[test]
+fn bound_start() {
+    let h = fixture();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    assert!(h.store.loaded().markets && h.store.loaded().tickers && h.store.loaded().balance);
+    assert_eq!(h.runtime.sockets.borrow().len(), 2);
+    done(&h);
+}
+#[test]
+fn bound_get_account() {
+    let h = fixture();
+    assert_eq!(
+        h.drive(h.venue().get_account()).unwrap().user_id,
+        "16909060"
+    );
+    done(&h);
+}
+#[test]
+fn bound_validate_account() {
+    let h = fixture();
+    assert_eq!(
+        serde_json::to_value(h.drive(h.venue().validate_account()).unwrap()).unwrap()["error"],
+        ""
+    );
+    assert_eq!(h.http.calls("/v3/user").len(), 1);
+    done(&h);
+}
+#[test]
+fn bound_fetch_positions() {
+    let h = fixture();
+    let positions = h.drive(h.venue().fetch_positions(None)).unwrap();
+    assert_eq!(positions.len(), 2);
+    assert_eq!(positions[0].leverage, 10.);
+    assert!(h.store.positions().is_empty());
+    done(&h);
+}
+#[test]
+fn bound_fetch_orders() {
+    let h = fixture();
+    let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, "order-1");
+    assert!(h.store.orders().is_empty());
+    done(&h);
+}
+#[test]
+fn bound_fetch_markets() {
+    let h = fixture();
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].id, "BTC-USDC");
+    assert_eq!(markets[0].precision.amount, 0.001);
+    assert_eq!(markets[0].precision.price, 0.01);
+    done(&h);
+}
+#[test]
+fn bound_place_order() {
+    let h = fixture();
+    let ids = h
+        .drive(h.exchange.base().place_order(h.exchange.as_ref(), placed()))
+        .unwrap();
+    assert_eq!(ids, ["9007199254740993"]);
+    let calls = h.http.calls("/v3/order");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].data["size"], "1.235", "wire size uses amount step");
+    assert_eq!(
+        calls[0].data["price"], "100.13",
+        "wire price uses price step"
+    );
+    assert_eq!(calls[0].data["clientOrderId"], "tscaller-1");
+    assert_eq!(
+        calls[0].data["signature"].as_str().unwrap().len(),
+        128,
+        "real native contract signature"
+    );
+    assert_eq!(calls[0].headers["APEX-API-KEY"], "fixture-key");
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/binding-signature.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "actual source placement: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        calls[0].data_raw, source["body"],
+        "complete source/native signed placement wire body"
+    );
+    done(&h);
+}
+#[test]
+fn bound_set_leverage() {
+    let h = fixture();
+    h.drive(h.venue().set_leverage("BTCUSDC".into(), 5., None))
+        .unwrap();
+    let calls = h.http.calls("/v3/set-initial-margin-rate");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].data["initialMarginRate"], "0.20000");
+    done(&h);
+}
+#[test]
+fn bound_update_order() {
+    let h = fixture();
+    let order = h.drive(h.venue().fetch_orders(None)).unwrap().remove(0);
+    let opts =
+        serde_json::from_value(json!({"order":order,"update":{"price":102.129,"amount":0.3456}}))
+            .unwrap();
+    assert_eq!(
+        h.drive(h.venue().update_order(opts)).unwrap(),
+        ["9007199254740993"]
+    );
+    assert_eq!(h.http.calls("/v3/delete-order").len(), 1);
+    assert_eq!(h.http.calls("/v3/order")[0].data["price"], "102.13");
+    done(&h);
+}
+#[test]
+fn bound_cancel_orders() {
+    let h = fixture();
+    let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
+    h.drive(h.venue().cancel_orders(orders)).unwrap();
+    assert_eq!(h.http.calls("/v3/delete-order")[0].data["id"], "order-1");
+    done(&h);
+}
+// Independent named E2Es for each inherited rejection; controllers can mutate
+// each trait override separately and cannot satisfy these through zero tests.
+macro_rules! inherited_test {($name:ident, $method:ident $(, $arg:expr)*) => {#[test] fn $name() {let h=fixture(); assert_eq!(h.drive(h.venue().$method($($arg),*)).unwrap_err().message,"Not implemented"); assert!(h.http.requests.borrow().is_empty()); done(&h);}};}
+inherited_test!(bound_fetch_tickers, fetch_tickers);
+inherited_test!(
+    bound_fetch_symbol_max_leverage,
+    fetch_symbol_max_leverage,
+    "BTCUSDC".into()
+);
+inherited_test!(bound_change_position_mode, change_position_mode, true, None);
+inherited_test!(bound_change_margin_type, change_margin_type, true, None);
+inherited_test!(bound_schedule_cancel, schedule_cancel, None);
+inherited_test!(
+    bound_fetch_public_trades,
+    fetch_public_trades,
+    "BTCUSDC".into(),
+    None
+);
