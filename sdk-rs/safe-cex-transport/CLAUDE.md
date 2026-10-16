@@ -150,3 +150,9 @@ queues events from connection and offers exactly `http/1.1` ALPN, which tradetun
 requires (REST keeps the default). One TLS stack: rustls on the `ring` provider with
 native roots; do not add a dependency that pulls aws-lc. Run inside a tokio
 `LocalSet`. Proofs live in `safe-cex-registry/tests/native_host_*.rs`.
+
+The native terminal combines baseURL and relative URLs using Axios
+buildFullPath/combineURLs semantics: exactly one joining slash, empty relative
+path retains baseURL, absolute/protocol-relative URLs remain absolute. The
+native::url_tests regression was measured against actual installed Axios and
+prove-failed on the old concatenation; DXtrade's /dxsca-web base exposed it.
