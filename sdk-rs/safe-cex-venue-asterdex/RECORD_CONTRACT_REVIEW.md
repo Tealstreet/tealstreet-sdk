@@ -60,12 +60,12 @@ complete valid positional array. Exact-byte restoration passed all twenty again.
 All 707 maintained-source shape observations passed before every native run.
 The per-run JSON receipts preserve every owner's individual failures.
 
-After integrating master `77fa5af694`, all 46 master contracts remain unchanged
-beside these twenty additions (66 total). The final source/native refresh passed
+After integrating master `4b7d081d69`, all 57 master contracts remain unchanged
+beside these twenty additions (77 total). The final source/native refresh passed
 20 owners / 707 observations, twenty runtime receipts and zero classifications
 or failures. Frozen install, script syntax and whitespace checks passed;
 `parity:check` passed 7,459 rows and 17,214 public Rust items with zero findings.
-Enum PR #366 remains separate pending integration.
+Enum PR #366 is merged and its eleven rows are preserved.
 
 The scope remains twenty native/default owners under the canonical
 [string boundary](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),
