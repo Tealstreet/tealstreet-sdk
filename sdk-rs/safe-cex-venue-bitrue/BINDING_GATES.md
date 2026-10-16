@@ -20,7 +20,8 @@ parsing from private big-integer string rewriting. Disposal closes both sockets.
 
 The binding retains existing declared typed helper/JSON domain choices; it does
 not widen them to arbitrary source objects. The HOW transport adapter is still
-an explicit constructor refusal. Shared worker RPC comes from #173, with no
+an explicit constructor refusal, tracked by overseer queue ddi2il-12 (shared
+proxy/tunnel routing) for removal once the shared adapter becomes available. Shared worker RPC comes from #173, with no
 venue-local duplicate. See the manifest class/constructor notes for these
 adapter choices and the existing helper-level divergences.
 
