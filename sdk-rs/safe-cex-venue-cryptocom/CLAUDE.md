@@ -328,6 +328,12 @@ This is fourteen original census owners and six specific Clone reviews; other
 owners, aliases, construction entries, locals, features and WASM execution remain
 separate obligations.
 
+The nested wire accepted-contract slice covers seven remaining concrete wire
+records and two private presence decoders. See NESTED_WIRE_CONTRACT_REVIEW.md and
+scripts/nested-wire-contracts.mjs for scope, native observations, exact selected
+construction reviews and compiling mutation controls. Other owners, aliases,
+locals, features and WASM contract execution remain separate obligations.
+
 Eight runtime helpers have individual accepted-set role reviews accompanied by
 direct private-function witnesses and compiling corruption controls. See
 RUNTIME_HELPER_CONTRACT_REVIEW.md and scripts/runtime-helper-contracts.mjs. These

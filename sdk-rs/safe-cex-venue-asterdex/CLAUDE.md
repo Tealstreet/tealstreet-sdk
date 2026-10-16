@@ -47,6 +47,10 @@ primitive accuracy. Native runtime tests assert values, original handles and
 ordered effects before wire observations. Source mutation controls and compiled
 native mutations must fail named assertions before a passing gate is evidence.
 
+`scripts/accepted-helper-contracts.mjs` runs the selected eighteen-function
+accepted-contract batch against actual TS and production Rust. Its compiled
+controls and remaining scope are recorded in ACCEPTED_CONTRACT_REVIEW.md.
+
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
 AccountFetch/OrderExecution and public/private stream bodies; it never evaluates

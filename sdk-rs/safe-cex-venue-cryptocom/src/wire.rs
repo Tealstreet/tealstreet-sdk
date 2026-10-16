@@ -1894,3 +1894,178 @@ impl Serialize for CryptocomOrder {
         output.end()
     }
 }
+
+#[cfg(test)]
+mod accepted_present_helpers {
+    use serde_json::Value;
+    #[test]
+    fn present_string_native_contract() {
+        let cases:Vec<Value>=serde_json::from_str(r###"[{"input":"\"\"","output":{"ok":true,"present":true,"value":"","units":[]}},{"input":"\"client-A\"","output":{"ok":true,"present":true,"value":"client-A","units":[99,108,105,101,110,116,45,65]}},{"input":"\" \\tclient B\\n\"","output":{"ok":true,"present":true,"value":" \tclient B\n","units":[32,9,99,108,105,101,110,116,32,66,10]}},{"input":"\"\\u03a9\\ud83d\\ude80\"","output":{"ok":true,"present":true,"value":"\u03a9\ud83d\ude80","units":[937,55357,56960]}},{"input":"null","output":{"ok":false}},{"input":"true","output":{"ok":false}},{"input":"0","output":{"ok":false}},{"input":"[]","output":{"ok":false}},{"input":"{}","output":{"ok":false}},{"input":"[\"s\"]","output":{"ok":false}},{"input":"{\"s\":\"x\"}","output":{"ok":false}}]"###).unwrap();
+        for case in cases {
+            let value = &case["input"];
+            let observed = {
+                let raw = value.as_str().unwrap();
+                let mut d = serde_json::Deserializer::from_str(raw);
+                match super::deserialize_present_string(&mut d) {
+                    Ok(Some(value)) => {
+                        serde_json::json!({"ok":true,"present":true,"units":value.encode_utf16().collect::<Vec<_>>(),"value":value})
+                    }
+                    Ok(None) => {
+                        serde_json::json!({"ok":true,"present":false,"units":[],"value":null})
+                    }
+                    Err(_) => serde_json::json!({"ok":false}),
+                }
+            };
+            assert_eq!(
+                observed, case["output"],
+                "native present helper string input {value}"
+            );
+        }
+    }
+    #[test]
+    fn present_generic_native_contract() {
+        let cases:Vec<Value>=serde_json::from_str(r###"[{"input":{"kind":"string","raw":"\"\""},"output":{"ok":true,"present":true,"value":"","kind":"string"}},{"input":{"kind":"string","raw":"\"order-A\""},"output":{"ok":true,"present":true,"value":"order-A","kind":"string"}},{"input":{"kind":"string","raw":"\"\\u03a9\\ud83d\\ude80\""},"output":{"ok":true,"present":true,"value":"\u03a9\ud83d\ude80","kind":"string"}},{"input":{"kind":"string","raw":"null"},"output":{"ok":false}},{"input":{"kind":"string","raw":"[]"},"output":{"ok":false}},{"input":{"kind":"string","raw":"true"},"output":{"ok":false}},{"input":{"kind":"number","raw":"-0.0"},"output":{"ok":true,"present":true,"value":{"bits":"8000000000000000"},"kind":"number"}},{"input":{"kind":"number","raw":"17.5"},"output":{"ok":true,"present":true,"value":{"bits":"4031800000000000"},"kind":"number"}},{"input":{"kind":"number","raw":"null"},"output":{"ok":false}},{"input":{"kind":"number","raw":"\"17.5\""},"output":{"ok":false}},{"input":{"kind":"number","raw":"[]"},"output":{"ok":false}},{"input":{"kind":"boolean","raw":"true"},"output":{"ok":true,"present":true,"value":true,"kind":"boolean"}},{"input":{"kind":"boolean","raw":"false"},"output":{"ok":true,"present":true,"value":false,"kind":"boolean"}},{"input":{"kind":"boolean","raw":"null"},"output":{"ok":false}},{"input":{"kind":"boolean","raw":"0"},"output":{"ok":false}},{"input":{"kind":"boolean","raw":"\"false\""},"output":{"ok":false}},{"input":{"kind":"strings","raw":"[]"},"output":{"ok":true,"present":true,"value":{"len":0,"items":[]},"kind":"strings"}},{"input":{"kind":"strings","raw":"[\"exec-A\"]"},"output":{"ok":true,"present":true,"value":{"len":1,"items":["exec-A"]},"kind":"strings"}},{"input":{"kind":"strings","raw":"[\"exec-A\", \"exec-B\"]"},"output":{"ok":true,"present":true,"value":{"len":2,"items":["exec-A","exec-B"]},"kind":"strings"}},{"input":{"kind":"strings","raw":"null"},"output":{"ok":false}},{"input":{"kind":"strings","raw":"\"exec-A\""},"output":{"ok":false}},{"input":{"kind":"strings","raw":"[\"exec-A\",0]"},"output":{"ok":false}},{"input":{"kind":"reference","raw":"\"MARK_PRICE\""},"output":{"ok":true,"present":true,"value":{"variant":"Mark","ordinal":0},"kind":"reference"}},{"input":{"kind":"reference","raw":"\"INDEX_PRICE\""},"output":{"ok":true,"present":true,"value":{"variant":"Index","ordinal":1},"kind":"reference"}},{"input":{"kind":"reference","raw":"\"LAST_PRICE\""},"output":{"ok":true,"present":true,"value":{"variant":"Last","ordinal":2},"kind":"reference"}},{"input":{"kind":"reference","raw":"null"},"output":{"ok":false}},{"input":{"kind":"reference","raw":"{\"MARK_PRICE\":null}"},"output":{"ok":false}},{"input":{"kind":"reference","raw":"\"unknown\""},"output":{"ok":false}},{"input":{"kind":"status","raw":"\"ACTIVE\""},"output":{"ok":true,"present":true,"value":{"variant":"Active","ordinal":0},"kind":"status"}},{"input":{"kind":"status","raw":"\"FILLED\""},"output":{"ok":true,"present":true,"value":{"variant":"Filled","ordinal":1},"kind":"status"}},{"input":{"kind":"status","raw":"\"CANCELED\""},"output":{"ok":true,"present":true,"value":{"variant":"Canceled","ordinal":2},"kind":"status"}},{"input":{"kind":"status","raw":"\"EXPIRED\""},"output":{"ok":true,"present":true,"value":{"variant":"Expired","ordinal":3},"kind":"status"}},{"input":{"kind":"status","raw":"\"PENDING\""},"output":{"ok":true,"present":true,"value":{"variant":"Pending","ordinal":4},"kind":"status"}},{"input":{"kind":"status","raw":"\"REJECTED\""},"output":{"ok":true,"present":true,"value":{"variant":"Rejected","ordinal":5},"kind":"status"}},{"input":{"kind":"status","raw":"null"},"output":{"ok":false}},{"input":{"kind":"status","raw":"{\"ACTIVE\":null}"},"output":{"ok":false}},{"input":{"kind":"status","raw":"\"unknown\""},"output":{"ok":false}},{"input":{"kind":"optional-string","raw":"null"},"output":{"ok":true,"present":true,"value":null,"kind":"optional-string"}},{"input":{"kind":"optional-string","raw":"\"inner\""},"output":{"ok":true,"present":true,"value":"inner","kind":"optional-string"}}]"###).unwrap();
+        for case in cases {
+            let value = &case["input"];
+            let observed = {
+                let kind = value["kind"].as_str().unwrap();
+                let raw = value["raw"].as_str().unwrap();
+                let mut d = serde_json::Deserializer::from_str(raw);
+                match kind {
+                    "string" => {
+                        let result = super::deserialize_present::<_, String>(&mut d);
+                        match result {
+                            Ok(Some(value)) => {
+                                let native = serde_json::json!(value);
+                                serde_json::json!({"ok":true,"present":true,"kind":kind,"value":native})
+                            }
+                            Ok(None) => {
+                                serde_json::json!({"ok":true,"present":false,"kind":kind,"value":null})
+                            }
+                            Err(_) => serde_json::json!({"ok":false}),
+                        }
+                    }
+                    "number" => {
+                        let result = super::deserialize_present::<_, f64>(&mut d);
+                        match result {
+                            Ok(Some(value)) => {
+                                let native =
+                                    serde_json::json!({"bits":format!("{:016x}",value.to_bits())});
+                                serde_json::json!({"ok":true,"present":true,"kind":kind,"value":native})
+                            }
+                            Ok(None) => {
+                                serde_json::json!({"ok":true,"present":false,"kind":kind,"value":null})
+                            }
+                            Err(_) => serde_json::json!({"ok":false}),
+                        }
+                    }
+                    "boolean" => {
+                        let result = super::deserialize_present::<_, bool>(&mut d);
+                        match result {
+                            Ok(Some(value)) => {
+                                let native = serde_json::json!(value);
+                                serde_json::json!({"ok":true,"present":true,"kind":kind,"value":native})
+                            }
+                            Ok(None) => {
+                                serde_json::json!({"ok":true,"present":false,"kind":kind,"value":null})
+                            }
+                            Err(_) => serde_json::json!({"ok":false}),
+                        }
+                    }
+                    "strings" => {
+                        let result = super::deserialize_present::<_, Vec<String>>(&mut d);
+                        match result {
+                            Ok(Some(value)) => {
+                                let native = serde_json::json!({"len":value.len(),"items":value});
+                                serde_json::json!({"ok":true,"present":true,"kind":kind,"value":native})
+                            }
+                            Ok(None) => {
+                                serde_json::json!({"ok":true,"present":false,"kind":kind,"value":null})
+                            }
+                            Err(_) => serde_json::json!({"ok":false}),
+                        }
+                    }
+                    "reference" => {
+                        let result = super::deserialize_present::<
+                            _,
+                            crate::wire::CryptocomRefPriceType,
+                        >(&mut d);
+                        match result {
+                            Ok(Some(value)) => {
+                                let native = match value {
+                                    crate::wire::CryptocomRefPriceType::Mark => {
+                                        serde_json::json!({"variant":"Mark","ordinal":0u32})
+                                    }
+                                    crate::wire::CryptocomRefPriceType::Index => {
+                                        serde_json::json!({"variant":"Index","ordinal":1u32})
+                                    }
+                                    crate::wire::CryptocomRefPriceType::Last => {
+                                        serde_json::json!({"variant":"Last","ordinal":2u32})
+                                    }
+                                };
+                                serde_json::json!({"ok":true,"present":true,"kind":kind,"value":native})
+                            }
+                            Ok(None) => {
+                                serde_json::json!({"ok":true,"present":false,"kind":kind,"value":null})
+                            }
+                            Err(_) => serde_json::json!({"ok":false}),
+                        }
+                    }
+                    "status" => {
+                        let result = super::deserialize_present::<
+                            _,
+                            crate::wire::CryptocomOrderStatus,
+                        >(&mut d);
+                        match result {
+                            Ok(Some(value)) => {
+                                let native = match value {
+                                    crate::wire::CryptocomOrderStatus::Active => {
+                                        serde_json::json!({"variant":"Active","ordinal":0u32})
+                                    }
+                                    crate::wire::CryptocomOrderStatus::Filled => {
+                                        serde_json::json!({"variant":"Filled","ordinal":1u32})
+                                    }
+                                    crate::wire::CryptocomOrderStatus::Canceled => {
+                                        serde_json::json!({"variant":"Canceled","ordinal":2u32})
+                                    }
+                                    crate::wire::CryptocomOrderStatus::Expired => {
+                                        serde_json::json!({"variant":"Expired","ordinal":3u32})
+                                    }
+                                    crate::wire::CryptocomOrderStatus::Pending => {
+                                        serde_json::json!({"variant":"Pending","ordinal":4u32})
+                                    }
+                                    crate::wire::CryptocomOrderStatus::Rejected => {
+                                        serde_json::json!({"variant":"Rejected","ordinal":5u32})
+                                    }
+                                };
+                                serde_json::json!({"ok":true,"present":true,"kind":kind,"value":native})
+                            }
+                            Ok(None) => {
+                                serde_json::json!({"ok":true,"present":false,"kind":kind,"value":null})
+                            }
+                            Err(_) => serde_json::json!({"ok":false}),
+                        }
+                    }
+                    "optional-string" => {
+                        let result = super::deserialize_present::<_, Option<String>>(&mut d);
+                        match result {
+                            Ok(Some(value)) => {
+                                let native = serde_json::json!(value);
+                                serde_json::json!({"ok":true,"present":true,"kind":kind,"value":native})
+                            }
+                            Ok(None) => {
+                                serde_json::json!({"ok":true,"present":false,"kind":kind,"value":null})
+                            }
+                            Err(_) => serde_json::json!({"ok":false}),
+                        }
+                    }
+                    _ => panic!("unclassified native fixture instantiation"),
+                }
+            };
+            assert_eq!(
+                observed, case["output"],
+                "native present helper generic input {value}"
+            );
+        }
+    }
+}

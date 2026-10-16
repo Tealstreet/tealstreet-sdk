@@ -1,0 +1,1827 @@
+{
+  "safe_cex_venue_asterdex::helpers::is_aster_dex_stp_mode": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_aster_dex_stp_mode",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value))",
+    "cases": [
+      {
+        "input": "EXPIRE_TAKER",
+        "output": true
+      },
+      {
+        "input": "EXPIRE_MAKER",
+        "output": true
+      },
+      {
+        "input": "EXPIRE_BOTH",
+        "output": true
+      },
+      {
+        "input": "expire_taker",
+        "output": false
+      },
+      {
+        "input": {
+          "EXPIRE_TAKER": null
+        },
+        "output": false
+      },
+      {
+        "input": null,
+        "output": false
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:30-31 exact string membership, including non-string rejection. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::helpers::trim_non_empty": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "trim_non_empty",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.as_str()))",
+    "cases": [
+      {
+        "input": "﻿  wallet ",
+        "output": "wallet"
+      },
+      {
+        "input": " \t\n",
+        "output": null
+      },
+      {
+        "input": "",
+        "output": null
+      },
+      {
+        "input": null,
+        "output": null
+      },
+      {
+        "input": "a b",
+        "output": "a b"
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:39-44 trim then absent-empty semantics within the canonical Rust UTF-8 boundary. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::helpers::is_aster_dex_v3_private_key": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_aster_dex_v3_private_key",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.as_str()))",
+    "cases": [
+      {
+        "input": "aBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaB",
+        "output": true
+      },
+      {
+        "input": "0xF0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0",
+        "output": true
+      },
+      {
+        "input": "0Xf0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+        "output": false
+      },
+      {
+        "input": "0x000000000000000000000000000000000000000000000000000000000000000",
+        "output": false
+      },
+      {
+        "input": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+        "output": false
+      },
+      {
+        "input": null,
+        "output": false
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:46-50 optional lowercase 0x prefix and exactly 64 ASCII hex digits. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::helpers::is_aster_dex_address": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_aster_dex_address",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.as_str()))",
+    "cases": [
+      {
+        "input": "0xaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaB",
+        "output": true
+      },
+      {
+        "input": "aBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaB",
+        "output": false
+      },
+      {
+        "input": "0Xabababababababababababababababababababab",
+        "output": false
+      },
+      {
+        "input": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "output": false
+      },
+      {
+        "input": "0xzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "output": false
+      },
+      {
+        "input": null,
+        "output": false
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:47,52-54 required lowercase 0x prefix and exactly 40 ASCII hex digits. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::helpers::is_aster_dex_main_wallet_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_aster_dex_main_wallet_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value))",
+    "cases": [
+      {
+        "input": "Aster API Wallet/vault keys require the Main Wallet Address. Details",
+        "output": true
+      },
+      {
+        "input": "AUTH.USERADDRESS is required",
+        "output": true
+      },
+      {
+        "input": "V3 KEYS REQUIRE field",
+        "output": true
+      },
+      {
+        "input": "ordinary error",
+        "output": false
+      },
+      {
+        "input": "",
+        "output": false
+      },
+      {
+        "input": {
+          "message": "auth.userAddress"
+        },
+        "output": false
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:58-77 canonical and both legacy marker substrings, case folded only for strings. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::helpers::resolve_aster_dex_v3_auth_context": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "resolve_aster_dex_v3_auth_context",
+      "signature": {
+        "inputs": [
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::types::AsterDEXV3AuthContext",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let options: safe_cex_types::ExchangeOptions=serde_json::from_value($value.clone()).unwrap();let auth=$type(&options); serde_json::json!({\"user\":auth.user_address,\"signer\":auth.signer_address,\"private\":auth.signer_private_key})}",
+    "cases": [
+      {
+        "input": {
+          "key": " fallback-key ",
+          "secret": " fallback-secret ",
+          "applicationId": " fallback-user ",
+          "auth": {
+            "userAddress": " direct-user ",
+            "signerAddress": " direct-signer ",
+            "privateKey": " direct-private "
+          }
+        },
+        "output": {
+          "user": "direct-user",
+          "signer": "direct-signer",
+          "private": "direct-private"
+        }
+      },
+      {
+        "input": {
+          "key": " fallback-key ",
+          "secret": " fallback-secret ",
+          "applicationId": " fallback-user ",
+          "auth": {
+            "userAddress": " ",
+            "signerAddress": "\t",
+            "privateKey": ""
+          }
+        },
+        "output": {
+          "user": "fallback-user",
+          "signer": "fallback-key",
+          "private": "fallback-secret"
+        }
+      },
+      {
+        "input": {
+          "key": "",
+          "secret": ""
+        },
+        "output": {
+          "user": null,
+          "signer": null,
+          "private": null
+        }
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:79-86 each auth field independently takes precedence over the account fallback; whitespace-only overrides fall back. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::helpers::resolve_aster_dex_api_version": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "resolve_aster_dex_api_version",
+      "signature": {
+        "inputs": [
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_asterdex::types::AsterDEXAPIVersion",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let options: safe_cex_types::ExchangeOptions=serde_json::from_value($value.clone()).unwrap();serde_json::json!(match $type(&options){crate::types::AsterDEXAPIVersion::V1=>\"v1\",crate::types::AsterDEXAPIVersion::V3=>\"v3\"})}",
+    "cases": [
+      {
+        "input": {
+          "key": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "secret": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "applicationId": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "output": "v3"
+      },
+      {
+        "input": {
+          "key": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "secret": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "applicationId": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "extra": {
+            "asterdexApiVersion": "v1"
+          }
+        },
+        "output": "v1"
+      },
+      {
+        "input": {
+          "key": "",
+          "secret": "",
+          "extra": {
+            "asterdexApiVersion": "v3"
+          }
+        },
+        "output": "v3"
+      },
+      {
+        "input": {
+          "key": "",
+          "secret": ""
+        },
+        "output": "v1"
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:97-108 explicit version overrides inferred credentials; native enum identity is observed directly. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::helpers::get_aster_dex_fapi_path": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_aster_dex_fapi_path",
+      "signature": {
+        "inputs": [
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "version",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_asterdex::types::AsterDEXFapiVersion",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let version=match $value[\"version\"].as_str().unwrap(){\"v1\"=>crate::types::AsterDEXFapiVersion::V1,\"v3\"=>crate::types::AsterDEXFapiVersion::V3,\"v4\"=>crate::types::AsterDEXFapiVersion::V4,_=>panic!(\"fixture\")};serde_json::json!($type($value[\"endpoint\"].as_str().unwrap(),&version))}",
+    "cases": [
+      {
+        "input": {
+          "version": "v1",
+          "endpoint": "///order"
+        },
+        "output": "/fapi/v1/order"
+      },
+      {
+        "input": {
+          "version": "v3",
+          "endpoint": ""
+        },
+        "output": "/fapi/v3/"
+      },
+      {
+        "input": {
+          "version": "v4",
+          "endpoint": " /order"
+        },
+        "output": "/fapi/v4/ /order"
+      },
+      {
+        "input": {
+          "version": "v3",
+          "endpoint": "a/b"
+        },
+        "output": "/fapi/v3/a/b"
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:110-113 removes leading slashes only and retains each version identity. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::strip_query_string": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "strip_query_string",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": null,
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.as_str().unwrap()))",
+    "cases": [
+      {
+        "input": "/fapi/v3/order?a?b",
+        "output": "/fapi/v3/order"
+      },
+      {
+        "input": "?x",
+        "output": ""
+      },
+      {
+        "input": "plain",
+        "output": "plain"
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts reviewed takes text before the first question mark. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::is_public_endpoint": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_public_endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.as_str()))",
+    "cases": [
+      {
+        "input": null,
+        "output": false
+      },
+      {
+        "input": "",
+        "output": false
+      },
+      {
+        "input": "/fapi/v3/ticker/price?x",
+        "output": true
+      },
+      {
+        "input": "https://host/prefix/fapi/v1/depth",
+        "output": true
+      },
+      {
+        "input": "/private?next=/fapi/v3/time",
+        "output": false
+      },
+      {
+        "input": "/FAPI/v3/time",
+        "output": false
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts reviewed matches public path fragments after removing query text. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::build_query_string": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "build_query_string",
+      "signature": {
+        "inputs": [
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{match $type($value.as_object().unwrap()){Ok(s)=>serde_json::json!({\"text\":s}),Err(e)=>serde_json::json!({\"error\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "b": false,
+          "a": "a b&c",
+          "n": null,
+          "empty": "",
+          "z": 0,
+          "list": [
+            1,
+            null,
+            3
+          ]
+        },
+        "output": {
+          "text": "b=false&a=a b&c&z=0&list=1,,3"
+        }
+      },
+      {
+        "input": {
+          "9": "nine",
+          "2": "two",
+          "x": true
+        },
+        "output": {
+          "text": "2=two&9=nine&x=true"
+        }
+      },
+      {
+        "input": {
+          "x": {
+            "toString": 1
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts Object.entries order, null/empty filtering, String coercion and absence of URL encoding are preserved. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::build_aster_dex_code_query_string": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "build_aster_dex_code_query_string",
+      "signature": {
+        "inputs": [
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{match $type($value.as_object().unwrap()){Ok(s)=>serde_json::json!({\"text\":s}),Err(e)=>serde_json::json!({\"error\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "b": false,
+          "a": "a b&c",
+          "n": null,
+          "empty": "",
+          "z": 0,
+          "list": [
+            1,
+            null,
+            3
+          ]
+        },
+        "output": {
+          "text": "b=false&a=a b&c&z=0&list=1,,3"
+        }
+      },
+      {
+        "input": {
+          "9": "nine",
+          "2": "two",
+          "x": true
+        },
+        "output": {
+          "text": "2=two&9=nine&x=true"
+        }
+      },
+      {
+        "input": {
+          "x": {
+            "toString": 1
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts Object.entries order, null/empty filtering, String coercion and absence of URL encoding are preserved. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::without_signing_fields": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "without_signing_fields",
+      "signature": {
+        "inputs": [
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::map::Map",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let entries=$type($value);serde_json::json!({\"keys\":entries.keys().collect::<Vec<_>>(),\"entries\":entries})}",
+    "cases": [
+      {
+        "input": {
+          "symbol": "BTC",
+          "signature": "s",
+          "timestamp": 1,
+          "recvWindow": 2,
+          "user": "u",
+          "signer": "s",
+          "nonce": 3,
+          "Signature": "keep"
+        },
+        "output": {
+          "keys": [
+            "symbol",
+            "Signature"
+          ],
+          "entries": {
+            "symbol": "BTC",
+            "Signature": "keep"
+          }
+        }
+      },
+      {
+        "input": [
+          7,
+          "row"
+        ],
+        "output": {
+          "keys": [
+            "0",
+            "1"
+          ],
+          "entries": {
+            "0": 7,
+            "1": "row"
+          }
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "keys": [],
+          "entries": {}
+        }
+      },
+      {
+        "input": "abc",
+        "output": {
+          "keys": [],
+          "entries": {}
+        }
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts:254-257 object/array own entries with the exact six signing keys removed. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::build_v3_signing_payload": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "build_v3_signing_payload",
+      "signature": {
+        "inputs": [
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::map::Map",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{match $type($value.as_object().unwrap()){Ok(v)=>serde_json::json!({\"keys\":v.keys().collect::<Vec<_>>(),\"payload\":v}),Err(e)=>serde_json::json!({\"error\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "b": false,
+          "a": 3,
+          "nil": null,
+          "empty": "",
+          "__proto__": "ignored",
+          "z": [
+            1,
+            null
+          ]
+        },
+        "output": {
+          "keys": [
+            "a",
+            "b",
+            "z"
+          ],
+          "payload": {
+            "a": "3",
+            "b": "false",
+            "z": "1,"
+          }
+        }
+      },
+      {
+        "input": {
+          "a": {
+            "toString": true
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "keys": [],
+          "payload": {}
+        }
+      },
+      {
+        "input": {
+          "": "bmp",
+          "😀": "astral",
+          "a": false,
+          "10": "ten",
+          "2": "two"
+        },
+        "output": {
+          "keys": [
+            "2",
+            "10",
+            "a",
+            "😀",
+            ""
+          ],
+          "payload": {
+            "2": "two",
+            "10": "ten",
+            "a": "false",
+            "😀": "astral",
+            "": "bmp"
+          }
+        }
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts:buildV3SigningPayload sorts keys by UTF-16, stringifies values, filters null/empty and preserves the source prototype-assignment behavior. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::is_aster_dex_code_signed_endpoint": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_aster_dex_code_signed_endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.get(\"url\").and_then(serde_json::Value::as_str),$value.get(\"method\").and_then(serde_json::Value::as_str)))",
+    "cases": [
+      {
+        "input": {
+          "url": "/fapi/v3/order?x=1",
+          "method": "POST"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "url": "/fapi/v3/order"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "url": "/fapi/v3/builder"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "url": "/fapi/v3/agent",
+          "method": ""
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "url": "/fapi/v3/agent",
+          "method": "post"
+        },
+        "output": false
+      },
+      {
+        "input": {},
+        "output": false
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts:170-178 method default/case normalization and exact path suffix pairing. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::should_suppress_unknown_order_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "should_suppress_unknown_order_error",
+      "signature": {
+        "inputs": [
+          [
+            "config",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "code",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{match $type($value.get(\"config\"),$value.get(\"code\"),$value.get(\"message\")){Ok(v)=>serde_json::json!({\"ok\":v}),Err(e)=>serde_json::json!({\"error\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "config": {
+            "__suppressAsterUnknownOrderError": true
+          },
+          "code": -2011,
+          "message": "Unknown ORDER sent"
+        },
+        "output": {
+          "ok": true
+        }
+      },
+      {
+        "input": {
+          "config": {
+            "__suppressAsterUnknownOrderError": false
+          },
+          "code": -2011,
+          "message": "Unknown order"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "config": {
+            "__suppressAsterUnknownOrderError": 1
+          },
+          "code": "-2011",
+          "message": {
+            "toString": 1
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "config": {
+            "__suppressAsterUnknownOrderError": true
+          },
+          "code": -1,
+          "message": "unknown order"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts:180-187 short-circuited flag/code/message checks and fallible String coercion. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::api_helpers::get_aster_dex_error_detail": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_aster_dex_error_detail",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "code",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{match $type($value.get(\"message\"),$value.get(\"code\")){Ok(v)=>serde_json::json!({\"text\":v}),Err(e)=>serde_json::json!({\"error\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "message": "",
+          "code": 1
+        },
+        "output": {
+          "text": ""
+        }
+      },
+      {
+        "input": {
+          "message": false
+        },
+        "output": {
+          "text": "Unknown error"
+        }
+      },
+      {
+        "input": {
+          "message": "ordinary",
+          "code": -5025
+        },
+        "output": {
+          "text": "Aster builder attribution is not synced for this API key. Open your Aster API key settings, sync or enable the Tealstreet builder authorization, then reconnect the account and try again."
+        }
+      },
+      {
+        "input": {
+          "message": "CANNOT FOUND BUILDER CONFIG"
+        },
+        "output": {
+          "text": "Aster builder attribution is not synced for this API key. Open your Aster API key settings, sync or enable the Tealstreet builder authorization, then reconnect the account and try again."
+        }
+      },
+      {
+        "input": {
+          "message": {
+            "toString": 0
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts:189-202 preserves string-empty versus falsy-nonstring fallback and both builder rewrite triggers. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  },
+  "safe_cex_venue_asterdex::clock_helpers::parse_server_time": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_server_time",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.get(\"value\")).map(|n|format!(\"{:016x}\",n.to_bits())))",
+    "cases": [
+      {
+        "input": {
+          "value": " 1.25 "
+        },
+        "output": "3ff4000000000000"
+      },
+      {
+        "input": {
+          "value": "0x10"
+        },
+        "output": "4030000000000000"
+      },
+      {
+        "input": {
+          "value": "0"
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": "-0"
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": ""
+        },
+        "output": null
+      },
+      {
+        "input": {},
+        "output": null
+      },
+      {
+        "input": {
+          "value": "Infinity"
+        },
+        "output": null
+      }
+    ],
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.virtualClock.ts:parseServerTime only admits positive finite Number/string values; actual binary64 is observed before serialization. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+  }
+}

@@ -1,8 +1,12 @@
-//! Construct the production host and call the typed Exchange surface through its
-//! shared JavaScript functions/promises, with HTTP as the sole scripted leaf.
+// Construct the production host and call the typed Exchange surface through its
+// shared JavaScript functions/promises, with HTTP as the sole scripted leaf.
 #[allow(dead_code)]
-#[path = "../../safe-cex-webworker/tests/support/runtime.rs"]
-mod clock;
+mod clock {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-webworker/tests/support/runtime.rs"
+    ));
+}
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::{
@@ -16,10 +20,11 @@ use safe_cex_exchange::{
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::*;
+#[cfg(test)]
+use safe_cex_venue_breakoutprop::native_reads::NativeRuntimeHost;
 use safe_cex_venue_breakoutprop::{
     host::{BreakoutDependencies, ProductionHost},
     lifecycle::BreakoutpropExchange,
-    native_reads::NativeRuntimeHost,
 };
 use serde_json::{Value, json};
 use std::{
@@ -494,4 +499,248 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
         assert_eq!(calls.get(), 1, "deferred callback runs exactly once");
         f.exchange.dispose().unwrap();
     }
+}
+
+#[test]
+fn cloned_production_host_retains_its_live_account_attachment() {
+    let f = fixture();
+    let cloned = Rc::new(f.host.as_ref().clone());
+    let result = BreakoutpropExchange::new(
+        cloned,
+        ExchangeName::Breakoutprop,
+        serde_json::from_value(json!({"key":"another-user","secret":"another-secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("cloning the host must not detach its live-account guard"),
+    };
+    assert_eq!(
+        error.message,
+        "Breakout Prop host already belongs to another account"
+    );
+    assert!(f.wire.requests.borrow().is_empty());
+    f.run(f.exchange.validate_account()).unwrap();
+    let login = f.request("POST", "/login");
+    assert_eq!(login["data"]["username"], "k");
+    assert_eq!(login["data"]["password"], "s");
+}
+
+// Finite production-method observations for the five compiler-indexed inherited
+// refusals. These helpers are also included by accepted-set native adapters.
+fn refusal_fixture(input: &Value) -> Fixture {
+    let f = fixture();
+    if input["seeded"].as_bool().unwrap() {
+        *f.exchange.session_token.borrow_mut() = Some("cached-refusal-token".into());
+        f.exchange.session_token_expires_at.set(9_876.25);
+        *f.exchange.account_code.borrow_mut() = Some("cached-refusal-account".into());
+        f.exchange
+            .recent_ws_requests
+            .borrow_mut()
+            .push(("retained-poll-cache".into(), (42.25, vec![])));
+        Store::update(
+            f.store.as_ref(),
+            StoreUpdate {
+                balance: Some(Balance {
+                    used: 1.25,
+                    free: 3.5,
+                    total: 4.75,
+                    upnl: -0.0,
+                    info: Some(json!({"refusal":"retained-info"})),
+                    currencies: None,
+                    coins: None,
+                }),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+    }
+    f
+}
+fn same_refusal_handle<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+fn observe_refusal(f: &Fixture, invoke: impl FnOnce() -> ExchangeError) -> Value {
+    let notifications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = notifications.clone();
+    let unsubscribe = f.store.subscribe(Arc::new(move |_, _| {
+        observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }));
+    let emitted = Rc::new(Cell::new(0));
+    let received = emitted.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, _| {
+            received.set(received.get() + 1);
+            Ok(())
+        }),
+    );
+    let snapshot = || {
+        let balance = f.store.balance();
+        (
+            serde_json::to_value(f.store.serialize()).unwrap(),
+            [
+                balance.used.to_bits(),
+                balance.free.to_bits(),
+                balance.total.to_bits(),
+                balance.upnl.to_bits(),
+            ],
+            serde_json::to_value(f.exchange.base.options()).unwrap(),
+            f.exchange.session_token.borrow().clone(),
+            f.exchange.session_token_expires_at.get().to_bits(),
+            f.exchange.account_code.borrow().clone(),
+            f.exchange.recent_ws_requests.borrow().clone(),
+            f.exchange.base.is_disposed(),
+        )
+    };
+    let before = snapshot();
+    let now = f.runtime.now.get();
+    let tasks = f.runtime.tasks.borrow().len();
+    let reports = f.runtime.exceptions.borrow().len();
+    let pending = f.exchange.session_token_request.borrow().clone();
+    let limited = f.exchange.xhr.borrow().clone();
+    let unlimited = f.exchange.unlimited_xhr.borrow().clone();
+    let socket = f.exchange.public_websocket.borrow().clone();
+    let error = invoke();
+    let result = json!({
+        "error": error.message,
+        "error_name": error.name,
+        "metadata_default": *error.metadata == safe_cex_exchange::runtime::ExchangeErrorMetadata::default(),
+        "http": f.wire.requests.borrow().len(),
+        "state_unchanged": before == snapshot(),
+        "notifications": notifications.load(std::sync::atomic::Ordering::SeqCst),
+        "errors_emitted": emitted.get(),
+        "now_unchanged": now == f.runtime.now.get(),
+        "tasks_unchanged": tasks == f.runtime.tasks.borrow().len(),
+        "reports_unchanged": reports == f.runtime.exceptions.borrow().len(),
+        "login_handle_unchanged": same_refusal_handle(&pending, &f.exchange.session_token_request.borrow()),
+        "limited_client_unchanged": same_refusal_handle(&limited, &f.exchange.xhr.borrow()),
+        "unlimited_client_unchanged": same_refusal_handle(&unlimited, &f.exchange.unlimited_xhr.borrow()),
+        "socket_handle_unchanged": same_refusal_handle(&socket, &f.exchange.public_websocket.borrow()),
+    });
+    unsubscribe();
+    result
+}
+pub fn accepted_refusal_fetch_symbol_max_leverage(input: &Value) -> Value {
+    let f = refusal_fixture(input);
+    observe_refusal(&f, || {
+        f.run(
+            f.exchange
+                .fetch_symbol_max_leverage(input["symbol"].as_str().unwrap().into()),
+        )
+        .unwrap_err()
+    })
+}
+pub fn accepted_refusal_set_leverage(input: &Value) -> Value {
+    let f = refusal_fixture(input);
+    observe_refusal(&f, || {
+        f.run(f.exchange.set_leverage(
+            input["symbol"].as_str().unwrap().into(),
+            input["leverage"].as_f64().unwrap(),
+            None,
+        ))
+        .unwrap_err()
+    })
+}
+pub fn accepted_refusal_change_position_mode(input: &Value) -> Value {
+    let f = refusal_fixture(input);
+    observe_refusal(&f, || {
+        f.run(f.exchange.change_position_mode(
+            input["flag"].as_bool().unwrap(),
+            input["symbol"].as_str().map(str::to_owned),
+        ))
+        .unwrap_err()
+    })
+}
+pub fn accepted_refusal_change_margin_type(input: &Value) -> Value {
+    let f = refusal_fixture(input);
+    observe_refusal(&f, || {
+        f.run(f.exchange.change_margin_type(
+            input["flag"].as_bool().unwrap(),
+            input["symbol"].as_str().map(str::to_owned),
+        ))
+        .unwrap_err()
+    })
+}
+pub fn accepted_refusal_fetch_public_trades(input: &Value) -> Value {
+    let f = refusal_fixture(input);
+    observe_refusal(&f, || {
+        f.run(f.exchange.fetch_public_trades(
+            input["symbol"].as_str().unwrap().into(),
+            input["limit"].as_f64(),
+        ))
+        .unwrap_err()
+    })
+}
+fn expected_inherited_refusal() -> Value {
+    json!({"error":"Not implemented","error_name":"Error","metadata_default":true,"http":0,"state_unchanged":true,"notifications":0,"errors_emitted":0,"now_unchanged":true,"tasks_unchanged":true,"reports_unchanged":true,"login_handle_unchanged":true,"limited_client_unchanged":true,"unlimited_client_unchanged":true,"socket_handle_unchanged":true})
+}
+fn inherited_refusal_cases() -> [Value; 2] {
+    [
+        json!({"seeded":false,"symbol":"BTCUSD","flag":true,"leverage":2.25,"limit":7}),
+        json!({"seeded":true,"symbol":"雪/ETH","flag":false,"leverage":17.5,"limit":null}),
+    ]
+}
+#[test]
+fn inherited_max_leverage_retains_native_state_without_http() {
+    for input in inherited_refusal_cases() {
+        assert_eq!(
+            accepted_refusal_fetch_symbol_max_leverage(&input),
+            expected_inherited_refusal()
+        );
+    }
+}
+#[test]
+fn inherited_set_leverage_retains_native_state_without_http() {
+    for input in inherited_refusal_cases() {
+        assert_eq!(
+            accepted_refusal_set_leverage(&input),
+            expected_inherited_refusal()
+        );
+    }
+}
+#[test]
+fn inherited_position_mode_retains_native_state_without_http() {
+    for input in inherited_refusal_cases() {
+        assert_eq!(
+            accepted_refusal_change_position_mode(&input),
+            expected_inherited_refusal()
+        );
+    }
+}
+#[test]
+fn inherited_margin_type_retains_native_state_without_http() {
+    for input in inherited_refusal_cases() {
+        assert_eq!(
+            accepted_refusal_change_margin_type(&input),
+            expected_inherited_refusal()
+        );
+    }
+}
+#[test]
+fn inherited_public_trades_retains_native_state_without_http() {
+    for input in inherited_refusal_cases() {
+        assert_eq!(
+            accepted_refusal_fetch_public_trades(&input),
+            expected_inherited_refusal()
+        );
+    }
+}
+
+// The accepted-set expression names its exact compiler owner and invokes the
+// typed trait method on this observer's production receiver.
+pub fn accepted_typed_refusal(
+    input: &Value,
+    invoke: impl FnOnce(
+        Rc<BreakoutpropExchange>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ExchangeError>>>,
+) -> Value {
+    let f = refusal_fixture(input);
+    observe_refusal(&f, || f.run(invoke(f.exchange.clone())))
 }
