@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.ws-diagnostics.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/json_boundaries.rs" ]
 
 [[symbol]]
 ts = "parseJsonObject"

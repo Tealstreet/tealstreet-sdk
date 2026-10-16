@@ -56,6 +56,7 @@ pub fn map_order(
     let amount = parse_float(text("size")?);
     let remaining = parse_float(text("remaining_size")?);
     Ok(Order {
+        client_order_id: None,
         id: text("id")?.to_owned(),
         parent_id: None,
         symbol: text("market")?.to_owned(),

@@ -172,6 +172,7 @@ pub(crate) fn map_order(
         chaser_max_attempts: None,
     };
     let base = Order {
+        client_order_id: None,
         id: row
             .get("orderId")
             .and_then(Value::as_str)

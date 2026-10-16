@@ -485,7 +485,10 @@ impl Js {
                 items.borrow_mut().resize(len, None);
                 return Ok(());
             }
-            return Ok(());
+            return Err(Thrown::type_error(&format!(
+                "js_runtime arrays carry no named properties (setting '{}')",
+                String::from_utf16_lossy(key)
+            )));
         }
         let Some(props) = self.own_props() else {
             if self.is_nullish() {
@@ -495,7 +498,13 @@ impl Js {
                     String::from_utf16_lossy(key)
                 )));
             }
-            return Ok(());
+            // Strict-mode [[Set]] on a primitive throws; Map/Set/Promise expandos are unsupported.
+            return Err(Thrown::type_error(&format!(
+                "Cannot create property '{}' on {} '{}'",
+                String::from_utf16_lossy(key),
+                self.type_of(),
+                self.to_display()
+            )));
         };
         let existing = props.borrow().get(key).cloned();
         match existing {

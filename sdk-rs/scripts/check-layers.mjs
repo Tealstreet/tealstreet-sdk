@@ -90,6 +90,20 @@ export function validateLayers(policy, metadata) {
     assert.ok(!layerGrants.has(key), `duplicate layer grant: ${key}`);
     layerGrants.add(key);
   }
+  // Registry -> venue constructor edges are an explicit list, not implied by layering.
+  const constructors = policy.registryConstructors;
+  assert.ok(constructors && typeof constructors.from === 'string' && Array.isArray(constructors.venues), 'registryConstructors must be declared');
+  assert.ok(typeof constructors.reason === 'string' && constructors.reason.trim(), 'registryConstructors requires reason');
+  const venueLayer = policy.layers.findIndex(layer => layer.name === 'venues');
+  const listed = new Set(constructors.venues);
+  assert.equal(listed.size, constructors.venues.length, 'duplicate registry constructor venue');
+  for (const venue of listed) {
+    assert.equal(classes.get(venue)?.layer, venueLayer, `registry constructor target is not a venue: ${constructors.from} -> ${venue}`);
+    assert.ok(graph.get(constructors.from)?.includes(venue), `stale registry constructor: ${constructors.from} -> ${venue}`);
+  }
+  for (const to of graph.get(constructors.from) ?? []) {
+    if (classes.get(to)?.layer === venueLayer) assert.ok(listed.has(to), `unlisted registry constructor: ${constructors.from} -> ${to}`);
+  }
   const walk = (name, trail) => {
     for (const to of graph.get(name) ?? []) {
       const next = [...trail, to];

@@ -127,6 +127,7 @@ mod tests {
 
     fn order(id: &str, price: f64) -> Order {
         Order {
+            client_order_id: None,
             id: id.into(),
             parent_id: None,
             status: OrderStatus::Open,

@@ -108,6 +108,7 @@ pub fn map_limit_order(
     let order_type = text(or(row.get("type"), row.get("order_type")))?;
     let side = text(row.get("side"))?;
     Ok(Some(Order {
+        client_order_id: None,
         id: text(order_id)?,
         parent_id: None,
         status: if row.get("status").and_then(Value::as_str) == Some("CANCELLED") {
@@ -217,6 +218,7 @@ pub fn map_algo_order(
             let trigger_type = trigger_type?;
             let side = required(side_hit, "side")?;
             Ok(Order {
+                client_order_id: None,
                 id,
                 parent_id: Some(parent_id),
                 status: OrderStatus::Open,

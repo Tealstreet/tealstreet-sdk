@@ -24,6 +24,26 @@ pub fn sign_mexc_ws_login(secret: &str, api_key: &str, req_time: &str) -> Result
     sign_mexc_request(secret, api_key, req_time, "")
 }
 
+// ts: isMexcSignatureRejection
+pub fn is_mexc_signature_rejection(data: &serde_json::Value) -> Result<bool, JsCoercionError> {
+    let field = |key| data.as_object().and_then(|object| object.get(key));
+    if safe_cex_num::js_number(field("code"))? == 602.0 {
+        return Ok(true);
+    }
+    let detail = [field("message"), field("msg")]
+        .into_iter()
+        .flatten()
+        .find(|value| !value.is_null());
+    let text = match detail {
+        Some(value) => safe_cex_num::js_string(Some(value))?,
+        None => String::new(),
+    };
+    // A non-unicode /i regex never folds a non-ASCII unit onto an ASCII one.
+    Ok(text
+        .to_ascii_lowercase()
+        .contains("signature verification failed"))
+}
+
 pub fn is_mexc_public_endpoint(url: Option<&str>) -> bool {
     let Some(url) = url.filter(|s| !s.is_empty()) else {
         return false;
