@@ -94,6 +94,8 @@ impl From<&ExchangeOptions> for RoutingOptions {
             payload_signer: _,
             hosted_mode: _,
             external_public_data: _,
+            enable_option_markets: _,
+            enable_inverse_markets: _,
         } = options;
         Self {
             tealstreet_proxy: tealstreet_proxy.unwrap_or(false),

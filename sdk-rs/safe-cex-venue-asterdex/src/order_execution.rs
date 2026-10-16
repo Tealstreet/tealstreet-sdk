@@ -265,6 +265,7 @@ impl OrderExecution {
                         client_order_id: None,
                         close: None,
                         max_slippage_pct: None,
+                        implied_volatility: None,
                     };
                     orders.push(ExecutionOrder {
                         opts: AsterDEXPlaceOrderOpts {
@@ -398,6 +399,7 @@ impl OrderExecution {
                     client_order_id: None,
                     close: None,
                     max_slippage_pct: None,
+                    implied_volatility: None,
                 },
                 stp_mode: None,
             },

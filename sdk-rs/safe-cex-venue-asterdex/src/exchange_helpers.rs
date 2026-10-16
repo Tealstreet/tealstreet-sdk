@@ -474,6 +474,7 @@ pub fn transform_position(
         margin_size: None,
         extra: None,
         last_update: None,
+        option: None,
     })
 }
 
@@ -918,6 +919,7 @@ pub fn transform_market(
                 min: 1.0,
                 max: max_leverage,
             },
+            price: None,
         },
         info: Some(
             retained_info(
@@ -952,6 +954,7 @@ pub fn transform_market(
         is_read_only: None,
         taker_fee: None,
         maker_fee: None,
+        option: None,
     })
 }
 
