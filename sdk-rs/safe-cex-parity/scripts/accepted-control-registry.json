@@ -145,6 +145,9 @@
       "opaque history, dormant declarations, and recreated names cannot claim nominal birth",
       "sibling introductions cannot launder delayed debt but genuine new-owner merges pass"
     ],
+    "accepted-reviewed-aliases.test.mjs": [
+      "reviewed generic aliases return only their spec-owned fixed instantiation"
+    ],
     "accepted-scanner.test.mjs": [
       "scanner receipts bind the SDK package and actual fresh executable",
       "scanner receipt ambiguity missing files and foreign identities fail closed",
