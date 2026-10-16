@@ -176,3 +176,10 @@ buildFullPath/combineURLs semantics: exactly one joining slash, empty relative
 path retains baseURL, absolute/protocol-relative URLs remain absolute. The
 native::url_tests regression was measured against actual installed Axios and
 prove-failed on the old concatenation; DXtrade's /dxsca-web base exposed it.
+
+Concrete frame/routing/header object admission and the region string unions are
+reviewed in [ACCEPTED_SHAPES.md](ACCEPTED_SHAPES.md). The shared standalone frames
+use owner-specific `deserialize_map` visitors and private remote schemas; SDK
+records use the existing object guard. Keep generic borrowed request payloads,
+all original field/presence rules and the independently inventoried visitor
+contracts. The twelve compiling disconnect controls restore exact source bytes.
