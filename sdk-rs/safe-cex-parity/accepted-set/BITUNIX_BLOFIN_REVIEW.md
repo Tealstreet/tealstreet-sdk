@@ -89,3 +89,19 @@ classifications. On the original compiler inventory, 81 Bitunix owners and its
 retry function-pointer alias remain, alongside all 163 Blofin owners and its
 API-factory function-pointer alias. The existing Future specifications and every
 previous contract remain unchanged.
+
+## Historical result mappers
+
+The trade-to-income, closed-position and historical-order functions now have
+three further native/default runtime receipts. Expectations inspect canonical
+enum variants, all mapped numeric bits, IDs, account/asset/provenance fields,
+optional presence and source null/empty guards. The closed-position cases keep
+closed quantity distinct from peak quantity, with separately chosen close prices.
+The trade cases distinguish commission from rebate and verify PnL-before-fee
+ordering. Historical orders retain zero-as-undefined price/time fields.
+
+All three actual production owners pass. Three compiled copied-source controls
+invert fee sign, replace notional's close price with quantity, and invert the
+market-order test. Each fails its named owner; exact restoration passes all
+three. Real production source bytes are unchanged. This leaves 78 original
+Bitunix owners, alongside the previously listed pointer and Blofin scope.
