@@ -11,6 +11,22 @@ status = "divergent"
 note = "FINDING (BingX continuation audit owner): The comparator actually orders materialized D800 against a; native collator arguments are &str and cannot retain it. The locale choice remains valid but needs separate exact unit/admission pricing. Source observations were executed; native paths inspected only, no new native proof claimed. See sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source/native evidence scope: sdk-rs/parity/DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. CHOSEN locale profile: shared JsRootCollator pins root/English ordering rather than varying signatures with the host default locale; mirroring host-dependent locale is worse because identical query keys would sign differently across deployments. Witness sort_matches_actual_typescript executes the exact maintained sort initializer extracted by TypeScript AST in one Node corpus; 784 key pairs compare native Ordering, with 3 actual-TS lone-surrogate acceptance/Rust UTF-8 refusal witnesses. Capture records Node version, architecture, ICU and English default locale. This row claims the comparator; createAPI and signing are mapped separately."
 
 [[symbol]]
+ts = "unsignedPayload"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "isBingxSignatureRejection"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "createAPI"
 kind = "const-fn"
 layer = "mirror"

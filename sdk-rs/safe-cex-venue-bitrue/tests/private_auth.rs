@@ -1011,6 +1011,9 @@ impl PrivateHost for Host {
             ],
         )
     }
+    fn clean_float(&self, v: V) -> Result<V, E> {
+        Ok(self.number(safe_cex_store::incremental_fills::clean_float(num(&v))))
+    }
     fn retry_condition(&self) -> Result<V, E> {
         Ok(Rc::new(Raw::Function("isRetryable")))
     }

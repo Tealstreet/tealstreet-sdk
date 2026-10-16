@@ -1,4 +1,4 @@
-//! Kraken Futures and Spot source ports. Runtime exchange hooks remain pending.
+//! Kraken Futures and Spot source ports, bound to the Exchange trait by `binding`.
 pub mod feed_stats;
 pub mod fills;
 pub mod futures_candles;
@@ -42,3 +42,6 @@ pub mod construction;
 pub mod ohlcv_polling;
 
 pub mod classes;
+
+pub mod binding;
+pub use binding::exchange::{KrakenDependencies, KrakenExchange, spot_client_ids};

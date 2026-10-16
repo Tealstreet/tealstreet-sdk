@@ -16,3 +16,19 @@ layer = ""
 rs = ""
 status = "pending"
 note = ""
+
+[[symbol]]
+ts = "BybitDemoExchange.optionsEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitDemoExchange.inverseEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
