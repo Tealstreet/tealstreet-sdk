@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/local_order_cache.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/local_order_cache.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
 
 [[symbol]]
 ts = "isBybitOrderAlreadyGoneCancelMessage"
@@ -13,10 +13,10 @@ note = "CHOSEN: retained JSON-plus-undefined and UTF-8 input excludes executable
 [[symbol]]
 ts = "BybitSpotExchange"
 kind = "class"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange"
+status = "divergent"
+note = "CHOSEN: BybitExchange is a discriminated Rust facade carrier shared with the primary class; name Bybitspot selects the distinct Spot receiver, spot public/private protocols, positionsSupported false, fixed leverage and Bybit spot client-ID rule. class_name reports BybitSpotExchange. This API type split does not inherit primary trading/startup bodies: binding/members/spot.rs installs the source Spot members. tests/spot_binding.rs constructs the facade and exercises its trait methods, startup and local order fallback. Renamed Rust carrier: safe-cex-venue-bybit/src/exchange.rs::BybitExchange."
 
 [[symbol]]
 ts = "BybitSpotExchange#reinitOnThrow"
@@ -37,10 +37,10 @@ note = "Strict numeric 1 selects CONTRACT; all other retained values select UNIF
 [[symbol]]
 ts = "BybitSpotExchange.constructor"
 kind = "constructor"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create", "safe-cex-venue-bybit/src/binding/members/spot.rs::install" ]
+status = "divergent"
+note = "CHOSEN: explicit BybitDependencies supplies physical HTTP wire, runtime, clock and optional hosted signer/external public data; the shared BybitExchange::create assembles the source secondary-key plus unlimited clients and Spot protocols, then spot::install binds the distinct Spot receiver. Construction starts no tasks or sockets. Its source isSpot field initializes through the single shared BaseExchange factory before typed Rc publication; the concrete E2E asserts typed is_spot true and is_demo false. Source account options use the shared owned-snapshot boundary sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Native Spot E2Es cover category, leverage, requests, client IDs, public-only/private startup and disposal. Renamed Rust constructor: safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create; receiver initializer: safe-cex-venue-bybit/src/binding/members/spot.rs::install."
 
 [[symbol]]
 ts = "BybitSpotExchange.getTickerSymbolsForPublicStream"
@@ -133,10 +133,10 @@ note = "CHOSEN: owned plain JSON and optional-value tuple results replace the so
 [[symbol]]
 ts = "BybitSpotExchange.start"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/spot.rs::start"
+status = "divergent"
+note = "CHOSEN: shared js_runtime promises and explicit host polling replace ambient JavaScript microtasks. The executable Spot body preserves clock/external initialization, immediately handled private probe, sequential awaited market/ticker operands, market publication before public connection, parse/disposal guards, private publication and tick. It does not fetch primary account fees or API-key cache. Public-only and private startup E2Es assert loaded flags, requests, spot URL, order-only private subscription and both socket closures. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/spot.rs::start."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchOrdersPositionsAndBalance"

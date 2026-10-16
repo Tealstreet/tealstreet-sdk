@@ -66,7 +66,11 @@ fn position(symbol: &str, upnl: &str, size: &str) -> Value {
 
 #[test]
 fn production_private_frames_publish_orders_incremental_fills_and_terminal_statuses() {
-    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+    for name in [
+        ExchangeName::Bybit,
+        ExchangeName::Bybitdemo,
+        ExchangeName::Bybitspot,
+    ] {
         let (h, _) = setup(name, support::options());
         let fills = Rc::new(RefCell::new(vec![]));
         let observed = fills.clone();
@@ -275,13 +279,17 @@ fn private_delivery_matches_actual_source_handler_mapper_fill_and_store_bodies()
     };
     let mut cases = vec![];
     let mut native = vec![];
-    for mask in 0..4 {
+    for mode in 0..8 {
+        let mask = mode % 4;
+        let spot = mode >= 4;
         let mut opts = support::options();
         opts.enable_inverse_markets = Some(mask & 1 != 0);
         opts.enable_option_markets = Some(mask & 2 != 0);
         for scene in 0..6 {
             let (h, _) = setup(
-                if mask & 1 == 0 {
+                if spot {
+                    ExchangeName::Bybitspot
+                } else if mask & 1 == 0 {
                     ExchangeName::Bybit
                 } else {
                     ExchangeName::Bybitdemo
@@ -325,7 +333,7 @@ fn private_delivery_matches_actual_source_handler_mapper_fill_and_store_bodies()
                 ],
                 5 => vec![
                     json!({"topic":"order","data":[order("linear","BTCUSDT","New"),order("inverse","BTCUSD","New"),order("option","BTC-30DEC26-100000-C","New")]}),
-                    json!({"topic":"order","data":{}}),
+                    json!({"topic":"order","data":if spot { json!([]) } else { json!({}) }}),
                 ],
                 _ => unreachable!(),
             };
@@ -339,7 +347,7 @@ fn private_delivery_matches_actual_source_handler_mapper_fill_and_store_bodies()
                 }),
             );
             cases
-                .push(json!({"options":opts,"markets":h.store.markets().to_vec(),"frames":frames}));
+                .push(json!({"variant":if spot {"spot"} else {"primary"},"options":opts,"markets":h.store.markets().to_vec(),"frames":frames}));
             let mut snapshots = vec![];
             for frame in frames {
                 if let Some(raw) = frame.as_str() {
@@ -360,8 +368,8 @@ fn private_delivery_matches_actual_source_handler_mapper_fill_and_store_bodies()
     }
     assert_eq!(
         native.len(),
-        24,
-        "native fixed four flag modes by six scenes"
+        48,
+        "native fixed two variants by four flag modes by six scenes"
     );
     let mut child = Command::new("node")
         .arg(concat!(
@@ -388,8 +396,8 @@ fn private_delivery_matches_actual_source_handler_mapper_fill_and_store_bodies()
     let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         source.len(),
-        24,
-        "source fixed four flag modes by six scenes"
+        48,
+        "source fixed two variants by four flag modes by six scenes"
     );
     for (index, (mut native, mut source)) in native.into_iter().zip(source).enumerate() {
         numeric(&mut native);
