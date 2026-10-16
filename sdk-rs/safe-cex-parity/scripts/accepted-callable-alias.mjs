@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { identityAliasProbe } from './accepted-identity-alias.mjs';
 import { reviewedGenericAliasProbe } from './accepted-reviewed-aliases.mjs';
 import { reviewedFunctionPointerAliasProbe } from './accepted-function-pointer-alias.mjs';
+import { weexKlineTupleProbe } from './accepted-weex-kline-alias.mjs';
 import { localFutureAliasProbe } from './accepted-future-alias.mjs';
 import { loaderFutureAliasProbe } from './accepted-loader-future.mjs';
 import { exchangeFutureAliasProbe } from './accepted-exchange-future.mjs';
@@ -33,6 +34,8 @@ function boundedAst(node, parameter) {
 export function genericAliasProbe(alias, contract, context) {
   const hosted = hostedSignerTupleProbe(alias, contract, context);
   if (hosted) return hosted;
+  const weex = weexKlineTupleProbe(alias, contract, context);
+  if (weex) return weex;
   const pointer = reviewedFunctionPointerAliasProbe(alias, contract, context);
   if (pointer) return pointer;
   if (!(alias.generics?.params ?? []).length) return undefined;

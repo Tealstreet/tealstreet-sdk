@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.response.ts"
-rust_files = [ "safe-cex-venue-bybit/src/response.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/response.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs" ]
 
 [[symbol]]
 ts = "normalizeMessage"
@@ -54,6 +54,6 @@ note = "The map-required decoder consumes shared JsNumberInput and preserves ret
 ts = "getBybitResponseMeta"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/response.rs::get_bybit_response_meta"
+rs = [ "safe-cex-venue-bybit/src/response.rs::get_bybit_response_meta", "safe-cex-venue-bybit/src/binding/members/orders.rs::position_response_meta" ]
 status = "divergent"
-note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Rejecting a raw proxy JSON envelope containing a lone surrogate also drops any status/message supplied only by that envelope; valid outer status fields still win. The live-source regression pins TS accepting retMsg with U+D800 versus Rust returning no explicit status for that raw-only frame."
+note = "Renamed specialized consumer: safe-cex-venue-bybit/src/binding/members/orders.rs::position_response_meta. It returns only the four status fields consumed by fetchPositionMode; the canonical helper separately retains rawResponse. The position-mode receiver also uses the mapped retained-Js status implementation and shared JSON.parse for proxy envelopes; native mode witnesses cover numeric/string/proxy/absent status, malformed lists and nonempty failure override. The existing response.rs helper keeps its separately witnessed boundary. CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Rejecting a raw proxy JSON envelope containing a lone surrogate also drops any status/message supplied only by that envelope; valid outer status fields still win. The live-source regression pins TS accepting retMsg with U+D800 versus Rust returning no explicit status for that raw-only frame."
