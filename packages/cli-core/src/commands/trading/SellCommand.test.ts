@@ -316,6 +316,18 @@ describe('SellCommand', () => {
         }),
       );
     });
+
+    it('sizes a best-priced USD sell at the ask instead of last', async () => {
+      const exchange = createMockExchange();
+      exchange.store!.tickers![1].ask = 2_500;
+
+      const result = await command.execute(createMockContext(['sell', '$300', 'best', 'ETHUSDT'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ symbol: 'ETHUSDT', price: 2_500, amount: 0.12 }),
+      );
+    });
   });
 
   describe('size conversion', () => {

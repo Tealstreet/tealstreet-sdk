@@ -425,6 +425,61 @@ describe('BuyCommand', () => {
     });
   });
 
+  describe('sizing at the order price', () => {
+    it('sizes suffix USD at a resolved percent limit price', async () => {
+      const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.000001;
+
+      const result = await command.execute(createMockContext(['buy', '1000$', 'at', '-20%'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 40_000, amount: 0.025 }));
+    });
+
+    it('sizes best-priced USD at the bid instead of last', async () => {
+      const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.000001;
+      exchange.store!.tickers![0].last = 82_000;
+      exchange.store!.tickers![0].bid = 60_000;
+
+      const result = await command.execute(createMockContext(['buy', '$50', 'best'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 60_000, amount: 0.000833 }));
+    });
+
+    it('sizes a balance percentage at the limit price', async () => {
+      const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.0001;
+      exchange.store!.tickers![0].last = 82_000;
+      exchange.store!.balance = { free: 500, total: 500, used: 0, upnl: 0 };
+
+      const result = await command.execute(createMockContext(['buy', '10%', 'at', '60000'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 60_000, amount: 0.0008 }));
+    });
+
+    it('sizes DOGE at the limit price before converting its 1000-DOGE ctVal', async () => {
+      const exchange = createMockExchange();
+      const market = exchange.store!.markets![0];
+      market.symbol = 'DOGEUSDT';
+      market.base = 'DOGE';
+      market.contractSize = 1_000;
+      market.precision = { amount: 0.01, price: 0.0001 };
+      exchange.store!.tickers![0].symbol = 'DOGEUSDT';
+      exchange.store!.tickers![0].last = 0.1;
+
+      const result = await command.execute(createMockContext(['buy', '$10', 'at', '0.05', 'DOGEUSDT'], exchange));
+
+      expect(result.success).toBe(true);
+      // $10 / $0.05 = 200 DOGE = 0.2 native contracts, not 0.1 at last.
+      expect(exchange.placeOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ symbol: 'DOGEUSDT', price: 0.05, amount: 0.2 }),
+      );
+    });
+  });
+
   describe('size conversion', () => {
     it('converts USD notional to contract size', async () => {
       const exchange = createMockExchange();
@@ -496,6 +551,7 @@ describe('BuyCommand', () => {
 
     it('end-to-end: `buy 1000$ at 49000` — limit form with suffix size', async () => {
       const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.000001;
       const ctx = createMockContext(['buy', '1000$', 'at', '49000'], exchange, 'BTCUSDT');
       const result = await command.execute(ctx);
 
@@ -503,7 +559,7 @@ describe('BuyCommand', () => {
       const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(order.type).toBe(OrderType.Limit);
       expect(order.price).toBe(49000);
-      expect(order.amount).toBe(0.02);
+      expect(order.amount).toBe(0.020408);
     });
 
     it('end-to-end: `buy 100$` (suffix size, generic case)', async () => {
@@ -741,7 +797,8 @@ describe('BuyCommand', () => {
 
     it('fan-out with limit price applies the same price to every leg', async () => {
       const exchange = createMockExchange();
-      const ctx = createMockContext(['buy', 'BTCUSDT,ETHUSDT', '$100', 'at', '49000'], exchange);
+      // $1000 so the ETH leg, sized at 49000, still clears its 0.01 lot step.
+      const ctx = createMockContext(['buy', 'BTCUSDT,ETHUSDT', '$1000', 'at', '49000'], exchange);
       const result = await command.execute(ctx);
       expect(result.success).toBe(true);
       const orders = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
@@ -1073,13 +1130,16 @@ describe('BuyCommand', () => {
   // POSITION (you're closing), not free balance. The mock has no balance,
   // so a balance-scope resolution would throw — position scope succeeds.
   describe('reduce-only percent sizing', () => {
-    it('sizes a bare `%` reduce order from the position, not balance', async () => {
+    it.each([
+      ['buy', '50%', 'reduce'],
+      ['buy', '50%pos', 'at', '40000', 'reduce'],
+    ])('sizes a position-scoped reduce order from the position (%s %s)', async (...args) => {
       const exchange = createMockExchange();
       // Short position of 4 contracts; `buy 50% reduce` closes half of it.
       (exchange.store as { positions: unknown[] }).positions = [
         { symbol: 'BTCUSDT', side: 'short', contracts: -4, leverage: 10 },
       ];
-      const r = await command.execute(createMockContext(['buy', '50%', 'reduce'], exchange, 'BTCUSDT'));
+      const r = await command.execute(createMockContext(args, exchange, 'BTCUSDT'));
       expect(r.success).toBe(true);
       expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ amount: 2, reduceOnly: true }));
     });
