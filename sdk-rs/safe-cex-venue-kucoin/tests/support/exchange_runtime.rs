@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+// Scripted I/O support; callers allow unused helpers at module scope.
 use safe_cex_exchange::{
     exchange::ExchangeSettings,
     http::{HttpClientOptions, HttpFuture, HttpHost},
