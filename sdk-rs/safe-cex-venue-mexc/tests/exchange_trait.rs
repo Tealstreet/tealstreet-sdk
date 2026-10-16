@@ -3,8 +3,16 @@
 #![cfg(not(target_arch = "wasm32"))]
 #[path = "support/exchange_trait_runtime.rs"]
 mod support;
-use safe_cex_exchange::exchange::Exchange;
-use safe_cex_types::{MarginType, Order, PlaceOrderOpts, PositionSide, UpdateOrderOpts};
+use safe_cex_exchange::{
+    exchange::Exchange,
+    external::ExternalPublicData,
+    runtime::{ExchangeError, ListenerCleanup},
+};
+use safe_cex_store::StoreUpdate;
+use safe_cex_types::{
+    Candle, ExchangeOptionsExternalPublicData, MarginType, OHLCVOptions, Order, OrderBook,
+    PlaceOrderOpts, PositionSide, UpdateOrderOpts,
+};
 use serde_json::{Value, json};
 use std::{
     future::Future,
@@ -384,4 +392,175 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
             .any(|m| m.contains("without a minInterval")),
         "tick loop uses the metadata interval"
     );
+}
+
+/// Scripted gateway: `connect` is recorded and markets/tickers land in the store
+/// 1.5s later, the way a public-data gateway fills it.
+struct Gateway {
+    base: Rc<safe_cex_exchange::exchange::BaseExchange>,
+    events: Rc<std::cell::RefCell<Vec<String>>>,
+}
+impl ExternalPublicData for Gateway {
+    fn connect(&self) {
+        let base = self.base.clone();
+        self.events
+            .borrow_mut()
+            .push(format!("connect@{}", base.runtime.now_ms()));
+        let events = self.events.clone();
+        let runtime = base.runtime.clone();
+        drop(runtime.clone().spawn_local(Box::pin(async move {
+            runtime.sleep(1_500).await.unwrap();
+            let mut loaded = base.store.loaded().clone();
+            loaded.markets = true;
+            loaded.tickers = true;
+            base.store
+                .update(
+                    StoreUpdate {
+                        loaded: Some(loaded),
+                        ..Default::default()
+                    },
+                    false,
+                )
+                .unwrap();
+            events
+                .borrow_mut()
+                .push(format!("loaded@{}", runtime.now_ms()));
+        })));
+    }
+    fn dispose(&self) {}
+    fn is_initialized(&self) -> bool {
+        true
+    }
+    fn is_healthy(&self) -> bool {
+        true
+    }
+    fn last_message_timestamp(&self) -> Option<f64> {
+        None
+    }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        _: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.events
+            .borrow_mut()
+            .push(format!("candle:{}", options.symbol));
+        Ok(Box::new(|| Ok(())))
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        _: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.events.borrow_mut().push(format!("book:{symbol}"));
+        Ok(Box::new(|| Ok(())))
+    }
+}
+
+#[test]
+fn start_initializes_external_public_data_and_waits_for_it_to_load() {
+    let events = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let urls = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let (o, rt, store, wire) = {
+        let events = events.clone();
+        let urls = urls.clone();
+        support::fixture_with(
+            json!({"key":"fixture-key","secret":"fixture-secret",
+                "externalPublicData":{"type":"websocket","url":"ws://gateway.local/gateway","exchangeId":"mexc"}}),
+            Rc::new(move |options, base| {
+                if let ExchangeOptionsExternalPublicData::Variant0(config) = options {
+                    urls.borrow_mut().push(config.url.clone());
+                }
+                Rc::new(Gateway {
+                    base,
+                    events: events.clone(),
+                })
+            }),
+        )
+    };
+    let venue: Rc<dyn Exchange> = o.clone();
+    script_venue(&wire);
+    let started = rt.now.get();
+
+    drive(&rt, venue.start()).unwrap();
+    let log = calls(&wire);
+    assert_eq!(
+        *urls.borrow(),
+        ["ws://gateway.local/gateway"],
+        "start builds the provider from options.externalPublicData"
+    );
+    let settled = rt.now.get();
+    let at = |prefix: &str| {
+        events
+            .borrow()
+            .iter()
+            .find_map(|e| e.strip_prefix(prefix).map(|t| t.parse::<f64>().unwrap()))
+    };
+    let (connected, loaded_at) = (at("connect@"), at("loaded@"));
+    assert_eq!(
+        connected,
+        Some(started),
+        "start connects the external provider"
+    );
+    assert!(
+        loaded_at.is_some_and(|t| t >= started + 1_500.0 && t <= settled),
+        "start waits for the provider's markets/tickers: {:?} settled {settled}",
+        events.borrow()
+    );
+    assert!(
+        !sent(&log, "GET", DETAIL) && !sent(&log, "GET", TICKER),
+        "external data replaces venue market/ticker REST: {log:?}"
+    );
+    assert!(sent(&log, "GET", ASSETS), "private snapshot still loads");
+    let console = rt.console.borrow().clone();
+    for line in [
+        "Using external public data gateway: ws://gateway.local/gateway",
+        "External public data loaded (markets + tickers)",
+        "Ready to trade on MEXC",
+    ] {
+        assert!(
+            console.iter().any(|m| m.contains(line)),
+            "start log {line}: {console:?}"
+        );
+    }
+    assert!(
+        !console.iter().any(|m| m.contains("Loaded ")),
+        "venue market load skipped: {console:?}"
+    );
+    let loaded = store.loaded().clone();
+    assert!(loaded.markets && loaded.tickers && loaded.orders, "loaded");
+
+    // mexc.exchange.ts:599/:606 route public listeners to the provider.
+    let ohlcv: OHLCVOptions =
+        serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap();
+    let candle = venue.listen_ohlcv(ohlcv, Rc::new(|_| {})).unwrap();
+    let book = venue
+        .listen_order_book("BTCUSDT".into(), Rc::new(|_| {}))
+        .unwrap();
+    candle().unwrap();
+    book().unwrap();
+    assert_eq!(
+        events.borrow()[2..],
+        ["candle:BTCUSDT", "book:BTCUSDT"],
+        "public listeners use the external provider"
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn external_public_data_on_a_venue_without_public_only_support_rejects_start() {
+    let (o, rt, _, wire) = support::fixture_with_settings(
+        json!({"key":"fixture-key","secret":"fixture-secret",
+            "externalPublicData":{"type":"websocket","url":"ws://gateway.local/gateway","exchangeId":"mexc"}}),
+        Rc::new(|_, _| panic!("provider must not be built without supportsPublicOnly")),
+        false,
+    );
+    let venue: Rc<dyn Exchange> = o.clone();
+    let error = drive(&rt, venue.start()).unwrap_err();
+    assert_eq!(
+        error.message,
+        "Exchange \"mexc\" does not support public-only mode (supportsPublicOnly is false). Cannot use externalPublicData with this exchange.",
+        "base supportsPublicOnly gate"
+    );
+    assert!(calls(&wire).is_empty(), "nothing sent");
 }

@@ -2,6 +2,7 @@
 //! driving a `MexcExchange::new` venue through the `Exchange` trait.
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
+    external::ExternalPublicData,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
@@ -10,7 +11,7 @@ use safe_cex_transport::{
     RestAdapter, RestBody, RestFuture, RestRequest, RestResponse, RestResponseBody,
     TransportProvider, socket::TunnelHost,
 };
-use safe_cex_types::{ExchangeName, ExchangeOptions};
+use safe_cex_types::{ExchangeName, ExchangeOptions, ExchangeOptionsExternalPublicData};
 use safe_cex_venue_mexc::{exchange::MexcExchange, sockets::MexcSocketDependencies};
 use serde_json::{Value, json};
 use std::{
@@ -213,7 +214,29 @@ impl RestAdapter for Wire {
     }
 }
 
+pub type External =
+    Rc<dyn Fn(&ExchangeOptionsExternalPublicData, Rc<BaseExchange>) -> Rc<dyn ExternalPublicData>>;
+
 pub fn fixture() -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) {
+    fixture_with(
+        json!({"key":"fixture-key","secret":"fixture-secret"}),
+        Rc::new(|_, _| panic!("no externalPublicData configured")),
+    )
+}
+
+pub fn fixture_with(
+    options: Value,
+    external: External,
+) -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) {
+    // exchangeMetadata.ts MexcMetadata: supportsPublicOnly.
+    fixture_with_settings(options, external, true)
+}
+
+pub fn fixture_with_settings(
+    options: Value,
+    external: External,
+    supports_public_only: bool,
+) -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) {
     let runtime = Rc::new(Runtime {
         now: Rc::new(Cell::new(1_700_000_000_000.0)),
         jobs: RefCell::default(),
@@ -222,17 +245,16 @@ pub fn fixture() -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) 
         sent: Rc::default(),
     });
     let store = Rc::new(DefaultStore::new());
-    let options: ExchangeOptions =
-        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap();
+    let options: ExchangeOptions = serde_json::from_value(options).unwrap();
     let base = BaseExchange::new(
         ExchangeName::Mexc,
         options,
         store.clone(),
         runtime.clone(),
-        // exchangeMetadata.ts MexcMetadata: tickInterval 2_000, supportsPublicOnly.
+        // exchangeMetadata.ts MexcMetadata: tickInterval 2_000.
         ExchangeSettings {
             tick_interval: Some(2_000.0),
-            supports_public_only: true,
+            supports_public_only,
             ..Default::default()
         },
     );
@@ -246,6 +268,7 @@ pub fn fixture() -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) 
             remote_account_name: None,
             emit_fill: Rc::new(|_| Ok(())),
         },
+        external,
     );
     (venue, runtime, store, wire)
 }

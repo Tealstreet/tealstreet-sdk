@@ -22,14 +22,15 @@ use safe_cex_exchange::{
     },
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
+    external::ExternalPublicData,
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_store::{StoreUpdate, model_patch::ModelPatch};
 use safe_cex_transport::{RestAdapter, RestFailure, RestRequest, RestResponseBody};
 use safe_cex_types::{
-    AccountValidationError, Candle, ExchangeAccount, Execution, ExecutionsOptions, FetchedLeverage,
-    MarginType, OHLCVOptions, Order, OrderBook, OrderStatus, PlaceOrderOpts, Position,
-    PositionMode, PositionSide, UpdateOrderOpts, ValidateAccountResult,
+    AccountValidationError, Candle, ExchangeAccount, ExchangeOptionsExternalPublicData, Execution,
+    ExecutionsOptions, FetchedLeverage, MarginType, OHLCVOptions, Order, OrderBook, OrderStatus,
+    PlaceOrderOpts, Position, PositionMode, PositionSide, UpdateOrderOpts, ValidateAccountResult,
 };
 #[cfg(test)]
 use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
@@ -45,7 +46,8 @@ use std::{
 
 // ts: MexcExchange
 pub struct MexcExchange {
-    base: BaseExchange,
+    base: Rc<BaseExchange>,
+    external: ExternalFactory,
     capabilities: ExchangeCapabilities,
     xhr: Rc<dyn RestAdapter>,
     local_to_utc: Rc<dyn Fn(f64) -> f64>,
@@ -59,6 +61,9 @@ pub struct MexcExchange {
 }
 #[path = "exchange_binding.rs"]
 mod binding;
+/// ts: BaseExchange#initExternalPublicData's provider, built by the registry host.
+type ExternalFactory =
+    Rc<dyn Fn(&ExchangeOptionsExternalPublicData, Rc<BaseExchange>) -> Rc<dyn ExternalPublicData>>;
 enum OrderKind {
     Regular,
     Plan,
@@ -218,8 +223,10 @@ impl Exchange for MexcExchange {
         options: OHLCVOptions,
         callback: Rc<dyn Fn(Candle)>,
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
-        if self.base.external_public_data_provider.borrow().is_some() {
-            return self.base.listen_ohlcv(options, callback);
+        // ts: mexc.exchange.ts:599 reads the provider itself, not super.listenOHLCV.
+        let provider = self.base.external_public_data_provider.borrow().clone();
+        if let Some(provider) = provider {
+            return provider.listen_ohlcv(options, callback);
         }
         let socket = self
             .public_socket
@@ -233,8 +240,10 @@ impl Exchange for MexcExchange {
         symbol: String,
         callback: Rc<dyn Fn(OrderBook)>,
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
-        if self.base.external_public_data_provider.borrow().is_some() {
-            return self.base.listen_order_book(symbol, callback);
+        // ts: mexc.exchange.ts:606 reads the provider itself, not super.listenOrderBook.
+        let provider = self.base.external_public_data_provider.borrow().clone();
+        if let Some(provider) = provider {
+            return provider.listen_order_book(symbol, callback);
         }
         let socket = self
             .public_socket
@@ -411,9 +420,11 @@ impl MexcExchange {
         xhr: Rc<dyn RestAdapter>,
         local_to_utc: Rc<dyn Fn(f64) -> f64>,
         sockets: crate::sockets::MexcSocketDependencies,
+        external: ExternalFactory,
     ) -> Rc<Self> {
         let exchange = Rc::new(Self {
-            base,
+            base: Rc::new(base),
+            external,
             xhr,
             local_to_utc: local_to_utc.clone(),
             capabilities: Self::capabilities_table(),

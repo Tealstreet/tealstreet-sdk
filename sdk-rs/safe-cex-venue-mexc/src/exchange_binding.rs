@@ -276,7 +276,7 @@ impl Host {
         let def = |key: &str, value: Js| {
             let _ = this.define(key, value);
         };
-        def("store", self.store_facade(venue));
+        def("store", store::facade(venue.base.store.clone()));
         def("xhr", self.xhr());
         def("publicWebsocket", self.socket(true));
         def("privateWebsocket", self.socket(false));
@@ -354,15 +354,15 @@ impl Host {
                 Ok(Js::Undefined)
             }),
             ("initExternalPublicData", |h, _| {
-                let configured = h.venue()?.base.options().external_public_data.is_some();
+                let venue = h.venue()?;
                 Ok(h.spawn(Box::pin(async move {
-                    if configured {
-                        return Err(Thrown::error(
-                            "Error",
-                            "MEXC externalPublicData needs a provider; MexcExchange::new takes none",
-                        ));
-                    }
-                    Ok(Js::Bool(false))
+                    let create = |options: &_| (venue.external)(options, venue.base.clone());
+                    let external = venue
+                        .base
+                        .init_external_public_data(create)
+                        .await
+                        .map_err(thrown)?;
+                    Ok(Js::Bool(external))
                 })))
             }),
             ("fetchMarkets", |h, _| h.native(|v| v.fetch_markets())),
@@ -652,37 +652,6 @@ impl Host {
             );
         }
         this
-    }
-
-    /// js_runtime's Store facade plus the two Store members MEXC calls that it lacks.
-    fn store_facade(&self, venue: &Rc<MexcExchange>) -> Js {
-        let store = store::facade(venue.base.store.clone());
-        let typed = venue.base.store.clone();
-        let _ = store.define(
-            "setSetting",
-            Js::function("setSetting", move |_, a| {
-                typed
-                    .set_setting(&text(&arg(&a, 0))?, arg(&a, 1).truthy())
-                    .map_err(|e| Thrown::from(ExchangeError::from(e)))?;
-                Ok(Js::Undefined)
-            }),
-        );
-        let typed = venue.base.store.clone();
-        let _ = store.define(
-            "updateOrdersStatus",
-            Js::function("updateOrdersStatus", move |_, a| {
-                let mut ids = vec![];
-                for row in arg(&a, 0).array_values().unwrap_or_default() {
-                    ids.push(text(&row.get("id")?)?);
-                }
-                let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-                typed
-                    .update_orders_status(&ids, to_typed(&arg(&a, 1))?)
-                    .map_err(|e| Thrown::from(ExchangeError::from(e)))?;
-                Ok(Js::Undefined)
-            }),
-        );
-        store
     }
 
     /// The Axios verbs the bodies call, over the venue's native REST adapter.

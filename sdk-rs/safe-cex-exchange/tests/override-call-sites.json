@@ -3174,6 +3174,30 @@
     "file": "safe-cex-venue-mexc/src/exchange.rs"
   },
   {
+    "function": "listen_ohlcv",
+    "body": "9aec87a5e902ae91",
+    "call": "provider . listen_ohlcv (options , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "9aec87a5e902ae91",
+    "call": "socket . listen_ohlcv (options , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "8691fd96244b0e80",
+    "call": "provider . listen_order_book (symbol , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "8691fd96244b0e80",
+    "call": "socket . listen_order_book (symbol , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
     "function": "fetch_ohlcv",
     "body": "df9cf4aa663f2f9b",
     "reference": "MexcExchange :: fetch_ohlcv",
@@ -3192,8 +3216,68 @@
     "file": "safe-cex-venue-mexc/src/exchange.rs"
   },
   {
+    "function": "set_leverage",
+    "body": "e4fafd285b786341",
+    "reference": "crate :: exchange_runtime :: set_leverage",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "change_position_mode",
+    "body": "a36a1d47fdf1f163",
+    "reference": "crate :: exchange_runtime :: change_position_mode",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "change_margin_type",
+    "body": "d54ad7f78d0e7771",
+    "reference": "crate :: exchange_runtime :: change_margin_type",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "63cf59794ffd965b",
+    "reference": "crate :: runtime_assembly :: update_order",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "54753c4b5a2aa893",
+    "reference": "crate :: exchange_runtime :: cancel_symbol_orders",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "cancel_all_orders",
+    "body": "709853e3c4b5b5d5",
+    "reference": "crate :: exchange_runtime :: cancel_all_orders",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "e11aedadcba165b1",
+    "reference": "binding :: dispose",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "e11aedadcba165b1",
+    "call": "self . base . dispose ()",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "40676de1ca197af7",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "40676de1ca197af7",
+    "call": "venue . fetch_historical_fills (options)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
     "function": "get_account",
-    "body": "ed79bb7f1263c63a",
+    "body": "324c1ddbacef3830",
     "call": "self . validate_account ()",
     "file": "safe-cex-venue-mexc/src/exchange.rs"
   },
@@ -3238,6 +3322,108 @@
     "body": "943b8c616d4fd0b0",
     "reference": "Exchange :: is_public_data_only",
     "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "Exchange :: is_public_data_only",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_markets ()",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_tickers ()",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_positions (symbols)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_orders (symbols)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_and_set_orders (symbols)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . cancel_orders (orders)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "assembly :: update_order",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: set_leverage",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: change_position_mode",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: change_margin_type",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: cancel_symbol_orders",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: cancel_all_orders",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "e12fd7ab31b46e84",
+    "call": "self . venue () ? . base . dispose ()",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "5c1ff012a60c1327",
+    "reference": "account :: dispose",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "connect_and_subscribe",
+    "body": "50a100f2c4560c80",
+    "call": "parent . is_public_data_only ()",
+    "file": "safe-cex-venue-mexc/src/sockets.rs"
+  },
+  {
+    "function": "on_open",
+    "body": "1cb6710bc86a2370",
+    "call": "owner . fetch_and_set_private_snapshot (10)",
+    "file": "safe-cex-venue-mexc/src/sockets.rs"
   },
   {
     "function": "listen_ohlcv",
