@@ -670,7 +670,7 @@ fn exchange_error_recovery_native_values_getters_cooldowns_and_throws() {
         );
     }
     assert_eq!(
-        corpus["contentHash"], "2c59a7b28871baf3d9ead5902369f8793955f34b0f61bda77d8b1cbad07f428e",
+        corpus["contentHash"], "a23c85910dc2093c412310d7f5a3bb9560d3986f8c57385a4e6a6321002aedeb",
         "full source-only corpus pin after native assertions"
     );
 }

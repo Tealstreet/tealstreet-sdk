@@ -155,6 +155,12 @@ pub fn fetch_closed_position_rows<H: SnapshotHost>(
         if h.truthy(&h.get(&owner, "isPublicDataOnly")?) {
             return Ok(h.array(vec![]));
         }
+        call!(
+            h,
+            owner.clone(),
+            "refuseOptionSymbol",
+            vec![h.get(&opts, "symbol")?, h.literal("closed PnL")]
+        );
         let (category, from, to) = closed_bounds(h.as_ref(), &owner, &opts)?;
         let collected = h.array(vec![]);
         let windows = call!(h, owner.clone(), "getExecutionQueryWindows", vec![from, to]);
@@ -300,6 +306,12 @@ pub fn fetch_closed_pnl<H: SnapshotHost>(h: Rc<H>, owner: H::Value, opts: H::Val
         if h.truthy(&h.get(&owner, "isPublicDataOnly")?) {
             return Ok(h.array(vec![]));
         }
+        call!(
+            h,
+            owner.clone(),
+            "refuseOptionSymbol",
+            vec![h.get(&opts, "symbol")?, h.literal("closed PnL")]
+        );
         let (category, from, to) = closed_bounds(h.as_ref(), &owner, &opts)?;
         let entries = h.array(vec![]);
         let result = async {
@@ -362,7 +374,11 @@ pub fn fetch_closed_pnl<H: SnapshotHost>(h: Rc<H>, owner: H::Value, opts: H::Val
                                 let mapper = h.intrinsic("select:mapBybitClosedPnl", vec![])?;
                                 let account =
                                     or(h.as_ref(), h.get(&opts, "accountName")?, || h.literal(""));
-                                let entry = h.apply(mapper, vec![row, account])?;
+                                let inverse = h.intrinsic(
+                                    "isBybitInverseSymbol",
+                                    vec![h.get(&row, "symbol")?],
+                                )?;
+                                let entry = h.apply(mapper, vec![row, account, inverse])?;
                                 if h.truthy(&entry) {
                                     call!(h, entries, "push", vec![entry]);
                                 }
@@ -435,11 +451,14 @@ pub fn fetch_historical_orders<H: SnapshotHost>(
         if h.truthy(&h.get(&owner,"isPublicDataOnly")?){return Ok(h.array(vec![]))}
         let result=async{
             let orders=h.array(vec![]);let seen=h.intrinsic("Set",vec![])?;let page=Rc::new(Cell::new(0));
-            let values=windows(h.as_ref(),&opts,"from","to")?;let hh=h.clone();let oo=owner.clone();let pp=opts.clone();let orders2=orders.clone();let page2=page.clone();
-            each(h.clone(),values,move|window|{let h=hh.clone();let owner=oo.clone();let opts=pp.clone();let orders=orders2.clone();let seen=seen.clone();let page=page2.clone();Box::pin(async move{
+            let values=windows(h.as_ref(),&opts,"from","to")?;
+            // ts: a symbol queries its own category; otherwise linear, plus inverse when enabled.
+            let categories=if h.truthy(&h.optional(&opts,"symbol")?){vec![call!(h,owner.clone(),"getCategoryForSymbol",vec![h.get(&opts,"symbol")?])]}else if h.truthy(&call!(h,owner.clone(),"inverseEnabled",vec![])){vec![h.literal("linear"),h.literal("inverse")]}else{vec![h.literal("linear")]};
+            for category in categories{let values=values.clone();let seen=seen.clone();let hh=h.clone();let oo=owner.clone();let pp=opts.clone();let orders2=orders.clone();let page2=page.clone();
+            each(h.clone(),values,move|window|{let h=hh.clone();let owner=oo.clone();let opts=pp.clone();let orders=orders2.clone();let seen=seen.clone();let page=page2.clone();let category=category.clone();Box::pin(async move{
                 let mut cursor=h.undefined();page.set(0);
                 while page.get()<20{
-                    let params=omitted(h.as_ref(),vec![("category",h.literal("linear")),("symbol",h.optional(&opts,"symbol")?),("startTime",h.get(&window,"startTime")?),("endTime",h.get(&window,"endTime")?),("limit",h.number(50.)),("cursor",cursor)])?;
+                    let params=omitted(h.as_ref(),vec![("category",category.clone()),("symbol",h.optional(&opts,"symbol")?),("startTime",h.get(&window,"startTime")?),("endTime",h.get(&window,"endTime")?),("limit",h.number(50.)),("cursor",cursor)])?;
                     let p=call!(h,h.get(&owner,"xhr")?,"get",vec![h.literal("/v5/order/history"),h.object(vec![("params",params)])]);let data=h.get(&h.wait(p).await?,"data")?;
                     if rejected(h.as_ref(),&data)?{let log=h.select(owner.clone(),"log")?;let message=template(h.as_ref(),vec![h.literal("Failed to fetch order history: "),h.get(&data,"retMsg")?])?;h.apply(log,vec![message,h.literal("error")])?;break}
                     let rows=list(h.as_ref(),&data)?;if h.equal(&h.get(&rows,"length")?,&h.number(0.)){break}
@@ -451,7 +470,7 @@ pub fn fetch_historical_orders<H: SnapshotHost>(
                     })}).await?;
                     cursor=crate::ledger_history::cursor(h.as_ref(),&data)?;if !h.truthy(&cursor){break}page.set(page.get()+1);
                 }Ok(true)
-            })}).await?;
+            })}).await?;}
             if page.get()>=20{call!(h,owner.clone(),"log",vec![h.literal("fetchHistoricalOrders stopped at the 20-page cap; older orders were not fetched"),h.literal("warning")]);}
             let sort=h.select(orders,"sort")?;let compare=h.callback(owner.clone(),"history_order_sort",vec![])?;let sorted=h.apply(sort,vec![compare])?;
             let slice=h.select(sorted,"slice")?;
@@ -459,19 +478,78 @@ pub fn fetch_historical_orders<H: SnapshotHost>(
         }.await;match result{Ok(v)=>Ok(v),Err(e)=>{emit(h.as_ref(),&owner,e)?;Ok(h.array(vec![]))}}
     }))
 }
-pub fn income_context<H: SnapshotHost>(h: &H, owner: &H::Value) -> Result<H::Value, H::Error> {
-    let ctx = BybitIncomeContext {
-        xhr: h.get(owner, "xhr")?,
-        log: h.get(owner, "log")?,
-        category: IncomeCategory::Linear,
-        account_type: IncomeAccountType::Unified,
+// ts: BybitExchange#refuseOptionSymbol
+pub fn refuse_option_symbol<H: SnapshotHost>(
+    h: &H,
+    symbol: &H::Value,
+    what: &H::Value,
+) -> Result<H::Value, H::Error> {
+    if h.truthy(symbol) && h.truthy(&h.intrinsic("isBybitOptionSymbol", vec![symbol.clone()])?) {
+        let message = template(
+            h,
+            vec![
+                h.literal("Bybit has no "),
+                what.clone(),
+                h.literal(" for options ("),
+                symbol.clone(),
+                h.literal(")"),
+            ],
+        )?;
+        return Err(h.error(message)?);
+    }
+    Ok(h.undefined())
+}
+// ts: BybitExchange#inverseEnabled
+pub fn inverse_enabled<H: SnapshotHost>(h: &H, owner: &H::Value) -> Result<H::Value, H::Error> {
+    let options = h.get(owner, "options")?;
+    Ok(h.boolean(
+        h.truthy(&h.get(&options, "enableInverseMarkets")?)
+            && !h.truthy(&h.get(&options, "externalPublicData")?),
+    ))
+}
+// ts: BybitExchange.get incomeContexts — one context per traded category.
+pub fn income_contexts<H: SnapshotHost>(h: &H, owner: &H::Value) -> Result<H::Value, H::Error> {
+    let categories = if h.truthy(&call!(h, owner.clone(), "inverseEnabled", vec![])) {
+        vec![IncomeCategory::Linear, IncomeCategory::Inverse]
+    } else {
+        vec![IncomeCategory::Linear]
     };
-    Ok(h.object(vec![
-        ("xhr", ctx.xhr),
-        ("log", ctx.log),
-        ("category", h.literal(ctx.category.as_str())),
-        ("accountType", h.literal(ctx.account_type.as_str())),
-    ]))
+    let mut contexts = Vec::new();
+    for category in categories {
+        let ctx = BybitIncomeContext {
+            xhr: h.get(owner, "xhr")?,
+            log: h.get(owner, "log")?,
+            category,
+            account_type: IncomeAccountType::Unified,
+        };
+        contexts.push(h.object(vec![
+            ("xhr", ctx.xhr),
+            ("log", ctx.log),
+            ("category", h.literal(ctx.category.as_str())),
+            ("accountType", h.literal(ctx.account_type.as_str())),
+        ]));
+    }
+    Ok(h.array(contexts))
+}
+// mapSeries over the contexts, then .flat().
+async fn each_context<H: SnapshotHost>(
+    h: &Rc<H>,
+    owner: &H::Value,
+    select: &str,
+    args: impl Fn() -> Vec<H::Value>,
+) -> Result<Vec<H::Value>, H::Error> {
+    let contexts = h.get(owner, "incomeContexts")?;
+    let mut records = Vec::new();
+    for ctx in h.values(&contexts)? {
+        // p-iteration awaits each element before invoking the callback.
+        let ctx = h.wait(ctx).await?;
+        let f = h.intrinsic(select, vec![])?;
+        let mut call_args = vec![ctx];
+        call_args.extend(args());
+        let rows = h.wait(h.apply(f, call_args)?).await?;
+        records.extend(h.values(&rows)?);
+    }
+    Ok(records)
 }
 pub fn fetch_income_history<H: SnapshotHost>(
     h: Rc<H>,
@@ -480,9 +558,22 @@ pub fn fetch_income_history<H: SnapshotHost>(
 ) -> H::Value {
     let launcher = h.clone();
     launcher.launch(Box::pin(async move {
-        let f = h.intrinsic("select:fetchBybitIncomeHistory", vec![])?;
-        let ctx = h.get(&owner, "incomeContext")?;
-        h.apply(f, vec![ctx, opts])
+        let records = each_context(&h, &owner, "select:fetchBybitIncomeHistory", || {
+            vec![opts.clone()]
+        })
+        .await?;
+        let records = h.array(records);
+        if !h.truthy(&call!(h, owner.clone(), "inverseEnabled", vec![])) {
+            return Ok(records);
+        }
+        let sort = h.select(records, "sort")?;
+        let compare = h.callback(owner.clone(), "history_income_sort", vec![])?;
+        let newest_first = h.apply(sort, vec![compare])?;
+        if h.truthy(&h.optional(&opts, "limit")?) {
+            let slice = h.select(newest_first, "slice")?;
+            return h.apply(slice, vec![h.number(0.), h.get(&opts, "limit")?]);
+        }
+        Ok(newest_first)
     }))
 }
 pub fn fetch_income_history_range<H: SnapshotHost>(
@@ -494,9 +585,11 @@ pub fn fetch_income_history_range<H: SnapshotHost>(
 ) -> H::Value {
     let launcher = h.clone();
     launcher.launch(Box::pin(async move {
-        let f = h.intrinsic("select:fetchBybitIncomeHistoryRange", vec![])?;
-        let ctx = h.get(&owner, "incomeContext")?;
-        h.apply(f, vec![ctx, start, end, income_type])
+        let records = each_context(&h, &owner, "select:fetchBybitIncomeHistoryRange", || {
+            vec![start.clone(), end.clone(), income_type.clone()]
+        })
+        .await?;
+        Ok(h.array(records))
     }))
 }
 pub fn fetch_bybit_income_history<H: SnapshotHost>(

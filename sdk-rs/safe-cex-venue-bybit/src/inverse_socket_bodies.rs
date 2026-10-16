@@ -202,10 +202,11 @@ fn order_row<H: SessionHost>(
             let side = h.get(&h.get(&orders, "0")?, "side")?;
             let symbol = h.get(&h.get(&orders, "0")?, "symbol")?;
             let price = if h.truthy(&h.get(&fill, "value")?) {
-                h.intrinsic(
+                let ratio = h.intrinsic(
                     "division",
                     vec![h.get(&fill, "qty")?, h.get(&fill, "value")?],
-                )?
+                )?;
+                imported!(h, "cleanFloat", vec![ratio])
             } else {
                 h.get(&executed, "price")?
             };

@@ -7,6 +7,8 @@ pub mod in_process_public_data;
 pub mod loaders;
 pub mod module_host;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod native_account;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod native_host;
 pub mod public_data_host;
 pub mod rust_venues;

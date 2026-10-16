@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts"
-rust_files = [ "safe-cex-venue-coinbase/src/cdp_signing.rs", "safe-cex-venue-coinbase/src/utils.rs" ]
+rust_files = [ "safe-cex-crypto/src/es256.rs", "safe-cex-venue-coinbase/src/cdp_signing.rs", "safe-cex-venue-coinbase/src/utils.rs" ]
 
 [[symbol]]
 ts = "normalizeCoinbaseUsdEquivalentProductId"
@@ -94,17 +94,17 @@ note = "CHOSEN: uses the shared forgiving base64 decoder and returns a unit Coin
 ts = "getSigningKey"
 kind = "function"
 layer = "adapted"
-rs = "safe-cex-venue-coinbase/src/cdp_signing.rs::get_signing_key"
-status = "ported"
-note = "Native async key-cache body, retaining opaque CryptoKey identity, same-secret hit and eager import races. Imported PEM/WebCrypto capabilities preserve original exception metadata and Rc carriers; the separately divergent pure PEM leaf is not relabeled. Mapped body renamed to safe-cex-venue-coinbase/src/cdp_signing.rs::get_signing_key."
+rs = [ "safe-cex-venue-coinbase/src/cdp_signing.rs::get_signing_key", "safe-cex-crypto/src/es256.rs::Es256SigningKey", "safe-cex-crypto/src/es256.rs::Es256SigningKey::from_pkcs8_der" ]
+status = "divergent"
+note = "CHOSEN: MANIFEST-SPEC.md#closed-typed-output-boundary. Native async key-cache body safe-cex-venue-coinbase/src/cdp_signing.rs::get_signing_key retains opaque CryptoKey identity, same-secret hit and eager import races. The optional production primitive safe-cex-crypto/src/es256.rs::Es256SigningKey and safe-cex-crypto/src/es256.rs::Es256SigningKey::from_pkcs8_der import caller-owned PKCS8 DER into a private RustCrypto key handle; invalid imports return a stable String instead of platform DOMException metadata. PEM normalization and caching remain caller operations, and this primitive does not claim venue registration. Existing host-supplied WebCrypto capabilities still preserve their own exception carriers."
 
 [[symbol]]
 ts = "sign"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-coinbase/src/cdp_signing.rs::sign"
-status = "ported"
-note = "Native credential/clock/nonce/JWT claims, JSON.stringify insertion order and primitive call/await policy. Claims (including NaN and negative zero) are asserted before message/JWT bytes. Imported Ed25519/WebCrypto/PEM primitives preserve original exception carriers; cryptographic primitive correctness is outside this field body. Mapped body renamed to safe-cex-venue-coinbase/src/cdp_signing.rs::sign."
+rs = [ "safe-cex-venue-coinbase/src/cdp_signing.rs::sign", "safe-cex-crypto/src/es256.rs::Es256SigningKey::sign" ]
+status = "divergent"
+note = "CHOSEN: MANIFEST-SPEC.md#closed-typed-output-boundary. Native credential/clock/nonce/JWT claims and primitive call/await policy remain in safe-cex-venue-coinbase/src/cdp_signing.rs::sign. The optional production primitive safe-cex-crypto/src/es256.rs::Es256SigningKey::sign hashes exact caller-owned bytes once with SHA-256 and returns fixed-width r||s. Authorized RFC6979 deterministic nonces replace WebCrypto randomness, yielding different valid signature bytes; live actual-source/WebCrypto verification in both directions and the RFC6979 P-256/SHA-256 known answer pin the primitive. Failure returns String instead of platform exception metadata. Claims, JSON spelling and preimage construction remain venue responsibilities; the primitive alone does not bind Coinbase."
 
 [[symbol]]
 ts = "formatOrderState"

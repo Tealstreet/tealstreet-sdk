@@ -817,7 +817,7 @@ fn public_subscriptions_native_routes_topics_aliases_callbacks() {
         );
     }
     assert_eq!(
-        corpus["contentHash"], "65ff83f5cc3ff70dce067472069a5a026b89ceeb245d12c5ed5b4b79d4f8f0ee",
+        corpus["contentHash"], "a75465e04438ba345397fb3c1c7a5fdcbf71f90ec3798d3d93313f64d3c0b823",
         "full source-only corpus pin after native assertions"
     );
 }

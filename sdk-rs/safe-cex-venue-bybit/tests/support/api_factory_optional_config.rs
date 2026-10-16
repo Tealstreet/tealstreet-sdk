@@ -83,6 +83,19 @@ pub fn compare_source(native: &[Value], source: &Value) {
     {
         assert_eq!(native[index]["id"], expected_id);
         assert_eq!(source["helperCases"][index]["id"], expected_id);
+        // Source signatureRejectedResponse refuses an error without config; a native
+        // RestFailure always carries its request, so that absence has no native state.
+        if expected_id == "signature-absent-config" {
+            assert_eq!(
+                (
+                    &native[index]["predicate"],
+                    &source["helperCases"][index]["predicate"]
+                ),
+                (&json!(true), &json!(false)),
+                "factory_optional_config_absent_config_boundary"
+            );
+            continue;
+        }
         assert_eq!(
             native[index]["predicate"], source["helperCases"][index]["predicate"],
             "factory_optional_config_source_pure_comparison {expected_id}"

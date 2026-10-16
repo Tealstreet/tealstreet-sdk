@@ -84,7 +84,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.len(), 12);
+    assert_eq!(cases.len(), 36);
     let mut compared = [0usize; 3];
     let mut constructors = [0usize; 2];
     for case in cases {
@@ -98,13 +98,13 @@ fn constructor_clients_and_sockets_follow_actual_source() {
             serde_json::from_value(case["options"].clone()).unwrap(),
             Rc::new(DefaultStore::new()),
             runtime.clone(),
-            Default::default(),
+            crate::binding::exchange::settings(),
         );
         let result = BybitExchange::new(
-            base,
+            Rc::new(base),
             runtime.clone(),
             clock.clone(),
-            |opts, base| {
+            |opts, base, _| {
                 trace
                     .borrow_mut()
                     .push(json!(["api", opts.key, opts.secret, base.name]));
@@ -319,11 +319,11 @@ fn constructor_clients_and_sockets_follow_actual_source() {
         assert!(private.emitter().is_private_socket(&private));
         assert!(Rc::ptr_eq(
             venue.base().secondary_clients.borrow().as_ref().unwrap(),
-            &venue.xhr
+            venue.xhr()
         ));
         // Actual throttling, not just a constructor argument comparison.
         for _ in 0..6 {
-            ready(venue.xhr.request(RestRequest::default())).unwrap();
+            ready(venue.xhr().request(RestRequest::default())).unwrap();
         }
         assert_eq!(
             *clock.sleeps.borrow(),
@@ -331,7 +331,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
             "sixth primary request must wait at five RPS"
         );
         for _ in 0..6 {
-            ready(venue.unlimited_xhr.execute(RestRequest::default())).unwrap();
+            ready(venue.unlimited_xhr().execute(RestRequest::default())).unwrap();
         }
         assert_eq!(
             *clock.sleeps.borrow(),
@@ -340,7 +340,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
         );
         if case["options"]["secondary_key"] == "read-key" {
             for _ in 0..6 {
-                ready(venue.xhr.get(RestRequest::default())).unwrap();
+                ready(venue.xhr().get(RestRequest::default())).unwrap();
             }
             assert_eq!(
                 *clock.sleeps.borrow(),
@@ -348,7 +348,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
                 "read-only secondary has no primary rate limiter"
             );
             assert!(calls.borrow()[12..].iter().all(|key| key == "read-key"));
-            ready(venue.xhr.request(RestRequest {
+            ready(venue.xhr().request(RestRequest {
                 method: "POST".into(),
                 ..Default::default()
             }))
@@ -414,12 +414,12 @@ fn constructor_clients_and_sockets_follow_actual_source() {
     }
     assert_eq!(
         constructors,
-        [7, 5],
+        [21, 15],
         "CONSTRUCTOR-CARDINALITY success/failure totals"
     );
     assert_eq!(
         compared,
-        [80, 20, 25],
+        [240, 60, 75],
         "CONSTRUCTOR-CARDINALITY native comparison totals"
     );
 }
@@ -461,7 +461,7 @@ fn concrete_private_protocol_composes_source_open_sequence_and_real_auth() {
                 serde_json::from_value(json!({"key":"fixture-key","secret":"secret"})).unwrap(),
                 Rc::new(DefaultStore::new()),
                 runtime.clone(),
-                Default::default(),
+                crate::binding::exchange::settings(),
             );
             if case["mode"] != "local" {
                 base.signers.remote_signer = Some(signer.clone());
@@ -471,10 +471,10 @@ fn concrete_private_protocol_composes_source_open_sequence_and_real_auth() {
             let gate = Rc::new(Cell::new(false));
             let sync_gate = gate.clone();
             let venue = BybitExchange::with_private_protocol(
-                base,
+                Rc::new(base),
                 runtime.clone(),
                 Arc::new(Clock::default()),
-                |options, _| {
+                |options, _, _| {
                     Ok(Arc::new(Adapter {
                         key: options.key.clone(),
                         calls: Rc::default(),
@@ -587,14 +587,14 @@ fn concrete_exchange_url_selectors_match_live_source() {
             serde_json::from_value(json!({"key":"", "secret":""})).unwrap(),
             Rc::new(DefaultStore::new()),
             runtime.clone(),
-            Default::default(),
+            crate::binding::exchange::settings(),
         );
         base.is_demo = case["isDemo"].as_bool().unwrap();
         let venue = BybitExchange::new(
-            base,
+            Rc::new(base),
             runtime,
             Arc::new(Clock::default()),
-            |_, _| {
+            |_, _, _| {
                 Ok(Arc::new(Adapter {
                     key: String::new(),
                     calls: Rc::new(RefCell::new(vec![])),
@@ -660,16 +660,16 @@ fn execution_query_windows_follow_actual_source() {
     let fixture: Value = serde_json::from_slice(&output.stdout).unwrap();
     let runtime = Rc::new(Runtime::default());
     let venue = BybitExchange::new(
-        BaseExchange::new(
+        Rc::new(BaseExchange::new(
             safe_cex_types::ExchangeName::Bybit,
             serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
             Rc::new(DefaultStore::new()),
             runtime.clone(),
-            Default::default(),
-        ),
+            crate::binding::exchange::settings(),
+        )),
         runtime,
         Arc::new(Clock::default()),
-        |opts, _| {
+        |opts, _, _| {
             Ok(Arc::new(Adapter {
                 key: opts.key.clone(),
                 calls: Rc::new(RefCell::new(vec![])),
@@ -772,7 +772,7 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
             serde_json::from_value(json!({"key":"", "secret":""})).unwrap(),
             store,
             runtime.clone(),
-            Default::default(),
+            crate::binding::exchange::settings(),
         );
         let active: Vec<String> = serde_json::from_value(case["active"].clone()).unwrap();
         base.set_active_ticker_symbols(&active).unwrap();
@@ -782,10 +782,10 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
             "fixture active symbols already normalized"
         );
         let venue = BybitExchange::new(
-            base,
+            Rc::new(base),
             runtime,
             Arc::new(Clock::default()),
-            |_, _| {
+            |_, _, _| {
                 Ok(Arc::new(Adapter {
                     key: String::new(),
                     calls: Rc::new(RefCell::new(vec![])),
@@ -808,14 +808,14 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
         );
         assert_eq!(
             fixture["symbols"].as_array().unwrap().len(),
-            8,
+            10,
             "CATEGORY-CARDINALITY symbol cases"
         );
         for symbol in fixture["symbols"].as_array().unwrap() {
             assert_eq!(
                 venue.get_category_for_symbol(symbol["symbol"].as_str().unwrap()),
                 symbol["category"].as_str().unwrap(),
-                "symbol category ignores input"
+                "symbol category routes options and inverse by symbol"
             );
         }
         if index == 0 {
@@ -1022,13 +1022,13 @@ fn protective_side_matches_source_coercion_and_exact_one_position() {
             serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
             store,
             runtime.clone(),
-            Default::default(),
+            crate::binding::exchange::settings(),
         );
         let venue = BybitExchange::new(
-            base,
+            Rc::new(base),
             runtime,
             Arc::new(Clock::default()),
-            |_, _| {
+            |_, _, _| {
                 Ok(Arc::new(Adapter {
                     key: String::new(),
                     calls: Rc::new(RefCell::new(vec![])),
@@ -1147,16 +1147,16 @@ fn linear_candle_validation_preserves_source_short_circuit() {
     let fixture: Value = serde_json::from_slice(&output.stdout).unwrap();
     let runtime = Rc::new(Runtime::default());
     let venue = BybitExchange::new(
-        BaseExchange::new(
+        Rc::new(BaseExchange::new(
             safe_cex_types::ExchangeName::Bybit,
             serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
             Rc::new(DefaultStore::new()),
             runtime.clone(),
-            Default::default(),
-        ),
+            crate::binding::exchange::settings(),
+        )),
         runtime,
         Arc::new(Clock::default()),
-        |opts, _| {
+        |opts, _, _| {
             Ok(Arc::new(Adapter {
                 key: opts.key.clone(),
                 calls: Rc::new(RefCell::new(vec![])),
@@ -1246,16 +1246,16 @@ fn cached_key_info_source_alias_and_native_snapshot() {
     let fixture: Value = serde_json::from_slice(&output.stdout).unwrap();
     let runtime = Rc::new(Runtime::default());
     let venue = BybitExchange::new(
-        BaseExchange::new(
+        Rc::new(BaseExchange::new(
             safe_cex_types::ExchangeName::Bybit,
             serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
             Rc::new(DefaultStore::new()),
             runtime.clone(),
-            Default::default(),
-        ),
+            crate::binding::exchange::settings(),
+        )),
         runtime,
         Arc::new(Clock::default()),
-        |opts, _| {
+        |opts, _, _| {
             Ok(Arc::new(Adapter {
                 key: opts.key.clone(),
                 calls: Rc::new(RefCell::new(vec![])),
@@ -1384,16 +1384,16 @@ fn linear_generated_link_id_matches_source_without_generation() {
     let fixture: Value = serde_json::from_slice(&output.stdout).unwrap();
     let runtime = Rc::new(Runtime::default());
     let venue = BybitExchange::new(
-        BaseExchange::new(
+        Rc::new(BaseExchange::new(
             safe_cex_types::ExchangeName::Bybit,
             serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
             Rc::new(DefaultStore::new()),
             runtime.clone(),
-            Default::default(),
-        ),
+            crate::binding::exchange::settings(),
+        )),
         runtime,
         Arc::new(Clock::default()),
-        |opts, _| {
+        |opts, _, _| {
             Ok(Arc::new(Adapter {
                 key: opts.key.clone(),
                 calls: Rc::new(RefCell::new(vec![])),
@@ -1484,13 +1484,13 @@ fn opposite_position_matches_source_signed_contracts() {
         serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
         store.clone(),
         runtime.clone(),
-        Default::default(),
+        crate::binding::exchange::settings(),
     );
     let venue = BybitExchange::new(
-        base,
+        Rc::new(base),
         runtime,
         Arc::new(Clock::default()),
-        |_, _| {
+        |_, _, _| {
             Ok(Arc::new(Adapter {
                 key: String::new(),
                 calls: Rc::new(RefCell::new(vec![])),
@@ -1500,6 +1500,51 @@ fn opposite_position_matches_source_signed_contracts() {
         |_| Rc::new(Protocol),
     )
     .unwrap();
+    let inverse = fixture["inverseCases"].as_array().unwrap();
+    assert_eq!(inverse.len(), 30, "OPPOSITE inverse source total");
+    for (index, case) in inverse.iter().enumerate() {
+        let positions = case["positions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(row_index, row)| {
+                let mut position: safe_cex_types::Position = serde_json::from_value(json!({
+                    "id":format!("p{row_index}"), "symbol":"BTCUSD", "side":row[0], "entryPrice":1, "leverage":1,
+                    "liquidationPrice":0, "notional":1, "unrealizedPnl":0, "contracts":row[1]
+                }))
+                .unwrap();
+                position.extra = row[2].as_f64().map(|native| safe_cex_types::PositionExtra {
+                    contracts_native: Some(native),
+                    unrealized_pnl_native: None,
+                });
+                position
+            })
+            .collect::<Vec<_>>();
+        Store::update(
+            store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                positions: Some(positions),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let side = if case["side"] == "buy" {
+            safe_cex_types::OrderSide::Buy
+        } else {
+            safe_cex_types::OrderSide::Sell
+        };
+        assert_eq!(
+            json!(venue.has_full_sized_position_opposite_side(
+                "BTCUSD",
+                side,
+                case["amount"].as_f64().unwrap()
+            )),
+            case["expected"],
+            "OPPOSITE inverse native size case {index}: {case}"
+        );
+    }
     let returns = RefCell::new(Vec::<usize>::new());
     let mut branches = [0_usize; 2];
     for index in 0..396 {
