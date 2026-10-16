@@ -1,7 +1,10 @@
 //! Module imports the ported class bodies read by name, bound to the existing
 //! Rust ports. A name the bodies reach that is not bound throws a visible
 //! ReferenceError rather than resolving to a stand-in.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{PropKey, Thrown, Value},
+};
 use crate::{cloid, types};
 
 fn arg(args: &[Value], i: usize) -> Value {

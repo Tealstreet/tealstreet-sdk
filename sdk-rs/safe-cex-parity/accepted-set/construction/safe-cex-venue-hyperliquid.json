@@ -1,0 +1,14 @@
+{
+  "safe_cex_venue_hyperliquid::helper_tasks::HelperObserver": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed the exact derived Clone of HelperObserver<V,E>: the sole field is Rc<RefCell<State<V,E>>>. Clone shares the existing completion and wakers; it creates no new task, validation token or one-use authority. The concrete native helper_observer_clone_shares_pending_completion_and_original_values witness uses the actual Realm HelperTaskHost and virtual TestRuntime at V=Value,E=Value. Pending clones share state, both registered wakers fire once, and original/cloned/late-cloned observers preserve fulfillment or rejection and original native object identity. A compiled detached-state Clone control fails the named pending-state assertion; exact restoration passes. This classifies this owner Clone only. Poll, task helpers, other owner APIs and generic runtime contracts retain their independent obligations."
+  },
+  "safe_cex_venue_hyperliquid::signing::SigningPayload": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed the exact derived Clone: private wire:serde_json::Value and encoding:JsJsonValue are separately owned snapshots. Clone preserves both graphs; it creates no validation token or one-use signing authority. The concrete native signing_payload_clone_retains_distinct_wire_and_encoding_snapshots witness builds a real prepared order through order_request_to_order_wire with an infinite native asset. Both clones keep wire null/omitted b and r fields separately from the encoding Number infinity and nil members, exact price/size strings and nested Gtc tag. Mutating each cloned view leaves its original view unchanged. Reconstructing Clone from only the wire view compiles and fails the named native asset assertion; exact restoration passes. This classifies only this owner Clone, preserving the documented owned-snapshot boundary; every raw conversion, signing and serialization API remains independently gated."
+  }
+}
