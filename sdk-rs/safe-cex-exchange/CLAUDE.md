@@ -927,3 +927,7 @@ indexer closed; native modules use free functions and trait impls only.
 `TealstreetTransport` over HOW adapters (bigInt = raw format) on a tunnel host that
 authenticates with the account's proxy token and checks expiry with the canonical
 `is_token_expired`. Proof: `safe-cex-registry/tests/native_host_tunnel.rs`.
+
+The JS HTTP terminal honors `responseType: 'text'` for encoded response bodies,
+including non-2xx responses. It preserves raw JSON tokens and whitespace until a
+venue's bigint-safe parser runs. The default continues ordinary JSON projection.

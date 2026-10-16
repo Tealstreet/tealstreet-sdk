@@ -1096,6 +1096,7 @@ impl safe_cex_transport::RestAdapter for Terminal {
             body: RestResponseBody::Encoded(body.as_bytes().to_vec()),
         };
         let result = match request.url.as_str() {
+            "/large-id" => Ok(response(200, r#"{ "orderId":9007199254740993 }"#)),
             "/down" => {
                 let mut failure = RestFailure::pre_transmit("socket hang up".into(), request);
                 failure.code = Some("ECONNRESET".into());
@@ -1175,6 +1176,44 @@ fn rest_http_host_carries_config_to_the_terminal_adapter() {
     assert_eq!(
         to_json(&down.value.get("code").unwrap()).unwrap(),
         json!("ECONNRESET")
+    );
+}
+
+#[test]
+fn rest_http_host_text_response_preserves_raw_big_integer_tokens() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let host = client::rest_http_host(runtime.clone(), terminal);
+    let xhr = client::create(host, Js::object(vec![("responseType", Js::str("text"))]));
+    let response = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/large-id")]).unwrap(),
+    )
+    .unwrap();
+    let raw = response.get("data").unwrap();
+    assert!(
+        raw.is_string(),
+        "text response must reach the venue before numeric projection"
+    );
+    assert_eq!(raw.to_display(), r#"{ "orderId":9007199254740993 }"#);
+    assert_eq!(
+        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())["orderId"],
+        "9007199254740993"
+    );
+    let failed = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/fail")]).unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        failed
+            .value
+            .get("response")
+            .unwrap()
+            .get("data")
+            .unwrap()
+            .to_display(),
+        r#"{"code":"1"}"#
     );
 }
 
