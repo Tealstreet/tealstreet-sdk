@@ -25,7 +25,7 @@ def run(label):
     return result
 
 baseline = run("baseline")
-assert baseline.returncode == 0 and "5 passed" in baseline.stdout, baseline.stdout
+assert baseline.returncode == 0 and "6 passed" in baseline.stdout, baseline.stdout
 try:
     for name, replacement in controls.items():
         # Only replace the public trait consumer; the untouched ported body still compiles.
@@ -47,6 +47,6 @@ try:
 finally:
     source.write_text(original)
 restored = run("restored")
-assert restored.returncode == 0 and "5 passed" in restored.stdout, restored.stdout
+assert restored.returncode == 0 and "6 passed" in restored.stdout, restored.stdout
 assert source.read_text() == original
-print("17 method controls caught; restored 5 Spot E2Es pass.", flush=True)
+print("17 method controls caught; restored 6 Spot E2Es pass.", flush=True)

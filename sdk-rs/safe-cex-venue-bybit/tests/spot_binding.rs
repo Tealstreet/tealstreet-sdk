@@ -294,3 +294,78 @@ fn spot_caller_id_is_verbatim_and_rejected_before_writes_when_invalid_or_split()
     }
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
+    h.drive(h.venue().start()).unwrap();
+    h.advance(2000.);
+    let private = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("/v5/private"))
+        .unwrap()
+        .1
+        .clone();
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value[0].clone());
+            Ok(())
+        }),
+    );
+    let mut row = json!({"orderId":"spot-live","orderLinkId":"SpotClient1","symbol":"BTCUSDT","side":"Buy","orderType":"Limit",
+        "price":"25000","qty":"0.01","leavesQty":"0.01","cumExecQty":"0","orderStatus":"New","timeInForce":"GTC",
+        "reduceOnly":false,"closeOnTrigger":false,"stopOrderType":"","triggerPrice":"","stopLoss":"","takeProfit":"","tpslMode":"","positionIdx":0});
+    private
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"topic":"order","data":[row.clone()]}).to_string(),
+        )));
+    h.runtime.pump();
+    assert!(
+        h.store.orders().iter().any(|o| o.id == "spot-live"),
+        "Spot private order reaches the store"
+    );
+    row["orderStatus"] = json!("PartiallyFilled");
+    row["cumExecQty"] = json!("0.004");
+    row["cumExecValue"] = json!("100");
+    row["avgPrice"] = json!("25000");
+    for _ in 0..2 {
+        private
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({"topic":"order","data":[row.clone()]}).to_string(),
+            )));
+        h.runtime.pump();
+    }
+    assert_eq!(
+        *fills.borrow(),
+        vec![
+            json!({"id":"spot-live","side":"buy","symbol":"BTCUSDT","price":25000.0,"amount":0.004})
+        ],
+        "Spot private replay emits one execution delta"
+    );
+    private
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"topic":"position","data":[{"symbol":"BTCUSDT","size":"10"}]}).to_string(),
+        )));
+    h.runtime.pump();
+    assert!(
+        h.store.positions().is_empty(),
+        "Spot source has no position handler"
+    );
+    h.venue().dispose().unwrap();
+    assert!(private.closed.get());
+}
