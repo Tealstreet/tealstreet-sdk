@@ -15,11 +15,12 @@ function load(file){
  }},{filename:file});return exports;
 }
 const enums=load(path.join(root,'packages/safe-cex/src/types.ts'));
+const inverseModule=load(path.join(root,'packages/safe-cex/src/exchanges/bybit/bybit.inverse.ts'));
 const file=path.join(root,'packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts');
 const source=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),99,true);
 assert.equal(source.parseDiagnostics.length,0);
 const klass=source.statements.find(s=>ts.isClassDeclaration(s)&&s.name.text==='BybitExchange');
-const names=['recordRecentlyPlacedOrderFromOpts','applyLocalOrderUpdateAfterRestWrite'];
+const names=['recordRecentlyPlacedOrderFromOpts','applyLocalOrderUpdateAfterRestWrite','remainingInStoreUnits'];
 const fields=names.map(name=>{
  const found=klass.members.filter(n=>n.name?.getText(source)===name);
  assert.equal(found.length,1,name);return found[0].getText(source);
@@ -37,7 +38,7 @@ function observe(value){
 }
 function make({parseReceiverWitness=false}={}){
  const events=[],clock={getCurrentTimeMs(){assert.equal(this,clock,'source clock receiver');events.push('clock');return 1234.5;}};
- const context=vm.createContext({exports:{},...enums,virtualClock:clock});
+ const context=vm.createContext({exports:{},...enums,isBybitInverseSymbol:inverseModule.isBybitInverseSymbol,virtualClock:clock});
  const parseReceiverCalls=vm.runInContext('[]',context);
  if(parseReceiverWitness){
   context.parseReceiverCalls=parseReceiverCalls;
@@ -51,7 +52,7 @@ function make({parseReceiverWitness=false}={}){
  owner.store={addOrUpdateOrders(orders){assert.equal(this,owner.store,'source publication receiver');events.push(['add',observe(orders)]);}};
  return {owner,events,parseReceiverCalls};
 }
-const base={symbol:'BTCUSD',type:enums.OrderType.Limit,side:enums.OrderSide.Buy,amount:7,price:11,triggerPrice:13,reduceOnly:true};
+const base={symbol:'BTCUSDT',type:enums.OrderType.Limit,side:enums.OrderSide.Buy,amount:7,price:11,triggerPrice:13,reduceOnly:true};
 const cases=[];
 const quantities=[undefined,'0','-0','NaN','Infinity','-Infinity','0x10','1.75tail',null,[],['2.5'],{}, {toString:null},'\ud800'];
 const prices=[undefined,'0','4.25tail',null];
@@ -101,7 +102,7 @@ const updateProfiles=[
 ];
 for(const [kind,patch,recent,fallback] of updateProfiles){
  const x=make(),info={child:'retained'};
- const order={id:'order-1',status:enums.OrderStatus.Open,symbol:'BTCUSD',type:enums.OrderType.Limit,side:enums.OrderSide.Buy,price:11,amount:7,filled:2,remaining:5,reduceOnly:true,timeInForce:enums.OrderTimeInForce.GoodTillCancel,lastUpdate:42,info};
+ const order={id:'order-1',status:enums.OrderStatus.Open,symbol:'BTCUSDT',type:enums.OrderType.Limit,side:enums.OrderSide.Buy,price:11,amount:7,filled:2,remaining:5,reduceOnly:true,timeInForce:enums.OrderTimeInForce.GoodTillCancel,lastUpdate:42,info};
  const prior={placedAt:12,order,extra:info};if(recent)x.owner.recentlyPlacedOrders.set(order.id,prior);
  x.owner.shouldUseLocalRestOrderLifecycleFallback=function(){assert.equal(this,x.owner,'source update fallback receiver');x.events.push('fallback');return fallback;};
  let passed;
@@ -130,6 +131,35 @@ const dependencyProfiles=[];
  assert.deepEqual(x.events[1][1].amount,observe(3.5));assert.deepEqual(x.events[1][1].price,observe(4.25));
  dependencyProfiles.push({kind,payload:observe(payload),calls:Array.from(x.parseReceiverCalls,call=>({receiverUndefined:call.receiverUndefined,input:observe(call.value)})),events:x.events});
 }
+const inverseRecords=[];
+for(const [kind,changes,payload] of [
+ ['contracts-at-price',{},{qty:'100',price:'25000'}],
+ ['fallback-price',{},{qty:'100',price:'0'}],
+ ['non-positive-price',{price:-5},{qty:'100',price:'-5'}],
+ ['dated-future',{symbol:'ETHUSDZ26'},{qty:'30',price:'3'}],
+]){
+ const x=make();x.owner.recordRecentlyPlacedOrderFromOpts('order-1',{...base,symbol:'BTCUSD',...changes},payload);
+ assert.equal(x.events.length,2);assert.equal(x.events[1][0],'record');
+ inverseRecords.push({kind,opts:observe({...base,symbol:'BTCUSD',...changes}),payload:observe(payload),events:x.events});
+}
+assert.deepEqual(inverseRecords[0].events[1][1].remaining,observe(0.004),'inverse remaining in coin');
+assert.deepEqual(inverseRecords[2].events[1][1].remaining,observe(100),'non-positive price keeps contracts');
+const inverseUpdates=[];
+for(const [kind,patch,extra] of [
+ ['price-amend',{price:20},undefined],['amount-amend',{amount:10},undefined],
+ ['retained-native',{},{remainingNative:50,keep:'x'}],['zero-price',{price:0},undefined],
+ ['amount-and-price',{amount:9,price:4},{remainingNative:50,keep:'x'}],
+]){
+ const x=make(),order={id:'order-1',symbol:'BTCUSD',price:11,amount:7,filled:2,remaining:5,lastUpdate:42};
+ if(extra)order.extra=extra;
+ x.owner.shouldUseLocalRestOrderLifecycleFallback=function(){x.events.push('fallback');return true;};
+ let passed;x.owner.store.addOrUpdateOrders=function(orders){passed=orders;x.events.push(['add',observe(orders)]);};
+ x.owner.applyLocalOrderUpdateAfterRestWrite(order,patch);
+ if(extra)assert.equal(order.extra,extra,'original extra untouched');
+ inverseUpdates.push({kind,order:observe(order),patch:observe(patch),events:x.events,passed:observe(passed)});
+}
+assert.deepEqual(inverseUpdates[0].passed[0].remaining,observe(0.25),'price-only amend rescales coin remaining');
+assert.equal(inverseRecords.length+inverseUpdates.length,9,'inverse profile floor');
 assert.equal(cases.length+supplements.length+updates.length,76,'retained baseline profile floor');
 assert.equal(dependencyProfiles.length,1,'separate dependency receiver profile floor');
-console.log(JSON.stringify({scope:'source-only extracted maintained methods; no native implementation, controls or annotation claim',declaredCases:56,cases,supplements,updates,declaredDependencyCases:1,dependencyProfiles}));
+console.log(JSON.stringify({scope:'source-only extracted maintained methods; no native implementation, controls or annotation claim',declaredCases:56,cases,supplements,updates,declaredDependencyCases:1,dependencyProfiles,inverseRecords,inverseUpdates}));

@@ -277,6 +277,7 @@ pub fn fixture_with(
         }),
         runtime.clone(),
         Rc::new(|_, _| panic!("fixture has no external public data")),
+        None,
     )
     .unwrap();
     assert_eq!(

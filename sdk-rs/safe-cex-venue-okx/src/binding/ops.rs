@@ -23,7 +23,7 @@ use safe_cex_exchange::{
         base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
         promise::await_js,
         scope::{Scope, ScopeShared, bound_member, scope_of},
-        value::{Js, Thrown, arg, from_typed, to_json, to_typed},
+        value::{Js, Thrown, arg, from_typed, to_json},
     },
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_exchange_metadata};
@@ -92,7 +92,7 @@ fn client_order_id_rule(shared: Weak<OkxShared>) -> ClientOrderIdRule {
 fn base_constructor(scope: &OkxScope) -> Js {
     let shared = scope.shared.clone();
     Js::constructor("BaseExchange", move |_, a| {
-        let options: ExchangeOptions = to_typed(&arg(&a, 1))?;
+        let options: ExchangeOptions = base_exchange::exchange_options(&arg(&a, 1))?;
         let parts = BaseExchangeParts {
             name: shared.extra.name.clone(),
             options,

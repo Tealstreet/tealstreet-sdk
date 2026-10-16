@@ -339,6 +339,14 @@ impl Host {
             ])
         });
         let owner = obj(vec![
+            (
+                "options",
+                if input["inverse"] == true {
+                    obj(vec![("enableInverseMarkets", b(true))])
+                } else {
+                    obj(vec![])
+                },
+            ),
             ("isPublicDataOnly", b(input["publicOnly"] == true)),
             ("DEFAULT_EXECUTIONS_LOOKBACK_MS", n(100.)),
             (
@@ -551,7 +559,7 @@ impl Host {
             "positions" => api::fetch_historical_positions(h, o, opts),
             "closed" => api::fetch_closed_pnl(h, o, opts),
             "orders" => api::fetch_historical_orders(h, o, opts),
-            "context" => api::income_context(self, &o)?,
+            "context" => api::income_contexts(self, &o)?,
             "wrapperIncome" => api::fetch_income_history(h, o, opts),
             "wrapperRange" => api::fetch_income_history_range(h, o, start, end, income),
             "income" => api::fetch_bybit_income_history(h, self.ctx.clone(), opts),
@@ -594,7 +602,7 @@ impl SnapshotHost for Host {
                         set_field(&self.owner, "xhr", next)
                     }
                 }
-                "incomeContext" => return api::income_context(self, owner),
+                "incomeContexts" => return api::income_contexts(self, owner),
                 _ => {}
             }
         }
@@ -610,6 +618,8 @@ impl SnapshotHost for Host {
                     | "fetchClosedPositionRows"
                     | "fetchHistoricalOrders"
                     | "emitAndLogError"
+                    | "inverseEnabled"
+                    | "refuseOptionSymbol"
             )
             || matches!(owner.as_ref(), Node::Array(_)) && matches!(key, "push" | "sort" | "slice")
             || matches!(owner.as_ref(), Node::Map(_)) && matches!(key, "get" | "set")
@@ -666,6 +676,8 @@ impl SnapshotHost for Host {
                 args[2].clone(),
                 args[3].clone(),
             )),
+            "refuseOptionSymbol" => api::refuse_option_symbol(self, &first, &args[1]),
+            "inverseEnabled" => api::inverse_enabled(self, owner),
             "getCategoryForSymbol" => {
                 self.rec("category", args)?;
                 let mut value = "category.".encode_utf16().collect::<Vec<_>>();
@@ -1066,6 +1078,14 @@ impl SnapshotHost for Host {
             }
             "iterator.close" => Ok(u()),
             "spreadArgs" => Ok(arr(items(&args[0]))),
+            "isBybitInverseSymbol" => Ok(b(
+                safe_cex_venue_bybit::inverse_symbol::is_bybit_inverse_symbol(
+                    &String::from_utf16_lossy(&text(&args[0])),
+                ),
+            )),
+            "isBybitOptionSymbol" => Ok(b(safe_cex_venue_bybit::options::is_bybit_option_symbol(
+                &String::from_utf16_lossy(&text(&args[0])),
+            ))),
             _ => panic!("unknown native intrinsic {name}"),
         }
     }
@@ -1182,7 +1202,7 @@ fn ledger_history_native_source_oracle() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(rows.len(), 87, "LEDGER independent case floor");
+    assert_eq!(rows.len(), 95, "LEDGER independent case floor");
     let mut counts = BTreeMap::new();
     let mut supplemental = vec![];
     for (index, row) in rows.iter().enumerate() {
@@ -1204,19 +1224,27 @@ fn ledger_history_native_source_oracle() {
             Ok(value) => {
                 assert_native(&value, &row["result"], &label);
                 if op == "context" {
-                    let xhr = field(&value, "xhr");
-                    let log = field(&value, "log");
-                    let refs = h.refs.borrow();
-                    assert!(
-                        refs.iter()
-                            .any(|(v, name)| name == "xhr" && Rc::ptr_eq(v, &xhr)),
-                        "{label}: native captured original xhr"
+                    let contexts = items(&value);
+                    assert_eq!(
+                        contexts.len(),
+                        if input["inverse"] == true { 2 } else { 1 },
+                        "{label}: native one context per traded category"
                     );
-                    assert!(
-                        refs.iter()
-                            .any(|(v, name)| name == "log" && Rc::ptr_eq(v, &log)),
-                        "{label}: native original log handle"
-                    );
+                    for context in contexts {
+                        let xhr = field(&context, "xhr");
+                        let log = field(&context, "log");
+                        let refs = h.refs.borrow();
+                        assert!(
+                            refs.iter()
+                                .any(|(v, name)| name == "xhr" && Rc::ptr_eq(v, &xhr)),
+                            "{label}: native captured original xhr"
+                        );
+                        assert!(
+                            refs.iter()
+                                .any(|(v, name)| name == "log" && Rc::ptr_eq(v, &log)),
+                            "{label}: native original log handle"
+                        );
+                    }
                 }
                 if matches!(
                     op,
@@ -1275,13 +1303,13 @@ fn ledger_history_native_source_oracle() {
     assert_eq!(
         counts,
         BTreeMap::from([
-            ("raw", 12),
+            ("raw", 13),
             ("positions", 10),
-            ("closed", 13),
-            ("orders", 14),
-            ("context", 4),
-            ("wrapperIncome", 4),
-            ("wrapperRange", 4),
+            ("closed", 15),
+            ("orders", 15),
+            ("context", 5),
+            ("wrapperIncome", 6),
+            ("wrapperRange", 5),
             ("income", 16),
             ("range", 10)
         ]),
@@ -1291,6 +1319,6 @@ fn ledger_history_native_source_oracle() {
         assert_eq!(actual, expected, "{label}")
     }
     eprintln!(
-        "LEDGER floor87 stopped at iteration86 range COMMISSION; native settlement/drain bound1024 jobs; all native assertions precede supplemental comparisons; no wire/roundtrip assertion"
+        "LEDGER floor95 stopped at iteration94 range COMMISSION; native settlement/drain bound1024 jobs; all native assertions precede supplemental comparisons; no wire/roundtrip assertion"
     );
 }

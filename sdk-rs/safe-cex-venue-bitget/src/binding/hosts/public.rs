@@ -825,7 +825,8 @@ fn dayjs_construct(rt: &Rt, input: &Js) -> Result<Js, Thrown> {
 // ts: resolveTransportRouting(name, options) over the shared Rust routing table.
 fn resolve_transport_routing(name: &Js, options: &Js) -> Result<Js, Thrown> {
     let name: ExchangeName = to_typed(name)?;
-    let options: ExchangeOptions = to_typed(options)?;
+    let options: ExchangeOptions =
+        safe_cex_exchange::js_runtime::base_exchange::exchange_options(options)?;
     let routing = safe_cex_transport::resolve_exchange_routing(
         &name,
         &safe_cex_transport::RoutingOptions::from(&options),

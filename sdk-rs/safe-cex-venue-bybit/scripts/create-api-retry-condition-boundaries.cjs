@@ -49,7 +49,7 @@ for (const statement of apiSource.statements) {
 }
 assert.deepEqual(moduleFunctions, [
   'isSignedRequest', 'isPublicEndpoint', 'isInstrumentsInfoRequest', 'isBybitClockSyncRetMsg',
-  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitEnvProbeRequest',
+  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitSignRejection', 'isBybitEnvProbeRequest',
   'shouldRetryBybitRequest', 'createAPI',
 ], 'independent module function inventory');
 assert.ok(factory);
@@ -84,43 +84,61 @@ const types = load('assembled-bybit-api-constants.ts', {}, typesProgram);
 assert.deepEqual(Object.keys(types).sort(), [...typeNames].sort());
 const response = load('packages/safe-cex/src/exchanges/bybit/bybit.response.ts');
 const retryReads = load('packages/safe-cex/src/utils/retryReadsOnly.ts', { 'axios-retry': retry });
+const signatureRejection = load('packages/safe-cex/src/utils/signatureRejection.ts');
 
 const inputs = [
   ['lower-string-substring', '{"ret_msg":"prefix error sign! suffix"}', 'retry'],
   ['camel-string-substring', '{"retMsg":"prefix error sign! suffix"}', 'retry'],
-  ['lower-array-exact', '{"ret_msg":["other","error sign!"]}', 'retry'],
-  ['camel-array-exact', '{"retMsg":["error sign!"]}', 'retry'],
+  ['lower-array-exact', '{"ret_msg":["other","error sign!"]}', 'original'],
+  ['camel-array-exact', '{"retMsg":["error sign!"]}', 'original'],
   ['lower-array-substring-does-not-match', '{"ret_msg":["prefix error sign! suffix"]}', 'original'],
-  ['lower-empty-array-falls-through', '{"ret_msg":[],"retMsg":["error sign!"]}', 'retry'],
-  ['lower-null-falls-through', '{"ret_msg":null,"retMsg":["error sign!"]}', 'retry'],
-  ['lower-empty-object', '{"ret_msg":{}}', 'TypeError'],
-  ['lower-number', '{"ret_msg":17}', 'TypeError'],
-  ['lower-boolean', '{"ret_msg":false}', 'TypeError'],
-  ['lower-own-includes-null', '{"ret_msg":{"includes":null}}', 'TypeError'],
-  ['lower-own-includes-string', '{"ret_msg":{"includes":"error sign!"}}', 'TypeError'],
-  ['lower-array-true-skips-camel-object', '{"ret_msg":["error sign!"],"retMsg":{}}', 'retry'],
+  ['lower-empty-array-falls-through', '{"ret_msg":[],"retMsg":["error sign!"]}', 'original'],
+  ['lower-null-falls-through', '{"ret_msg":null,"retMsg":["error sign!"]}', 'original'],
+  ['lower-empty-object', '{"ret_msg":{}}', 'original'],
+  ['lower-number', '{"ret_msg":17}', 'original'],
+  ['lower-boolean', '{"ret_msg":false}', 'original'],
+  ['lower-own-includes-null', '{"ret_msg":{"includes":null}}', 'original'],
+  ['lower-own-includes-string', '{"ret_msg":{"includes":"error sign!"}}', 'original'],
+  ['lower-array-is-not-a-message', '{"ret_msg":["error sign!"],"retMsg":{}}', 'original'],
   ['lower-string-true-skips-camel-boolean', '{"ret_msg":"error sign!","retMsg":false}', 'retry'],
-  ['lower-array-false-reaches-camel-object', '{"ret_msg":[],"retMsg":{}}', 'TypeError'],
-  ['lower-object-throws-before-positive-camel', '{"ret_msg":{},"retMsg":"error sign!"}', 'TypeError'],
-  ['lower-empty-string-reaches-camel-number', '{"ret_msg":"","retMsg":0}', 'TypeError'],
+  ['lower-array-false-reaches-camel-object', '{"ret_msg":[],"retMsg":{}}', 'original'],
+  ['lower-object-yields-to-positive-camel', '{"ret_msg":{},"retMsg":"error sign!"}', 'retry'],
+  ['lower-empty-string-reaches-camel-number', '{"ret_msg":"","retMsg":0}', 'original'],
   ['camel-array-substring-does-not-match', '{"retMsg":["prefix error sign! suffix"]}', 'original'],
   ['both-null-no-signature-retry', '{"ret_msg":null,"retMsg":null}', 'original'],
-  ['json-proto-key-does-not-install-includes', '{"ret_msg":{"__proto__":{"includes":"error sign!"}}}', 'TypeError'],
+  ['json-proto-key-does-not-install-includes', '{"ret_msg":{"__proto__":{"includes":"error sign!"}}}', 'original'],
+  ['code-10004-without-sign-text', '{"retCode":10004,"retMsg":"signature mismatch"}', 'retry'],
+  ['capitalised-error-sign-wording', '{"retCode":10001,"retMsg":"Error sign, please check your signature generation algorithm"}', 'retry'],
 ].map(([id, rawResponse, expected]) => ({ id, rawResponse, expected }));
 const pinnedIds = [
-  'lower-string-substring', 'camel-string-substring', 'lower-array-exact', 'camel-array-exact',
-  'lower-array-substring-does-not-match', 'lower-empty-array-falls-through', 'lower-null-falls-through',
-  'lower-empty-object', 'lower-number', 'lower-boolean', 'lower-own-includes-null', 'lower-own-includes-string',
-  'lower-array-true-skips-camel-object', 'lower-string-true-skips-camel-boolean',
-  'lower-array-false-reaches-camel-object', 'lower-object-throws-before-positive-camel',
-  'lower-empty-string-reaches-camel-number', 'camel-array-substring-does-not-match',
-  'both-null-no-signature-retry', 'json-proto-key-does-not-install-includes',
+  'lower-string-substring',
+  'camel-string-substring',
+  'lower-array-exact',
+  'camel-array-exact',
+  'lower-array-substring-does-not-match',
+  'lower-empty-array-falls-through',
+  'lower-null-falls-through',
+  'lower-empty-object',
+  'lower-number',
+  'lower-boolean',
+  'lower-own-includes-null',
+  'lower-own-includes-string',
+  'lower-array-is-not-a-message',
+  'lower-string-true-skips-camel-boolean',
+  'lower-array-false-reaches-camel-object',
+  'lower-object-yields-to-positive-camel',
+  'lower-empty-string-reaches-camel-number',
+  'camel-array-substring-does-not-match',
+  'both-null-no-signature-retry',
+  'json-proto-key-does-not-install-includes',
+  'code-10004-without-sign-text',
+  'capitalised-error-sign-wording',
 ];
-assert.equal(inputs.length, 20, 'declared source review case floor');
+assert.equal(inputs.length, 22, 'declared source review case floor');
 assert.deepEqual(inputs.map(value => value.id), pinnedIds);
-assert.equal(inputs.filter(value => value.expected === 'retry').length, 8);
-assert.equal(inputs.filter(value => value.expected === 'original').length, 3);
-assert.equal(inputs.filter(value => value.expected === 'TypeError').length, 9);
+assert.equal(inputs.filter(value => value.expected === 'retry').length, 6);
+assert.equal(inputs.filter(value => value.expected === 'original').length, 16);
+assert.equal(inputs.filter(value => value.expected === 'TypeError').length, 0);
 async function run(input) {
   let nextId = 0, authSuccesses = 0, authFailures = 0, sourceError;
   const physical = [], payloads = [], logs = [];
@@ -162,7 +180,7 @@ async function run(input) {
       syncFromServerTime() { assert.fail('no clock branch in rejection fixture'); },
     } },
     './bybit.response': response, './bybit.site': { getBybitSiteHeaders: () => ({}) },
-    './bybit.types': types, '../../utils/retryReadsOnly': retryReads,
+    './bybit.types': types, '../../utils/retryReadsOnly': retryReads, '../../utils/signatureRejection': signatureRejection,
   }, apiSource.text, { error: (...args) => logs.push(args) });
   const freshPredicateConfig = { method: 'post', url: '/private', data: { request: true } };
   const freshPredicateInput = new axios.AxiosError('original venue rejection', 'ERR_BAD_RESPONSE',
@@ -203,10 +221,13 @@ async function run(input) {
   assert.deepEqual(sourceError.response.data, JSON.parse(input.rawResponse), 'actual Axios parses rejection response JSON');
   assert.deepEqual(physical.map(value => value.data), retryExpected ? ['{"request":true}', '{"request":true}'] : ['{"request":true}']);
   assert.deepEqual(payloads, retryExpected
-    ? ['1000key20000{"request":true}', '1000key20000"{\\"request\\":true}"']
+    ? ['1000key20000{"request":true}', '1000key20000{"request":true}']
     : ['1000key20000{"request":true}']);
   let predicateResult, predicateError;
-  try { predicateResult = api.shouldRetryBybitRequest(sourceError); }
+  // The actual retry stamped this config; the pure condition is read on an unstamped copy.
+  const unstamped = { ...sourceError.config };
+  delete unstamped.safeCexSignatureRetry;
+  try { predicateResult = api.shouldRetryBybitRequest(Object.assign(Object.create(Object.getPrototypeOf(sourceError)), sourceError, { config: unstamped })); }
   catch (error) { predicateError = error; }
   if (input.expected === 'TypeError') {
     assert.equal(result, undefined);
@@ -241,17 +262,17 @@ async function run(input) {
 (async () => {
   const cases = [];
   for (const input of inputs) cases.push({ ...input, source: await run(input) });
-  assert.equal(cases.length, 20, 'executed source review case floor');
+  assert.equal(cases.length, 22, 'executed source review case floor');
   assert.deepEqual(cases.map(value => value.id), pinnedIds);
-  assert.equal(cases.filter(value => value.source.outcome === 'resolved-after-retry').length, 8);
-  assert.equal(cases.filter(value => value.source.outcome === 'original-rejection').length, 3);
-  assert.equal(cases.filter(value => value.source.outcome === 'TypeError').length, 9);
-  assert.equal(cases.filter(value => value.source.predicate.kind === 'boolean' && value.source.predicate.value === true).length, 8);
-  assert.equal(cases.filter(value => value.source.predicate.kind === 'boolean' && value.source.predicate.value === false).length, 3);
-  assert.equal(cases.filter(value => value.source.predicate.kind === 'error' && value.source.predicate.name === 'TypeError').length, 9);
+  assert.equal(cases.filter(value => value.source.outcome === 'resolved-after-retry').length, 6);
+  assert.equal(cases.filter(value => value.source.outcome === 'original-rejection').length, 16);
+  assert.equal(cases.filter(value => value.source.outcome === 'TypeError').length, 0);
+  assert.equal(cases.filter(value => value.source.predicate.kind === 'boolean' && value.source.predicate.value === true).length, 6);
+  assert.equal(cases.filter(value => value.source.predicate.kind === 'boolean' && value.source.predicate.value === false).length, 16);
+  assert.equal(cases.filter(value => value.source.predicate.kind === 'error' && value.source.predicate.name === 'TypeError').length, 0);
   process.stdout.write(JSON.stringify({
-    scope: 'source-only; raw JSON rejection responses transformed by actual Axios; unchanged maintained API/response/read-retry with actual axios-retry/qs; standard inherited String/Array includes and JSON own noncallable properties, no custom prototype/functions; scripted common constructor/physical adapter and recording signer; no native proof',
+    scope: 'source-only; raw JSON rejection responses transformed by actual Axios; unchanged maintained API/response/read-retry with actual axios-retry/qs; isBybitSignRejection over getBybitResponseMeta (retCode 10004 or the first non-empty string message matching /error sign/i); JSON own noncallable properties, no custom prototype/functions; scripted common constructor/physical adapter and recording signer; no native proof',
     sourceCallbacks: callbacks, sourceModuleFunctions: moduleFunctions, assembledAstDiagnostics: 0,
-    declaredCases: 20, outcomes: { retried: 8, originalRejection: 3, TypeError: 9 }, cases,
+    declaredCases: 22, outcomes: { retried: 6, originalRejection: 16, TypeError: 0 }, cases,
   }) + '\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });

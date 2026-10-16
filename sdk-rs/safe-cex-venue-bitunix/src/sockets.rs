@@ -1538,6 +1538,8 @@ impl Socket {
             let runtime = venue.runtime.clone();
             let (clock, nonce, id) = (runtime.clone(), runtime.clone(), runtime.clone());
             let signer = venue.base.signers.remote_signer.clone();
+            let account_name = venue.remote_account_name.clone();
+            let request_account = account_name.clone();
             let name = Exchange::name(venue.as_ref()).clone();
             let report = venue.clone();
             let sender = socket.clone();
@@ -1554,7 +1556,7 @@ impl Socket {
                 || Ok(signer),
                 || Ok(options.secret.clone()),
                 || Ok(id.unique_id()),
-                |_| Ok(JsJsonValue::Undefined),
+                |_| Ok(account_name.map_or(JsJsonValue::Undefined, JsJsonValue::String)),
                 |signer, payload| async move {
                     let value = json(&payload).map_err(|e| e.message)?;
                     let request: safe_cex_types::ws_auth::WsAuthRequest =
@@ -1562,7 +1564,7 @@ impl Socket {
                     let response = signer
                         .sign(safe_cex_transport::signing::RemoteSignerRequest::WsAuth {
                             exchange_name: name,
-                            account_name: None,
+                            account_name: request_account,
                             request,
                         })
                         .await
