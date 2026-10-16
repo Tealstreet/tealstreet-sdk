@@ -168,3 +168,28 @@ source exactly passes all three again. The existing fifty-three-case source
 oracle covers the consumed root and nested SDK maps. No shared decoder guard,
 borrowed lifetime rule or historical debt entry changes. Remaining compiler
 owners and local scopes retain their review obligations.
+
+## Complete exchange owner and borrowed Fields
+
+The GrvtExchange contract retains all eleven compiler-selected APIs. Its
+constructor has a specific typed capability role; six raw methods observe native
+results, Store state and HTTP requests. Four inherited rejections use only the
+reviewed per-method source, signature, fixture and adapter policy. Each rejection
+observes the actual Error name/message and unchanged HTTP/state effects.
+
+Fields<bool> retains its Rc/RefCell/IndexMap identity and static borrowed string
+keys. Its finite borrowed-map contract executes all 36 immutable route witnesses:
+static text, retained static borrowed Value and owned Value. Native key order,
+bool payloads, source-text offsets and borrowed Value key pointers are observed.
+Escaped text and nonempty owned Values refuse; an empty owned map admits. No
+caller projection, ownership change or permission for other generic arguments
+is added. All nineteen reviewed GRVT aliases now have their own stored contracts.
+
+Both new complete owners pass production execution on native and wasm. The
+complete stored set executes together on each target, including all nineteen
+aliases, and its receipts pass the scoped ratchet. A compiled
+production position-size drift fails both fetch_positions observations while all
+36 Fields routes remain green; exact byte restoration passes both owners again.
+The merged Fields tooling additionally proves native identity, member-order and
+removed-policy controls. These receipts retain the ordinary guards and do not
+complete the remaining nominal, receiver or local-scope review.
