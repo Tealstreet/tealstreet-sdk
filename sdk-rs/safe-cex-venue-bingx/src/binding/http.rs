@@ -6,15 +6,15 @@ use crate::{
 use safe_cex_exchange::{
     exchange::BaseExchange,
     js_runtime::{
-        client::{self, JsHttpHost},
-        promise::{JsFuture, await_js},
-        value::{Js, Thrown, arg, from_json, to_json},
+        client,
+        promise::await_js,
+        value::{Js, Thrown, arg, from_json, from_typed, to_json},
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
+    runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_transport::{
-    RestAdapterContext, RestAdapterVariant, RestBody, RestRequest, RestTransportContext,
+    RestAdapterVariant, RestBody, RestRequest,
     retry::{ClassifiedRequest, ReadClassification},
     signature_rejection::{IsSignatureRejection, SignatureRetry, signature_rejected_response},
 };
@@ -28,40 +28,8 @@ use std::{
 pub(super) struct ClientEntry {
     transport: Weak<dyn ReadTransport>,
     client: Js,
-    route: Rc<Route>,
     signer: Rc<RefCell<Weak<BingxApi>>>,
     signature: Rc<RefCell<Option<IsSignatureRejection>>>,
-}
-struct Route {
-    runtime: Rc<dyn safe_cex_exchange::websocket::WsRuntime>,
-    sender: RefCell<Rc<dyn JsHttpHost>>,
-    authorize: Option<std::sync::Arc<dyn safe_cex_transport::RestAuthorizer>>,
-}
-impl JsHttpHost for Route {
-    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
-        self.runtime.clone()
-    }
-    fn send(&self, config: Js) -> JsFuture<'static> {
-        let sender = self.sender.borrow().clone();
-        let authorizer = self.authorize.clone();
-        Box::pin(async move {
-            if let Some(auth) = authorizer {
-                let mut request = RestRequest {
-                    method: config.get("method")?.to_display(),
-                    url: config.get("url")?.to_display(),
-                    ..Default::default()
-                };
-                auth.authorize(&mut request)
-                    .await
-                    .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-                let headers = config.get("headers")?;
-                for (name, value) in request.headers {
-                    headers.define(&name, Js::str(&value))?;
-                }
-            }
-            sender.send(config).await
-        })
-    }
 }
 struct Transport {
     client: Js,
@@ -245,7 +213,7 @@ impl Host {
         *entry.signer.borrow_mut() = Rc::downgrade(api);
         Ok(())
     }
-    fn client(&self, transport: &Rc<dyn ReadTransport>) -> Result<(Js, Rc<Route>), ExchangeError> {
+    fn client(&self, transport: &Rc<dyn ReadTransport>) -> Result<Js, ExchangeError> {
         self.clients
             .borrow()
             .iter()
@@ -254,13 +222,13 @@ impl Host {
                     .transport
                     .upgrade()
                     .filter(|t| Rc::ptr_eq(t, transport))
-                    .map(|_| (entry.client.clone(), entry.route.clone()))
+                    .map(|_| entry.client.clone())
             })
             .ok_or_else(|| ExchangeError::new("BingX HTTP client was not created by this host"))
     }
     pub fn configure_limit(&self, api: &Rc<BingxApi>, rps: f64) -> Result<(), ExchangeError> {
         self.configure_signing(api)?;
-        let (client, _) = self.client(&api.client)?;
+        let client = self.client(&api.client)?;
         client
             .call_method(
                 "__configureRateLimit",
@@ -281,30 +249,12 @@ impl ApiHost for Host {
             let _ = self.scope.base.set(base.clone());
         }
         let provider = self.scope.runtime.transport();
-        let request = RestRequest {
-            base_url: Some(defaults.base_url.clone()),
-            ..Default::default()
-        };
-        let routing = provider
-            .rest(RestTransportContext {
-                exchange: &ExchangeName::Bingx,
-                options,
-                config: &request,
-            })
-            .map_err(|e| ExchangeError::new(e.to_string()))?;
-        let route = Rc::new(Route {
-            runtime: self.scope.runtime.clone(),
-            sender: RefCell::new(self.scope.http.clone()),
-            authorize: routing.authorize,
-        });
         let serializer = defaults.params_serializer;
-        let client = client::create(
-            route.clone(),
+        let client = client::factory::create(
+            self.scope.http.clone(),
+            provider.as_ref(),
             Js::object(vec![
-                (
-                    "baseURL",
-                    Js::str(routing.base_url.as_deref().unwrap_or(&defaults.base_url)),
-                ),
+                ("baseURL", Js::str(&defaults.base_url)),
                 ("timeout", Js::Number(defaults.timeout)),
                 ("responseType", Js::str("text")),
                 (
@@ -327,7 +277,10 @@ impl ApiHost for Host {
                     }),
                 ),
             ]),
-        );
+            &from_typed(options).map_err(error)?,
+            ExchangeName::Bingx,
+        )
+        .map_err(error)?;
         client
             .get("interceptors")
             .and_then(|i| i.get("request"))
@@ -356,7 +309,6 @@ impl ApiHost for Host {
         self.clients.borrow_mut().push(ClientEntry {
             transport: Rc::downgrade(&transport),
             client,
-            route,
             signer,
             signature,
         });
@@ -378,7 +330,7 @@ impl ApiHost for Host {
                 *entry.signature.borrow_mut() = Some(signature.clone());
             }
         }
-        let (client, _) = self.client(transport)?;
+        let client = self.client(transport)?;
         let condition = Js::function("retryRead", move |_, args| {
             let failure = arg(&args, 0);
             let config = failure.get("config")?;
@@ -432,21 +384,15 @@ impl ApiHost for Host {
         options: &ExchangeOptions,
         _: &Rc<BaseExchange>,
     ) -> Result<(), ExchangeError> {
-        if let Some(adapter) = self
-            .scope
-            .runtime
-            .transport()
-            .rest_adapter(RestAdapterContext {
-                exchange: &ExchangeName::Bingx,
-                options,
-                variant: RestAdapterVariant::BigInt,
-            })
-        {
-            let (_, route) = self.client(client)?;
-            *route.sender.borrow_mut() =
-                client::rest_http_host(self.scope.runtime.clone(), adapter);
-        }
-        Ok(())
+        client::factory::install_transport_adapter(
+            self.scope.http.clone(),
+            self.scope.runtime.transport().as_ref(),
+            &self.client(client)?,
+            &from_typed(options).map_err(error)?,
+            ExchangeName::Bingx,
+            RestAdapterVariant::Default,
+        )
+        .map_err(error)
     }
     fn serialize(&self, params: &Value) -> Result<String, ExchangeError> {
         self.scope
