@@ -47,14 +47,17 @@ export function contractFor(type, contracts, context = {}) {
     assert.equal(type.deserialize, false, `${type.name}: accepted-set assertion: observed API cannot replace a Deserialize shape contract`);
     assert.ok(contract.category === undefined || contract.category === 'decoder', `${type.name}: accepted-set assertion: observed API cannot skip executed witnesses as non-decoder`);
     assert.ok(expected.length > 0, `${type.name}: accepted-set assertion: observed API requires exact entrypoints`);
-    for (const entry of expected) assert.ok(['observed', 'non-decoder'].includes(entry.input) && entry.reason?.trim(), `${type.name}: accepted-set assertion: observed API classification requires reason`);
+    for (const [index, entry] of expected.entries()) {
+      assert.ok(['observed', 'typed', 'non-decoder'].includes(entry.input) && entry.reason?.trim(), `${type.name}: accepted-set assertion: observed API classification requires reason`);
+      if (entry.input === 'typed') validateTypedEntrypoint(type, entry, index);
+    }
+    const observed = expected.filter(entry => entry.input === 'observed');
+    assert.ok(observed.length, `${type.name}: accepted-set assertion: observed API must execute an actual observed method`);
     if (expected.length === 1) {
       assert.ok(contract.call?.includes('$value') && contract.cases?.length >= 2 && contract.cases.every(row => Object.hasOwn(row, 'input') && Object.hasOwn(row, 'output')), `${type.name}: accepted-set assertion: observed API requires executed input/output witnesses`);
       return contract;
     }
     assert.ok(!Object.hasOwn(contract, 'call') && !Object.hasOwn(contract, 'cases'), `${type.name}: accepted-set assertion: multi-entry observed witnesses cannot override generated dispatch`);
-    const observed = expected.filter(entry => entry.input === 'observed');
-    assert.ok(observed.length, `${type.name}: accepted-set assertion: observed API must execute an actual observed method`);
     for (const entry of observed) {
       if (entry.unitInput === true) {
         assert.deepEqual([entry.api.kind, entry.api.trait, entry.api.name, entry.api.signature?.inputs], ['trait', 'serde_core::de::Visitor', 'visit_unit', [['self', { generic: 'Self' }]]], `${type.name}: accepted-set assertion: unit witness requires the exact compiler self-only Visitor method`);
@@ -81,8 +84,7 @@ export function contractFor(type, contracts, context = {}) {
     }
     assert.ok(['typed', 'value', 'string', 'json-text', 'map', 'number'].includes(entry.input), `${type.name}: accepted-set assertion: unknown entrypoint input contract`);
     assert.ok(entry.reason?.trim(), `${type.name}: accepted-set assertion: entrypoint requires a reason`);
-    const signature = JSON.stringify({ trait: entry.api.trait, inputs: entry.api.kind === 'conversion' ? entry.api.args : entry.api.signature?.inputs });
-    if (entry.input === 'typed') assert.ok(!type.rawEntrypoints?.[index] && !/FromStr|serde_json::(?:value::)?(?:Value|Map)|\"primitive\":\"(?:str|u8)\"|alloc::string::String/.test(signature), `${type.name}: accepted-set assertion: raw decoder cannot be classified typed`);
+    if (entry.input === 'typed') validateTypedEntrypoint(type, entry, index);
     if (entry.input !== 'typed') {
       assert.ok(entry.call?.includes('$value') && entry.positive?.length, `${type.name}: accepted-set assertion: entrypoint requires runtime adapter`);
       assert.notEqual(contract.shape, 'typed', `${type.name}: accepted-set assertion: raw adapter needs a shape contract`);
@@ -91,6 +93,11 @@ export function contractFor(type, contracts, context = {}) {
   }
   if (type.deserialize !== false && type.generics.params.length) assert.ok(contract.instantiation, `${type.name}: accepted-set assertion: generic type needs classified monomorphization`);
   return contract;
+}
+
+function validateTypedEntrypoint(type, entry, index) {
+  const signature = JSON.stringify({ trait: entry.api.trait, inputs: entry.api.kind === 'conversion' ? entry.api.args : entry.api.signature?.inputs });
+  assert.ok(!type.rawEntrypoints?.[index] && !/FromStr|serde_json::(?:value::)?(?:Value|Map)|"primitive":"(?:str|u8)"|alloc::string::String/.test(signature), `${type.name}: accepted-set assertion: raw decoder cannot be classified typed`);
 }
 
 function validateNative(name, native) {

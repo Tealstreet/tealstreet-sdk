@@ -166,11 +166,11 @@ test('production runner rejects widening, new owners, and remote Self bypass at 
   negative('raw doc attribute predicate', value => `${value}\n#[cfg_attr(r#doc, cfg(any()))] #[derive(serde::Deserialize)] pub enum RawShadow { Buy }\n`, /DOC_CONFIGURATION/, [], false);
   const external = path.join(fixture, 'src/hidden.rs');
   try {
-    fs.writeFileSync(external, '#![cfg(not(doc))]\n#[derive(serde::Deserialize)] pub enum Hidden { Buy }\n');
+    fs.writeFileSync(external, '#![cfg(not(doc))]\n#[allow(dead_code)] #[derive(serde::Deserialize)] pub enum Hidden { Buy }\n');
     negative('external module inner doc predicate', value => `${value}\nmod hidden;\n`, /hidden.rs: accepted-set assertion: DOC_CONFIGURATION/, [], false);
     negative('local external module inner doc predicate', value => `${value}\n pub fn hidden_owner() { #[path = "hidden.rs"] mod hidden; }\n`, /UNSUPPORTED_LOCAL_EXTERNAL_MODULE.*accepted-set assertion/, [], false);
     negative('path module inner doc predicate', value => `${value}\n#[path = "hidden.rs"] mod other;\n`, /hidden.rs: accepted-set assertion: DOC_CONFIGURATION/, [], false);
-    fs.writeFileSync(external, '#![r#cfg(not(doc))]\n#[derive(serde::Deserialize)] pub enum Hidden { Buy }\n');
+    fs.writeFileSync(external, '#![r#cfg(not(doc))]\n#[allow(dead_code)] #[derive(serde::Deserialize)] pub enum Hidden { Buy }\n');
     negative('external raw cfg attribute', value => `${value}\nmod hidden;\n`, /hidden.rs: accepted-set assertion: DOC_CONFIGURATION/, [], false);
   } finally { fs.rmSync(external, { force: true }); }
   negative('enum re-widened', value => value.replace(/impl<'de> serde::Deserialize<'de> for Side \{[\s\S]*?\n\}\n\nmod private/, '\nmod private').replace('#[derive(Debug, serde::Serialize)]', '#[derive(Debug, serde::Serialize, serde::Deserialize)]'), /accepted_set_control::Side:.*Deserialize accepted.*buy/);
