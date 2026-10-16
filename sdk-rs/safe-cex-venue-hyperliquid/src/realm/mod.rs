@@ -13,6 +13,7 @@ pub(crate) mod json;
 pub(crate) mod ops;
 pub(crate) mod promise;
 pub(crate) mod regex;
+mod typed;
 pub(crate) mod value;
 
 pub(crate) mod builtins;
@@ -26,6 +27,7 @@ mod host_core;
 mod host_income;
 mod host_leaves;
 mod host_market;
+mod host_spot;
 mod host_startup;
 pub(crate) mod imports;
 pub(crate) mod imports_utils;
