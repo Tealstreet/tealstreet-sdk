@@ -1000,3 +1000,12 @@ worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
 completion hook and reconstructed error properties. Arguments/results use the
 existing JSON worker boundary; it does not create a parallel worker protocol.
 
+
+The shared lodash import table supplies `times` for source order splitting.
+It truncates the coerced count, returns an empty array for invalid/nonpositive
+counts, and treats non-callable iteratees as identity (not a property shorthand).
+Callbacks receive only their index with undefined `this`; results retain their
+values, and a thrown callback stops further calls without replacing its error.
+`js_runtime::library::tests::lodash_times_*` compares 68 installed-lodash cases
+and independently checks native callback/error behavior. The callback-arity
+mutation compiles and fails both tests, then passes after restoration.
