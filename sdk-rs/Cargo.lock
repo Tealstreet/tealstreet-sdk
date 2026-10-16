@@ -4227,6 +4227,7 @@ dependencies = [
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
