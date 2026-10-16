@@ -3973,3 +3973,10 @@ cached-positions `serde_json::to_value` pattern. ApexOmni's private position
 projection immediately restores native scalar fields with ModelPatch; Backpack's
 Market snapshot projections are a broader candidate outside its leverage setter,
 without a proven failure in this work. No foreign production file is changed.
+
+The mandatory full `venue-oracle:bybit` command passes 204 tests across 49 test
+binaries (42 contain tests; seven contain zero), with zero failures or ignored
+tests. It runs with `SAFE_CEX_TYPESCRIPT_PATH` pointing at the installed compiler.
+Latest master `efbc4969b6` merges cleanly: the incoming Asterdex inventory reviews
+are preserved alongside the single owned Bybit removal. No Bybit or shared
+runtime production body changes in that integration.
