@@ -10814,6 +10814,352 @@
       ]
     }
   },
+  "safe_cex_venue_grvt::builder::get_eip712_domain": {
+    "api": {
+      "kind": "function",
+      "name": "get_eip712_domain",
+      "signature": {
+        "inputs": [
+          [
+            "testnet",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed getEIP712Domain in grvt.builder.ts: typed network bool selects chainId 325 or 326, retaining name GRVT Exchange and version string 0. Observations inspect the native object field count/order, string fields and chain Number bits before projection. Actual-source builder_domain tests independently cover both networks. This contract does not admit arbitrary raw objects or establish signing execution.",
+    "call": "{let d=$type($value.as_bool().unwrap());let object=d.as_object().expect(\"GRVT DOMAIN object\");serde_json::json!({\"keys\":object.keys().collect::<Vec<_>>(),\"count\":object.len(),\"name\":d[\"name\"].as_str().unwrap(),\"version\":d[\"version\"].as_str().unwrap(),\"chain_bits\":format!(\"{:016x}\",d[\"chainId\"].as_f64().unwrap().to_bits())})}",
+    "cases": [
+      {
+        "input": false,
+        "output": {
+          "keys": [
+            "name",
+            "version",
+            "chainId"
+          ],
+          "count": 3,
+          "name": "GRVT Exchange",
+          "version": "0",
+          "chain_bits": "4074500000000000"
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "keys": [
+            "name",
+            "version",
+            "chainId"
+          ],
+          "count": 3,
+          "name": "GRVT Exchange",
+          "version": "0",
+          "chain_bits": "4074600000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::public_subscriptions::map_interval_to_grvt": {
+    "api": {
+      "kind": "function",
+      "name": "map_interval_to_grvt",
+      "signature": {
+        "inputs": [
+          [
+            "interval",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_num::table_lookup::TableHit",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed actual GrvtPublicWebSocket.mapIntervalToGrvt: eighteen own string mappings; ordinary Object.prototype inherited members retain native ProtoMember identity/arity/string interpolation; every other key falls back to the original string. Expected mappings and all twelve inherited identities are independent literals. Native source interval_native covers mapping and identity; these exact production observations retain UTF-8 inputs and the existing stock-prototype boundary, without admitting executable/prototype-mutated hosts.",
+    "call": "{match $type($value.as_str().unwrap()){safe_cex_num::TableHit::Mapped(d)=>serde_json::json!({\"mapped\":d}),safe_cex_num::TableHit::Inherited(d)=>serde_json::json!({\"inherited\":match d{safe_cex_num::ProtoMember::Constructor=>\"Constructor\",safe_cex_num::ProtoMember::DefineGetter=>\"DefineGetter\",safe_cex_num::ProtoMember::DefineSetter=>\"DefineSetter\",safe_cex_num::ProtoMember::HasOwnProperty=>\"HasOwnProperty\",safe_cex_num::ProtoMember::LookupGetter=>\"LookupGetter\",safe_cex_num::ProtoMember::LookupSetter=>\"LookupSetter\",safe_cex_num::ProtoMember::IsPrototypeOf=>\"IsPrototypeOf\",safe_cex_num::ProtoMember::PropertyIsEnumerable=>\"PropertyIsEnumerable\",safe_cex_num::ProtoMember::ToString=>\"ToString\",safe_cex_num::ProtoMember::ValueOf=>\"ValueOf\",safe_cex_num::ProtoMember::Prototype=>\"Prototype\",safe_cex_num::ProtoMember::ToLocaleString=>\"ToLocaleString\"},\"arity\":d.length(),\"text\":d.js_string()}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"missing\":true})}}",
+    "cases": [
+      {
+        "input": "1m",
+        "output": {
+          "mapped": "CI_1_M"
+        }
+      },
+      {
+        "input": "3m",
+        "output": {
+          "mapped": "CI_3_M"
+        }
+      },
+      {
+        "input": "5m",
+        "output": {
+          "mapped": "CI_5_M"
+        }
+      },
+      {
+        "input": "15m",
+        "output": {
+          "mapped": "CI_15_M"
+        }
+      },
+      {
+        "input": "30m",
+        "output": {
+          "mapped": "CI_30_M"
+        }
+      },
+      {
+        "input": "1h",
+        "output": {
+          "mapped": "CI_1_H"
+        }
+      },
+      {
+        "input": "2h",
+        "output": {
+          "mapped": "CI_2_H"
+        }
+      },
+      {
+        "input": "4h",
+        "output": {
+          "mapped": "CI_4_H"
+        }
+      },
+      {
+        "input": "6h",
+        "output": {
+          "mapped": "CI_6_H"
+        }
+      },
+      {
+        "input": "8h",
+        "output": {
+          "mapped": "CI_8_H"
+        }
+      },
+      {
+        "input": "12h",
+        "output": {
+          "mapped": "CI_12_H"
+        }
+      },
+      {
+        "input": "1d",
+        "output": {
+          "mapped": "CI_1_D"
+        }
+      },
+      {
+        "input": "3d",
+        "output": {
+          "mapped": "CI_3_D"
+        }
+      },
+      {
+        "input": "5d",
+        "output": {
+          "mapped": "CI_5_D"
+        }
+      },
+      {
+        "input": "1w",
+        "output": {
+          "mapped": "CI_1_W"
+        }
+      },
+      {
+        "input": "2w",
+        "output": {
+          "mapped": "CI_2_W"
+        }
+      },
+      {
+        "input": "3w",
+        "output": {
+          "mapped": "CI_3_W"
+        }
+      },
+      {
+        "input": "4w",
+        "output": {
+          "mapped": "CI_4_W"
+        }
+      },
+      {
+        "input": "CI_5_M",
+        "output": {
+          "mapped": "CI_5_M"
+        }
+      },
+      {
+        "input": "unknown",
+        "output": {
+          "mapped": "unknown"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "mapped": ""
+        }
+      },
+      {
+        "input": "1M",
+        "output": {
+          "mapped": "1M"
+        }
+      },
+      {
+        "input": "\ud83d\udca0_1m",
+        "output": {
+          "mapped": "\ud83d\udca0_1m"
+        }
+      },
+      {
+        "input": "constructor",
+        "output": {
+          "inherited": "Constructor",
+          "arity": 1,
+          "text": "function Object() { [native code] }"
+        }
+      },
+      {
+        "input": "__defineGetter__",
+        "output": {
+          "inherited": "DefineGetter",
+          "arity": 2,
+          "text": "function __defineGetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "__defineSetter__",
+        "output": {
+          "inherited": "DefineSetter",
+          "arity": 2,
+          "text": "function __defineSetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "hasOwnProperty",
+        "output": {
+          "inherited": "HasOwnProperty",
+          "arity": 1,
+          "text": "function hasOwnProperty() { [native code] }"
+        }
+      },
+      {
+        "input": "__lookupGetter__",
+        "output": {
+          "inherited": "LookupGetter",
+          "arity": 1,
+          "text": "function __lookupGetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "__lookupSetter__",
+        "output": {
+          "inherited": "LookupSetter",
+          "arity": 1,
+          "text": "function __lookupSetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "isPrototypeOf",
+        "output": {
+          "inherited": "IsPrototypeOf",
+          "arity": 1,
+          "text": "function isPrototypeOf() { [native code] }"
+        }
+      },
+      {
+        "input": "propertyIsEnumerable",
+        "output": {
+          "inherited": "PropertyIsEnumerable",
+          "arity": 1,
+          "text": "function propertyIsEnumerable() { [native code] }"
+        }
+      },
+      {
+        "input": "toString",
+        "output": {
+          "inherited": "ToString",
+          "arity": 0,
+          "text": "function toString() { [native code] }"
+        }
+      },
+      {
+        "input": "valueOf",
+        "output": {
+          "inherited": "ValueOf",
+          "arity": 0,
+          "text": "function valueOf() { [native code] }"
+        }
+      },
+      {
+        "input": "__proto__",
+        "output": {
+          "inherited": "Prototype",
+          "arity": null,
+          "text": "[object Object]"
+        }
+      },
+      {
+        "input": "toLocaleString",
+        "output": {
+          "inherited": "ToLocaleString",
+          "arity": 0,
+          "text": "function toLocaleString() { [native code] }"
+        }
+      }
+    ]
+  },
   "safe_cex_venue_grvt::binding::exchange::GrvtExchange": {
     "shape": "observed",
     "evidence": "All eleven compiler-selected APIs are retained: the constructor has its specific typed capability role; six raw methods execute distinct native result, Store and transport observations; four inherited rejections use only the exact reviewed constant-output policy. Complete production probes pass on native and wasm. An isolated compiled production position-size drift fails both fetch_positions output expectations while all 36 Fields routes remain green; exact source restoration passes both owners. Remaining nominal/local review is separate.",

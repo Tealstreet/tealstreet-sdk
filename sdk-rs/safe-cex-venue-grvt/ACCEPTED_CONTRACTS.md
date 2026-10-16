@@ -132,6 +132,24 @@ code1000 cases, object coercion count and original thrown-object identity. The
 complete Private owner retains its separate API obligations. This batch does not
 claim whole-crate gate completion.
 
+## Domain and interval helpers
+
+The domain and websocket interval contracts add two separately executed helper
+reviews. The EIP-712 domain observes both network choices, the three native
+object fields in order, string identity and chain-id Number bits. The websocket
+interval mapper observes all eighteen own mappings, five unchanged fallbacks and
+all twelve stock inherited members by native ProtoMember identity, arity and
+interpolation text. The existing builder_domain and public_subscriptions tests
+compare the actual TypeScript functions independently. These two contracts do
+not establish the caller's signing, subscription, or arbitrary host behavior.
+
+Swapping only the two production domain chain IDs compiled and failed the two
+network output expectations. Changing only the production 1m mapping to CI_3_M
+compiled and failed that exact interval output expectation. Each control retained
+the other helper's passing result; exact source restoration passed both owners.
+Selected production execution also passes on wasm. No new classification-only
+skip or historical debt row is introduced by these two helper reviews.
+
 ## Complete exchange owner and borrowed Fields
 
 The GrvtExchange contract retains all eleven compiler-selected APIs. Its
@@ -149,8 +167,8 @@ caller projection, ownership change or permission for other generic arguments
 is added. All nineteen reviewed GRVT aliases now have their own stored contracts.
 
 Both new complete owners pass production execution on native and wasm. The
-combined stored set passes with 70 runtime results and thirteen explicit
-classifications per target (83 total before the two helper PRs merge). A compiled
+complete stored set executes together on each target, including all nineteen
+aliases, and its receipts pass the scoped ratchet. A compiled
 production position-size drift fails both fetch_positions observations while all
 36 Fields routes remain green; exact byte restoration passes both owners again.
 The merged Fields tooling additionally proves native identity, member-order and
