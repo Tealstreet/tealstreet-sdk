@@ -32,7 +32,7 @@ use crate::{
 use safe_cex_exchange::js_runtime::{
     promise::{Promise, await_js},
     scope::{Scope, ScopeShared},
-    value::{Js, Thrown},
+    value::{Js, Prop, Thrown},
 };
 use std::rc::Rc;
 
@@ -354,8 +354,11 @@ impl ExchangeClassRealm for Realm {
         Ok(to_account(&Js::array(values.iter().map(to_js).collect())))
     }
     fn finish_class_binding(&self, class: &AccountValue) -> SigningResult<()> {
-        let name = to_js(class).get("name").map_err(to_signing)?;
-        let name = name.to_js_string().map_err(to_signing)?;
+        // js_runtime functions keep their name natively rather than as a property.
+        let Js::Function(function) = to_js(class) else {
+            return Err(to_signing(Thrown::type_error("class binding is not a function")));
+        };
+        let name = function.name.clone();
         self.0
             .globals
             .set_key(&name, to_js(class))
@@ -376,9 +379,20 @@ impl ExchangeClassRealm for Realm {
         if let Js::Object(o) = &instance {
             *o.proto.borrow_mut() = Some(prototype);
         }
+        // Own data members only: reading accessors here would run base getters
+        // (isPublicDataOnly) while the class is still under construction.
         let members = Js::object(vec![]);
-        for (key, value) in instance.own_entries().map_err(to_signing)? {
-            if value.is_callable() {
+        if let Js::Object(o) = &instance {
+            let methods: Vec<(Rc<[u16]>, Js)> = o
+                .props
+                .borrow()
+                .iter()
+                .filter_map(|(key, prop)| match prop {
+                    Prop::Data(value) if value.is_callable() => Some((key.clone(), value.clone())),
+                    _ => None,
+                })
+                .collect();
+            for (key, value) in methods {
                 members.define_key(&key, value).map_err(to_signing)?;
             }
         }

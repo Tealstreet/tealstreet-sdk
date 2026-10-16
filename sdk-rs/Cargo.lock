@@ -3987,11 +3987,13 @@ name = "safe-cex-venue-lighter"
 version = "0.1.0"
 dependencies = [
  "form_urlencoded",
+ "getrandom 0.2.17",
  "indexmap 2.14.2",
  "num-bigint 0.4.6",
  "safe-cex-candle-cache",
  "safe-cex-crypto",
  "safe-cex-exchange",
+ "safe-cex-lighter-sdk",
  "safe-cex-num",
  "safe-cex-store",
  "safe-cex-transport",

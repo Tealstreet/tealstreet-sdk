@@ -52,7 +52,8 @@ fn settings() -> ExchangeSettings {
 
 pub struct LighterNativeExchange {
     realm: Realm,
-    this: Js,
+    /// The constructed class instance; filled once construction returns.
+    this: std::cell::RefCell<Js>,
     capabilities: ExchangeCapabilities,
 }
 
@@ -140,6 +141,15 @@ impl LighterNativeExchange {
         let realm = build_realm(&name, &options, &store, &deps).map_err(err)?;
         let shared = realm.0.clone();
         let class = LighterExchange::define(&realm).map_err(|e| err(to_thrown(e)))?;
+        // The venue exists before construction: base getters such as
+        // isPublicDataOnly dispatch through it while the constructor runs.
+        let venue = Rc::new(Self {
+            realm,
+            this: std::cell::RefCell::new(Js::Undefined),
+            capabilities: capabilities(),
+        });
+        let dyn_venue: Rc<dyn Exchange> = venue.clone();
+        *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
         let this = to_js(&class)
             .call(
                 Js::Undefined,
@@ -151,13 +161,7 @@ impl LighterNativeExchange {
             )
             .map_err(err)?;
         *shared.exchange.borrow_mut() = this.clone();
-        let venue = Rc::new(Self {
-            realm,
-            this,
-            capabilities: capabilities(),
-        });
-        let dyn_venue: Rc<dyn Exchange> = venue.clone();
-        *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
+        *venue.this.borrow_mut() = this;
         Ok(venue)
     }
 
@@ -166,7 +170,7 @@ impl LighterNativeExchange {
         member: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
-        let this = self.this.clone();
+        let this = self.this.borrow().clone();
         Box::pin(async move {
             let value = await_js(this.call_method(member, args).map_err(err)?)
                 .await
@@ -176,7 +180,7 @@ impl LighterNativeExchange {
     }
 
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
-        let this = self.this.clone();
+        let this = self.this.borrow().clone();
         Box::pin(async move {
             await_js(this.call_method(member, args).map_err(err)?)
                 .await
@@ -272,6 +276,7 @@ impl Exchange for LighterNativeExchange {
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
         self.this
+            .borrow()
             .call_method("dispose", vec![])
             .map(|_| ())
             .map_err(err)

@@ -1,0 +1,410 @@
+//! TransactionClient parameter decoders and L2 transaction-info encoders. The
+//! encoders build the source object literals: every key present, undefined kept.
+use crate::{
+    http_transactions::*,
+    transaction_client::{SendTxBatchResponse, TransactionRef, VolumeQuotaRemaining},
+    transaction_client_types::*,
+    transaction_promise::{Shared, shared},
+};
+use num_bigint::BigInt;
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use std::rc::Rc;
+
+fn mismatch(key: &str, expected: &str, value: &Js) -> Thrown {
+    Thrown::type_error(&format!(
+        "{key} must be {expected}, received {}",
+        value.type_of()
+    ))
+}
+
+fn optional<T>(
+    object: &Js,
+    key: &str,
+    read: impl FnOnce(&str, Js) -> Result<T, Thrown>,
+) -> Result<Option<T>, Thrown> {
+    match object.get(key)? {
+        Js::Undefined => Ok(None),
+        value => read(key, value).map(Some),
+    }
+}
+
+fn as_big(key: &str, value: Js) -> Result<BigInt, Thrown> {
+    match value {
+        Js::BigInt(n) => Ok((*n).clone()),
+        other => Err(mismatch(key, "a bigint", &other)),
+    }
+}
+fn as_number(key: &str, value: Js) -> Result<f64, Thrown> {
+    match value {
+        Js::Number(n) => Ok(n),
+        other => Err(mismatch(key, "a number", &other)),
+    }
+}
+fn as_bool(key: &str, value: Js) -> Result<bool, Thrown> {
+    match value {
+        Js::Bool(b) => Ok(b),
+        other => Err(mismatch(key, "a boolean", &other)),
+    }
+}
+fn as_text(key: &str, value: Js) -> Result<Vec<u16>, Thrown> {
+    match value {
+        Js::String(s) => Ok(s.to_vec()),
+        other => Err(mismatch(key, "a string", &other)),
+    }
+}
+fn big(object: &Js, key: &str) -> Result<BigInt, Thrown> {
+    as_big(key, object.get(key)?)
+}
+fn number(object: &Js, key: &str) -> Result<f64, Thrown> {
+    as_number(key, object.get(key)?)
+}
+
+fn literal<T: Copy>(key: &str, value: Js, table: &[(&str, T)]) -> Result<T, Thrown> {
+    if let Js::String(text) = &value {
+        let text = String::from_utf16_lossy(text);
+        if let Some((_, kind)) = table.iter().find(|(name, _)| *name == text) {
+            return Ok(*kind);
+        }
+    }
+    Err(Thrown::type_error(&format!(
+        "{key} is not one of the declared literals: {}",
+        value.to_display()
+    )))
+}
+
+const ORDER_KINDS: [(&str, CreateOrderKind); 6] = [
+    ("limit", CreateOrderKind::Limit),
+    ("market", CreateOrderKind::Market),
+    ("stop_loss", CreateOrderKind::StopLoss),
+    ("stop_loss_limit", CreateOrderKind::StopLossLimit),
+    ("take_profit", CreateOrderKind::TakeProfit),
+    ("take_profit_limit", CreateOrderKind::TakeProfitLimit),
+];
+const TIME_IN_FORCE: [(&str, CreateOrderTimeInForce); 4] = [
+    ("GoodTillCancel", CreateOrderTimeInForce::GoodTillCancel),
+    (
+        "ImmediateOrCancel",
+        CreateOrderTimeInForce::ImmediateOrCancel,
+    ),
+    ("FillOrKill", CreateOrderTimeInForce::FillOrKill),
+    ("PostOnly", CreateOrderTimeInForce::PostOnly),
+];
+
+// ts: CreateOrderParams
+pub(super) fn create_order(params: &Js) -> Result<CreateOrderParams, Thrown> {
+    Ok(CreateOrderParams {
+        order_id: big(params, "orderId")?,
+        market_id: number(params, "marketId")?,
+        is_buy: as_bool("isBuy", params.get("isBuy")?)?,
+        price: big(params, "price")?,
+        amount: big(params, "amount")?,
+        post_only: optional(params, "postOnly", as_bool)?,
+        reduce_only: optional(params, "reduceOnly", as_bool)?,
+        order_type: optional(params, "orderType", |k, v| literal(k, v, &ORDER_KINDS))?,
+        trigger_price: optional(params, "triggerPrice", as_big)?,
+        order_expiry: optional(params, "orderExpiry", as_big)?,
+        expired_at: optional(params, "expiredAt", as_big)?,
+        time_in_force: optional(params, "timeInForce", |k, v| literal(k, v, &TIME_IN_FORCE))?,
+        integrator_account_index: optional(params, "integratorAccountIndex", as_big)?,
+        integrator_maker_fee: optional(params, "integratorMakerFee", as_number)?,
+        integrator_taker_fee: optional(params, "integratorTakerFee", as_number)?,
+    })
+}
+
+// ts: CreateGroupedOrdersParams
+pub(super) fn create_grouped_orders(params: &Js) -> Result<CreateGroupedOrdersParams, Thrown> {
+    let grouping = params.get("groupingType")?;
+    let grouping_type = match grouping.as_f64() {
+        Some(1.0) => LighterGroupedOrderType::OneTriggersTheOther,
+        Some(2.0) => LighterGroupedOrderType::OneCancelsTheOther,
+        Some(3.0) => LighterGroupedOrderType::OneTriggersOco,
+        _ => {
+            return Err(Thrown::error(
+                "Error",
+                &format!(
+                    "Unsupported Lighter grouped order type: {}",
+                    grouping.to_display()
+                ),
+            ));
+        }
+    };
+    let orders = params.get("orders")?;
+    let orders = orders
+        .array_values()
+        .ok_or_else(|| mismatch("orders", "an array", &orders))?
+        .iter()
+        .map(create_order)
+        .collect::<Result<_, _>>()?;
+    Ok(CreateGroupedOrdersParams {
+        grouping_type,
+        orders,
+        integrator_account_index: optional(params, "integratorAccountIndex", as_big)?,
+        integrator_maker_fee: optional(params, "integratorMakerFee", as_number)?,
+        integrator_taker_fee: optional(params, "integratorTakerFee", as_number)?,
+    })
+}
+
+// ts: CancelOrderParams
+pub(super) fn cancel_order(params: &Js) -> Result<CancelOrderParams, Thrown> {
+    Ok(CancelOrderParams {
+        order_id: big(params, "orderId")?,
+        market_id: number(params, "marketId")?,
+    })
+}
+
+// ts: UpdateLeverageParams
+pub(super) fn update_leverage(params: &Js) -> Result<UpdateLeverageParams, Thrown> {
+    let market_id = number(params, "marketId")?;
+    let leverage = number(params, "leverage")?;
+    let mode = params.get("marginMode")?;
+    let margin_mode = mode.as_f64().and_then(MarginMode::new).ok_or_else(|| {
+        Thrown::error(
+            "Error",
+            &format!("marginMode must be 0 or 1. Received: {}", mode.to_display()),
+        )
+    })?;
+    Ok(UpdateLeverageParams {
+        market_id,
+        leverage,
+        margin_mode,
+    })
+}
+
+/// `params.nonce ?? await getNextNonce()`: nullish means allocate.
+pub(super) fn approve_nonce(params: &Js) -> Result<Option<BigInt>, Thrown> {
+    match params.get("nonce")? {
+        Js::Undefined | Js::Null => Ok(None),
+        value => as_big("nonce", value).map(Some),
+    }
+}
+
+// ts: ApproveIntegratorParams
+pub(super) fn approve_integrator(
+    params: &Js,
+    nonce: Option<BigInt>,
+) -> Result<ApproveIntegratorParams, Thrown> {
+    Ok(ApproveIntegratorParams {
+        integrator_account_index: big(params, "integratorAccountIndex")?,
+        max_perps_taker_fee: number(params, "maxPerpsTakerFee")?,
+        max_perps_maker_fee: number(params, "maxPerpsMakerFee")?,
+        max_spot_taker_fee: number(params, "maxSpotTakerFee")?,
+        max_spot_maker_fee: number(params, "maxSpotMakerFee")?,
+        approval_expiry: big(params, "approvalExpiry")?,
+        nonce,
+        l1_signature: optional(params, "l1Signature", as_text)?,
+    })
+}
+
+pub(super) fn deadline(value: &Js) -> Result<BigInt, Thrown> {
+    as_big("deadline", value.clone())
+}
+
+// ts: SendTxBatchResponse
+pub(super) fn send_tx_batch_response(value: &Js) -> Result<SendTxBatchResponse, Thrown> {
+    let hashes = value.get("txHashes")?;
+    let tx_hashes = hashes
+        .array_values()
+        .ok_or_else(|| mismatch("txHashes", "an array", &hashes))?
+        .into_iter()
+        .map(|hash| as_text("txHashes[]", hash))
+        .collect::<Result<_, _>>()?;
+    let volume_quota_remaining = optional(value, "volumeQuotaRemaining", |key, v| match v {
+        Js::Number(n) => Ok(VolumeQuotaRemaining::Number(n)),
+        Js::String(s) => Ok(VolumeQuotaRemaining::String(s.to_vec())),
+        other => Err(mismatch(key, "a number or string", &other)),
+    })?;
+    Ok(SendTxBatchResponse {
+        tx_hashes: shared(tx_hashes),
+        predicted_execution_time_ms: optional(value, "predictedExecutionTimeMs", as_number)?,
+        volume_quota_remaining,
+    })
+}
+
+fn bigint(value: &BigInt) -> Js {
+    Js::BigInt(Rc::new(value.clone()))
+}
+fn opt<T>(value: Option<T>, encode: impl FnOnce(T) -> Js) -> Js {
+    value.map_or(Js::Undefined, encode)
+}
+
+fn header(kind: TransactionKind, h: &TransactionHeader, details: (&str, Js)) -> Js {
+    let mut fields = vec![
+        ("type", Js::str(kind.as_str())),
+        ("data", Js::utf16(&h.data)),
+        ("signature", Js::utf16(&h.signature)),
+        ("accountIndex", bigint(&h.account_index)),
+        ("apiKeyIndex", Js::Number(h.api_key_index)),
+        ("nonce", bigint(&h.nonce)),
+    ];
+    if let Some(expired_at) = &h.expired_at {
+        fields.push(("expiredAt", bigint(expired_at)));
+    }
+    fields.push(details);
+    Js::object(fields)
+}
+
+// ts: L2CreateOrderTxInfo
+pub(super) fn create_order_tx(tx: &L2CreateOrderTxInfo) -> Js {
+    let d = &tx.order_details;
+    let details = Js::object(vec![
+        ("orderId", bigint(&d.order_id)),
+        ("marketId", Js::Number(d.market_id)),
+        ("isBuy", Js::Bool(d.is_buy)),
+        ("price", bigint(&d.price)),
+        ("amount", bigint(&d.amount)),
+        ("postOnly", opt(d.post_only, Js::Bool)),
+        ("reduceOnly", opt(d.reduce_only, Js::Bool)),
+        ("orderTypeValue", opt(d.order_type_value, Js::Number)),
+        ("timeInForceValue", opt(d.time_in_force_value, Js::Number)),
+        ("triggerPrice", opt(d.trigger_price.as_ref(), bigint)),
+        ("orderExpiry", opt(d.order_expiry.as_ref(), bigint)),
+        (
+            "integratorAccountIndex",
+            opt(d.integrator_account_index.as_ref(), bigint),
+        ),
+        (
+            "integratorMakerFee",
+            opt(d.integrator_maker_fee, Js::Number),
+        ),
+        (
+            "integratorTakerFee",
+            opt(d.integrator_taker_fee, Js::Number),
+        ),
+    ]);
+    header(
+        TransactionKind::CreateOrder,
+        &tx.header,
+        ("orderDetails", details),
+    )
+}
+
+fn grouped_order(d: &LighterGroupedOrderDetails) -> Js {
+    Js::object(vec![
+        ("orderId", bigint(&d.order_id)),
+        ("marketId", Js::Number(d.market_id)),
+        ("isBuy", Js::Bool(d.is_buy)),
+        ("price", bigint(&d.price)),
+        ("amount", bigint(&d.amount)),
+        ("reduceOnly", opt(d.reduce_only, Js::Bool)),
+        ("orderTypeValue", opt(d.order_type_value, Js::Number)),
+        ("timeInForceValue", opt(d.time_in_force_value, Js::Number)),
+        ("triggerPrice", opt(d.trigger_price.as_ref(), bigint)),
+        ("orderExpiry", opt(d.order_expiry.as_ref(), bigint)),
+    ])
+}
+
+// ts: L2CreateGroupedOrdersTxInfo
+pub(super) fn create_grouped_orders_tx(tx: &L2CreateGroupedOrdersTxInfo) -> Js {
+    let d = &tx.grouped_order_details;
+    let details = Js::object(vec![
+        ("groupingType", Js::Number(d.grouping_type.value())),
+        (
+            "orders",
+            Js::array(d.orders.iter().map(grouped_order).collect()),
+        ),
+        (
+            "integratorAccountIndex",
+            opt(d.integrator_account_index.as_ref(), bigint),
+        ),
+        (
+            "integratorMakerFee",
+            opt(d.integrator_maker_fee, Js::Number),
+        ),
+        (
+            "integratorTakerFee",
+            opt(d.integrator_taker_fee, Js::Number),
+        ),
+    ]);
+    header(
+        TransactionKind::CreateGroupedOrders,
+        &tx.header,
+        ("groupedOrderDetails", details),
+    )
+}
+
+// ts: L2CancelOrderTxInfo
+pub(super) fn cancel_order_tx(tx: &L2CancelOrderTxInfo) -> Js {
+    let d = &tx.cancel_details;
+    let details = Js::object(vec![
+        ("orderId", bigint(&d.order_id)),
+        ("marketId", Js::Number(d.market_id)),
+        ("expiredAt", opt(d.expired_at.as_ref(), bigint)),
+    ]);
+    header(
+        TransactionKind::CancelOrder,
+        &tx.header,
+        ("cancelDetails", details),
+    )
+}
+
+// ts: L2TransferTxInfo
+pub(super) fn transfer_tx(tx: &L2TransferTxInfo) -> Js {
+    let d = &tx.transfer_details;
+    let details = Js::object(vec![
+        ("toAccountIndex", bigint(&d.to_account_index)),
+        ("amount", bigint(&d.amount)),
+        ("tokenId", Js::Number(d.token_id)),
+    ]);
+    header(
+        TransactionKind::Transfer,
+        &tx.header,
+        ("transferDetails", details),
+    )
+}
+
+// ts: L2UpdateLeverageTxInfo
+pub(super) fn update_leverage_tx(tx: &L2UpdateLeverageTxInfo) -> Js {
+    let d = &tx.leverage_details;
+    let details = Js::object(vec![
+        ("marketId", Js::Number(d.market_id)),
+        (
+            "initialMarginFraction",
+            Js::Number(d.initial_margin_fraction),
+        ),
+        ("marginMode", Js::Number(d.margin_mode.value())),
+        ("expiredAt", opt(d.expired_at.as_ref(), bigint)),
+    ]);
+    header(
+        TransactionKind::UpdateLeverage,
+        &tx.header,
+        ("leverageDetails", details),
+    )
+}
+
+// ts: L2ApproveIntegratorTxInfo
+pub(super) fn approve_integrator_tx(tx: &L2ApproveIntegratorTxInfo) -> Js {
+    let d = &tx.approve_integrator_details;
+    let details = Js::object(vec![
+        (
+            "integratorAccountIndex",
+            bigint(&d.integrator_account_index),
+        ),
+        ("maxPerpsTakerFee", Js::Number(d.max_perps_taker_fee)),
+        ("maxPerpsMakerFee", Js::Number(d.max_perps_maker_fee)),
+        ("maxSpotTakerFee", Js::Number(d.max_spot_taker_fee)),
+        ("maxSpotMakerFee", Js::Number(d.max_spot_maker_fee)),
+        ("approvalExpiry", bigint(&d.approval_expiry)),
+        ("expiredAt", opt(d.expired_at.as_ref(), bigint)),
+        ("l1Signature", opt(d.l1_signature.as_deref(), Js::utf16)),
+    ]);
+    header(
+        TransactionKind::ApproveIntegrator,
+        &tx.header,
+        ("approveIntegratorDetails", details),
+    )
+}
+
+pub(super) fn transaction_ref(tx: &TransactionRef) -> Js {
+    match tx {
+        TransactionRef::CreateOrder(v) => create_order_tx(&v.borrow()),
+        TransactionRef::CreateGroupedOrders(v) => create_grouped_orders_tx(&v.borrow()),
+        TransactionRef::CancelOrder(v) => cancel_order_tx(&v.borrow()),
+        TransactionRef::Transfer(v) => transfer_tx(&v.borrow()),
+        TransactionRef::UpdateLeverage(v) => update_leverage_tx(&v.borrow()),
+        TransactionRef::ApproveIntegrator(v) => approve_integrator_tx(&v.borrow()),
+    }
+}
+
+pub(super) fn create_order_txs(txs: &[Shared<L2CreateOrderTxInfo>]) -> Js {
+    Js::array(txs.iter().map(|tx| create_order_tx(&tx.borrow())).collect())
+}
