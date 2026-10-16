@@ -169,7 +169,7 @@ async fn many(orders: EventValue, b: &mut impl BatchBindings) -> Result<EventVal
             let f = b.capture_format()?;
             let formatted = f(o)?;
             if let EventValue::Array(a) = formatted {
-                payloads.extend(array_values(&a).into_iter())
+                payloads.extend(array_values(&a))
             } else {
                 payloads.push(formatted)
             }

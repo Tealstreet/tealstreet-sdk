@@ -65,7 +65,7 @@ fn retained_intrinsic_identity_fields_and_arity_match_node() {
         for value in [-0.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
             first.set("written", Js::Number(value)).unwrap();
             let PrototypeValue::Number(native) = reference.get("written") else {
-                panic!("number field")
+                panic!("INTRINSIC writes reach native realm as a number")
             };
             assert_eq!(
                 native.to_bits(),

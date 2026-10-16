@@ -314,7 +314,7 @@ pub async fn historical_fills(
             request.write("endTime", window.read("endTime")?);
             let data = get(endpoint("USER_TRADES"), omit(request))?.await?;
             if let EventValue::Array(a) = data {
-                rows.extend(array_values(&a).into_iter())
+                rows.extend(array_values(&a))
             }
         }
         map(EventValue::array(rows), |entry| execution_row(entry, b))

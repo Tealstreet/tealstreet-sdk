@@ -45,3 +45,12 @@ unit values, and callable fields refuse conversion. This preserves the previous
 DTO boundary (including synthetic position `info.symbolConfig`) using the same
 shared native visitor. Ordinary shared `to_typed` keeps its JSON-shaped omission
 policy. The pinned sixteen-method transport test independently checks this shape.
+
+Validation of the migration checkpoint: the mandatory complete venue oracle
+passes 300 tests across 73 targets; core runtime/typed/prototype/cancellation
+checks pass 74 tests. Three compiling controls separately break retained
+intrinsic identity, live native-field writes, and declared-DTO undefined presence.
+Each fails its named assertion; after restoring the source, all eight prototype
+and typed-value tests pass. Invention/status gates pass and extractor check
+reports zero changes. This evidence validates the graph migration, not the
+previously declared whole-venue divergences.
