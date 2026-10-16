@@ -21,7 +21,8 @@ GLOBAL_MUTATIONS = [
 ]
 INHERITED = "inherited_base_members_reject_or_resolve_empty"
 MUTATIONS = [
-    ("dispose", "self.base().dispose()?;", "", "disposal_during_fetch_markets_stops_start_before_store_update"),
+    ("dispose", '.call_method("dispose", vec![])', '.call_method("getPositionMode", vec![])', "disposal_during_fetch_markets_stops_start_before_store_update"),
+    ("dispose", "        self.rt\n", "        self.base().dispose()?;\n        self.rt\n", "dispose_sets_source_flag_without_removing_inherited_listeners"),
     ("place_order", '"placeOrder"', '"placeOrders"', "place_order_signs_a_limit_create_order"),
     ("place_orders", '"placeOrders"', '"placeOrder"', "place_orders_places_each_order_in_series"),
     ("start", '"start"', '"fetchMarkets"', "start_loads_markets_tickers_sockets_and_the_private_snapshot"),

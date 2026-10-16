@@ -299,3 +299,11 @@ Date construction and Date.now apply the shared TimeClip operation to injected
 wall-clock values. A fractional host clock must still produce an integer nonce;
 `tests/binding.rs` checks local signing with a fractional input. NativeRuntime also
 supplies integer epoch milliseconds, while monotonic clocks retain their precision.
+
+The original 53-root/2380-case numeric fixture deliberately excludes WsUserEvent;
+its complete intersection has separate finding_user_event/spot_runtime proofs.
+The source generator keeps that scope even after the seed repaired the previously
+fabricated user-only feeder row to valid funding plus user. Collection identity
+pins the repaired feeder hash and reconstructs the old excluded row to verify
+that every other feeder byte is unchanged. Neither numeric goldens nor native
+production behavior are rewritten to reconcile this source-corpus boundary.

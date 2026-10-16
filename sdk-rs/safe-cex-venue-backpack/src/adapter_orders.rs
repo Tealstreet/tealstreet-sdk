@@ -1,4 +1,5 @@
 //! Exchange account and batch entrypoints over the owned transport and store.
+use crate::native_value::NativeValue;
 use crate::{adapter::BackpackExchange, order_utils as mapping};
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
 use safe_cex_num::JsJsonValue;
