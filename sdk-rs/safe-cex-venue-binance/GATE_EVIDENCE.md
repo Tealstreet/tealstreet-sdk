@@ -3502,3 +3502,21 @@ post-only predicate, and true from the deprecated balance predicate, fails each
 function's named native assertion. Every exact source restoration passes that
 same test. The final production source is byte-identical to the starting source;
 this tranche changes tests and classifications, not the predicate implementations.
+
+The maintained `predicate-role-contracts.mjs` completes fresh ordinary
+native/default compiler discovery and three explicit production non-decoder
+classification receipts with zero failed owners. These receipts validate the
+reviewed function APIs/classifications; they do not execute their predicate
+logic. The native fixtures, live oracles and behavioral controls above supply
+that separate execution evidence. Discovery remains 235 owners, 80 aliases and
+two construction policies; the three selected receipts exclude other owners,
+aliases, locals and feature/wasm coverage.
+
+Selected `accepted_predicate_roles` Clippy passes with warnings denied, as do
+formatting, frozen dependency installation and parity-check. After integrating
+master `cc32fd465b`, the Rust/dependency/test/oracle inputs compare unchanged
+against validated predicate revision `f38213c340`; the existing compiled native
+and two live targets execute five passing tests again. This is documented binary
+reuse after input comparison, not a fresh Cargo test build. Controls and Clippy
+keep their pre-merge provenance. Every master contract entry remains unchanged;
+only these three reviewed predicates are added to the Binance shard.
