@@ -744,6 +744,14 @@ fn hosted_params_serializer(config: &Js) -> Result<Option<crate::http::ParamsSer
 }
 
 fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Thrown> {
+    rest_request_data(config, serialize_query, false)
+}
+
+fn rest_request_data(
+    config: &Js,
+    serialize_query: bool,
+    before_signing: bool,
+) -> Result<RestRequest, Thrown> {
     let mut headers = indexmap::IndexMap::new();
     let config_headers = config.get("headers")?;
     if !config_headers.is_nullish() {
@@ -759,6 +767,9 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
     let data = config.get("data")?;
     let body = match &data {
         Js::Undefined | Js::Null => None,
+        // A JS string is still typed adapter data at hosted-signing ingress.
+        // Only the direct terminal path has finished with that provenance.
+        Js::String(_) if before_signing => Some(RestBody::Untransformed(to_json(&data)?)),
         Js::String(text) => Some(RestBody::Encoded(
             String::from_utf16_lossy(text).into_bytes(),
         )),
@@ -945,7 +956,11 @@ impl JsHttpHost for RestHttpHost {
             } else {
                 adapter
             };
-            let request = rest_request(&config, remote.is_none() && adapter.query_in_url())?;
+            let request = rest_request_data(
+                &config,
+                remote.is_none() && adapter.query_in_url(),
+                remote.is_some(),
+            )?;
             match adapter.execute_with_receipt(request).await {
                 Ok(execution) => {
                     let config = if remote.is_some() {
