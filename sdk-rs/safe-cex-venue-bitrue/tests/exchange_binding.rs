@@ -229,7 +229,7 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
     );
     let opts:PlaceOrderOpts=serde_json::from_value(json!({"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.37,"price":27123.49,"clientOrderId":"caller-17"})).unwrap();
     assert_eq!(
-        complete(&runtime, api.base().place_order(api, opts)).expect("BIND placeOrder"),
+        complete(&runtime, api.base().place_order(api, opts.clone())).expect("BIND placeOrder"),
         ["placed-order"]
     );
     assert!(
@@ -238,6 +238,26 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
             .iter()
             .any(|r| r["url"] == "/fapi/v2/order" && r["data"]["clientOrderId"] == "caller-17"),
         "BIND placeOrder caller ID wire"
+    );
+    let mut first = opts.clone();
+    first.client_order_id = Some("batch-a".into());
+    let mut second = opts;
+    second.client_order_id = Some("batch-b".into());
+    let before = http.1.borrow().len();
+    assert_eq!(
+        complete(&runtime, api.base().place_orders(api, vec![first, second]))
+            .expect("BIND batch placement"),
+        ["placed-order", "placed-order"]
+    );
+    let written: Vec<_> = http.1.borrow()[before..]
+        .iter()
+        .filter(|r| r["url"] == "/fapi/v2/order")
+        .map(|r| r["data"]["clientOrderId"].clone())
+        .collect();
+    assert_eq!(
+        written,
+        [json!("batch-a"), json!("batch-b")],
+        "BIND batch preserves each caller ID"
     );
     let update:UpdateOrderOpts=serde_json::from_value(json!({"order":serde_json::to_value(&orders[0]).unwrap(),"update":{"price":27345.6,"amount":0.33}})).unwrap();
     assert_eq!(
