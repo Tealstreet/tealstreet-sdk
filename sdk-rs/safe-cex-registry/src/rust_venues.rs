@@ -82,6 +82,14 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn phemex(
+        &self,
+    ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "phemex inputs are unavailable on this host",
+        ))
+    }
+
     /// Optional hosted account capability; no host-local secret is required.
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
@@ -138,6 +146,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Phemex, phemex_constructor),
 ];
 
 pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -157,6 +166,19 @@ pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
                 options,
                 store,
                 host.asterdex()?,
+            )?,
+        )
+    })
+}
+
+pub fn phemex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_phemex::binding::exchange::PhemexExchange::new(
+                name,
+                options,
+                store,
+                host.phemex()?,
             )?,
         )
     })

@@ -1,7 +1,7 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, `cryptocom`, the Kraken family (`kraken`, `krakenspot`),
+`bitgetusdc`), `bitunix`, `blofin`, `cryptocom`, `phemex`, the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
@@ -209,3 +209,10 @@ constructs the bound venue using production native inputs and the shared host
 limiter argument, then checks its identity, distinct market precision steps,
 real local HTTP dispatch and Store read purity. The registry passes through the
 account's hosted signer and external-public-data provider to the venue binding.
+
+Phemex constructs through `phemex_constructor` and the production shared Js HTTP
+host, including hosted signing and the external-public-data gateway. Native host
+callers supply the shared limiter as for other venues. Phemex currently refuses
+`tealstreetTunnel` when no transport installer is supplied; the native host has
+no Phemex tunnel installer. `tests/native_host_phemex.rs` verifies real local HTTP
+market precision/read purity and signed account-query bytes through the registry.

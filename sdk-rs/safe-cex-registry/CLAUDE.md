@@ -119,3 +119,8 @@ constructor still takes the caller-owned Hyperliquid limiter introduced by the
 shared host API. `tests/native_host_cryptocom.rs` constructs through the registry
 and production native host, then reads markets over real local HTTP and checks
 read purity. The module-host construction path remains the default.
+
+Phemex's Rust constructor receives the shared Js HTTP host and external-data
+factory. Its local HTTP witness checks amount/price precision independently and
+verifies the account-query HMAC against the bytes observed by the server. Native
+Phemex tunnel construction fails explicitly without a transport installer.

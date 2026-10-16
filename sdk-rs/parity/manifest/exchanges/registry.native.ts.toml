@@ -326,9 +326,9 @@ note = "CHOSEN: native_paradex selects the actual source module ./paradex/parade
 ts = "exchangeRegistry.phemex"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_phemex"
+rs = [ "safe-cex-registry/src/loaders.rs::native_phemex", "safe-cex-registry/src/rust_venues.rs::phemex_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::phemex" ]
 status = "divergent"
-note = "CHOSEN: native_phemex selects the actual source module ./phemex/phemex.exchange and export PhemexExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_phemex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::phemex_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::phemex construct the production Phemex binding using shared native HTTP/WS runtime, hosted signing and external public data. CHOSEN: native_phemex selects the actual source module ./phemex/phemex.exchange and export PhemexExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_phemex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.polymarket"
