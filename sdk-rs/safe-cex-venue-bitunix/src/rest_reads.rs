@@ -132,6 +132,7 @@ where
                         min: 1.0,
                         max: 100.0,
                     },
+                    price: None,
                 },
                 pretty_symbol: None,
                 contract_size: None,
@@ -143,6 +144,7 @@ where
                 info: None,
                 taker_fee: None,
                 maker_fee: None,
+                option: None,
             });
         }
         Ok(markets)

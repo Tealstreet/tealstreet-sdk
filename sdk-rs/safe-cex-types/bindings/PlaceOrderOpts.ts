@@ -20,4 +20,8 @@ export type PlaceOrderOpts = {
     readonly clientOrderId?: string;
     readonly maxSlippagePct?: number;
     readonly close?: boolean;
+    /**
+     * Price an option order by implied volatility, as a fraction. Option markets only.
+     */
+    readonly impliedVolatility?: number;
 };

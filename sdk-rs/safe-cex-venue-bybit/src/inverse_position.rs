@@ -162,6 +162,7 @@ pub(crate) fn map_position_deferred(
             unrealized_pnl_native: Some(pnl),
         }),
         last_update: Some(last_update),
+        option: None,
     })))
 }
 
