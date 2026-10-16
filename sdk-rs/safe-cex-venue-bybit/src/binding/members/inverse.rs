@@ -115,6 +115,23 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(rt, "mapPosition", |rt, a| {
         super::inverse_mapping::map_position(&rt, &arg(&a, 0))
     })?;
+    method(rt, "setLeverage", |rt, a| {
+        super::controls::set_inverse_leverage(&rt, arg(&a, 0), arg(&a, 1))
+    })?;
+    method(rt, "fetchPositionMode", |rt, a| {
+        super::orders::fetch_inverse_position_mode(&rt, arg(&a, 0))
+    })?;
+    method(rt, "changePositionMode", |rt, a| {
+        let hedged = arg(&a, 0);
+        Ok(rt.clone().spawn(Box::pin(async move {
+            // Source deliberately discards symbol and changes linear USDT.
+            await_js(rt.this.call_method(
+                "changePositionModeHelper",
+                vec![hedged, Js::str("linear"), Js::str("USDT")],
+            )?)
+            .await
+        })))
+    })?;
     method(rt, "fetchRawBalance", |rt, _| {
         Ok(rt.clone().spawn(Box::pin(async move {
             reads::fetch_raw_balance(&rt, rt.this.clone()).await
