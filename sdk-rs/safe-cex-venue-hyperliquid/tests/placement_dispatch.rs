@@ -307,9 +307,14 @@ fn case(scene: &'static str) -> N {
                         "sz",
                         "limit_px",
                         "order_type",
-                        "reduce_only"
+                        "reduce_only",
+                        "cloid"
                     ],
                     "DISPATCH native request insertion order"
+                );
+                assert!(
+                    eq(&get(request, "cloid"), &st.marker),
+                    "DISPATCH native caller client order ID on the main wire"
                 );
                 assert!(eq(&get(request, "coin"), &s("coin")));
                 assert!(
@@ -466,10 +471,21 @@ fn case(scene: &'static str) -> N {
                 "DISPATCH native deferred short circuit"
             );
             let hip = ["tp-hip3", "tp-deferred", "drop-observer"].contains(&scene);
+            // HIP-3 stops, and core-perp stop ENTRIES (not reduce-only), are pre-cached.
+            let reduce_only = scene == "tp-full";
+            let trigger = scene.starts_with("tp") || scene.starts_with("sl") || scene == "drop-observer";
             assert_eq!(
                 count(&h, "addToPrePlacementCache"),
-                usize::from(hip),
+                usize::from(trigger && (hip || !reduce_only)),
                 "DISPATCH native precache count"
+            );
+            // Market and TP/SL wires are recorded once, after signing and before the POST.
+            let signed = !["limit", "sign-error", "tp-invalid", "sl-nan", "wrong-type", "trailing", "missing-market"]
+                .contains(&scene);
+            assert_eq!(
+                count(&h, "recordPlacement"),
+                usize::from(signed),
+                "DISPATCH native one placement record per signed wire"
             );
             assert_eq!(
                 count(&h, "refreshHip3OrdersWithRetry"),
@@ -595,7 +611,8 @@ fn dispatch_native_before_source() {
             let st = h.st.borrow();
             assert_eq!(
                 st.settled.len(),
-                if serial { 3 } else { 1 },
+                // placeOrder settles its own promise and #placeOrderWithCloid's.
+                if serial { 5 } else { 2 },
                 "DISPATCH native actual dropped observer settlements {scene}"
             );
             let r = st.settled.last().unwrap().as_ref().unwrap();

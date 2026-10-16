@@ -136,9 +136,15 @@ fn check_requests(h: &Host, scene: &str) {
                 "sz",
                 "limit_px",
                 "order_type",
-                "reduce_only"
+                "reduce_only",
+                "cloid"
             ],
             "LIMIT native request field order {scene}/{i}"
+        );
+        // The entry wire carries the default-minted placement cloid; each leg mints after it.
+        assert!(
+            eq(&get(r, "cloid"), &s(&format!("0xmint{}", i + 1))),
+            "LIMIT native cloid {scene}/{i}"
         );
         assert!(
             eq(&get(&st.wires[i], "request"), r),
@@ -216,9 +222,9 @@ fn case(family: &str, scene: &'static str) -> N {
     let e = h.base.exchange.clone();
     let opts = h.st.borrow().opts.clone();
     let result = if family == "wires" {
-        create_limit_order_wires(&mut h, &e, &opts)
+        create_limit_order_wires(&mut h, &e, &opts, &N::U)
     } else {
-        let observer = place_limit_order(&h, &e, &opts);
+        let observer = place_limit_order(&h, &e, &opts, &N::U);
         let promise = h.base.promise(observer);
         h.base.drain();
         h.base.native_result(&promise)
@@ -510,8 +516,15 @@ fn case(family: &str, scene: &'static str) -> N {
                         .unwrap()
                         .clone();
                 let pre_args = values(&pre);
-                assert_eq!(pre_args.len(), 6, "LIMIT native precache arity");
-                for (i, v) in [s("coin"), s("buy"), s("limit"), N::Num(101.25), N::Num(7.5)]
+                assert_eq!(pre_args.len(), 7, "LIMIT native precache arity");
+                for (i, v) in [
+                    s("coin"),
+                    s("buy"),
+                    s("limit"),
+                    N::Num(101.25),
+                    N::Num(7.5),
+                    s("0xmint1"),
+                ]
                     .iter()
                     .enumerate()
                 {
@@ -578,7 +591,7 @@ fn limit_bodies_native_before_source() {
     if catch_unwind(AssertUnwindSafe(|| {
         let h = Host::new("drop-observer");
         let opts = h.st.borrow().opts.clone();
-        drop(place_limit_order(&h, &h.base.exchange, &opts));
+        drop(place_limit_order(&h, &h.base.exchange, &opts, &N::U));
         h.base.drain();
         let st = h.st.borrow();
         assert_eq!(
