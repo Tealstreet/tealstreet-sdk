@@ -290,3 +290,19 @@ identities using shared TableHit; it accepts UTF-16 keys including lone surrogat
 product cases (27 native IDs) and 32 timeframe cases (20 numbers and 12 inherited
 identities) in one Node process. `scripts/ws-helper-controls.py` proves one named
 production failure per new row. Socket lifecycle methods remain pending.
+
+
+The concrete Spot API host binds the source's per-error signature retry condition,
+full-client `request` resend, and form replay. The typed Spot venue emits flat
+read/order form fields; its native parser decodes those fields and the formatter
+re-signs them with one fresh nonce. `tests/spot_form_oracle.cjs` runs the actual
+qs dependency for six stringify/parse/re-sign cases, including encoded Unicode,
+plus signs, repeated fields and prior nonces. This binding does not expose a
+public general-purpose qs parser.
+
+`tests/exchange_binding.rs` checks successful and repeated signature rejections
+under HTTP 200 and 401, including complete unsigned order fields, fresh signatures
+and the two-request ceiling. `scripts/spot-api-binding-controls.py` independently
+mutates each new native API-host method, requires a named runtime failure, restores
+exact bytes and requires the test to pass again. Shared retry-config preservation
+is covered by `safe-cex-exchange/tests/js_runtime.rs` and the same native E2E.

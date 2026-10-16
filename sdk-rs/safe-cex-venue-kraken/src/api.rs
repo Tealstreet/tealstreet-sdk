@@ -3,6 +3,7 @@ use crate::{
     rest_account::{Handle, ReadResult},
     trading::{ErrorHost, eq, field, obj, opt, optional_or, text, units},
 };
+use safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY;
 use std::{cell::Cell, rc::Rc};
 
 #[derive(Default)]
@@ -58,7 +59,62 @@ pub trait ApiHost: ErrorHost {
     ) -> ReadResult<Self, Handle<Self>>;
     fn join(&self, value: &Self::Value, separator: &str) -> ReadResult<Self, Handle<Self>>;
     fn mark_skip(&self, config: Handle<Self>) -> ReadResult<Self, ()>;
+    /// ts: the Spot `retryCondition` arrow: `networkErrorOnRead(readsAndPosted(...posted))(error)
+    /// || signatureRejectedResponse(isKrakenSpotSignatureRejection)(error)`, evaluated per error.
+    fn spot_retry_condition(&self, posted: Vec<&'static str>) -> ReadResult<Self, Handle<Self>>;
+    /// ts: `qs.parse(data)`.
+    fn qs_parse(&self, value: Handle<Self>) -> ReadResult<Self, Handle<Self>>;
+    /// ts: `xhr.request(config)` — the full pipeline again, interceptors included.
+    fn resend(
+        &self,
+        client: Handle<Self>,
+        config: Handle<Self>,
+    ) -> ReadResult<Self, impl std::future::Future<Output = ReadResult<Self, Handle<Self>>>>;
 }
+/// ts: utils/signatureRejection hasRetriedSignature — `Boolean(config?.[KEY])`.
+fn has_retried_signature<H: ApiHost>(h: &H, config: &H::Value) -> ReadResult<H, bool> {
+    Ok(h.truthy(&*opt(h, config, SIGNATURE_RETRY_CONFIG_KEY)?))
+}
+
+/// ts: krakenspot.api isKrakenSpotSignatureRejection — `Array.isArray(data?.error) &&
+/// data.error.some((error) => String(error).includes('EAPI:Invalid signature'))`.
+pub fn is_kraken_spot_signature_rejection<H: ErrorHost>(
+    h: &H,
+    data: &H::Value,
+) -> ReadResult<H, bool> {
+    let errors = opt(h, data, "error")?;
+    if !h.is_array(&errors) {
+        return Ok(false);
+    }
+    for error in h.items(&errors)? {
+        if h.string(&error)?
+            .windows(units("EAPI:Invalid signature").len())
+            .any(|w| w == units("EAPI:Invalid signature"))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// ts: krakenspot.api unsignedFormParams — a resend's string body is re-parsed
+/// without its previous nonce; an object is signed as is; anything else signs `{}`.
+pub fn unsigned_form_params<H: ApiHost>(h: &H, data: Handle<H>) -> ReadResult<H, Handle<H>> {
+    if h.is_string(&data) {
+        let parsed = h.qs_parse(data)?;
+        let rest = h
+            .entries(&parsed)?
+            .into_iter()
+            .filter(|(k, _)| *k != units("nonce"))
+            .collect();
+        return h.object(rest);
+    }
+    if h.truthy(&data) && h.is_object(&data) {
+        return Ok(data);
+    }
+    obj(h, vec![])
+}
+
 pub struct Api<H: ApiHost> {
     pub client: Handle<H>,
     host: Rc<H>,
@@ -99,32 +155,30 @@ fn create<H: ApiHost>(
         ],
     )?;
     let client = h.create_client(config, options.clone(), exchange.clone())?;
-    let posted = if spot {
-        Some(
-            [
-                "BALANCE",
-                "EXTENDED_BALANCE",
-                "TRADE_BALANCE",
-                "OPEN_ORDERS",
-                "CLOSED_ORDERS",
-                "TRADES_HISTORY",
-                "OPEN_POSITIONS",
-                "WS_TOKEN",
-            ]
-            .iter()
-            .map(|key| {
-                crate::spot_types::ENDPOINTS
-                    .iter()
-                    .find(|(k, _)| k == key)
-                    .expect("posted read endpoint")
-                    .1
-            })
-            .collect(),
-        )
+    let condition = if spot {
+        let posted = [
+            "BALANCE",
+            "EXTENDED_BALANCE",
+            "TRADE_BALANCE",
+            "OPEN_ORDERS",
+            "CLOSED_ORDERS",
+            "TRADES_HISTORY",
+            "OPEN_POSITIONS",
+            "WS_TOKEN",
+        ]
+        .iter()
+        .map(|key| {
+            crate::spot_types::ENDPOINTS
+                .iter()
+                .find(|(k, _)| k == key)
+                .expect("posted read endpoint")
+                .1
+        })
+        .collect();
+        h.spot_retry_condition(posted)?
     } else {
-        None
+        h.retry_condition(None)?
     };
-    let condition = h.retry_condition(posted)?;
     h.retry(
         client.clone(),
         obj(
@@ -264,12 +318,7 @@ impl<H: ApiHost> Api<H> {
         counter.set(previous + 1.0);
         let nonce = h.text(&h.string(&*h.number(timestamp * 1000.0 + previous % 1000.0))?);
         if self.spot {
-            let data = field(h, &config, "data")?;
-            let data = if h.truthy(&data) && h.is_object(&*field(h, &config, "data")?) {
-                field(h, &config, "data")?
-            } else {
-                obj(h, vec![])?
-            };
+            let data = unsigned_form_params(h, field(h, &config, "data")?)?;
             let body = h.spread(&data, vec![(units("nonce"), nonce.clone())])?;
             post = h.qs(body, Form::Repeat)?;
         } else if (eq(h, &method, "get") || eq(h, &method, "delete")) && h.truthy(&post) {
@@ -347,6 +396,18 @@ impl<H: ApiHost> Api<H> {
     }
     pub async fn success(&self, response: Handle<H>) -> ReadResult<H, Handle<H>> {
         let h = &*self.host;
+        if self.spot {
+            let config = field(h, &response, "config")?;
+            let rejected = !has_retried_signature(h, &config)?
+                && is_kraken_spot_signature_rejection(h, &*field(h, &response, "data")?)?;
+            if rejected {
+                let stamped = h.spread(
+                    &*field(h, &response, "config")?,
+                    vec![(units(SIGNATURE_RETRY_CONFIG_KEY), h.boolean(true))],
+                )?;
+                return h.resend(self.client.clone(), stamped)?.await;
+            }
+        }
         if h.truthy(&*field(h, &response, "data")?) {
             let data = field(h, &response, "data")?;
             if self.spot {

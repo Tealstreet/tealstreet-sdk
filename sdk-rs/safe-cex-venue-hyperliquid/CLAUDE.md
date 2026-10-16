@@ -250,3 +250,36 @@ untransformed template; invalid wallet validation may fail first. Inspection can
 emit an unexpected-action warning. Proven Transformed String data skips signing.
 The typed telemetry callback maps a missing body to JSON null and owns its JSON
 context; no source undefined/alias/error-object identity is asserted for that ABI.
+
+## Production binding (`binding.rs`, `realm/`)
+
+`HyperliquidExchange::new(options, store, HyperliquidDependencies)` builds the
+shared BaseExchange, then runs the ported class constructor inside `realm`, the
+crate-private production JS host for the generic class bodies. Every `Exchange`
+trait method invokes the instance's ported method; six inherit the TS
+BaseExchange `Not implemented` rejection (getAccount, fetchMarkets, fetchTickers,
+fetchSymbolMaxLeverage, changePositionMode, fetchPublicTrades). Facades bind the
+JS BaseExchange, BaseWebSocket (over the core socket), store and REST clients to
+their Rust owners; imports bind by name to the existing ports, and an unbound
+name throws a ReferenceError rather than resolving to a stand-in.
+`tests/binding.rs` drives all 16 methods over a scripted host and asserts a
+clean startup. Run `python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/binding-controls.py`
+from the repository root for reproducible dispatch controls: each of the 16
+trait overrides is corrupted independently, must compile and fail its named
+E2E test, and is restored byte-for-byte. The restored suite must pass all 12
+tests. These controls establish dispatch coverage; they do not establish full
+JavaScript semantics or live exchange parity. Logs stay outside the repository.
+
+Startup's successful `applicationId`/`vault` assignments also patch the native
+BaseExchange identity immediately. A host write observer preserves the realm
+object's ordinary property descriptors; it runs after successful assignment and
+outside the object's borrow. The scripted legacy-account test covers user,
+vault, agent and subAccount roles against both native options and privacy checks.
+Native identity strings retain the shared scalar-Unicode boundary.
+
+Declared realm choices: promise reactions run as runtime tasks, not a V8
+microtask queue; store reads are snapshots (writes go through Store methods);
+the cross cache is per realm and memory-only (no BroadcastChannel or
+sessionStorage on native hosts); `close` listeners are not invoked because the
+core socket runs the close/reconnect path; external public data rejects visibly.
+Signing converts actions with `undefined` members retained, matching msgpack nil.
