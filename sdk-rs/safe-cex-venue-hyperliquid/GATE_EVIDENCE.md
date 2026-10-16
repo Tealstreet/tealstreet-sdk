@@ -20,6 +20,14 @@ only the present-field adapter admits null; introducing a Value-first buffer
 trips the shared numeric pipeline's explicit buffer refusal. Each control restores
 the production source bytes exactly. Logs remain outside the repository.
 
+Integrated checks after merging master: **18/18 scoped native tests pass**
+(cache_runtime 11, cloid 2 with the actual maintained TS source oracle, and
+placement_record_ingress 5). Strict native all-targets clippy and wasm32 library
+clippy pass with warnings denied. `parity:check` exits zero: 7459 manifest rows,
+17204 public Rust items, zero invention/status findings. The independent review
+found no issues; CodeRabbit's manual review was rate limited, and no unresolved
+GitHub review conversations remain.
+
 This is decoder-boundary evidence. The 570-key accepted-contract review remains
 open: the selected 37-draft formal runner still refuses unresolved local helper
 and import/macro scopes, and no package/dependency/matrix clearance is claimed.
