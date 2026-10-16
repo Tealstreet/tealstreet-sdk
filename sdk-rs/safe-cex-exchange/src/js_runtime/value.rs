@@ -449,6 +449,12 @@ impl Js {
             Some(Prop::Accessor(Some(getter), _)) => getter(self),
             Some(Prop::Accessor(None, _)) => Ok(Js::Undefined),
             None => {
+                if let Js::Function(function) = self {
+                    if key == utf16("name").as_ref() {
+                        return Ok(Js::String(function.name.clone()));
+                    }
+                    return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
+                }
                 if let Js::Object(o) = self
                     && let Some(proto) = o.proto.borrow().clone()
                 {
