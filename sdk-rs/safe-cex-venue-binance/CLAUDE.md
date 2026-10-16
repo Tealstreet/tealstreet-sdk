@@ -52,8 +52,9 @@ clock/window numbers become their textual query spelling in the JSON config.
 The former's actual qs bytes are pinned independently; do not silently describe
 all arbitrary Axios data as equivalent. Normal venue requests use structured data.
 
-Wire decoding uses string-only union and map-only record front gates, with
-function-private Serde wire companions. The live union oracle compares the
+Wire decoding uses string-only union and map-only record front gates. Records use
+private Serde remote companions; they do not create another Deserialize owner.
+The live union oracle compares the
 accepted literal inventory (including Serde aliases) to the TypeScript AST;
 qualified public Deserialize calls reject non-string and positional-array inputs.
 
@@ -169,8 +170,9 @@ emitter. It emits exactly once, then returns the unsupported-margin Error; an
 emitter failure takes precedence and retains its metadata. Unused isolated and
 symbol inputs are omitted; concrete class/emitter composition remains pending.
 
-Generated wire records now capture shared JsNumberInput at their public Deserialize
-entry, then decode through the private MapOnly/Wire companion. Keep the explicit
+Generated wire records capture shared JsNumberInput at their public Deserialize
+entry, then call the private remote companion through strict_decode::object. Keep
+all field/default/presence attributes on that schema and keep the explicit
 exhaustive JsNumberOutput impls emitted by the generator, including the income
 union's registration. This repairs raw JSON overflow refusal without trading away
 signed zero on already-parsed Value input. Never replace it with Value-first
@@ -178,6 +180,29 @@ rebuffering or remove the map/string front gates. Numeric ingress tests compare
 bits before serialization over raw str/slice, owned/borrowed Value and the three
 shared js_from_* entrypoints. The separate vanilla Value-rebuffer witness still
 records an unsafe bypass outside these opted-in decoders.
+
+`tests/accepted_record_shapes.rs` authors each complete valid positional array in
+declaration order and reads every decoded native field across those seven routes.
+Run `python3 sdk-rs/safe-cex-venue-binance/scripts/record-shape-controls.py` from
+the repository root to remove each owner's object guard, require its named array
+assertion to fail after compilation, restore the source and require it to pass.
+Do not derive the negative array from record serialization.
+`node sdk-rs/safe-cex-venue-binance/scripts/record-contracts.mjs` runs fresh
+ordinary inventory and the four records' production contract probes. Run accepted
+probes serially; this focused command excludes other owners and the feature/wasm
+matrix.
+
+The income, API-type and orderbook-apply string unions use private Serde remote
+schemas after their existing String admission. Preserve both actual native
+variant identity and the complete Serde rename/alias inventory. The 24 valid
+tags must each reject a tagged-null object through owned, borrowed, qualified
+and text decoding. `tests/accepted_string_shapes.rs` supplies those witnesses;
+`python3 sdk-rs/safe-cex-venue-binance/scripts/string-shape-controls.py` removes
+only one String frontdoor at a time, requires the named valid-tagged-object
+assertion to fail after compilation, restores exact bytes and requires a pass.
+`node sdk-rs/safe-cex-venue-binance/scripts/string-contracts.mjs` performs fresh
+ordinary inventory and production native probes for those three enums only.
+It excludes other owners, aliases, local scopes and feature/wasm coverage.
 
 The public-factory response witness now pins the repaired shared provenance
 boundary: direct quoted HTTP text parses once; HOW custom-parser strings pass

@@ -210,6 +210,102 @@ pub struct GetPositionRiskResponseRow {
     )]
     pub open_order_initial_margin: Option<String>,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "GetPositionRiskResponseRow")]
+struct GetPositionRiskResponseRowWire {
+    #[serde(rename = "symbol")]
+    pub symbol: String,
+    #[serde(rename = "positionAmt")]
+    pub position_amt: String,
+    #[serde(rename = "entryPrice")]
+    pub entry_price: String,
+    #[serde(rename = "markPrice")]
+    pub mark_price: String,
+    #[serde(rename = "unRealizedProfit")]
+    pub un_realized_profit: String,
+    #[serde(rename = "liquidationPrice")]
+    pub liquidation_price: String,
+    #[serde(
+        rename = "leverage",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub leverage: Option<String>,
+    #[serde(
+        rename = "maxNotionalValue",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_notional_value: Option<String>,
+    #[serde(
+        rename = "marginType",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub margin_type: Option<String>,
+    #[serde(rename = "isolatedMargin")]
+    pub isolated_margin: String,
+    #[serde(
+        rename = "isAutoAddMargin",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub is_auto_add_margin: Option<String>,
+    #[serde(rename = "positionSide")]
+    pub position_side: String,
+    #[serde(rename = "notional")]
+    pub notional: String,
+    #[serde(rename = "isolatedWallet")]
+    pub isolated_wallet: String,
+    #[serde(rename = "updateTime")]
+    pub update_time: f64,
+    #[serde(
+        rename = "isolated",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub isolated: Option<bool>,
+    #[serde(
+        rename = "adl",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub adl: Option<f64>,
+    #[serde(
+        rename = "adlQuantile",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub adl_quantile: Option<f64>,
+    #[serde(
+        rename = "initialMargin",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub initial_margin: Option<String>,
+    #[serde(
+        rename = "positionInitialMargin",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub position_initial_margin: Option<String>,
+    #[serde(
+        rename = "openOrderInitialMargin",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub open_order_initial_margin: Option<String>,
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for GetPositionRiskResponseRow {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self, struct { symbol,position_amt,entry_price,mark_price,un_realized_profit,liquidation_price,leverage,max_notional_value,margin_type,isolated_margin,is_auto_add_margin,position_side,notional,isolated_wallet,update_time,isolated,adl,adl_quantile,initial_margin,position_initial_margin,open_order_initial_margin });
@@ -217,151 +313,66 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for GetPositionRiskResponseRo
 }
 impl<'de> serde::Deserialize<'de> for GetPositionRiskResponseRow {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            pub symbol: String,
-            #[serde(rename = "positionAmt")]
-            pub position_amt: String,
-            #[serde(rename = "entryPrice")]
-            pub entry_price: String,
-            #[serde(rename = "markPrice")]
-            pub mark_price: String,
-            #[serde(rename = "unRealizedProfit")]
-            pub un_realized_profit: String,
-            #[serde(rename = "liquidationPrice")]
-            pub liquidation_price: String,
-            #[serde(
-                rename = "leverage",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub leverage: Option<String>,
-            #[serde(
-                rename = "maxNotionalValue",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub max_notional_value: Option<String>,
-            #[serde(
-                rename = "marginType",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub margin_type: Option<String>,
-            #[serde(rename = "isolatedMargin")]
-            pub isolated_margin: String,
-            #[serde(
-                rename = "isAutoAddMargin",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub is_auto_add_margin: Option<String>,
-            #[serde(rename = "positionSide")]
-            pub position_side: String,
-            #[serde(rename = "notional")]
-            pub notional: String,
-            #[serde(rename = "isolatedWallet")]
-            pub isolated_wallet: String,
-            #[serde(rename = "updateTime")]
-            pub update_time: f64,
-            #[serde(
-                rename = "isolated",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub isolated: Option<bool>,
-            #[serde(
-                rename = "adl",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub adl: Option<f64>,
-            #[serde(
-                rename = "adlQuantile",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub adl_quantile: Option<f64>,
-            #[serde(
-                rename = "initialMargin",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub initial_margin: Option<String>,
-            #[serde(
-                rename = "positionInitialMargin",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub position_initial_margin: Option<String>,
-            #[serde(
-                rename = "openOrderInitialMargin",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub open_order_initial_margin: Option<String>,
-        }
-        struct MapOnly;
-        impl<'de> serde::de::Visitor<'de> for MapOnly {
-            type Value = GetPositionRiskResponseRow;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("an object")
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                map: A,
-            ) -> Result<Self::Value, A::Error> {
-                let wire = <Wire as serde::Deserialize>::deserialize(
-                    serde::de::value::MapAccessDeserializer::new(map),
-                )?;
-                Ok(GetPositionRiskResponseRow {
-                    symbol: wire.symbol,
-                    position_amt: wire.position_amt,
-                    entry_price: wire.entry_price,
-                    mark_price: wire.mark_price,
-                    un_realized_profit: wire.un_realized_profit,
-                    liquidation_price: wire.liquidation_price,
-                    leverage: wire.leverage,
-                    max_notional_value: wire.max_notional_value,
-                    margin_type: wire.margin_type,
-                    isolated_margin: wire.isolated_margin,
-                    is_auto_add_margin: wire.is_auto_add_margin,
-                    position_side: wire.position_side,
-                    notional: wire.notional,
-                    isolated_wallet: wire.isolated_wallet,
-                    update_time: wire.update_time,
-                    isolated: wire.isolated,
-                    adl: wire.adl,
-                    adl_quantile: wire.adl_quantile,
-                    initial_margin: wire.initial_margin,
-                    position_initial_margin: wire.position_initial_margin,
-                    open_order_initial_margin: wire.open_order_initial_margin,
-                })
-            }
-        }
         let input =
             <safe_cex_num::numeric_ingress::JsNumberInput as serde::Deserialize>::deserialize(
                 deserializer,
             )?;
         input
-            .decode_with(|decoder| serde::Deserializer::deserialize_map(decoder, MapOnly))
+            .decode_with(|decoder| {
+                GetPositionRiskResponseRowWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
+            })
             .map_err(serde::de::Error::custom)
     }
 }
 pub type GetPositionRiskResponse = Vec<GetPositionRiskResponseRow>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum BinanceIncomeType {
+    #[serde(rename = "TRANSFER")]
+    TRANSFER,
+    #[serde(rename = "WELCOME_BONUS")]
+    WelcomeBonus,
+    #[serde(rename = "REALIZED_PNL")]
+    RealizedPnl,
+    #[serde(rename = "FUNDING_FEE")]
+    FundingFee,
+    #[serde(rename = "COMMISSION")]
+    COMMISSION,
+    #[serde(rename = "INSURANCE_CLEAR")]
+    InsuranceClear,
+    #[serde(rename = "REFERRAL_KICKBACK")]
+    ReferralKickback,
+    #[serde(rename = "COMMISSION_REBATE")]
+    CommissionRebate,
+    #[serde(rename = "API_REBATE")]
+    ApiRebate,
+    #[serde(rename = "CONTEST_REWARD")]
+    ContestReward,
+    #[serde(rename = "CROSS_COLLATERAL_TRANSFER")]
+    CrossCollateralTransfer,
+    #[serde(rename = "OPTIONS_PREMIUM_FEE")]
+    OptionsPremiumFee,
+    #[serde(rename = "OPTIONS_SETTLE_PROFIT")]
+    OptionsSettleProfit,
+    #[serde(rename = "INTERNAL_TRANSFER")]
+    InternalTransfer,
+    #[serde(rename = "AUTO_EXCHANGE")]
+    AutoExchange,
+    #[serde(rename = "DELIVERED_SETTELMENT")]
+    DeliveredSettelment,
+    #[serde(rename = "COIN_SWAP_DEPOSIT")]
+    CoinSwapDeposit,
+    #[serde(rename = "COIN_SWAP_WITHDRAW")]
+    CoinSwapWithdraw,
+    #[serde(rename = "POSITION_LIMIT_INCREASE_FEE")]
+    PositionLimitIncreaseFee,
+}
+#[derive(serde::Deserialize)]
+#[serde(remote = "BinanceIncomeType")]
+// Remote variants must retain the public source-derived identifiers.
+#[allow(clippy::upper_case_acronyms)]
+enum BinanceIncomeTypeWire {
     #[serde(rename = "TRANSFER")]
     TRANSFER,
     #[serde(rename = "WELCOME_BONUS")]
@@ -408,77 +419,44 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for BinanceIncomeType {
 }
 impl<'de> serde::Deserialize<'de> for BinanceIncomeType {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "TRANSFER")]
-            Transfer,
-            #[serde(rename = "WELCOME_BONUS")]
-            WelcomeBonus,
-            #[serde(rename = "REALIZED_PNL")]
-            RealizedPnl,
-            #[serde(rename = "FUNDING_FEE")]
-            FundingFee,
-            #[serde(rename = "COMMISSION")]
-            Commission,
-            #[serde(rename = "INSURANCE_CLEAR")]
-            InsuranceClear,
-            #[serde(rename = "REFERRAL_KICKBACK")]
-            ReferralKickback,
-            #[serde(rename = "COMMISSION_REBATE")]
-            CommissionRebate,
-            #[serde(rename = "API_REBATE")]
-            ApiRebate,
-            #[serde(rename = "CONTEST_REWARD")]
-            ContestReward,
-            #[serde(rename = "CROSS_COLLATERAL_TRANSFER")]
-            CrossCollateralTransfer,
-            #[serde(rename = "OPTIONS_PREMIUM_FEE")]
-            OptionsPremiumFee,
-            #[serde(rename = "OPTIONS_SETTLE_PROFIT")]
-            OptionsSettleProfit,
-            #[serde(rename = "INTERNAL_TRANSFER")]
-            InternalTransfer,
-            #[serde(rename = "AUTO_EXCHANGE")]
-            AutoExchange,
-            #[serde(rename = "DELIVERED_SETTELMENT")]
-            DeliveredSettelment,
-            #[serde(rename = "COIN_SWAP_DEPOSIT")]
-            CoinSwapDeposit,
-            #[serde(rename = "COIN_SWAP_WITHDRAW")]
-            CoinSwapWithdraw,
-            #[serde(rename = "POSITION_LIMIT_INCREASE_FEE")]
-            PositionLimitIncreaseFee,
-        }
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
-        Ok(match wire {
-            Wire::Transfer => Self::TRANSFER,
-            Wire::WelcomeBonus => Self::WelcomeBonus,
-            Wire::RealizedPnl => Self::RealizedPnl,
-            Wire::FundingFee => Self::FundingFee,
-            Wire::Commission => Self::COMMISSION,
-            Wire::InsuranceClear => Self::InsuranceClear,
-            Wire::ReferralKickback => Self::ReferralKickback,
-            Wire::CommissionRebate => Self::CommissionRebate,
-            Wire::ApiRebate => Self::ApiRebate,
-            Wire::ContestReward => Self::ContestReward,
-            Wire::CrossCollateralTransfer => Self::CrossCollateralTransfer,
-            Wire::OptionsPremiumFee => Self::OptionsPremiumFee,
-            Wire::OptionsSettleProfit => Self::OptionsSettleProfit,
-            Wire::InternalTransfer => Self::InternalTransfer,
-            Wire::AutoExchange => Self::AutoExchange,
-            Wire::DeliveredSettelment => Self::DeliveredSettelment,
-            Wire::CoinSwapDeposit => Self::CoinSwapDeposit,
-            Wire::CoinSwapWithdraw => Self::CoinSwapWithdraw,
-            Wire::PositionLimitIncreaseFee => Self::PositionLimitIncreaseFee,
-        })
+        BinanceIncomeTypeWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+            text,
+        ))
     }
 }
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BinanceIncomeRecord {
+    #[serde(rename = "symbol")]
+    pub symbol: String,
+    #[serde(rename = "incomeType")]
+    pub income_type: BinanceIncomeType,
+    #[serde(rename = "income")]
+    pub income: String,
+    #[serde(rename = "asset")]
+    pub asset: String,
+    #[serde(
+        rename = "info",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub info: Option<String>,
+    #[serde(rename = "time")]
+    pub time: f64,
+    #[serde(rename = "tranId")]
+    pub tran_id: String,
+    #[serde(
+        rename = "tradeId",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub trade_id: Option<String>,
+}
+#[derive(serde::Deserialize)]
+#[serde(remote = "BinanceIncomeRecord")]
+struct BinanceIncomeRecordWire {
     #[serde(rename = "symbol")]
     pub symbol: String,
     #[serde(rename = "incomeType")]
@@ -513,71 +491,58 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for BinanceIncomeRecord {
 }
 impl<'de> serde::Deserialize<'de> for BinanceIncomeRecord {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(rename = "symbol")]
-            pub symbol: String,
-            #[serde(rename = "incomeType")]
-            pub income_type: BinanceIncomeType,
-            #[serde(rename = "income")]
-            pub income: String,
-            #[serde(rename = "asset")]
-            pub asset: String,
-            #[serde(
-                rename = "info",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub info: Option<String>,
-            #[serde(rename = "time")]
-            pub time: f64,
-            #[serde(rename = "tranId")]
-            pub tran_id: String,
-            #[serde(
-                rename = "tradeId",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub trade_id: Option<String>,
-        }
-        struct MapOnly;
-        impl<'de> serde::de::Visitor<'de> for MapOnly {
-            type Value = BinanceIncomeRecord;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("an object")
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                map: A,
-            ) -> Result<Self::Value, A::Error> {
-                let wire = <Wire as serde::Deserialize>::deserialize(
-                    serde::de::value::MapAccessDeserializer::new(map),
-                )?;
-                Ok(BinanceIncomeRecord {
-                    symbol: wire.symbol,
-                    income_type: wire.income_type,
-                    income: wire.income,
-                    asset: wire.asset,
-                    info: wire.info,
-                    time: wire.time,
-                    tran_id: wire.tran_id,
-                    trade_id: wire.trade_id,
-                })
-            }
-        }
         let input =
             <safe_cex_num::numeric_ingress::JsNumberInput as serde::Deserialize>::deserialize(
                 deserializer,
             )?;
         input
-            .decode_with(|decoder| serde::Deserializer::deserialize_map(decoder, MapOnly))
+            .decode_with(|decoder| {
+                BinanceIncomeRecordWire::deserialize(safe_cex_types::strict_decode::object(decoder))
+            })
             .map_err(serde::de::Error::custom)
     }
 }
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BinanceIncomeHistoryOptions {
+    #[serde(
+        rename = "symbol",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub symbol: Option<String>,
+    #[serde(
+        rename = "incomeType",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub income_type: Option<BinanceIncomeType>,
+    #[serde(
+        rename = "startTime",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub start_time: Option<f64>,
+    #[serde(
+        rename = "endTime",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub end_time: Option<f64>,
+    #[serde(
+        rename = "limit",
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub limit: Option<f64>,
+}
+#[derive(serde::Deserialize)]
+#[serde(remote = "BinanceIncomeHistoryOptions")]
+struct BinanceIncomeHistoryOptionsWire {
     #[serde(
         rename = "symbol",
         default,
@@ -621,72 +586,16 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for BinanceIncomeHistoryOptio
 }
 impl<'de> serde::Deserialize<'de> for BinanceIncomeHistoryOptions {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            #[serde(
-                rename = "symbol",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub symbol: Option<String>,
-            #[serde(
-                rename = "incomeType",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub income_type: Option<BinanceIncomeType>,
-            #[serde(
-                rename = "startTime",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub start_time: Option<f64>,
-            #[serde(
-                rename = "endTime",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub end_time: Option<f64>,
-            #[serde(
-                rename = "limit",
-                default,
-                deserialize_with = "crate::deserialize_present",
-                skip_serializing_if = "Option::is_none"
-            )]
-            pub limit: Option<f64>,
-        }
-        struct MapOnly;
-        impl<'de> serde::de::Visitor<'de> for MapOnly {
-            type Value = BinanceIncomeHistoryOptions;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("an object")
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                map: A,
-            ) -> Result<Self::Value, A::Error> {
-                let wire = <Wire as serde::Deserialize>::deserialize(
-                    serde::de::value::MapAccessDeserializer::new(map),
-                )?;
-                Ok(BinanceIncomeHistoryOptions {
-                    symbol: wire.symbol,
-                    income_type: wire.income_type,
-                    start_time: wire.start_time,
-                    end_time: wire.end_time,
-                    limit: wire.limit,
-                })
-            }
-        }
         let input =
             <safe_cex_num::numeric_ingress::JsNumberInput as serde::Deserialize>::deserialize(
                 deserializer,
             )?;
         input
-            .decode_with(|decoder| serde::Deserializer::deserialize_map(decoder, MapOnly))
+            .decode_with(|decoder| {
+                BinanceIncomeHistoryOptionsWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
+            })
             .map_err(serde::de::Error::custom)
     }
 }
