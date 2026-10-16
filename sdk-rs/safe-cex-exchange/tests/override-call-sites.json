@@ -349,7 +349,7 @@
   },
   {
     "function": "facade",
-    "body": "35d694b8312ceda6",
+    "body": "c6140fadf0482da7",
     "call": "st . update_order (& id_of (& arg (& a , 0)) ? , & patch (& arg (& a , 1)) ?)",
     "file": "safe-cex-exchange/src/js_runtime/store.rs"
   },
