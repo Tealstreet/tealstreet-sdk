@@ -11,6 +11,7 @@ use safe_cex_exchange::js_runtime::{
     globals::{install_builtins, install_enums},
     library::install_library,
     ops,
+    promise::await_js,
     scope::scope_of,
     sockets,
     value::{Js, Thrown, arg, from_json, to_json},
@@ -76,10 +77,9 @@ fn signing_params(params: &Js) -> Result<SigningValue, Thrown> {
 
 fn clock(rt: &Rt) -> safe_cex_store::virtual_clock::VirtualClock {
     let now = rt.now();
-    safe_cex_store::virtual_clock::VirtualClock {
-        now: Arc::new(move || now),
-        ..Default::default()
-    }
+    let mut clock = safe_cex_store::virtual_clock::VirtualClock::default();
+    clock.now = Arc::new(move || now);
+    clock
 }
 
 struct ErrorHost<'a> {
@@ -123,7 +123,11 @@ impl api_error::ApiErrorHost for ErrorHost<'_> {
             body,
             |v| {
                 let s = json.call_method("stringify", vec![v.clone()])?;
-                Ok::<_, Thrown>(if s.is_undefined() { None } else { Some(units(&s)?) })
+                Ok::<_, Thrown>(if s.is_undefined() {
+                    None
+                } else {
+                    Some(units(&s)?)
+                })
             },
             units,
         )?;
@@ -178,7 +182,12 @@ fn throttle(rt: &Rt, callback: Js, wait: f64) -> Js {
                     Some((this, args)) => {
                         let result = callback.call(this, args)?;
                         timer_state.borrow_mut().last = Some(result);
-                        open_window(timer_rt.clone(), timer_state.clone(), callback.clone(), wait);
+                        open_window(
+                            timer_rt.clone(),
+                            timer_state.clone(),
+                            callback.clone(),
+                            wait,
+                        );
                     }
                     None => {
                         let mut s = timer_state.borrow_mut();
@@ -201,7 +210,12 @@ fn throttle(rt: &Rt, callback: Js, wait: f64) -> Js {
         }
         let result = call_callback.call(this, a)?;
         call_state.borrow_mut().last = Some(result.clone());
-        open_window(call_rt.clone(), call_state.clone(), call_callback.clone(), wait);
+        open_window(
+            call_rt.clone(),
+            call_state.clone(),
+            call_callback.clone(),
+            wait,
+        );
         Ok(result)
     });
     let (cancel_rt, cancel_state) = (rt.clone(), state);
@@ -219,6 +233,92 @@ fn throttle(rt: &Rt, callback: Js, wait: f64) -> Js {
     throttled
 }
 
+/// Axios runs a response interceptor's `onRejected` for a failure raised before
+/// it; the shared client keeps only `onFulfilled`. Record each pair, tag what a
+/// fulfilled handler throws with its index, and replay the rejected handlers
+/// after that index on every verb's rejection.
+fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
+    type Pairs = Rc<RefCell<Vec<(Js, Js)>>>;
+    type Raised = Rc<RefCell<Vec<(Js, usize)>>>;
+    let pairs: Pairs = Rc::default();
+    let raised: Raised = Rc::default();
+    let response = xhr.get("interceptors")?.get("response")?;
+    let register = response.get("use")?;
+    let (use_pairs, use_raised, use_owner) = (pairs.clone(), raised.clone(), response.clone());
+    response.define(
+        "use",
+        Js::function("use", move |_, a| {
+            let (fulfilled, rejected) = (arg(&a, 0), arg(&a, 1));
+            let index = use_pairs.borrow().len();
+            use_pairs.borrow_mut().push((fulfilled.clone(), rejected));
+            let tags = use_raised.clone();
+            let tagged = Js::function("fulfilled", move |this, v| {
+                let result = fulfilled.call(this, v).map_err(|e| {
+                    tags.borrow_mut().push((e.value.clone(), index));
+                    e
+                })?;
+                let Js::Promise(promise) = &result else {
+                    return Ok(result);
+                };
+                let (promise, tags) = (promise.clone(), tags.clone());
+                Ok(Js::Promise(
+                    safe_cex_exchange::js_runtime::promise::Promise::spawn(
+                        &promise.runtime(),
+                        Box::pin(async move {
+                            await_js(Js::Promise(promise)).await.map_err(|e| {
+                                tags.borrow_mut().push((e.value.clone(), index));
+                                e
+                            })
+                        }),
+                    ),
+                ))
+            });
+            register.call(use_owner.clone(), vec![tagged])
+        }),
+    )?;
+    for verb in ["get", "delete", "post", "put", "request"] {
+        let send = xhr.get(verb)?;
+        let (owner, pairs, raised, verb_rt) =
+            (xhr.clone(), pairs.clone(), raised.clone(), rt.clone());
+        xhr.define(
+            verb,
+            Js::function(verb, move |_, a| {
+                let pending = send.call(owner.clone(), a)?;
+                let (pairs, raised) = (pairs.clone(), raised.clone());
+                Ok(verb_rt.spawn(Box::pin(async move {
+                    let error = match await_js(pending).await {
+                        Ok(value) => return Ok(value),
+                        Err(error) => error,
+                    };
+                    let start = {
+                        let mut tags = raised.borrow_mut();
+                        let found = tags
+                            .iter()
+                            .position(|(v, _)| v.same_reference(&error.value));
+                        found.map_or(0, |i| tags.remove(i).1 + 1)
+                    };
+                    let handlers: Vec<(Js, Js)> =
+                        pairs.borrow()[start.min(pairs.borrow().len())..].to_vec();
+                    let mut outcome: Result<Js, Thrown> = Err(error);
+                    for (fulfilled, rejected) in handlers {
+                        outcome = match outcome {
+                            Ok(value) => {
+                                await_js(fulfilled.call(Js::Undefined, vec![value])?).await
+                            }
+                            Err(error) if rejected.is_callable() => {
+                                await_js(rejected.call(Js::Undefined, vec![error.value])?).await
+                            }
+                            Err(error) => Err(error),
+                        };
+                    }
+                    outcome
+                })))
+            }),
+        )?;
+    }
+    Ok(xhr)
+}
+
 fn sort_levels(levels: &Js, ascending: bool) -> Result<(), Thrown> {
     let Some(values) = levels.array_values() else {
         return Err(Thrown::type_error("orderBook levels are not an array"));
@@ -227,7 +327,13 @@ fn sort_levels(levels: &Js, ascending: bool) -> Result<(), Thrown> {
         .into_iter()
         .map(|level| Ok((level.get("price")?.to_number()?, level)))
         .collect::<Result<Vec<_>, Thrown>>()?;
-    keyed.sort_by(|(a, _), (b, _)| if ascending { a.total_cmp(b) } else { b.total_cmp(a) });
+    keyed.sort_by(|(a, _), (b, _)| {
+        if ascending {
+            a.total_cmp(b)
+        } else {
+            b.total_cmp(a)
+        }
+    });
     for (i, (_, level)) in keyed.into_iter().enumerate() {
         levels.set(&i.to_string(), level)?;
     }
@@ -270,7 +376,10 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 .collect(),
         ),
     );
-    def("GRAFANA_ENDPOINTS_EVERY", strings(types::GRAFANA_ENDPOINTS_EVERY));
+    def(
+        "GRAFANA_ENDPOINTS_EVERY",
+        strings(types::GRAFANA_ENDPOINTS_EVERY),
+    );
     def(
         "GRAFANA_ENDPOINTS_PERIODIC",
         strings(types::GRAFANA_ENDPOINTS_PERIODIC),
@@ -293,10 +402,12 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                     "Error",
                     "Crypto.com binding: inherited candlestick interval keys are not modelled",
                 )),
-                Err(message) => Err(Thrown::new(safe_cex_exchange::js_runtime::value::error_object(
-                    "Error",
-                    &String::from_utf16_lossy(&message),
-                ))),
+                Err(message) => Err(Thrown::new(
+                    safe_cex_exchange::js_runtime::value::error_object(
+                        "Error",
+                        &String::from_utf16_lossy(&message),
+                    ),
+                )),
             }
         }),
     );
@@ -313,7 +424,10 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     def(
         "BaseWebSocket",
         Js::constructor("BaseWebSocket", move |_, a| {
-            Ok(sockets::base_websocket(&scope(&w)?.shared.sockets, arg(&a, 0)))
+            Ok(sockets::base_websocket(
+                &scope(&w)?.shared.sockets,
+                arg(&a, 0),
+            ))
         }),
     );
 
@@ -350,14 +464,20 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     def(
         "isPublicEndpoint",
         Js::function("isPublicEndpoint", |_, a| {
-            Ok(Js::Bool(api::is_public_endpoint_units(&units(&arg(&a, 0))?)))
+            Ok(Js::Bool(api::is_public_endpoint_units(&units(&arg(
+                &a, 0,
+            ))?)))
         }),
     );
     def(
         "isNonRetryablePrivateWrite",
         Js::function("isNonRetryablePrivateWrite", |_, a| {
             let url = arg(&a, 0);
-            let url = if url.is_undefined() { None } else { Some(units(&url)?) };
+            let url = if url.is_undefined() {
+                None
+            } else {
+                Some(units(&url)?)
+            };
             Ok(Js::Bool(api::is_non_retryable_private_write_units(
                 url.as_deref(),
             )))
@@ -374,10 +494,9 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     def(
         "isCryptocomAuthenticationErrorCode",
         Js::function("isCryptocomAuthenticationErrorCode", |_, a| {
-            Ok(Js::Bool(api_guards::is_cryptocom_authentication_error_code(
-                arg(&a, 0),
-                |v| units(&v),
-            )?))
+            Ok(Js::Bool(
+                api_guards::is_cryptocom_authentication_error_code(arg(&a, 0), |v| units(&v))?,
+            ))
         }),
     );
     def(
@@ -391,11 +510,30 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         }),
     );
     def(
+        "shouldSuppressValidationAuthErrorEmission",
+        Js::function("shouldSuppressValidationAuthErrorEmission", |_, a| {
+            let exchange = arg(&a, 0);
+            Ok(Js::Bool(
+                api_guards::should_suppress_validation_auth_error_emission(
+                    arg(&a, 1),
+                    |v| units(&v),
+                    || {
+                        Ok(
+                            match exchange.get("suppressCryptocomValidationErrorEmission")? {
+                                Js::Bool(b) => Some(b),
+                                _ => None,
+                            },
+                        )
+                    },
+                )?,
+            ))
+        }),
+    );
+    def(
         "isCryptocomSignatureRejection",
         Js::function("isCryptocomSignatureRejection", |_, a| {
             Ok(Js::Bool(
-                api::is_cryptocom_signature_rejection(&to_json(&arg(&a, 0))?)
-                    .map_err(coercion)?,
+                api::is_cryptocom_signature_rejection(&to_json(&arg(&a, 0))?).map_err(coercion)?,
             ))
         }),
     );
@@ -408,7 +546,11 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
             let rt = scope(&w)?;
             let params = arg(&a, 1);
             let nonce = arg(&a, 4);
-            let nonce = if nonce.is_nullish() { None } else { Some(nonce.to_number()?) };
+            let nonce = if nonce.is_nullish() {
+                None
+            } else {
+                Some(nonce.to_number()?)
+            };
             let request = signing::generate_authenticated_request(
                 &text(&arg(&a, 0))?,
                 signing_params(&params)?,
@@ -433,9 +575,12 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         "generateWsAuthMessage",
         Js::function("generateWsAuthMessage", move |_, a| {
             let rt = scope(&w)?;
-            let message =
-                signing::generate_ws_auth_message(&text(&arg(&a, 0))?, &text(&arg(&a, 1))?, &clock(&rt))
-                    .map_err(|e| Thrown::error("Error", &e.message))?;
+            let message = signing::generate_ws_auth_message(
+                &text(&arg(&a, 0))?,
+                &text(&arg(&a, 1))?,
+                &clock(&rt),
+            )
+            .map_err(|e| Thrown::error("Error", &e.message))?;
             Ok(Js::object(vec![
                 ("id", Js::Number(message.id)),
                 ("method", Js::str(message.method)),
@@ -451,7 +596,8 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     def(
         "safeCexAxiosCreate",
         Js::function("safeCexAxiosCreate", move |_, a| {
-            Ok(client::create(scope(&w)?.shared.http.clone(), arg(&a, 0)))
+            let rt = scope(&w)?;
+            with_rejected_handlers(&rt, client::create(rt.shared.http.clone(), arg(&a, 0)))
         }),
     );
     def(
@@ -484,7 +630,9 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 request: Box::default(),
                 context: None,
             };
-            Ok(Js::Bool(safe_cex_transport::retry::is_network_error(&failure)))
+            Ok(Js::Bool(safe_cex_transport::retry::is_network_error(
+                &failure,
+            )))
         }),
     );
     def(

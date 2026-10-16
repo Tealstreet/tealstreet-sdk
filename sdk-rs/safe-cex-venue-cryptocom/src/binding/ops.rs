@@ -91,7 +91,7 @@ pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
         nullish: Rc::new(Js::is_nullish),
         equal: Rc::new(|a, b| a.strict_equals(b)),
         is_number: Rc::new(|v| matches!(v, Js::Number(_))),
-        has: Rc::new(|v, k| has_property(v, k)),
+        has: Rc::new(has_property),
         numeric: Rc::new(Js::to_number),
         text: Rc::new(|v| Ok(v.to_js_string()?.to_vec())),
         utf16: Rc::new(|units| Js::utf16(&units)),
@@ -178,7 +178,10 @@ fn iterator_record(value: Js) -> Result<Js, Thrown> {
         Js::Array(_) => value.clone(),
         other => Js::array(spread(other)?),
     };
-    Ok(Js::object(vec![("source", source), ("index", Js::Number(0.0))]))
+    Ok(Js::object(vec![
+        ("source", source),
+        ("index", Js::Number(0.0)),
+    ]))
 }
 
 fn iterator_next(record: &Js) -> Result<Option<Js>, Thrown> {
@@ -204,10 +207,7 @@ pub(crate) fn binding_ops(weak: Weak<Shared>) -> Rc<BindingOps<Js, Thrown>> {
         throw_value: Rc::new(Thrown::new),
         promise: Rc::new(move |future| match scope(&promise_weak) {
             Ok(rt) => rt.spawn(future),
-            Err(e) => Js::Promise(Promise::settled(
-                &noop_runtime(),
-                Err(e),
-            )),
+            Err(e) => Js::Promise(Promise::settled(&noop_runtime(), Err(e))),
         }),
         iterator: Rc::new(iterator_record),
         next: Rc::new(iterator_next),
@@ -227,7 +227,11 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             0.0
         }
         fn sleep(&self, _: u64) -> safe_cex_exchange::runtime::ExchangeFuture<'static, ()> {
-            Box::pin(async { Err(safe_cex_exchange::runtime::ExchangeError::new("exchange runtime disposed")) })
+            Box::pin(async {
+                Err(safe_cex_exchange::runtime::ExchangeError::new(
+                    "exchange runtime disposed",
+                ))
+            })
         }
         fn spawn_local(
             &self,
@@ -249,13 +253,22 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
         fn random(&self) -> f64 {
             0.0
         }
-        fn report_exception(&self, _: &safe_cex_exchange::runtime::ExchangeError, _: &serde_json::Value) {}
+        fn report_exception(
+            &self,
+            _: &safe_cex_exchange::runtime::ExchangeError,
+            _: &serde_json::Value,
+        ) {
+        }
         fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {}
         fn execute_worker_request(
             &self,
             _: serde_json::Value,
         ) -> safe_cex_exchange::runtime::ExchangeFuture<'static, serde_json::Value> {
-            Box::pin(async { Err(safe_cex_exchange::runtime::ExchangeError::new("exchange runtime disposed")) })
+            Box::pin(async {
+                Err(safe_cex_exchange::runtime::ExchangeError::new(
+                    "exchange runtime disposed",
+                ))
+            })
         }
     }
     Rc::new(Gone)
@@ -358,7 +371,9 @@ pub(crate) fn runtime_ops(weak: Weak<Shared>) -> Rc<RuntimeOps<Js, Thrown>> {
                 .map(|c| c.base.clone())
                 .ok_or_else(|| Thrown::type_error("Crypto.com binding: not a derived class"))
         }),
-        super_construct: Rc::new(move |base, target, args| super_construct(&w3, base, target, args)),
+        super_construct: Rc::new(move |base, target, args| {
+            super_construct(&w3, base, target, args)
+        }),
         derive: Rc::new(move |name, base, _length, body| derive(&w4, name, base, body)),
         prototype_method: Rc::new(move |class, name, _length, method| {
             let rt = scope(&w5)?;

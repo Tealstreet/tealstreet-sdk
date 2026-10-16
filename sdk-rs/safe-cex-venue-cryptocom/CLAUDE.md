@@ -2,6 +2,31 @@
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/cryptocom/CLAUDE.md).
 
+Production binding work lives in `binding/exchange.rs`: `CryptocomExchange::new`
+assembles the Rust exchange/API/socket bodies on `safe-cex-exchange::js_runtime`
+from real options, a Store, HTTP and WebSocket runtime dependencies. The Exchange
+trait forwards the supported methods and reproduces inherited source rejections
+for `fetchSymbolMaxLeverage`, `scheduleCancel` and `fetchPublicTrades`;
+`fetchHistoricalFills` returns the source's empty list. Registry wiring belongs
+to the registry lane. Tunnel installation currently rejects explicitly.
+
+Disposal must close the typed BaseExchange before source socket teardown:
+the shared facade's `isDisposed` accessor has no setter. Assigning the source
+flag alone leaves pending startup continuations active. `tests/exchange_binding.rs`
+holds an HTTP response across disposal and checks that no market update, ticker
+request or socket construction follows. It also checks read purity, public-only
+startup and private subscription ordering across failed/successful auth acks.
+`scripts/binding-controls.py` runs compiling production mutations sequentially,
+restoring exact source bytes and requiring each named test to pass again.
+
+Open binding finding: source REST `fetchBalance` returns currency records with
+`available`/`locked` fields under an `as any` cast. The inherited binding projects
+them to the shared typed Balance shape. This changes observable output and is
+tracked on the class manifest row; it is not accepted as parity. Resolve that
+boundary before marking the binding ready. Run `parity:check` against the actual
+workspace; the historical one-crate source-view helper can miss mappings owned
+by shared manifests.
+
 The first slice mirrors the eight configuration constants and
 `mapCandlestickInterval` from `cryptocom.types.ts`. Eleven wire records (Instrument, Ticker, Candlestick, PositionBalance, Error, Trade, AccountsResponse, BalanceSummary, Book, TradeFill and Order)
 are now declared in `wire.rs`; other records, REST and websocket dispatch remain

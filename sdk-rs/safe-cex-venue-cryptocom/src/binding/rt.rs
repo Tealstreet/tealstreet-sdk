@@ -5,8 +5,8 @@ use safe_cex_exchange::js_runtime::{
 };
 use std::{cell::RefCell, rc::Rc};
 
-pub type ClassBody = Rc<dyn Fn(Js, Js, Vec<Js>) -> Result<Js, Thrown>>;
-pub type Getter = Rc<dyn Fn(Js) -> Result<Js, Thrown>>;
+pub(crate) type ClassBody = Rc<dyn Fn(Js, Js, Vec<Js>) -> Result<Js, Thrown>>;
+pub(crate) type Getter = Rc<dyn Fn(Js) -> Result<Js, Thrown>>;
 
 /// A class the bodies derived: its constructor body and the prototype members
 /// installed on it.
