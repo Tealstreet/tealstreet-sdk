@@ -78,3 +78,7 @@ Clippy, strict registry-test Clippy, formatting, zero parity findings (7,459 row
 include-ignored override audit passed five of six tests; its only finding was
 the already-routed BreakoutProp inherited-socket dispose review row. No KuCoin
 finding or exemption was added.
+
+After merging master (merge head 8b2d574900), the same four registry tests and
+all six shared override audit tests pass, including the repaired BreakoutProp
+review row. The refreshed parity check also reports zero findings.
