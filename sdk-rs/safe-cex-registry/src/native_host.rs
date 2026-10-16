@@ -96,11 +96,10 @@ fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
 }
 
 impl RustVenueHost for NativeVenueHost {
-<<<<<<< HEAD
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.remote.clone()
     }
-=======
+
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         if self.remote.is_some() {
             return Err(ExchangeError::new(
@@ -120,7 +119,6 @@ impl RustVenueHost for NativeVenueHost {
         })
     }
 
->>>>>>> origin/master
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError> {
         Ok(safe_cex_venue_binance::native_host::native_dependencies(
             self.runtime.clone(),

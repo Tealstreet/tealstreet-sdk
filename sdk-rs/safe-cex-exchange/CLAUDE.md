@@ -928,8 +928,6 @@ indexer closed; native modules use free functions and trait impls only.
 authenticates with the account's proxy token and checks expiry with the canonical
 `is_token_expired`. Proof: `safe-cex-registry/tests/native_host_tunnel.rs`.
 
-<<<<<<< HEAD
 Hosted JS venues receive the signer through JsHttpHost, shared by Scope and BaseExchange assembly. Structural exchange_options decoding omits capability handles without altering the JS options object; never serialize hosted signers into the uninhabited JSON markers. The native host binds the exchange name before sending, wraps the existing RemoteSigningAdapter and propagates its effective configuration to source response hooks. Native registry tests exercise secretless validation and private websocket auth over real local sockets.
-=======
+
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
->>>>>>> origin/master
