@@ -148,3 +148,56 @@ impl SessionHost for Host {
         Box::pin(async move { value(await_js(v).await) })
     }
 }
+
+#[cfg(test)]
+mod accepted_clone_tests {
+    use super::*;
+    #[allow(dead_code)]
+    mod fixture {
+        use crate as safe_cex_venue_grvt;
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/binding_harness.rs"
+        ));
+    }
+
+    #[test]
+    fn host_clone_retains_shared_scope_and_receiver_identity() {
+        let runtime = Rc::new(fixture::Runtime::default());
+        let http = Rc::new(fixture::Http::default());
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let shared = Rc::new(ScopeShared::new(
+            runtime,
+            http,
+            store,
+            Js::object(vec![]),
+            Extra {
+                builder_error_proto: Js::object(vec![]),
+                nonce_ids: Default::default(),
+                nonce_times: Default::default(),
+                public: Default::default(),
+                private: Default::default(),
+                name: safe_cex_types::ExchangeName::Grvt,
+                options: fixture::options(),
+                external_public_data: None,
+            },
+        ));
+        let original = Host::from_shared(shared, Js::object(vec![("marker", Js::Number(7.0))]));
+        let cloned = original.clone();
+        assert!(Rc::ptr_eq(&original.0.shared, &cloned.0.shared));
+        assert!(original.0.this.same_value_zero(&cloned.0.this));
+        cloned.0.this.set("marker", Js::Number(-0.0)).unwrap();
+        let Js::Number(marker) = original.0.this.get("marker").unwrap() else {
+            panic!("GRVT Host clone lost its receiver");
+        };
+        assert_eq!(marker.to_bits(), (-0.0_f64).to_bits());
+        cloned
+            .0
+            .shared
+            .extra
+            .nonce_ids
+            .borrow_mut()
+            .replace(Default::default());
+        assert!(original.0.shared.extra.nonce_ids.borrow().is_some());
+    }
+}
