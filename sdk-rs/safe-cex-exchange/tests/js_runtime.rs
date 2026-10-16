@@ -2688,6 +2688,71 @@ fn client_rejection_handlers_follow_the_axios_promise_chain() {
 }
 
 #[test]
+fn source_socket_fields_reach_typed_groups_and_track_replacement_and_removal() {
+    use safe_cex_exchange::{
+        js_runtime::sockets::{base_websocket, core_of},
+        socket_lifecycle::SocketSlot,
+    };
+    let (a, _venue) = assembled_venue(Ok(vec![]));
+    assert!(a.base.get_all_sockets().is_empty());
+    // Exact order from source BaseExchange.getAllSockets/getPublicSockets.
+    let fields = [
+        "privateWebsocket",
+        "publicWebsocket",
+        "publicWebsocketSecondary",
+        "publicInverseWebsocket",
+        "futuresWebsocket",
+        "businessWebsocket",
+        "secondsTickersWebsocket",
+        "thirdTickersWebsocket",
+    ];
+    let sockets: Vec<_> = fields
+        .iter()
+        .map(|field| {
+            let socket = base_websocket(&a.context, a.this.clone());
+            a.this.set(field, socket.clone()).unwrap();
+            socket
+        })
+        .collect();
+    let expected: Vec<_> = sockets
+        .iter()
+        .map(|socket| core_of(&a.context, socket).unwrap().base().unwrap())
+        .collect();
+    let actual = a.base.get_all_sockets();
+    assert_eq!(
+        actual.len(),
+        8,
+        "typed lifecycle sees every source-owned socket"
+    );
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert!(Rc::ptr_eq(actual, expected));
+    }
+    assert!(Rc::ptr_eq(&a.base.get_private_sockets()[0], &expected[0]));
+    assert_eq!(
+        a.base
+            .get_public_sockets()
+            .iter()
+            .map(|s| s.id)
+            .collect::<Vec<_>>(),
+        expected[1..].iter().map(|s| s.id).collect::<Vec<_>>()
+    );
+    let replacement = base_websocket(&a.context, a.this.clone());
+    a.this.set("privateWebsocket", replacement.clone()).unwrap();
+    let replacement_core = core_of(&a.context, &replacement).unwrap().base().unwrap();
+    assert!(Rc::ptr_eq(
+        &a.base.get_socket(SocketSlot::Private).unwrap(),
+        &replacement_core
+    ));
+    a.this.delete(&utf16("publicWebsocket"));
+    assert!(a.base.get_socket(SocketSlot::Public).is_none());
+    assert_eq!(a.base.get_all_sockets().len(), 7);
+    assert_eq!(a.base.get_public_sockets().len(), 6);
+    a.base.dispose().unwrap();
+    assert!(replacement_core.is_disposed());
+    assert!(expected[1..].iter().all(|socket| socket.is_disposed()));
+}
+
+#[test]
 fn date_now_is_integer_while_performance_retains_fractional_milliseconds() {
     let (runtime, shared) = scoped_globals();
     for (wall, expected) in [
@@ -2703,6 +2768,491 @@ fn date_now_is_integer_while_performance_retains_fractional_milliseconds() {
         assert_eq!(
             run(&shared.globals, "performance.now", vec![]).as_f64(),
             Some(7.625)
+        );
+    }
+}
+
+mod http_factory {
+    use super::*;
+    use safe_cex_exchange::js_runtime::client::factory;
+    use safe_cex_transport::{
+        DirectTransport, PrivateProxy, ResolvedRouting, RestAdapter, RestAdapterContext,
+        RestAuthorizer, RestFuture, RestRequest, RestResponse, RestResponseBody, RestTransport,
+        RestTransportContext, RoutingOptions, TransportError, TransportFuture, TransportProvider,
+        WsConnection,
+    };
+    use safe_cex_types::{ExchangeName, ExchangeOptions};
+    use std::sync::Arc;
+    struct Authorizer {
+        events: Rc<RefCell<Vec<String>>>,
+        fail: bool,
+    }
+    impl RestAuthorizer for Authorizer {
+        fn authorize<'a>(&'a self, request: &'a mut RestRequest) -> TransportFuture<'a, ()> {
+            Box::pin(async move {
+                self.events.borrow_mut().push("authorize".into());
+                if self.fail {
+                    return Err(TransportError::Host("token rejected".into()));
+                }
+                request
+                    .headers
+                    .insert("Proxy-Authorization".into(), "Bearer token".into());
+                Ok(())
+            })
+        }
+    }
+    struct Provider {
+        proxied: bool,
+        authorize: Arc<dyn RestAuthorizer>,
+        adapter: Option<Arc<dyn RestAdapter>>,
+        variants: RefCell<Vec<safe_cex_transport::RestAdapterVariant>>,
+    }
+    impl TransportProvider for Provider {
+        fn name(&self) -> &str {
+            "recording"
+        }
+        fn rest(&self, c: RestTransportContext<'_>) -> Result<RestTransport, TransportError> {
+            Ok(RestTransport {
+                base_url: if self.proxied {
+                    c.config
+                        .base_url
+                        .as_ref()
+                        .map(|base| format!("https://proxy/{base}"))
+                } else {
+                    c.config.base_url.clone()
+                },
+                proxied: self.proxied,
+                authorize: Some(self.authorize.clone()),
+            })
+        }
+        fn rest_adapter(&self, c: RestAdapterContext<'_>) -> Option<Arc<dyn RestAdapter>> {
+            self.variants.borrow_mut().push(c.variant);
+            self.adapter.clone()
+        }
+        fn proxy_prefix(&self, _: RestTransportContext<'_>) -> String {
+            String::new()
+        }
+        fn public_cors_proxy(&self) -> Option<String> {
+            None
+        }
+        fn private_proxy(&self, _: &ExchangeName) -> Option<Arc<dyn PrivateProxy>> {
+            None
+        }
+        fn require_proxy(&self, o: ExchangeOptions) -> ExchangeOptions {
+            o
+        }
+        fn server_proxy_url(&self, _: &ExchangeName) -> Option<String> {
+            None
+        }
+        fn ws_routing(&self, e: &ExchangeName, o: &RoutingOptions) -> ResolvedRouting {
+            DirectTransport.ws_routing(e, o)
+        }
+        fn ws_connection(&self, _: &str) -> Option<WsConnection> {
+            None
+        }
+    }
+    struct Terminal {
+        events: Rc<RefCell<Vec<String>>>,
+        sent: Rc<RefCell<Vec<RestRequest>>>,
+        query_in_url: bool,
+    }
+    impl RestAdapter for Terminal {
+        fn query_in_url(&self) -> bool {
+            self.query_in_url
+        }
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.events.borrow_mut().push("send".into());
+            self.sent.borrow_mut().push(request);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Untransformed(json!({"ok":true})),
+                })
+            })
+        }
+    }
+    fn opts(value: Value) -> Js {
+        safe_cex_exchange::js_runtime::value::from_json(&value)
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn source_factory_routes_and_authorizes_after_venue_signing_without_losing_headers() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/js_http_factory_source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(rows.len(), 4);
+        for row in rows {
+            let runtime = Rc::new(Runtime::default());
+            let events = Rc::new(RefCell::new(vec![]));
+            let sent = Rc::new(RefCell::new(vec![]));
+            let terminal = Arc::new(Terminal {
+                events: events.clone(),
+                sent: sent.clone(),
+                query_in_url: true,
+            });
+            let host = client::rest_http_host(runtime.clone(), terminal);
+            let provider = Provider {
+                proxied: row["proxied"].as_bool().unwrap(),
+                authorize: Arc::new(Authorizer {
+                    events: events.clone(),
+                    fail: row["failAuth"].as_bool().unwrap(),
+                }),
+                adapter: None,
+                variants: RefCell::default(),
+            };
+            let config = opts(
+                json!({"baseURL":"https://venue","timeout":31,"headers":{"X-Venue":"initial"}}),
+            );
+            let xhr = factory::create(
+                host,
+                &provider,
+                config,
+                &opts(json!({"key":"","secret":""})),
+                ExchangeName::Polymarket,
+            )
+            .unwrap();
+            let trace = events.clone();
+            xhr.get("interceptors")
+                .unwrap()
+                .get("request")
+                .unwrap()
+                .call_method(
+                    "use",
+                    vec![Js::function("venue", move |_, a| {
+                        trace.borrow_mut().push("venue".into());
+                        let config = arg(&a, 0);
+                        config
+                            .get("headers")?
+                            .call_method("set", vec![Js::str("X-Venue"), Js::str("signed")])?;
+                        Ok(config)
+                    })],
+                )
+                .unwrap();
+            let result = settle(
+                &runtime,
+                xhr.call_method("get", vec![Js::str("/book")]).unwrap(),
+            );
+            assert_eq!(json!(*events.borrow()), row["events"]);
+            assert_eq!(
+                result.as_ref().err().map(Thrown::message),
+                row["error"].as_str().map(str::to_owned)
+            );
+            let requests = sent.borrow();
+            if row["wire"].is_null() {
+                assert!(requests.is_empty());
+            } else {
+                assert_eq!(requests.len(), 1);
+                let request = &requests[0];
+                assert_eq!(
+                    json!({"baseURL":request.base_url,"timeout":request.timeout_ms,"headers":request.headers}),
+                    row["wire"]
+                );
+                assert_eq!(
+                    result
+                        .unwrap()
+                        .get("config")
+                        .unwrap()
+                        .get("headers")
+                        .unwrap()
+                        .call_method("get", vec![Js::str("x-venue")])
+                        .unwrap()
+                        .to_display(),
+                    "signed"
+                );
+            }
+        }
+    }
+    #[test]
+    fn direct_factory_preserves_override_and_refuses_unavailable_routing_before_send() {
+        let runtime = Rc::new(Runtime::default());
+        let http = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let options = opts(json!({"key":"","secret":"","overrideProxyUrl":"https://override"}));
+        let xhr = factory::create(
+            http.clone(),
+            &DirectTransport,
+            opts(json!({"baseURL":"https://venue","timeout":999})),
+            &options,
+            ExchangeName::Polymarket,
+        )
+        .unwrap();
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/book")]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            http.sent.borrow()[0]["baseURL"],
+            "https://override/https://venue"
+        );
+        for flag in ["tealstreetProxy", "tealstreetTunnel"] {
+            let error = factory::create(
+                http.clone(),
+                &DirectTransport,
+                opts(json!({"baseURL":"https://venue"})),
+                &opts(json!({"key":"","secret":"",flag:true})),
+                ExchangeName::Polymarket,
+            )
+            .unwrap_err();
+            assert!(error.message().contains("direct transport is active"));
+        }
+        assert_eq!(http.sent.borrow().len(), 1);
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn explicit_transport_installation_selects_variants_and_leaves_how_params_in_frame() {
+        use safe_cex_transport::{RestAdapterRegion, RestAdapterVariant as V};
+        let runtime = Rc::new(Runtime::default());
+        let direct = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let events = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        let provider = Provider {
+            proxied: false,
+            authorize: Arc::new(Authorizer {
+                events: events.clone(),
+                fail: false,
+            }),
+            adapter: Some(Arc::new(Terminal {
+                events,
+                sent: sent.clone(),
+                query_in_url: false,
+            })),
+            variants: RefCell::default(),
+        };
+        let options = opts(json!({"key":"","secret":"","tealstreetTunnel":true}));
+        let xhr = factory::create(
+            direct.clone(),
+            &provider,
+            opts(json!({"baseURL":"https://venue"})),
+            &options,
+            ExchangeName::Polymarket,
+        )
+        .unwrap();
+        let variants = [
+            V::Default,
+            V::BigInt,
+            V::Region {
+                region: Some(RestAdapterRegion::Ja),
+            },
+        ];
+        for variant in &variants {
+            factory::install_transport_adapter(
+                direct.clone(),
+                &provider,
+                &xhr,
+                &options,
+                ExchangeName::Polymarket,
+                variant.clone(),
+            )
+            .unwrap();
+            settle(
+                &runtime,
+                xhr.call_method(
+                    "get",
+                    vec![
+                        Js::str("/book"),
+                        Js::object(vec![
+                            ("params", opts(json!({"id":"9007199254740993"}))),
+                            (
+                                "paramsSerializer",
+                                Js::function("serialize", |_, _| {
+                                    panic!("HOW must retain frame params")
+                                }),
+                            ),
+                        ]),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(*provider.variants.borrow(), variants);
+        assert!(direct.sent.borrow().is_empty());
+        for request in sent.borrow().iter() {
+            assert_eq!(request.url, "/book");
+            assert_eq!(request.params, Some(json!({"id":"9007199254740993"})));
+        }
+        let absent = Provider {
+            adapter: None,
+            ..provider
+        };
+        factory::install_transport_adapter(
+            direct,
+            &absent,
+            &xhr,
+            &options,
+            ExchangeName::Polymarket,
+            V::Default,
+        )
+        .unwrap();
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/again")]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            sent.borrow().last().unwrap().url,
+            "/again",
+            "absent adapter retains the installed inner adapter"
+        );
+    }
+
+    struct Signer {
+        events: Rc<RefCell<Vec<String>>>,
+    }
+    impl safe_cex_transport::signing::RemoteSigner for Signer {
+        fn sign(
+            &self,
+            request: safe_cex_transport::signing::RemoteSignerRequest,
+        ) -> TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse> {
+            use safe_cex_transport::signing::*;
+            self.events.borrow_mut().push("sign".into());
+            let RemoteSignerRequest::Http(request) = request else {
+                panic!("HTTP expected")
+            };
+            assert_eq!(request.exchange_name, ExchangeName::Polymarket);
+            assert_eq!(request.account_name.as_deref(), Some("hosted"));
+            assert_eq!(
+                request
+                    .config
+                    .headers
+                    .get("Proxy-Authorization")
+                    .map(String::as_str),
+                Some("Bearer token")
+            );
+            Box::pin(async move {
+                Ok(RemoteSignerResponse::Http(HttpSigningResponse {
+                    id: request.id,
+                    config: Some(SignedConfig {
+                        url: Some("/signed".into()),
+                        params: Some(json!({"signed":7.0})),
+                        headers: [("Remote-Signature".into(), "signed".into())]
+                            .into_iter()
+                            .collect(),
+                        ..Default::default()
+                    }),
+                    error: None,
+                }))
+            })
+        }
+    }
+    impl safe_cex_exchange::runtime::RemoteSigner for Signer {
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn on_availability_change(
+            &self,
+            _: Rc<dyn Fn(bool)>,
+        ) -> safe_cex_exchange::runtime::Cleanup {
+            Box::new(|| {})
+        }
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn replacing_transport_keeps_remote_signing_below_proxy_auth_and_before_query_serialization() {
+        use safe_cex_transport::RestAdapterVariant;
+        let runtime = Rc::new(Runtime::default());
+        let events = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        let terminal = Arc::new(Terminal {
+            events: events.clone(),
+            sent: sent.clone(),
+            query_in_url: true,
+        });
+        let host = client::rest_http_host_signed(
+            runtime.clone(),
+            terminal.clone(),
+            Some((
+                Rc::new(Signer {
+                    events: events.clone(),
+                }),
+                Some("hosted".into()),
+            )),
+        );
+        let provider = Provider {
+            proxied: true,
+            authorize: Arc::new(Authorizer {
+                events: events.clone(),
+                fail: false,
+            }),
+            adapter: Some(terminal),
+            variants: RefCell::default(),
+        };
+        let options = opts(json!({"key":"","secret":""}));
+        let trace = events.clone();
+        let xhr = factory::create(
+            host.clone(),
+            &provider,
+            Js::object(vec![
+                ("baseURL", Js::str("https://venue")),
+                (
+                    "paramsSerializer",
+                    Js::function("serialize", move |_, a| {
+                        trace.borrow_mut().push("serialize".into());
+                        assert_eq!(to_json(&arg(&a, 0))?, json!({"signed":7.0}));
+                        Ok(Js::str("signed=7"))
+                    }),
+                ),
+            ]),
+            &options,
+            ExchangeName::Polymarket,
+        )
+        .unwrap();
+        factory::install_transport_adapter(
+            host,
+            &provider,
+            &xhr,
+            &options,
+            ExchangeName::Polymarket,
+            RestAdapterVariant::Default,
+        )
+        .unwrap();
+        let response = settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![Js::str("/book"), opts(json!({"params":{"unsigned":3}}))],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(*events.borrow(), ["authorize", "sign", "serialize", "send"]);
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].url, "/signed?signed=7");
+        assert_eq!(
+            sent[0].headers.get("Remote-Signature").map(String::as_str),
+            Some("signed")
+        );
+        assert_eq!(
+            response
+                .get("config")
+                .unwrap()
+                .get("url")
+                .unwrap()
+                .to_display(),
+            "/signed"
+        );
+        assert_eq!(
+            to_json(&response.get("config").unwrap().get("params").unwrap()).unwrap(),
+            json!({"signed":7.0})
         );
     }
 }

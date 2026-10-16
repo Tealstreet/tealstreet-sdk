@@ -241,8 +241,8 @@ source Exchange methods retain their inherited `Not implemented` rejection.
 Hosted remote signing is explicitly refused by the native registry host because
 the active GRVT SDK order signer requires the local wallet.
 
-The production native registry supplies `CreateApiClient` over the existing common
-HTTP factory for each of the three API clients. This retains eager routing
+Each of the three API clients uses the shared
+`js_runtime::client::factory::create` with the runtime transport provider. This retains eager routing
 refusals, transport authorization, standard headers and the common 20-second
 timeout. The source GRVT HOW installations remain commented out; this binding
 preserves that choice. A caller-supplied HOW terminal still receives cookie/account

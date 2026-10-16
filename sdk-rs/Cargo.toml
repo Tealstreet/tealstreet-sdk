@@ -51,6 +51,7 @@ publish = false
 # License remains unset until the overseer resolves public/licensing decision D4.
 
 [workspace.dependencies]
+safe-cex-venue-hyperliquid = { path = "safe-cex-venue-hyperliquid" }
 # Exact regex pin is deliberate: cargo update cannot take security patches; bump this requirement explicitly.
 regex = "=1.13.1"
 # Shared signing primitives for transport and venue authentication.
@@ -101,9 +102,11 @@ safe-cex-venue-bingx = { path = "safe-cex-venue-bingx" }
 safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
 safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
+safe-cex-venue-coinbase = { path = "safe-cex-venue-coinbase" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
 safe-cex-venue-kraken = { path = "safe-cex-venue-kraken" }
 safe-cex-venue-grvt = { path = "safe-cex-venue-grvt" }
+safe-cex-venue-polymarket = { path = "safe-cex-venue-polymarket" }
 safe-cex-candle-cache = { path = "safe-cex-candle-cache" }
 safe-cex = { path = "safe-cex" }
 safe-cex-ffi = { path = "safe-cex-ffi" }

@@ -3240,6 +3240,126 @@
     "file": "safe-cex-venue-bybit/src/ws_public.rs"
   },
   {
+    "function": "new",
+    "body": "58a475a01e1b314d",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "is_public_data_only",
+    "body": "78be3261ff32793e",
+    "call": "self . class . is_public_data_only ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "8e8b17c0f9404af2",
+    "reference": "exchange_lifecycle :: dispose",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "start",
+    "body": "ee9d8ecc438fbb2b",
+    "reference": "exchange_lifecycle :: start",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "get_account",
+    "body": "225756092b9f8ce5",
+    "call": "self . class . get_account ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "validate_account",
+    "body": "45fb1f305466d6ba",
+    "reference": "exchange_lifecycle :: validate_account",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "7efaf034959e5156",
+    "reference": "crate :: order_sync :: fetch_orders",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "4fd469da50f305e9",
+    "reference": "order_edit :: update_order",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_ohlcv",
+    "body": "a028c8b466a2361c",
+    "reference": "public_market_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "64e078057f071bba",
+    "call": "socket . listen_ohlcv (options_root (options) , Rc :: new (move | candle | { let candle = match candle { PublicData :: Candle (candle) => candle . borrow () . clone () , other => { let value = Js :: object (vec ! []) ; for (key , field) in other . fields () { value . define_key (& key , field . as_ref () . map (to_js) . unwrap_or (Js :: Undefined) ,) . map_err (| error | { Rc :: new (crate :: public_stream_dispatch :: PublicStreamFailure { name : error . to_exchange_error () . name , message : error . to_exchange_error () . message , } ,) }) ? ; } to_typed (& value) . map_err (| error | { Rc :: new (crate :: public_stream_dispatch :: PublicStreamFailure { name : error . to_exchange_error () . name , message : error . to_exchange_error () . message , }) }) ? } } ; callback (candle) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "5c2bbefa8ac10616",
+    "call": "socket . listen_order_book (symbol , Rc :: new (move | book | { callback (super :: sockets :: native_book (& book)) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "sign_ws_auth",
+    "body": "a2b2da1900175eed",
+    "reference": "exchange_ws_auth :: sign_ws_auth",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "class_name",
+    "body": "21a0bfaa41418127",
+    "call": "self . name ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "market_values",
+    "body": "f4586f9bfd9c97b7",
+    "reference": "public_market_reads :: fetch_markets",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "ticker_values",
+    "body": "18a4de3a21ed724f",
+    "reference": "market_position_reads :: fetch_tickers",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "position_values",
+    "body": "f7b53938f6285302",
+    "reference": "market_position_reads :: fetch_positions",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "dispose_base",
+    "body": "397043d34be7c3ff",
+    "call": "self . base () . dispose ()",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "775061d4f4b97dd4",
+    "reference": "order_create :: cancel_orders",
+    "file": "safe-cex-venue-coinbase/src/binding/orders.rs"
+  },
+  {
+    "function": "public_only",
+    "body": "3102b5c09be0b51c",
+    "call": "class . is_public_data_only ()",
+    "file": "safe-cex-venue-coinbase/src/binding/rt.rs"
+  },
+  {
+    "function": "fetch_ohlcv_detached",
+    "body": "630e2c10c0e00b4c",
+    "reference": "crate :: public_market_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-coinbase/src/binding/sockets.rs"
+  },
+  {
     "function": "listen_ohlcv",
     "body": "e0113c19726f822e",
     "reference": "crate :: public_market_listeners :: listen_ohlcv",

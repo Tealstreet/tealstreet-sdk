@@ -161,3 +161,9 @@ semantics. Unknown extension properties are retained, not emitted as HTTP header
 or HOW arguments. The existing JSON data boundary applies to extension values;
 this is not an arbitrary executable Axios object carrier. The live source corpus
 in tests/grvt-config-source.cjs covers seven missing/truthy/falsy/overwrite cases.
+
+The native terminal combines baseURL and relative URLs using Axios
+buildFullPath/combineURLs semantics: exactly one joining slash, empty relative
+path retains baseURL, absolute/protocol-relative URLs remain absolute. The
+native::url_tests regression was measured against actual installed Axios and
+prove-failed on the old concatenation; DXtrade's /dxsca-web base exposed it.

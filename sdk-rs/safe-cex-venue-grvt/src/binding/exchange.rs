@@ -20,15 +20,10 @@ use safe_cex_store::Store;
 use safe_cex_types::*;
 use std::rc::Rc;
 
-/// Concrete common Axios factory; receives each source factory's defaults/options.
-pub type CreateApiClient = Rc<dyn Fn(Js, &ExchangeOptions) -> Result<Js, ExchangeError>>;
-
 pub struct GrvtDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     /// HTTP wire host for every client the venue creates.
     pub http: Rc<dyn safe_cex_exchange::js_runtime::client::JsHttpHost>,
-    /// Common HTTP factory. A scripted wire host can use the built-in client.
-    pub create_api_client: Option<CreateApiClient>,
     /// Provider for `options.externalPublicData`; required when that option is set.
     pub external_public_data:
         Option<safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory>,
@@ -76,7 +71,6 @@ impl GrvtExchange {
                 store.clone(),
                 globals,
                 Extra {
-                    create_api_client: deps.create_api_client.clone(),
                     name: name.clone(),
                     options: options.clone(),
                     external_public_data: deps.external_public_data.clone(),

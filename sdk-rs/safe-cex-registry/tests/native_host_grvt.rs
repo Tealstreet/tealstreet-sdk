@@ -1,6 +1,9 @@
 //! GRVT through the registry, common HTTP factory and real local reqwest IO.
 #![cfg(not(target_arch = "wasm32"))]
-use safe_cex_registry::{native_host::native_venue_host_with, rust_venues::rust_constructor};
+use safe_cex_registry::{
+    native_host::{hyperliquid_rate_limiter, native_venue_host_with},
+    rust_venues::rust_constructor,
+};
 use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, native::ReqwestAdapter,
@@ -68,7 +71,7 @@ fn grvt_registry_uses_real_http_and_preserves_direct_sdk_session_headers() {
                 inner: safe_cex_transport::native::reqwest_adapter().unwrap(),
                 origin: origin.clone(), seen: recorded.clone(),
             }) as Arc<dyn RestAdapter>)
-        }));
+        }), hyperliquid_rate_limiter());
         let ctor = rust_constructor(&ExchangeName::Grvt, host).unwrap();
         let options = serde_json::from_value(json!({"key":"native-key","secret":"0000000000000000000000000000000000000000000000000000000000000001","grvtTradingAccountId":"42"})).unwrap();
         let exchange = ctor.construct(ExchangeName::Grvt, options, Rc::new(DefaultStore::new())).unwrap();
@@ -101,7 +104,7 @@ fn grvt_common_factory_refuses_proxy_options_on_direct_transport_during_construc
         .build()
         .unwrap();
     tokio::task::LocalSet::new().block_on(&rt, async {
-        let host = safe_cex_registry::native_host::native_venue_host();
+        let host = safe_cex_registry::native_host::native_venue_host(hyperliquid_rate_limiter());
         let ctor = rust_constructor(&ExchangeName::Grvt, host).unwrap();
         let options =
             serde_json::from_value(json!({"key":"","secret":"","tealstreetProxy":true})).unwrap();

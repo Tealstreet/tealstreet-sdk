@@ -179,3 +179,25 @@ undefined is nil, integer encoding and own-key ordering match the raw entrypoint
 The raw MessagePack adapter uses retained JSON capture before conversion to the
 native carrier. A literal private-Number-looking object remains an object;
 its native member assertion precedes the source byte golden.
+
+**zkLink contract capability.** `zklink::contract` implements the imported
+ContractBuilder serialization and the Ethereum-signature branch of
+JsonRpcSigner for contracts. The venue retains validation, wasm argument
+coercion and transaction orchestration. The seed handle owns zeroizing65-byte
+storage with no Debug/serde/export; v is consumed verbatim as the npm SDK does.
+It exposes no wallet provider, seed acquisition or other transaction signing.
+
+Contract preimages retain the SDK's low16 slot, low24 nonce and low8 pair,
+40-bit decimal-float amount, 120-bit price, direction, distinct fees and subsidy.
+Wire size/price remain the original numeric values as canonical decimal strings;
+packing affects the authenticated preimage only. `closest_packable_amount/fee`
+select the closest lower encoding, including the preceding exponent's maximum
+mantissa, rather than always truncating at the next exponent.
+
+Chosen bounds: decimal conversion beyond u128, prices beyond120 bits and inputs
+whose SDK packing product overflows or whose exponent exceeds31 return errors.
+These replace source panic paths; no identical error-text claim is made. Inputs
+are already typed after WASM conversion; native JSON u32/string refusals do not
+claim to reproduce JavaScript's modulo conversions. Existing primitive fixtures
+remain unchanged. The separately labeled24-contract npm supplement plus18
+rounding cases pin fields and wire signatures, with immutable artifact hashes.

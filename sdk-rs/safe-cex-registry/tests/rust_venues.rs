@@ -502,10 +502,31 @@ impl RustVenueHost for Venues {
                 self.runtime.clone(),
                 self.wire.clone(),
             ),
-            create_api_client: None,
             external_public_data: None,
         })
     }
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn hyperliquid(
+        &self,
+        _: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("hyperliquid");
+        Ok(
+            safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
+                runtime: self.runtime.clone(),
+                http: self.wire.clone(),
+                limiter: Rc::new(safe_cex_venue_hyperliquid::rate_limit::RateLimiter::new(
+                    Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
+                        self.runtime.clone(),
+                    )),
+                    1200.0,
+                    60_000.0,
+                )),
+                signers: Default::default(),
+            },
+        )
+    }
+
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         self.calls.borrow_mut().push("kraken");
         Ok(safe_cex_venue_kraken::KrakenDependencies {
@@ -631,6 +652,22 @@ impl RustVenueHost for Venues {
             external_public_data: None,
         })
     }
+    fn polymarket(
+        &self,
+    ) -> Result<safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies, ExchangeError>
+    {
+        self.calls.borrow_mut().push("polymarket");
+        Ok(
+            safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                    self.runtime.clone(),
+                    self.wire.clone(),
+                ),
+                external_public_data: None,
+            },
+        )
+    }
 }
 fn venues() -> Rc<Venues> {
     Rc::new(Venues {
@@ -706,12 +743,16 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
             ExchangeName::Grvt,
+            ExchangeName::Coinbase,
+            ExchangeName::Coinbasespot,
+            ExchangeName::Hyperliquid,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
             ExchangeName::Okx,
             ExchangeName::Okxdemo,
             ExchangeName::Okxeu,
             ExchangeName::Okxeudemo,
+            ExchangeName::Polymarket,
         ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );
@@ -1042,7 +1083,9 @@ fn kraken_family_constructs_through_the_registry_and_reads_its_markets() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn native_kraken_dependencies_retain_module_state_per_host() {
-    let host = safe_cex_registry::native_host::native_venue_host();
+    let host = safe_cex_registry::native_host::native_venue_host(
+        safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+    );
     let first = host.kraken().unwrap();
     let second = host.kraken().unwrap();
     assert!(
@@ -1060,9 +1103,11 @@ fn native_kraken_dependencies_retain_module_state_per_host() {
         first.external_public_data.is_some(),
         "REGISTRY Kraken native gateway factory"
     );
-    let other = safe_cex_registry::native_host::native_venue_host()
-        .kraken()
-        .unwrap();
+    let other = safe_cex_registry::native_host::native_venue_host(
+        safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+    )
+    .kraken()
+    .unwrap();
     assert!(
         !Rc::ptr_eq(&first.futures_nonces, &other.futures_nonces),
         "REGISTRY separate native runtimes have separate module state"
@@ -1088,5 +1133,34 @@ fn grvt_constructs_through_registry_and_reads_actual_public_gateway() {
     assert_eq!(
         host.wire.requests.lock().unwrap()[0],
         "/lite/v1/all_instruments"
+    );
+}
+
+#[test]
+fn polymarket_constructs_through_the_registry_and_calls_live_methods() {
+    let host = venues();
+    let exchange = construct(
+        ExchangeName::Polymarket,
+        &host,
+        json!({"key":"","secret":"","publicDataOnly":true}),
+    );
+    assert_eq!(*exchange.base().name(), ExchangeName::Polymarket);
+    let account = run(&host.runtime, exchange.get_account()).unwrap();
+    assert_eq!(
+        account.user_id, "unknown",
+        "REGISTRY Polymarket account source body"
+    );
+    assert_eq!(
+        run(
+            &host.runtime,
+            exchange.fetch_symbol_max_leverage("example-Yes".into())
+        )
+        .unwrap(),
+        1.
+    );
+    assert_eq!(
+        &*host.calls.borrow(),
+        &["polymarket"],
+        "REGISTRY requests venue inputs exactly once"
     );
 }

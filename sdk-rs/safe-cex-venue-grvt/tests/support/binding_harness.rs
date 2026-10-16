@@ -353,7 +353,6 @@ pub fn harness(
         GrvtDependencies {
             runtime: runtime.clone(),
             http: http.clone(),
-            create_api_client: None,
             external_public_data: None,
         },
     )
