@@ -254,7 +254,7 @@ context; no source undefined/alias/error-object identity is asserted for that AB
 ## Production binding (`binding.rs`, `realm/`)
 
 `HyperliquidExchange::new(options, store, HyperliquidDependencies)` builds the
-shared BaseExchange, then runs the ported class constructor inside `realm`, the
+shared BaseExchange with the required `HyperliquidDependencies.signers`, then runs the ported class constructor inside `realm`, the
 crate-private production JS host for the generic class bodies. Every `Exchange`
 trait method invokes the instance's ported method; six inherit the TS
 BaseExchange `Not implemented` rejection (getAccount, fetchMarkets, fetchTickers,
@@ -266,7 +266,7 @@ name throws a ReferenceError rather than resolving to a stand-in.
 clean startup. Run `python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/binding-controls.py`
 from the repository root for reproducible dispatch controls: each of the 16
 trait overrides is corrupted independently, must compile and fail its named
-E2E test, and is restored byte-for-byte. The restored suite must pass all 12
+E2E test, and is restored byte-for-byte. The restored suite must pass all 13
 tests. These controls establish dispatch coverage; they do not establish full
 JavaScript semantics or live exchange parity. Logs stay outside the repository.
 
@@ -283,3 +283,11 @@ the cross cache is per realm and memory-only (no BroadcastChannel or
 sessionStorage on native hosts); `close` listeners are not invoked because the
 core socket runs the close/reconnect path; external public data rejects visibly.
 Signing converts actions with `undefined` members retained, matching msgpack nil.
+
+The production host supplies `ExchangeSigners` through the existing dependency
+struct; construction attaches them to BaseExchange before realm assembly. Native
+`can_sign` reflects a hosted signer even with no local secret, and availability
+waiters subscribe to that same signer. HTTP relay signing is supplied separately
+by the host's composed adapter, which must honor the API's skip-signing tag on info
+requests. Every caller must pass the signer bundle explicitly; local callers use
+`ExchangeSigners::default()`.

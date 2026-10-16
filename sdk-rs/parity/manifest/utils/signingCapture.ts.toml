@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/utils/signingCapture.ts"
-rust_files = [ "safe-cex-store/src/remaining_utils.rs" ]
+rust_files = [ "safe-cex-store/src/remaining_utils.rs", "safe-cex-exchange/src/http.rs" ]
 
 [[symbol]]
 ts = "SIGNING_CAPTURE_FLAG"
@@ -14,6 +14,6 @@ note = "Exact source flag; native assertion in safe-cex-store/tests/remaining_ut
 ts = "isSigningCaptureRequest"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/remaining_utils.rs::is_signing_capture_request"
+rs = [ "safe-cex-store/src/remaining_utils.rs::is_signing_capture_request", "safe-cex-exchange/src/http.rs::HttpClient::is_signing_capture" ]
 status = "divergent"
-note = "CHOSEN: This helper reads the explicit own config marker, never a header. The local rationale and selected costs are declared once at sdk-rs/parity/MANIFEST-SPEC.md#utility-capability-choice. Renamed to safe-cex-store/src/remaining_utils.rs::is_signing_capture_request. Evidence: sdk-rs/parity/UTILITY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: This helper reads the explicit own config marker, never a header. The local rationale and selected costs are declared once at sdk-rs/parity/MANIFEST-SPEC.md#utility-capability-choice. Renamed to safe-cex-store/src/remaining_utils.rs::is_signing_capture_request. Evidence: sdk-rs/parity/UTILITY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split member `safe-cex-exchange/src/http.rs::HttpClient::is_signing_capture`. This forwards the existing host capture predicate for venue signing interceptors, keeping the same configuration marker decision; KuCoin uses it to retain an incoming timestamp only during a capture. It adds no separate capture policy. Witness: tests/api_capture.rs in safe-cex-venue-kucoin exercises incoming versus freshly generated timestamps."

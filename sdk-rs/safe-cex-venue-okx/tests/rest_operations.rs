@@ -341,11 +341,25 @@ fn maintained_typescript_response_body_lookup_and_sequential_placement() {
             case["calls"],
             "request bytes/order/count {index}"
         );
-        assert_eq!(
-            json!(emissions.into_inner()),
-            case["emissions"],
-            "diagnostic {index}"
-        );
+        let source_emissions = case["emissions"].as_array().unwrap();
+        if source_emissions.iter().any(|emitted| !emitted.is_string()) {
+            // The source emits a non-string msg before new Error(msg) throws; the
+            // string-valued emitter cannot carry it, so the native path only throws.
+            assert!(
+                emissions.borrow().is_empty(),
+                "string emitter refuses a non-string diagnostic {index}"
+            );
+            assert_eq!(
+                case["error"]["name"], "TypeError",
+                "source then throws {index}"
+            );
+        } else {
+            assert_eq!(
+                json!(emissions.into_inner()),
+                case["emissions"],
+                "diagnostic {index}"
+            );
+        }
         assert_eq!(
             json!(mappings.into_inner()),
             case["mappings"],

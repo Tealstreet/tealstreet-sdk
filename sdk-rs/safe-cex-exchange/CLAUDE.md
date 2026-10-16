@@ -618,6 +618,13 @@ before the signer, then normalize again after signer output. The first spelling
 survives while the last value wins. Plain-object serialize_headers deliberately
 retains its entries, including case variants.
 
+The JS client gives source request interceptors an AxiosHeaders facade with
+inherited `set(name, value, rewrite?)`, `set(record, rewrite?)`, `get(name)` and
+`has(name)` methods. Header casing, value normalization, fluent receiver identity
+and own-key order are checked against installed Axios; methods never become wire
+entries. Parser/matcher overloads of get/has fail visibly until bound. This does
+not widen the transport's string-valued header ABI to Axios's false sentinel.
+
 After signing, the shared request transform generates application/json for
 object/array data when Content-Type is absent, and dispatch supplies
 application/x-www-form-urlencoded for POST/PUT/PATCH when still absent. Explicit
@@ -936,6 +943,7 @@ authenticates with the account's proxy token and checks expiry with the canonica
 The JS HTTP terminal honors `responseType: 'text'` for encoded response bodies,
 including non-2xx responses. It preserves raw JSON tokens and whitespace until a
 venue's bigint-safe parser runs. The default continues ordinary JSON projection.
+
 Hosted JS venues receive the signer through JsHttpHost, shared by Scope and BaseExchange assembly. Structural exchange_options decoding omits capability handles without altering the JS options object; never serialize hosted signers into the uninhabited JSON markers. The native host binds the exchange name before sending, wraps the existing RemoteSigningAdapter and propagates its effective configuration to source response hooks. Query serialization uses the shared HTTP codec after signing; response/error configs retain signed params and source URLs for retries. Native registry tests exercise secretless validation and private websocket auth over real local sockets.
 
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
