@@ -262,9 +262,9 @@ note = "API split: safe-cex-registry/src/rust_venues.rs::kucoin_constructor, saf
 ts = "exchangeRegistry.lighter"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_lighter"
+rs = [ "safe-cex-registry/src/loaders.rs::native_lighter", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::lighter", "safe-cex-registry/src/rust_venues.rs::lighter_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_lighter selects the actual source module ./lighter/lighter.exchange and export LighterExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_lighter. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_lighter selects the actual source module ./lighter/lighter.exchange and export LighterExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_lighter. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::RustVenueHost::lighter` and `safe-cex-registry/src/rust_venues.rs::lighter_constructor` bind the existing LighterNativeExchange for lighter and lighter-robinhood. The native host uses the runtime transport registry and OS signing entropy; hosted remote signing refuses visibly. Construction tests read deployment-specific markets through the registry on native HTTP."
 
 [[symbol]]
 ts = "exchangeRegistry.lighter-robinhood"

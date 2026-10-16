@@ -364,3 +364,22 @@ fn start_loads_markets_tickers_account_and_sockets() {
     );
     h.venue().dispose().expect("dispose");
 }
+
+#[test]
+fn source_identity_flags_survive_demo_facade_construction() {
+    for (name, demo) in [
+        (ExchangeName::Okx, false),
+        (ExchangeName::Okxdemo, true),
+        (ExchangeName::Okxeu, false),
+        (ExchangeName::Okxeudemo, true),
+    ] {
+        let h = harness(name, options(), |_| {});
+        assert_eq!(
+            h.venue().base().is_demo,
+            demo,
+            "OKX source isDemo flag reaches typed base"
+        );
+        assert!(!h.venue().base().is_spot);
+        h.venue().dispose().unwrap();
+    }
+}
