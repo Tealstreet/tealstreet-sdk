@@ -971,6 +971,12 @@ compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
 checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
 
+Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
+JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
+`dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
+cases cover successful cleanup and each throwing socket, shared-cell visibility,
+retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
+
 The js_runtime Object.defineProperty binding retains ordinary-object/function data
 attributes, following ToPropertyDescriptor and ValidateAndApplyPropertyDescriptor
 in ECMA-262. New fields default to undefined/false; omitted fields on an existing
