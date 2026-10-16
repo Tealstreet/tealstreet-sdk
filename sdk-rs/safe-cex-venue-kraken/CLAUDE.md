@@ -348,6 +348,20 @@ functions, construction and feature/wasm accepted behavior remain independent.
 The host profiles are already defined in MANIFEST-SPEC#kraken-module-utility-adapters.
 
 
+`tests/accepted_scalar_helpers.rs` observes six distinct fills/income scalar
+decoders: finite numbers, two presence-sensitive optional-number functions,
+seconds and millisecond date functions, and the raw-field position-size-leg
+predicate. Compare native f64 bits, Option presence, Boolean values and coercion
+error names before Serialize. Date fixtures retain the explicit local-time host
+boundary and pre-epoch flooring. The selected production gate
+`scripts/scalar-helper-contracts.mjs` runs all six actual APIs against independent
+cases; it is not a classification-only receipt. Run the native fixture with
+`--test utilities`, then the serial `scripts/scalar-helper-contract-controls.py`.
+Each control must fail its named compiled native witness and only its own
+production output probe; every exact restoration must pass the named native
+witness and all six production probes. Other owners, aliases and all 25 receiver
+refusals remain independent, under MANIFEST-SPEC#kraken-utility-wire-domain.
+
 The four private request records in `futures_candles`, `spot_reads` and `reads`
 use their concrete Deserialize boundary with the existing shared numeric backend
 and `strict_decode::object`, followed by private Serde remote companions. Preserve

@@ -1624,6 +1624,63 @@ Independent merge-preservation review is clean; the obsolete #327-pending wordin
 has been corrected. Other accepted-set obligations remain open as listed above.
 
 
+## Six accepted scalar helper bodies (2026-10-17)
+
+The complete fills/income helper bodies were reviewed individually against the
+actual TS source and MANIFEST-SPEC#kraken-utility-wire-domain. All six are decoders:
+`fills::num`, `fills::optional_num`, `fills::to_seconds`, `income::num`,
+`income::to_ms` and `income::is_position_size_leg`. The last function reads and
+coerces raw asset/contract fields before comparison, rather than comparing two
+already typed literal strings. The two optional-number functions remain separate
+owners with independently executed calls.
+
+Six new native witnesses plus all six existing utility source/boundary tests pass
+**12 / zero failures / zero ignored**. Native observations retain finite f64 bits
+including negative zero, missing/null/empty versus present zero, coercion errors,
+pre-epoch mathematical floor, milliseconds versus seconds and explicit local-host
+callback value/count. UTC inputs must not consult that callback. Raw predicate
+cases include numeric/Boolean/array/object fields, no trimming, null/missing keys
+and actual coercion errors. The maintained actual-source corpus independently
+checks 164 cases across utility scalars, dates, mappers and boundary supplements;
+it does not replace the new independently authored expected values.
+
+Fresh native/default production probes execute all six actual APIs over **103
+independently authored cases**, reporting **six runtime results / zero explicit
+classifications / zero failed owners**. Numeric output uses native `to_bits`,
+optional output observes actual Some/None, and Boolean/error-name results are
+read before serialization. Production date probes use an explicit UTC identity
+host; local UTC+02 behavior and missing scalar inputs have separate native tests.
+
+`scripts/scalar-helper-contract-controls.py` completed all six compiled controls:
+finite numeric result plus one, each optional decoder's missing result changed
+to Some(0), date floor changed to ceil, milliseconds divided by 1000, and the position-leg
+nonempty test changed to empty. Every mutation fails its own named native test
+and only its own actual production output probe. Each exact restoration passes
+that native witness and all six production probes. The final source bytes equal
+the original fills.rs/income.rs and all 12 native/source tests pass again with
+zero ignored. Compiler failures and tooling refusals cannot count as controls.
+
+Master `9be4149af3` integrates as `ca3629d8ca`, including the four helper rows from
+#345. All five existing master Kraken contracts are preserved exactly; only the
+six new scalar rows are added. No production helper or protocol boundary changed.
+The remaining owners, aliases, construction, local functions, 25 receiver refusals
+and feature/wasm accepted behavior remain independent obligations.
+
+
+Scalar readiness at integration `ca3629d8ca`: fresh full scoped Kraken tests pass
+**151 / zero failures / zero ignored** across 30 target receipts including docs.
+Separate native and wasm32 all-targets Clippy pass with warnings denied; frozen
+install and workspace format pass. The scoped structural gate passes **134 rows /
+539 public items / zero exemptions**, and global verification passes **7459 rows /
+17206 public items**. Those checker executions reuse the compiled maintained
+indexer after comparison confirmed unchanged Rust/Cargo/lock inputs. The maintained
+TS extractor checks **83 symbols across seven slice files**. Fresh post-integration
+production verification passes **six actual runtime results / zero classifications
+/ zero failed owners**. Independent draft review is clean; CodeRabbit's requested
+manual review returned a rate limit. The paginated review audit contains zero
+inline conversations and zero substantive review summaries at this checkpoint.
+This is six native/default owners, not complete venue or wasm behavioral coverage.
+
 ## Four private request-record object boundaries (2026-10-17)
 
 The Futures/Spot candle Options, AccountLogParams and HistoricalOptions were each
