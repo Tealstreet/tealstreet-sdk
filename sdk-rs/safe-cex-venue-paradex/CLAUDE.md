@@ -169,3 +169,12 @@ signer routing and felt-pair formatting. Its host retains original JavaScript
 method receivers, map/species behavior, coercions and promise settlement. Native
 bindings use `safe-cex-crypto` hashing/signing; inherited typed-data encoder
 refusals remain explicit in the manifest rather than claiming SDK-wide parity.
+
+
+`native_exchange::ParadexExchange::new` now composes the body ports on the shared
+`js_runtime`. Runtime, per-options HTTP factory and external public-data factory
+are explicit constructor dependencies. See [BINDING_GATES.md](BINDING_GATES.md)
+for constructed trait coverage, actual SDK signatures and compiled controls.
+Preserve source fetchPositions balance writes and exchange disposal without base
+cleanup. Only constructed private onOpen uses the approved shared authentication
+recovery contract; direct authenticate keeps the original catch and log behavior.

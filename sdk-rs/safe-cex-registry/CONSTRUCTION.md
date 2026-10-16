@@ -289,3 +289,11 @@ callers supply the shared limiter as for other venues. Phemex currently refuses
 `tealstreetTunnel` when no transport installer is supplied; the native host has
 no Phemex tunnel installer. `tests/native_host_phemex.rs` verifies real local HTTP
 market precision/read purity and signed account-query bytes through the registry.
+
+
+Paradex's Rust entry calls `native_exchange::ParadexExchange::new` with shared
+runtime HTTP and external-data hosts. `native_host_paradex` constructs the
+production registry route over local HTTP and checks native amount/price steps,
+venue identity and source fetchMarkets Store purity. The native host explicitly
+refuses remoteSigner until the SDK account capability is bound; it never falls
+back to local credentials for a hosted account.

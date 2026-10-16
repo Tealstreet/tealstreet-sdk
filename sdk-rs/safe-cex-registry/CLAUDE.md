@@ -169,3 +169,8 @@ gateway factory through their existing `external_public_data` dependency. The
 loopback `native_host_bitget_external_data` test covers all three names: gateway
 market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
 with no venue REST or private/public venue sockets in public-only mode.
+
+
+Paradex's native constructor supplies shared runtime HTTP and gateway inputs.
+Its loopback test observes distinct market precision axes and source read purity.
+Hosted remoteSigner remains an explicit refusal until SDK signing is bound.

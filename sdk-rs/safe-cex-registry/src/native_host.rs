@@ -363,6 +363,35 @@ impl RustVenueHost for NativeVenueHost {
         })
     }
 
+    fn paradex(
+        &self,
+    ) -> Result<safe_cex_venue_paradex::native_exchange::ParadexDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for paradex on the native host",
+            ));
+        }
+        let runtime = self.runtime.clone();
+        let adapter = self.adapter.clone();
+        Ok(
+            safe_cex_venue_paradex::native_exchange::ParadexDependencies {
+                runtime: self.runtime.clone(),
+                http: Rc::new(move |options| {
+                    if options.remote_signer.is_some() {
+                        return Err(ExchangeError::new(
+                            "remoteSigner is not wired for paradex on the native host",
+                        ));
+                    }
+                    Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
+                        runtime.clone(),
+                        (adapter)()?,
+                    ))
+                }),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
     fn phemex(
         &self,
     ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
