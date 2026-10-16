@@ -88,7 +88,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::bytes_to_hex"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::bytes_to_hex`."
 
 [[symbol]]
 ts = "TransactionClient#utf8ToHex"
@@ -96,7 +96,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::utf8_to_hex"
 status = "divergent"
-note = "CHOSEN: native UTF16-to-UTF8 encoding is always available, so the source ambient-runtime branch that throws when both TextEncoder and Buffer are absent has no native counterpart. Both available source encoders and the absent-encoder error are measured separately. Unpaired units receive U+FFFD exactly as TextEncoder and Buffer do. The free helper does not claim WASM loading or transaction-client adoption."
+note = "CHOSEN: native UTF16-to-UTF8 encoding is always available, so the source ambient-runtime branch that throws when both TextEncoder and Buffer are absent has no native counterpart. Both available source encoders and the absent-encoder error are measured separately. Unpaired units receive U+FFFD exactly as TextEncoder and Buffer do. The free helper does not claim WASM loading or transaction-client adoption. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::utf8_to_hex`."
 
 [[symbol]]
 ts = "TransactionClient#toHexNoPrefix"
@@ -104,7 +104,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::to_hex_no_prefix"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::to_hex_no_prefix`."
 
 [[symbol]]
 ts = "TransactionClient#toUint32FieldHex"
@@ -112,7 +112,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::to_uint32_field_hex"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::to_uint32_field_hex`."
 
 [[symbol]]
 ts = "TransactionClient#toInt64FieldHex"
@@ -120,7 +120,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::to_int64_field_hex"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::to_int64_field_hex`."
 
 [[symbol]]
 ts = "TransactionClient#mapOrderTypeValue"
@@ -128,7 +128,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::map_order_type_value"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::map_order_type_value`."
 
 [[symbol]]
 ts = "TransactionClient#mapTimeInForceValue"
@@ -136,7 +136,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::map_time_in_force_value"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::map_time_in_force_value`."
 
 [[symbol]]
 ts = "TransactionClient#buildCreateOrderData"
@@ -144,7 +144,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_data"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_data`."
 
 [[symbol]]
 ts = "TransactionClient#buildCreateOrderL2AttributesData"
@@ -152,7 +152,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_l2_attributes_data"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_l2_attributes_data`."
 
 [[symbol]]
 ts = "TransactionClient#buildGroupedOrderInfoData"
@@ -160,7 +160,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_grouped_order_info_data"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_grouped_order_info_data`."
 
 [[symbol]]
 ts = "TransactionClient#isStopLossOrderType"
@@ -168,7 +168,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::is_stop_loss_order_type"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::is_stop_loss_order_type`."
 
 [[symbol]]
 ts = "TransactionClient#isTakeProfitOrderType"
@@ -176,7 +176,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::is_take_profit_order_type"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::is_take_profit_order_type`."
 
 [[symbol]]
 ts = "TransactionClient#isChildGroupedOrderType"
@@ -184,7 +184,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_client_helpers.rs::is_child_grouped_order_type"
 status = "ported"
-note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts."
+note = "Pure helper extracted as a free function; transaction construction, nonce allocation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. UTF16 slice parameters preserve the complete JavaScript string domain, including unpaired code units. Native outputs are compared with the actual transpiled source helper; the corpus independently pins all input columns and counts. Rename target: `safe-cex-venue-lighter/src/transaction_client_helpers.rs::is_child_grouped_order_type`."
 
 [[symbol]]
 ts = "TransactionClient#validateCreateGroupedOrdersParams"
@@ -192,7 +192,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::validate_create_grouped_orders_params"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::validate_create_grouped_orders_params`."
 
 [[symbol]]
 ts = "TransactionClient#buildCreateGroupedOrdersData"
@@ -200,7 +200,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_signing.rs::build_create_grouped_orders_data"
 status = "ported"
-note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary."
+note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary. Rename target: `safe-cex-venue-lighter/src/transaction_signing.rs::build_create_grouped_orders_data`."
 
 [[symbol]]
 ts = "TransactionClient#buildCancelOrderData"
@@ -208,7 +208,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_cancel_order_data"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_cancel_order_data`."
 
 [[symbol]]
 ts = "TransactionClient#buildTransferData"
@@ -216,7 +216,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_transfer_data"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_transfer_data`."
 
 [[symbol]]
 ts = "TransactionClient#buildUpdateLeverageData"
@@ -224,7 +224,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_update_leverage_data"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_update_leverage_data`."
 
 [[symbol]]
 ts = "TransactionClient#buildApproveIntegratorData"
@@ -232,7 +232,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_approve_integrator_data"
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Historical shared92-case fixture remains untouched; this new live builder corpus uses four distinct fees and independent native word expectations. The original shared92-case maxPerpsMakerFee/maxSpotTakerFee swap survived with byte-identical output because the relevant fees were all zero; this remains an archived corpus limitation, not retroactive evidence of builder parity. Original SHA256 afe399cc424ff3e4e5393ef9c2f8f642b770530328f6cc70d6aefd830383679a and later ab2aadb8f5 supplement are unchanged."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Historical shared92-case fixture remains untouched; this new live builder corpus uses four distinct fees and independent native word expectations. The original shared92-case maxPerpsMakerFee/maxSpotTakerFee swap survived with byte-identical output because the relevant fees were all zero; this remains an archived corpus limitation, not retroactive evidence of builder parity. Original SHA256 afe399cc424ff3e4e5393ef9c2f8f642b770530328f6cc70d6aefd830383679a and later ab2aadb8f5 supplement are unchanged. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_approve_integrator_data`."
 
 [[symbol]]
 ts = "TransactionClient#signTransaction"
@@ -240,7 +240,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_signing.rs::sign_transaction"
 status = "ported"
-note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary."
+note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary. Rename target: `safe-cex-venue-lighter/src/transaction_signing.rs::sign_transaction`."
 
 [[symbol]]
 ts = "TransactionClient#signCreateOrderTransaction"
@@ -248,7 +248,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_signing.rs::sign_create_order_transaction"
 status = "ported"
-note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary."
+note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary. Rename target: `safe-cex-venue-lighter/src/transaction_signing.rs::sign_create_order_transaction`."
 
 [[symbol]]
 ts = "TransactionClient.getCreateOrderTransaction"
@@ -264,7 +264,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/transaction_signing.rs::build_create_order_transaction"
 status = "ported"
-note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary."
+note = "Pure native composition over explicit crypto callbacks, retaining source validation precedence, lazy clock reads, callback arguments/order, returned-error prefixes and opaque thrown-value identity. Actual source oracle covers 52 composition cases across five methods; deterministic crypto probes test composition rather than Poseidon/Schnorr arithmetic. Native class/nonce/submission adoption is tracked separately, with CHOSEN input-ownership divergences. Concrete WASM loading, HTTP and cryptographic arithmetic remain outside this composition boundary. Rename target: `safe-cex-venue-lighter/src/transaction_signing.rs::build_create_order_transaction`."
 
 [[symbol]]
 ts = "TransactionClient.getCreateOrderTransactions"

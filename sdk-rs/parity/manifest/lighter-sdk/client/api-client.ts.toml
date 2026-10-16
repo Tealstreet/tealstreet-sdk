@@ -24,7 +24,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/http_number_helpers.rs::is_safe_integer_bigint"
 status = "ported"
-note = "Pure declared bigint-domain helper: inclusive +/- Number.MAX_SAFE_INTEGER, exact binary64 conversion and original UTF16 field name in Error diagnostics. Nine live-source native boundary witnesses. No HTTP transport or dynamic non-BigInt input claim."
+note = "Pure declared bigint-domain helper: inclusive +/- Number.MAX_SAFE_INTEGER, exact binary64 conversion and original UTF16 field name in Error diagnostics. Nine live-source native boundary witnesses. No HTTP transport or dynamic non-BigInt input claim. Rename target: `safe-cex-venue-lighter/src/http_number_helpers.rs::is_safe_integer_bigint`."
 
 [[symbol]]
 ts = "LighterApiClient"
@@ -64,7 +64,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::add_request_interceptor"
 status = "ported"
-note = "Source request-array registration captures LHS registry before independent RHS lookup, preserves truthy array/fresh falsey fallback, assigns captured LHS and reacquires current owner before bound push. Required fallible live property/array hosts; native reentrancy oracle."
+note = "Source request-array registration captures LHS registry before independent RHS lookup, preserves truthy array/fresh falsey fallback, assigns captured LHS and reacquires current owner before bound push. Required fallible live property/array hosts; native reentrancy oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::add_request_interceptor`."
 
 [[symbol]]
 ts = "LighterApiClient.addResponseInterceptor"
@@ -72,7 +72,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::add_response_interceptor"
 status = "ported"
-note = "Source response-array registration captures LHS registry before independent RHS lookup, preserves truthy array/fresh falsey fallback, assigns captured LHS and reacquires current owner before bound push. Required fallible live property/array hosts; native reentrancy oracle."
+note = "Source response-array registration captures LHS registry before independent RHS lookup, preserves truthy array/fresh falsey fallback, assigns captured LHS and reacquires current owner before bound push. Required fallible live property/array hosts; native reentrancy oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::add_response_interceptor`."
 
 [[symbol]]
 ts = "LighterApiClient.addErrorInterceptor"
@@ -80,7 +80,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::add_error_interceptor"
 status = "ported"
-note = "Source error-array registration captures LHS registry before independent RHS lookup, preserves truthy array/fresh falsey fallback, assigns captured LHS and reacquires current owner before bound push. Required fallible live property/array hosts; native reentrancy oracle."
+note = "Source error-array registration captures LHS registry before independent RHS lookup, preserves truthy array/fresh falsey fallback, assigns captured LHS and reacquires current owner before bound push. Required fallible live property/array hosts; native reentrancy oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::add_error_interceptor`."
 
 [[symbol]]
 ts = "LighterApiClient.getNextNonce"
@@ -152,7 +152,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::get"
 status = "ported"
-note = "Captures actual Axios GET receiver/callee, forwards UTF16 path and original config including undefined, performs source Await then one live response.data read and async-return PromiseResolve. Required owner/language/Axios hosts; live native oracle."
+note = "Captures actual Axios GET receiver/callee, forwards UTF16 path and original config including undefined, performs source Await then one live response.data read and async-return PromiseResolve. Required owner/language/Axios hosts; live native oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::get`."
 
 [[symbol]]
 ts = "LighterApiClient.post"
@@ -160,7 +160,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::post"
 status = "ported"
-note = "Captures actual Axios POST receiver/callee, forwards path/body/config in source order with original identity and explicit undefined positions, Await/data projection and async-return adoption. Required hosts; live native oracle."
+note = "Captures actual Axios POST receiver/callee, forwards path/body/config in source order with original identity and explicit undefined positions, Await/data projection and async-return adoption. Required hosts; live native oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::post`."
 
 [[symbol]]
 ts = "LighterApiClient.put"
@@ -168,7 +168,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::put"
 status = "ported"
-note = "Captures actual Axios PUT receiver/callee, forwards path/body/config in source order with original identity and explicit undefined positions, Await/data projection and async-return adoption. Required hosts; live native oracle."
+note = "Captures actual Axios PUT receiver/callee, forwards path/body/config in source order with original identity and explicit undefined positions, Await/data projection and async-return adoption. Required hosts; live native oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::put`."
 
 [[symbol]]
 ts = "LighterApiClient.delete"
@@ -176,7 +176,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::delete"
 status = "ported"
-note = "Captures actual Axios DELETE receiver/callee, forwards UTF16 path/config with original identity, Await then live response.data projection and async-return adoption. Required hosts; live native oracle."
+note = "Captures actual Axios DELETE receiver/callee, forwards UTF16 path/config with original identity, Await then live response.data projection and async-return adoption. Required hosts; live native oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::delete`."
 
 [[symbol]]
 ts = "LighterApiClient.getBaseUrl"
@@ -184,7 +184,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::get_base_url"
 status = "ported"
-note = "Reads current owner config then baseUrl property without string coercion, preserving UTF16 values and original getter exceptions. Required language/owner hosts; live native oracle."
+note = "Reads current owner config then baseUrl property without string coercion, preserving UTF16 values and original getter exceptions. Required language/owner hosts; live native oracle. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::get_base_url`."
 
 [[symbol]]
 ts = "LighterApiClient.getConfig"
@@ -192,4 +192,4 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::get_config"
 status = "ported"
-note = "Captures current config once, fresh ordinary shallow CopyDataProperties preserving own enumerable string/symbol keys, field order and nested value identity; nullish sources skipped. Required complete language copy host; live native oracle, no constructor/runtime-binding claim."
+note = "Captures current config once, fresh ordinary shallow CopyDataProperties preserving own enumerable string/symbol keys, field order and nested value identity; nullish sources skipped. Required complete language copy host; live native oracle, no constructor/runtime-binding claim. Rename target: `safe-cex-venue-lighter/src/sdk_http_access.rs::get_config`."

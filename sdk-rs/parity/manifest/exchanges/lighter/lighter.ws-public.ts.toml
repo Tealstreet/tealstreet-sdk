@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::is_ws_proxy_route_enabled"
 status = "ported"
-note = "Source short-circuit profile support, nullish route/testnet options and actual captured routing helper before live repeated parent/name/options reads; double-negated public host. Native typed boolean/UTF16/property-order and original-throw floor; concrete imported/owner/routing bridge pending."
+note = "Source short-circuit profile support, nullish route/testnet options and actual captured routing helper before live repeated parent/name/options reads; double-negated public host. Native typed boolean/UTF16/property-order and original-throw floor; concrete imported/owner/routing bridge pending. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::is_ws_proxy_route_enabled`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#isTickerRestFallbackCoolingDown"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::sync_ticker_rest_fallback_to_price_hydration"
 status = "ported"
-note = "Live captured hydration decision: clear watchdog then stop fallback on hydrated result, otherwise start only for truthy optional typed UTF16 reason. Exact call ordering and original errors at required owner/method hosts; full websocket binding pending."
+note = "Live captured hydration decision: clear watchdog then stop fallback on hydrated result, otherwise start only for truthy optional typed UTF16 reason. Exact call ordering and original errors at required owner/method hosts; full websocket binding pending. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::sync_ticker_rest_fallback_to_price_hydration`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#primeTickerRestFallback"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::prime_ticker_rest_fallback"
 status = "ported"
-note = "Suppresses fetch only when proxy-connected AND already primed; nonproxy repeat still fetches. Writes primed flag before eager call and discards actual fetch return without await/then lookup. Live typed flags/getter-setter/callee hosts; native partial-state and discarded-thenable oracle."
+note = "Suppresses fetch only when proxy-connected AND already primed; nonproxy repeat still fetches. Writes primed flag before eager call and discards actual fetch return without await/then lookup. Live typed flags/getter-setter/callee hosts; native partial-state and discarded-thenable oracle. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::prime_ticker_rest_fallback`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket.connectAndSubscribe"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::connect_and_subscribe"
 status = "ported"
-note = "Source disposed guard, proxy/direct/readonly route decision, full UTF16 URL/query construction with real nanoid and routing/clock call boundaries; ordered flags/clock/socket assignment then independently live socket/method/handler capture for three listeners and proxy priming. Native aliases/handlers/arguments/errors asserted; full class/transport/socket/runtime host construction pending. Optional routing host disappearance retains actual fallible includes property/call and catchable generated TypeError before URL/string extraction."
+note = "Source disposed guard, proxy/direct/readonly route decision, full UTF16 URL/query construction with real nanoid and routing/clock call boundaries; ordered flags/clock/socket assignment then independently live socket/method/handler capture for three listeners and proxy priming. Native aliases/handlers/arguments/errors asserted; full class/transport/socket/runtime host construction pending. Optional routing host disappearance retains actual fallible includes property/call and catchable generated TypeError before URL/string extraction. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::connect_and_subscribe`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket.onOpen"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::on_open"
 status = "ported"
-note = "Source ordered startup calls after disposed guard/opened flag, current parent/emitter off then on with separate live handler reads, reconnect emit only for prior hasEverConnected, then true assignment. Captured callee/receiver and original failures/partial state preserved; full owner/emitter/transport binding pending."
+note = "Source ordered startup calls after disposed guard/opened flag, current parent/emitter off then on with separate live handler reads, reconnect emit only for prior hasEverConnected, then true assignment. Captured callee/receiver and original failures/partial state preserved; full owner/emitter/transport binding pending. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::on_open`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#onMarketsChanged"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::on_markets_changed"
 status = "ported"
-note = "Parameter added Get then empty/ws/disposed/connected guards, live for-of and actual String capture before market id; exact UTF16 topic updates, captured send before JSON.stringify and fresh subscribe literal. Native field/schema/identity and iterator-close floor; serializer and concrete getter/iterator/socket bridge required."
+note = "Parameter added Get then empty/ws/disposed/connected guards, live for-of and actual String capture before market id; exact UTF16 topic updates, captured send before JSON.stringify and fresh subscribe literal. Native field/schema/identity and iterator-close floor; serializer and concrete getter/iterator/socket bridge required. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::on_markets_changed`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket.onClose"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::send_payload"
 status = "ported"
-note = "Captures actual send callee/receiver before actual JSON.stringify callee, invokes serializer with original native payload identity and forwards its return. Native arguments/receivers/errors/order before final forwarding-value checks; serializer bridge is required host, no JSON codec proof claimed."
+note = "Captures actual send callee/receiver before actual JSON.stringify callee, invokes serializer with original native payload identity and forwards its return. Native arguments/receivers/errors/order before final forwarding-value checks; serializer bridge is required host, no JSON codec proof claimed. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::send_payload`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#clearOhlcvNoDataTimeout"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_ohlcv_no_data_timeout"
 status = "ported"
-note = "Exact timeout cancellation body at required native owner/record/global timer hosts: get UTF16 topic, skip falsey id without deletion, clear original value, then reacquire current owner record and delete topic. Native identity/state/read-order assertions cover inherited keys, throws and owner replacement; whole websocket owner remains pending."
+note = "Exact timeout cancellation body at required native owner/record/global timer hosts: get UTF16 topic, skip falsey id without deletion, clear original value, then reacquire current owner record and delete topic. Native identity/state/read-order assertions cover inherited keys, throws and owner replacement; whole websocket owner remains pending. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_ohlcv_no_data_timeout`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#clearOrderBookStaleTimeout"
@@ -136,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_order_book_stale_timeout"
 status = "ported"
-note = "Same source stale-timeout body: falsey entries remain, truthy id is passed unchanged to clearTimeout before current owner is re-read for strict deletion. Distinct stale record identity, original aliases, UTF16 keys and callback replacement checked natively. Full owner/timer scheduling remains pending."
+note = "Same source stale-timeout body: falsey entries remain, truthy id is passed unchanged to clearTimeout before current owner is re-read for strict deletion. Distinct stale record identity, original aliases, UTF16 keys and callback replacement checked natively. Full owner/timer scheduling remains pending. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_order_book_stale_timeout`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#clearOrderBookInitialDataTimeout"
@@ -144,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_order_book_initial_data_timeout"
 status = "ported"
-note = "Initial-data timeout body retains source lookup/falsey return/clearTimeout/delete order with current-record reacquisition after host call. Required host preserves strict deletion and original getter/timer exceptions; full class remains pending."
+note = "Initial-data timeout body retains source lookup/falsey return/clearTimeout/delete order with current-record reacquisition after host call. Required host preserves strict deletion and original getter/timer exceptions; full class remains pending. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_order_book_initial_data_timeout`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#clearAllOrderBookInitialDataTimeouts"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_all_order_book_initial_data_timeouts"
 status = "ported"
-note = "Captures actual Object.values callee/Object receiver before owner-field argument; deferred call handles noncallable after argument evaluation. Required bound for-of host preserves yielded-value identity, live iterators and IteratorClose/body-throw precedence. Truthy timeout cancellations precede fresh ordinary record assignment with old aliases retained; no standalone JS engine claim."
+note = "Captures actual Object.values callee/Object receiver before owner-field argument; deferred call handles noncallable after argument evaluation. Required bound for-of host preserves yielded-value identity, live iterators and IteratorClose/body-throw precedence. Truthy timeout cancellations precede fresh ordinary record assignment with old aliases retained; no standalone JS engine claim. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_all_order_book_initial_data_timeouts`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#clearAllOrderBookStaleTimeouts"
@@ -160,7 +160,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_all_order_book_stale_timeouts"
 status = "ported"
-note = "Source bulk stale cleanup captures values callee/receiver before owner read, iterates through required actual for-of host, and assigns a fresh ordinary record only after success. Native cases cover callee/getter replacement, iterator failures/closing, live appended yields, numeric keys, original aliases and setter failures. Full websocket owner remains pending."
+note = "Source bulk stale cleanup captures values callee/receiver before owner read, iterates through required actual for-of host, and assigns a fresh ordinary record only after success. Native cases cover callee/getter replacement, iterator failures/closing, live appended yields, numeric keys, original aliases and setter failures. Full websocket owner remains pending. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_all_order_book_stale_timeouts`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#stopOrderBookRestFallback"
@@ -168,7 +168,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::stop_order_book_rest_fallback"
 status = "ported"
-note = "Preserves independent interval/in-flight cleanup: truthy interval gets clearInterval then current-record delete; in-flight topic is deleted even without a timer, and cooldown is untouched. Native value identities, UTF16 keys, original/current record states and thrown-value identity checked at declared hosts."
+note = "Preserves independent interval/in-flight cleanup: truthy interval gets clearInterval then current-record delete; in-flight topic is deleted even without a timer, and cooldown is untouched. Native value identities, UTF16 keys, original/current record states and thrown-value identity checked at declared hosts. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::stop_order_book_rest_fallback`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#stopAllOrderBookRestFallback"
@@ -176,7 +176,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::stop_all_order_book_rest_fallback"
 status = "ported"
-note = "Bound Object.values lookup precedes interval-record argument; required for-of host includes source IteratorClose and live yield semantics. Truthy interval cancellation completes before fresh intervals/in-flight/cooldown assignments in order; native partial-state and alias assertions cover timer/iterator/second/third setter failures. Whole class/runtime stays pending."
+note = "Bound Object.values lookup precedes interval-record argument; required for-of host includes source IteratorClose and live yield semantics. Truthy interval cancellation completes before fresh intervals/in-flight/cooldown assignments in order; native partial-state and alias assertions cover timer/iterator/second/third setter failures. Whole class/runtime stays pending. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::stop_all_order_book_rest_fallback`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#isOrderBookRestFallbackCoolingDown"
@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::is_order_book_rest_fallback_cooling_down"
 status = "ported"
-note = "Actual receiver-bound clock lookup/call before owner record and UTF16 topic Get; source falsey-to-zero fallback then full Abstract Relational Comparison required host. Native Number boundaries/nonfinite/signed-zero and inherited constructor-function floor; broader coercion/runtime bridge remains required host."
+note = "Actual receiver-bound clock lookup/call before owner record and UTF16 topic Get; source falsey-to-zero fallback then full Abstract Relational Comparison required host. Native Number boundaries/nonfinite/signed-zero and inherited constructor-function floor; broader coercion/runtime bridge remains required host. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::is_order_book_rest_fallback_cooling_down`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#parseRestOrderBookLevels"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::start_order_book_rest_fallback"
 status = "ported"
-note = "Captured cooling check, existing interval guard, exact UTF16 warning before eagerly discarded fetch; assignment record captured before setInterval. Callback rereads disposal and optional current handler length to stop or eagerly fetch with original book/callback identities. Native aliases/delay/callback/throws floor; real REST/timer/owner binding pending."
+note = "Captured cooling check, existing interval guard, exact UTF16 warning before eagerly discarded fetch; assignment record captured before setInterval. Callback rereads disposal and optional current handler length to stop or eagerly fetch with original book/callback identities. Native aliases/delay/callback/throws floor; real REST/timer/owner binding pending. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::start_order_book_rest_fallback`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#clearTickerRestFallbackWatchdog"
@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::clear_ticker_rest_fallback_watchdog"
 status = "ported"
-note = "Live timer truthiness, captured clearTimeout before second handle read, undefined assignment only after successful call. Native opaque handle and throw identity; required owner/timer hosts."
+note = "Live timer truthiness, captured clearTimeout before second handle read, undefined assignment only after successful call. Native opaque handle and throw identity; required owner/timer hosts. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::clear_ticker_rest_fallback_watchdog`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#armTickerRestFallbackWatchdog"
@@ -224,7 +224,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::arm_ticker_rest_fallback_watchdog"
 status = "ported"
-note = "Undefined-only typed delay/reason defaults and ordinary readonly constants; live cooldown call, clear then captured timeout. Callback clears handle before disposal guard, tests message/hydration short-circuit and captures start callee before second live message flag selects exact UTF16 reason. Required full owner/timer/call hosts; native callback/state oracle."
+note = "Undefined-only typed delay/reason defaults and ordinary readonly constants; live cooldown call, clear then captured timeout. Callback clears handle before disposal guard, tests message/hydration short-circuit and captures start callee before second live message flag selects exact UTF16 reason. Required full owner/timer/call hosts; native callback/state oracle. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::arm_ticker_rest_fallback_watchdog`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#parseRestTickerItems"
@@ -248,7 +248,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::stop_ticker_rest_fallback"
 status = "ported"
-note = "Truthy interval cleanup re-reads handle after captured clearInterval, clears field after success, then optional source Info log (undefined logRecovered defaults true, false stays false). Live typed flags/timer/call hosts and original partial-state failures."
+note = "Truthy interval cleanup re-reads handle after captured clearInterval, clears field after success, then optional source Info log (undefined logRecovered defaults true, false stays false). Live typed flags/timer/call hosts and original partial-state failures. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::stop_ticker_rest_fallback`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#startTickerRestFallback"
@@ -256,7 +256,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::start_ticker_rest_fallback"
 status = "ported"
-note = "Live cooldown/interval guards, warned flag before exact UTF16 warning, eager discarded fetch, captured interval scheduling. Deferred callback uses live disposed/connected/message/hydration short-circuit to stop or fetch. Source readonly interval and required full owner/call/timer/REST bindings; native bounded oracle."
+note = "Live cooldown/interval guards, warned flag before exact UTF16 warning, eager discarded fetch, captured interval scheduling. Deferred callback uses live disposed/connected/message/hydration short-circuit to stop or fetch. Source readonly interval and required full owner/call/timer/REST bindings; native bounded oracle. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::start_ticker_rest_fallback`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#clearPendingSubscribeTimeouts"
@@ -264,7 +264,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_pending_subscribe_timeouts"
 status = "ported"
-note = "Source length guard, second owner-array lookup, receiver-bound forEach with unfiltered timer arguments, then fresh empty array assignment. Required actual array host preserves method lookup, length snapshot, holes/live index reads and throws; native argument identities, sparse indices, original/current array aliases and callback mutations asserted. Full websocket/runtime remains pending."
+note = "Source length guard, second owner-array lookup, receiver-bound forEach with unfiltered timer arguments, then fresh empty array assignment. Required actual array host preserves method lookup, length snapshot, holes/live index reads and throws; native argument identities, sparse indices, original/current array aliases and callback mutations asserted. Full websocket/runtime remains pending. Rename target: `safe-cex-venue-lighter/src/ws_public_cleanup.rs::clear_pending_subscribe_timeouts`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#armOrderBookStaleTimeout"
@@ -272,7 +272,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_order_book_stale_timeout"
 status = "ported"
-note = "Clears old timeout; captures assignment record before setTimeout; callback deletes current record entry before live disposed/reconnecting guards and captured recovery call. Native handle/record aliases, callback values, ordering and original throws asserted. Actual timer queue/owner/import runtime hosts required; full class pending."
+note = "Clears old timeout; captures assignment record before setTimeout; callback deletes current record entry before live disposed/reconnecting guards and captured recovery call. Native handle/record aliases, callback values, ordering and original throws asserted. Actual timer queue/owner/import runtime hosts required; full class pending. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_order_book_stale_timeout`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#isOrderBookTopic"
@@ -280,7 +280,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::is_order_book_topic"
 status = "ported"
-note = "Exact UTF16 startsWith colon-or-slash book prefixes for typed string topics and ordinary String intrinsics; native boolean oracle covers case, empty prefix, unpaired and paired surrogate cases. Reflective intrinsic overrides/out-of-type inputs unproved."
+note = "Exact UTF16 startsWith colon-or-slash book prefixes for typed string topics and ordinary String intrinsics; native boolean oracle covers case, empty prefix, unpaired and paired surrogate cases. Reflective intrinsic overrides/out-of-type inputs unproved. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::is_order_book_topic`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#armExistingOrderBookTimeouts"
@@ -288,7 +288,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_existing_order_book_timeouts"
 status = "ported"
-note = "Captures Object.entries before owner topics getter; required enumeration and outer iterator plus entry destructuring host; live topic helper, Array.isArray and first-element lookup preserve empty/sparse array Undefined and channel truthiness. Native receiver/channel identity and iterator-close error floor; concrete JS bridge pending."
+note = "Captures Object.entries before owner topics getter; required enumeration and outer iterator plus entry destructuring host; live topic helper, Array.isArray and first-element lookup preserve empty/sparse array Undefined and channel truthiness. Native receiver/channel identity and iterator-close error floor; concrete JS bridge pending. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_existing_order_book_timeouts`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#armOhlcvNoDataTimeout"
@@ -296,7 +296,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_ohlcv_no_data_timeout"
 status = "ported"
-note = "Clears old candle timeout; captures assignment record before setTimeout; callback deletes current record entry before live flags and exact UTF16 no-data recovery reason. Native delay/handle/current-versus-old aliases and callback throws asserted; real timer/owner host binding pending."
+note = "Clears old candle timeout; captures assignment record before setTimeout; callback deletes current record entry before live flags and exact UTF16 no-data recovery reason. Native delay/handle/current-versus-old aliases and callback throws asserted; real timer/owner host binding pending. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_ohlcv_no_data_timeout`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#armExistingOhlcvNoDataTimeouts"
@@ -304,7 +304,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_existing_ohlcv_no_data_timeouts"
 status = "ported"
-note = "Captures Object.keys before owner topics getter; required ordinary string-key enumeration/iterator host; candle prefix and live optional handler length control arming. Native call/value ordering and iterator-close floor asserted; reflective non-string Object.keys replacement and concrete runtime bridge unproved."
+note = "Captures Object.keys before owner topics getter; required ordinary string-key enumeration/iterator host; candle prefix and live optional handler length control arming. Native call/value ordering and iterator-close floor asserted; reflective non-string Object.keys replacement and concrete runtime bridge unproved. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::arm_existing_ohlcv_no_data_timeouts`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#attemptOhlcvRecovery"
@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::attempt_ohlcv_recovery"
 status = "ported"
-note = "Clock first; captures actual imported helpers and Boolean before live argument getters, ordered literal fields, route promotion assignments before full UTF16 log, last-reconnect timestamp only after successful log then reconnect. Native literal schema/values, number bits, identity and original throws asserted; literal prototype/descriptors and imported/owner runtime bridge required."
+note = "Clock first; captures actual imported helpers and Boolean before live argument getters, ordered literal fields, route promotion assignments before full UTF16 log, last-reconnect timestamp only after successful log then reconnect. Native literal schema/values, number bits, identity and original throws asserted; literal prototype/descriptors and imported/owner runtime bridge required. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::attempt_ohlcv_recovery`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket.maybeRecoverOhlcvStream"
@@ -320,7 +320,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::maybe_recover_ohlcv_stream"
 status = "ported"
-note = "Undefined-only reason default, parent/store/markets lookup before options symbol, falsey market exit; captured actual candle builder before market id and actual interval resolver before options interval, then captured recovery. Native UTF16 arguments, generated interval errors and original throws asserted; concrete imported/store/options host binding pending."
+note = "Undefined-only reason default, parent/store/markets lookup before options symbol, falsey market exit; captured actual candle builder before market id and actual interval resolver before options interval, then captured recovery. Native UTF16 arguments, generated interval errors and original throws asserted; concrete imported/store/options host binding pending. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::maybe_recover_ohlcv_stream`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket#attemptOrderBookRecovery"
@@ -336,7 +336,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::ping"
 status = "ported"
-note = "Typed disposed guard, performance.now assigned to pingAt before send callee capture and separate virtual timestamp read; passes fresh ordinary ping object literal with own type/timestamp data properties via required object host. Native fields and repeated-call freshness checked; prototype/descriptors/runtime bridge and allocation exhaustion not independently proved."
+note = "Typed disposed guard, performance.now assigned to pingAt before send callee capture and separate virtual timestamp read; passes fresh ordinary ping object literal with own type/timestamp data properties via required object host. Native fields and repeated-call freshness checked; prototype/descriptors/runtime bridge and allocation exhaustion not independently proved. Rename target: `safe-cex-venue-lighter/src/ws_public_readiness.rs::ping`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket.subscribe"
@@ -352,7 +352,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::sync_bbo_ticker_topics"
 status = "ported"
-note = "Captured Object.keys before live topics getter; ordinary string-key for-of with current prefix and current deletion record, then live parent/store/markets and String-before-id getter. Computed assignment captures topics record before prefix expression. Native old/current aliases, UTF16 keys/values and iterator-close floor; concrete JS bridge pending."
+note = "Captured Object.keys before live topics getter; ordinary string-key for-of with current prefix and current deletion record, then live parent/store/markets and String-before-id getter. Computed assignment captures topics record before prefix expression. Native old/current aliases, UTF16 keys/values and iterator-close floor; concrete JS bridge pending. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::sync_bbo_ticker_topics`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket.onMessage"
@@ -400,7 +400,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::handle_tickers_event"
 status = "ported"
-note = "Live json.data, captured Array.isArray guard, source for-of and captured per-ticker handler before fresh single-data-field literal. Native ticker/literal identity, ordered schema/values/freshness and iterator-close floor; external handler/array/iterator/literal runtime hosts required."
+note = "Live json.data, captured Array.isArray guard, source for-of and captured per-ticker handler before fresh single-data-field literal. Native ticker/literal identity, ordered schema/values/freshness and iterator-close floor; external handler/array/iterator/literal runtime hosts required. Rename target: `safe-cex-venue-lighter/src/ws_public_subscriptions.rs::handle_tickers_event`."
 
 [[symbol]]
 ts = "LighterPublicWebsocket.handleMarketStatsEvent"
@@ -432,4 +432,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::dispose"
 status = "ported"
-note = "Three cleanup calls, captured Object.values before candle record getter, truthy clearTimeout iteration, fresh candle record replacement after successful loop, book cleanup calls, fresh attempt/recovery records then actual super.dispose receiver. Native old/current alias/value identity and iterator-close errors asserted; full superclass/owner/timer bridge pending."
+note = "Three cleanup calls, captured Object.values before candle record getter, truthy clearTimeout iteration, fresh candle record replacement after successful loop, book cleanup calls, fresh attempt/recovery records then actual super.dispose receiver. Native old/current alias/value identity and iterator-close errors asserted; full superclass/owner/timer bridge pending. Rename target: `safe-cex-venue-lighter/src/ws_public_watchdogs.rs::dispose`."

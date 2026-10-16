@@ -56,7 +56,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_constructor.rs::construct_exchange_body"
 status = "ported"
-note = "Constructor remainder after required exact base construction and derived instance-element initialization; live imported constructors, original aliases, client re-reads and partial failures. Native source-backed floor28 through iteration27. Full class composition, base/field initialization, callable replacement/receiver/newTarget identities remain unproved by this fixture; separate bounded class-composition witnesses are tracked on LighterExchange."
+note = "Constructor remainder after required exact base construction and derived instance-element initialization; live imported constructors, original aliases, client re-reads and partial failures. Native source-backed floor28 through iteration27. Full class composition, base/field initialization, callable replacement/receiver/newTarget identities remain unproved by this fixture; separate bounded class-composition witnesses are tracked on LighterExchange. Rename target: `safe-cex-venue-lighter/src/exchange_constructor.rs::construct_exchange_body`."
 
 [[symbol]]
 ts = "LighterExchange#parseAccountIndex"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_account_index"
 status = "ported"
-note = "Captured BigInt before String, nullish guard and caught original coercion/call failures. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captured BigInt before String, nullish guard and caught original coercion/call failures. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_account_index`."
 
 [[symbol]]
 ts = "LighterExchange#rememberPlacedOrderHint"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::infer_stop_loss_type_from_reduce_only_limit"
 status = "ported"
-note = "Reads the live ticker store, retains limit/reduce-only/finite-positive guards and mark/last/index candidate order with inclusive loss-side ties. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Reads the live ticker store, retains limit/reduce-only/finite-positive guards and mark/last/index candidate order with inclusive loss-side ties. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::infer_stop_loss_type_from_reduce_only_limit`."
 
 [[symbol]]
 ts = "LighterExchange#extractAccountFromResponse"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::extract_account_from_response"
 status = "ported"
-note = "Legacy success===true/data precedence, current code===200/actual Array.isArray branch and first account nullish index fallback, then truthy message/nested-error fallback. Repeated live payload/data/member reads retained; full native BigInt/UTF16 fields in fresh ordered records checked with actual source helper. Required Get/Array/parser/literal hosts; full exchange and JS engine pending."
+note = "Legacy success===true/data precedence, current code===200/actual Array.isArray branch and first account nullish index fallback, then truthy message/nested-error fallback. Repeated live payload/data/member reads retained; full native BigInt/UTF16 fields in fresh ordered records checked with actual source helper. Required Get/Array/parser/literal hosts; full exchange and JS engine pending. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::extract_account_from_response`."
 
 [[symbol]]
 ts = "LighterExchange#fetchParsedAccountLookup"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::fetch_parsed_account_lookup"
 status = "ported"
-note = "Captured API get receiver with ordinary unmodified ENDPOINTS.ACCOUNT; truthy params gets a fresh one-field options object. Queued await delivers payload, captures extraction call, rereads parsed index/referrer, captures Error before errorMessage getter and constructs/throws actual error or custom constructor object. Async return includes required inherited-then resolution/adoption; native returned fields and error fields/identity checked. HTTP/JS engine binding remains separate."
+note = "Captured API get receiver with ordinary unmodified ENDPOINTS.ACCOUNT; truthy params gets a fresh one-field options object. Queued await delivers payload, captures extraction call, rereads parsed index/referrer, captures Error before errorMessage getter and constructs/throws actual error or custom constructor object. Async return includes required inherited-then resolution/adoption; native returned fields and error fields/identity checked. HTTP/JS engine binding remains separate. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::fetch_parsed_account_lookup`."
 
 [[symbol]]
 ts = "LighterExchange#fetchAccountFromL1AddressLookup"
@@ -112,7 +112,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::fetch_account_from_l1_address_lookup"
 status = "ported"
-note = "Captures client get and endpoint before exact nested request records, awaits original payload and appends four response-array spreads in source order with repeated live Get checks. Parses the first account with terminal-null-preserving fallback, constructs source Error on undefined index, or returns a native accountIndex/referrer record retaining original values and identities. Native decoded fields/BigInt/UTF16 and callee/receiver/iterator operations checked against actual source. Full JS/import/Array/spread/Promise/return adoption host and exchange/HTTP integration remain required; this is the method body, not full exchange construction."
+note = "Captures client get and endpoint before exact nested request records, awaits original payload and appends four response-array spreads in source order with repeated live Get checks. Parses the first account with terminal-null-preserving fallback, constructs source Error on undefined index, or returns a native accountIndex/referrer record retaining original values and identities. Native decoded fields/BigInt/UTF16 and callee/receiver/iterator operations checked against actual source. Full JS/import/Array/spread/Promise/return adoption host and exchange/HTTP integration remain required; this is the method body, not full exchange construction. Rename target: `safe-cex-venue-lighter/src/exchange_account_lookup.rs::fetch_account_from_l1_address_lookup`."
 
 [[symbol]]
 ts = "LighterExchange#ensureAccountIndex"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ensure_account_index"
 status = "ported"
-note = "Undefined-only cache guard with repeated live cache read; otherwise eager fetchAccountInfo and queued continuation, assigns fetched native index before rereading owner result. Required async-return then resolution/adoption applies to both fast and awaited paths; original getter/setter/call/rejection identities retained. Full account-info lookup and exchange owner remain separate."
+note = "Undefined-only cache guard with repeated live cache read; otherwise eager fetchAccountInfo and queued continuation, assigns fetched native index before rereading owner result. Required async-return then resolution/adoption applies to both fast and awaited paths; original getter/setter/call/rejection identities retained. Full account-info lookup and exchange owner remain separate. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::ensure_account_index`."
 
 [[symbol]]
 ts = "LighterExchange#getValidatedApiKeyIndex"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::get_validated_api_key_index"
 status = "ported"
-note = "Captures imported parser before owner options/key getters; preserves ordinary parser Number-or-undefined result, exact negative/greater-than255 check including negativezero and truncation supplied by actual helper, then actual captured Error construction on invalid index. Native Number bits/Error message and original throws asserted; parser engine/owner binding required."
+note = "Captures imported parser before owner options/key getters; preserves ordinary parser Number-or-undefined result, exact negative/greater-than255 check including negativezero and truncation supplied by actual helper, then actual captured Error construction on invalid index. Native Number bits/Error message and original throws asserted; parser engine/owner binding required. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::get_validated_api_key_index`."
 
 [[symbol]]
 ts = "LighterExchange#extractL1AddressCandidate"
@@ -136,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::extract_l1_address_candidate"
 status = "ported"
-note = "Live trim, imported full-address predicate and original regex/match/index operations. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live trim, imported full-address predicate and original regex/match/index operations. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::extract_l1_address_candidate`."
 
 [[symbol]]
 ts = "LighterExchange#fetchAccountInfo"
@@ -144,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::fetch_account_info"
 status = "ported"
-note = "Preserves optional trim and parser/import capture, native lookup records in explicit-index/L1/legacy order, actual filter callback and uniq call. Required full iterator records remain live across eager awaits; primary then L1 fallback loops retain last truthy error message, close on return/body throw and preserve Get/Call errors, then exact guidance Error. Native lookup record fields, source-order callbacks, original throws, returned object identity/decoded values and UTF16 checked before source pin. Fixture covers absent iterator return plus throwing return getter, not callable return/full engine integration; full JS/import/iterator/Promise host required. Synchronous lookup throws continue via an eager trampoline; source/native stress floor2048 primary attempts, stop2047."
+note = "Preserves optional trim and parser/import capture, native lookup records in explicit-index/L1/legacy order, actual filter callback and uniq call. Required full iterator records remain live across eager awaits; primary then L1 fallback loops retain last truthy error message, close on return/body throw and preserve Get/Call errors, then exact guidance Error. Native lookup record fields, source-order callbacks, original throws, returned object identity/decoded values and UTF16 checked before source pin. Fixture covers absent iterator return plus throwing return getter, not callable return/full engine integration; full JS/import/iterator/Promise host required. Synchronous lookup throws continue via an eager trampoline; source/native stress floor2048 primary attempts, stop2047. Rename target: `safe-cex-venue-lighter/src/exchange_account_lookup.rs::fetch_account_info`."
 
 [[symbol]]
 ts = "LighterExchange#fetchAccountSnapshot"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_cache.rs::fetch_account_snapshot"
 status = "ported"
-note = "Live recent snapshot and in-flight version guards preserve repeated owner reads, exact age arithmetic and strict version comparison. Eager inner Promise performs source request/modern and legacy payload paths; actual finally callable retains captured version and conditionally clears live state before outer return adoption. Native state, DTO fields, original values/throws, callee/receiver and cleanup checked against actual source. Full JS/Promise/clock/import hosts required; fixture providers are nonthenable and intrinsic Promise internals are outside its trace."
+note = "Live recent snapshot and in-flight version guards preserve repeated owner reads, exact age arithmetic and strict version comparison. Eager inner Promise performs source request/modern and legacy payload paths; actual finally callable retains captured version and conditionally clears live state before outer return adoption. Native state, DTO fields, original values/throws, callee/receiver and cleanup checked against actual source. Full JS/Promise/clock/import hosts required; fixture providers are nonthenable and intrinsic Promise internals are outside its trace. Rename target: `safe-cex-venue-lighter/src/exchange_account_cache.rs::fetch_account_snapshot`."
 
 [[symbol]]
 ts = "LighterExchange#rememberRecentAccountSnapshot"
@@ -176,7 +176,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_cache.rs::fetch_account_limits"
 status = "ported"
-note = "Preserves cooldown and in-flight reuse, eager ensure-index/auth awaits, retry before cached fallback on absent auth, source nested request record and endpoint order, payload success/cache timestamps, exact try/catch boundaries, warn-once flag and log callee/message/severity ordering. Actual finally callable clears the live promise unconditionally. Native state, DTO schema/UTF16 and original handles checked against source; full JS/Promise/clock/import integration remains required, beyond bounded nonthenable fixtures."
+note = "Preserves cooldown and in-flight reuse, eager ensure-index/auth awaits, retry before cached fallback on absent auth, source nested request record and endpoint order, payload success/cache timestamps, exact try/catch boundaries, warn-once flag and log callee/message/severity ordering. Actual finally callable clears the live promise unconditionally. Native state, DTO schema/UTF16 and original handles checked against source; full JS/Promise/clock/import integration remains required, beyond bounded nonthenable fixtures. Rename target: `safe-cex-venue-lighter/src/exchange_account_cache.rs::fetch_account_limits`."
 
 [[symbol]]
 ts = "LighterExchange#getCachedAccountTier"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_tier_eligible"
 status = "ported"
-note = "Source fee short circuit, eager limits fetch/queued await with best-effort Debug log, then live tier extraction/eligibility; captures emit and Error constructor before separate constant reads. Original lookup/log/constructor throws and source catch boundary retained. Required JS/import/tier/Promise/exchange binding remains separate; native object arguments and completions checked."
+note = "Source fee short circuit, eager limits fetch/queued await with best-effort Debug log, then live tier extraction/eligibility; captures emit and Error constructor before separate constant reads. Original lookup/log/constructor throws and source catch boundary retained. Required JS/import/tier/Promise/exchange binding remains separate; native object arguments and completions checked. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_tier_eligible`."
 
 [[symbol]]
 ts = "LighterExchange#ensurePartnerAttributionApproved"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_approved"
 status = "ported"
-note = "Fee guard and eager snapshot request with allowRecent=true; best-effort lookup catch ends before approval logic. Actual array test, fresh empty fallback, captured integrator index toString and clock, native some callback with source nullish aliases, String.trim, Number/isFinite and strict expiry>now. Emits then throws missing-approval constant; native callback outcomes/record schema checked. Full array/UTF16/Symbol/property/coercion/Promise hosts required; fixture string-key domain only."
+note = "Fee guard and eager snapshot request with allowRecent=true; best-effort lookup catch ends before approval logic. Actual array test, fresh empty fallback, captured integrator index toString and clock, native some callback with source nullish aliases, String.trim, Number/isFinite and strict expiry>now. Emits then throws missing-approval constant; native callback outcomes/record schema checked. Full array/UTF16/Symbol/property/coercion/Promise hosts required; fixture string-key domain only. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_approved`."
 
 [[symbol]]
 ts = "LighterExchange.getAccountRateLimitGuidanceMessage"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::get_account_rate_limit_guidance_message"
 status = "ported"
-note = "Captured cached-tier method then exact strict standard/plus/premium branches and actual UTF16 guidance constants. Native result values and original getter/call failures; concrete exchange/tier/runtime binding pending."
+note = "Captured cached-tier method then exact strict standard/plus/premium branches and actual UTF16 guidance constants. Native result values and original getter/call failures; concrete exchange/tier/runtime binding pending. Rename target: `safe-cex-venue-lighter/src/exchange_error_recovery.rs::get_account_rate_limit_guidance_message`."
 
 [[symbol]]
 ts = "LighterExchange.changeAccountTier"
@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::change_account_tier"
 status = "ported"
-note = "Tier request, cache invalidation and disposed-sensitive balance update; source/native request operands, identities and UTF16 witnesses. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Tier request, cache invalidation and disposed-sensitive balance update; source/native request operands, identities and UTF16 witnesses. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::change_account_tier`."
 
 [[symbol]]
 ts = "LighterExchange#warmupSignerRuntime"
@@ -224,7 +224,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::warmup_signer_runtime"
 status = "ported"
-note = "Captures and calls isWasmReady, calls/awaits initWasm only when false, then force-reads getCryptoApi; original throws/rejections reject eager detached native promise. Ready fast path and awaited path resolve undefined through required async-return binding. Source import aliases/types pinned; actual wasm loading/export/runtime engine remains separate."
+note = "Captures and calls isWasmReady, calls/awaits initWasm only when false, then force-reads getCryptoApi; original throws/rejections reject eager detached native promise. Ready fast path and awaited path resolve undefined through required async-return binding. Source import aliases/types pinned; actual wasm loading/export/runtime engine remains separate. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::warmup_signer_runtime`."
 
 [[symbol]]
 ts = "LighterExchange#normalizeSignerErrorMessage"
@@ -232,7 +232,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::normalize_signer_error_message"
 status = "ported"
-note = "Actual Error global/instanceof host, live truthiness message Get then independent returned-value Get; fallback captures String with source falsey-to-empty native argument. Native repeated getter/coercion/opaque identity floor; full JS instanceof/prototype/coercion bridge required."
+note = "Actual Error global/instanceof host, live truthiness message Get then independent returned-value Get; fallback captures String with source falsey-to-empty native argument. Native repeated getter/coercion/opaque identity floor; full JS instanceof/prototype/coercion bridge required. Rename target: `safe-cex-venue-lighter/src/exchange_error_recovery.rs::normalize_signer_error_message`."
 
 [[symbol]]
 ts = "LighterExchange#isWasmRuntimeIssueMessage"
@@ -240,7 +240,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_wasm_runtime_issue_message"
 status = "ported"
-note = "Live lowercase and ordered substring short circuits. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live lowercase and ordered substring short circuits. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_wasm_runtime_issue_message`."
 
 [[symbol]]
 ts = "LighterExchange#shouldShortCircuitSignerRetry"
@@ -248,7 +248,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_short_circuit_signer_retry"
 status = "ported"
-note = "Clock before captured issue helper and message; conditional readiness call, then live less-than retry-until comparison. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Clock before captured issue helper and message; conditional readiness call, then live less-than retry-until comparison. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_short_circuit_signer_retry`."
 
 [[symbol]]
 ts = "LighterExchange#getSignerRetryBlockMessage"
@@ -256,7 +256,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_signer_retry_block_message"
 status = "ported"
-note = "Captured Math.max, live subtraction, issue/readiness short circuit and source repeated message/template reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captured Math.max, live subtraction, issue/readiness short circuit and source repeated message/template reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_signer_retry_block_message`."
 
 [[symbol]]
 ts = "LighterExchange#warnSignerUnavailable"
@@ -264,7 +264,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::warn_signer_unavailable"
 status = "ported"
-note = "Live arithmetic and lexical class cooldown read; timestamp assignment precedes captured log with the original message and imported severity. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live arithmetic and lexical class cooldown read; timestamp assignment precedes captured log with the original message and imported severity. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::warn_signer_unavailable`."
 
 [[symbol]]
 ts = "LighterExchange#ensureSignerAdapter"
@@ -272,7 +272,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::ensure_signer_adapter"
 status = "ported"
-note = "Cached adapter and Promise identity, eager IIFE, one WASM-race retry, cooldown and finally cleanup; source synchronous-cleanup ordering retained. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Cached adapter and Promise identity, eager IIFE, one WASM-race retry, cooldown and finally cleanup; source synchronous-cleanup ordering retained. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::ensure_signer_adapter`."
 
 [[symbol]]
 ts = "LighterExchange.dispose"
@@ -280,7 +280,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::dispose"
 status = "ported"
-note = "Captures actual superclass dispose with owner receiver first, then map clear/public/private dispose in source order. Optional signer dispose guard is followed by fresh signer and member reads, eager discard of return value without await; nullish/noncallable/throw and partial-effect cases preserve native source completion. Full superclass/websocket/signer owner binding remains pending."
+note = "Captures actual superclass dispose with owner receiver first, then map clear/public/private dispose in source order. Optional signer dispose guard is followed by fresh signer and member reads, eager discard of return value without await; nullish/noncallable/throw and partial-effect cases preserve native source completion. Full superclass/websocket/signer owner binding remains pending. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::dispose`."
 
 [[symbol]]
 ts = "LighterExchange.getAccount"
@@ -288,7 +288,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::get_account"
 status = "ported"
-note = "Eager account-info fetch and queued await; undefined-only conditional cache update preserves concurrent/preexisting cache, then uses fetched account index for userId toString and fetched referrer for affiliateId. Fresh exact ordered native record fields asserted directly; required internal async-return resolution/adoption handles inherited then getter/resolve/reject, not a JSON roundtrip or full engine proof."
+note = "Eager account-info fetch and queued await; undefined-only conditional cache update preserves concurrent/preexisting cache, then uses fetched account index for userId toString and fetched referrer for affiliateId. Fresh exact ordered native record fields asserted directly; required internal async-return resolution/adoption handles inherited then getter/resolve/reject, not a JSON roundtrip or full engine proof. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::get_account`."
 
 [[symbol]]
 ts = "LighterExchange.validateAccount"
@@ -296,7 +296,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::validate_account"
 status = "ported"
-note = "API-key guard, lookup assignment, warning-only signer precheck and outer lookup guidance; source/native original failures, catch boundaries and UTF16 messages. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "API-key guard, lookup assignment, warning-only signer precheck and outer lookup guidance; source/native original failures, catch boundaries and UTF16 messages. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::validate_account`."
 
 [[symbol]]
 ts = "LighterExchange.start"
@@ -304,7 +304,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::start_exchange"
 status = "ported"
-note = "Concurrent signer warmup and market load, repeated external-path await, loaded spreads, snapshot destructuring and tick scheduling; numeric API-key zero source branch retained. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Concurrent signer warmup and market load, repeated external-path await, loaded spreads, snapshot destructuring and tick scheduling; numeric API-key zero source branch retained. Required realm/owner/import bindings; bounded live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::start_exchange`."
 
 [[symbol]]
 ts = "LighterExchange#getInitialTickDelay"
@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_initial_tick_delay"
 status = "ported"
-note = "Calls the bound owner tick interval once, then source positive guard and Math.min cap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Calls the bound owner tick interval once, then source positive guard and Math.min cap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_initial_tick_delay`."
 
 [[symbol]]
 ts = "LighterExchange.fetchAndSetPrivateSnapshot"
@@ -320,7 +320,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_and_set_private_snapshot"
 status = "ported"
-note = "Eager captured helper call, queued await and undefined completion with actual async-return host; preserves synchronous call throws and awaited original rejection identity. Delegation body only: helper is separately mapped; full exchange/runtime binding pending."
+note = "Eager captured helper call, queued await and undefined completion with actual async-return host; preserves synchronous call throws and awaited original rejection identity. Delegation body only: helper is separately mapped; full exchange/runtime binding pending. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_and_set_private_snapshot`."
 
 [[symbol]]
 ts = "LighterExchange.fetchAndSetPrivateSnapshotHelper"
@@ -328,7 +328,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_and_set_private_snapshot_helper"
 status = "ported"
-note = "Captures Promise.all before eager positions/options and orders calls; required actual two-value iterator/destructuring and close occurs before disposed guard. Live Number-or-undefined websocket freshness reads, strict1000ms merge boundary, source store call order and exact loaded-state overrides, then balance await/second guard. All synchronous/await errors reach one snapshot-error handler; handler errors reject. Required full array/iterator/CopyDataProperties hosts; bounded fixture covers ASCII spread keys/hidden descriptor and lone UTF16 values, not Symbol/lone-surrogate keys or full engine."
+note = "Captures Promise.all before eager positions/options and orders calls; required actual two-value iterator/destructuring and close occurs before disposed guard. Live Number-or-undefined websocket freshness reads, strict1000ms merge boundary, source store call order and exact loaded-state overrides, then balance await/second guard. All synchronous/await errors reach one snapshot-error handler; handler errors reject. Required full array/iterator/CopyDataProperties hosts; bounded fixture covers ASCII spread keys/hidden descriptor and lone UTF16 values, not Symbol/lone-surrogate keys or full engine. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_and_set_private_snapshot_helper`."
 
 [[symbol]]
 ts = "LighterExchange.tick"
@@ -336,7 +336,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::tick"
 status = "ported"
-note = "Initial live disposed guard only; helper call/await failure forwards optional original message to emitAndLogError before loop. Captures imported loop before fresh live-owner callback and interval get/call, schedules even if owner became disposed during await, original loop/interval/callback throws retained. Native callback and caught-rejection order checked; real timer/loop/exchange binding pending."
+note = "Initial live disposed guard only; helper call/await failure forwards optional original message to emitAndLogError before loop. Captures imported loop before fresh live-owner callback and interval get/call, schedules even if owner became disposed during await, original loop/interval/callback throws retained. Native callback and caught-rejection order checked; real timer/loop/exchange binding pending. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::tick`."
 
 [[symbol]]
 ts = "LighterExchange.fetchBalance"
@@ -344,7 +344,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_balance"
 status = "ported"
-note = "Undefined-only fresh empty options default, eager fetchRawBalance call and queued await; post-await disposed guard returns live store.balance or raw native balance identity. Required async-return resolution preserves inherited then getter/queued resolve/reject on both returned branches. Native identities/completions asserted before source pin; balance arithmetic/HTTP/exchange binding separate."
+note = "Undefined-only fresh empty options default, eager fetchRawBalance call and queued await; post-await disposed guard returns live store.balance or raw native balance identity. Required async-return resolution preserves inherited then getter/queued resolve/reject on both returned branches. Native identities/completions asserted before source pin; balance arithmetic/HTTP/exchange binding separate. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_balance`."
 
 [[symbol]]
 ts = "LighterExchange.fetchAndSetBalance"
@@ -352,7 +352,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_and_set_balance"
 status = "ported"
-note = "Undefined-only options default and eager raw balance fetch/await, disposed short circuit, captured store.update before loaded read and full spread with balance=true, exact balance/loaded update record. Native payload identity, own field schema, hidden-descriptor/read order and original errors checked. ASCII spread-key fixture floor; full Symbol/UTF16-key/JS CopyDataProperties runtime required."
+note = "Undefined-only options default and eager raw balance fetch/await, disposed short circuit, captured store.update before loaded read and full spread with balance=true, exact balance/loaded update record. Native payload identity, own field schema, hidden-descriptor/read order and original errors checked. ASCII spread-key fixture floor; full Symbol/UTF16-key/JS CopyDataProperties runtime required. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::fetch_and_set_balance`."
 
 [[symbol]]
 ts = "LighterExchange.fetchRawBalance"
@@ -360,7 +360,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_raw_balance"
 status = "ported"
-note = "Undefined-only options default, captured snapshot/options call and await, strict-false limits skip versus limits await. Native reduce callback computes source long/short PnL; captured parseFloat/subtract/Math calls then exact total/upnl/used/free/info record, preserving spread unknown fields and native limits identity. Direct decoded record/callback/UTF16 values and inherited-then return outcomes checked. Full CopyDataProperties/Promise/engine host required; fixture ASCII spread keys and authored empty-default schema only. Missing callback arguments bind Undefined, preserving native JS TypeError instead of a bounds panic. Accumulator addition uses a required full JS addition operation after numeric RHS evaluation; undefined and string accumulators are witnessed."
+note = "Undefined-only options default, captured snapshot/options call and await, strict-false limits skip versus limits await. Native reduce callback computes source long/short PnL; captured parseFloat/subtract/Math calls then exact total/upnl/used/free/info record, preserving spread unknown fields and native limits identity. Direct decoded record/callback/UTF16 values and inherited-then return outcomes checked. Full CopyDataProperties/Promise/engine host required; fixture ASCII spread keys and authored empty-default schema only. Missing callback arguments bind Undefined, preserving native JS TypeError instead of a bounds panic. Accumulator addition uses a required full JS addition operation after numeric RHS evaluation; undefined and string accumulators are witnessed. Rename target: `safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_raw_balance`."
 
 [[symbol]]
 ts = "LighterExchange#parseMarginMode"
@@ -368,7 +368,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_margin_mode"
 status = "ported"
-note = "Strict numeric/string0-or1 tests followed by live String/lowercase and source cross/isolated branches without trimming. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Strict numeric/string0-or1 tests followed by live String/lowercase and source cross/isolated branches without trimming. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_margin_mode`."
 
 [[symbol]]
 ts = "LighterExchange#marginModeToMarginType"
@@ -376,7 +376,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_mode_to_margin_type"
 status = "ported"
-note = "Strict mode1 test and live imported MarginType result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Strict mode1 test and live imported MarginType result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_mode_to_margin_type`."
 
 [[symbol]]
 ts = "LighterExchange#marginTypeToMarginMode"
@@ -384,7 +384,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_type_to_margin_mode"
 status = "ported"
-note = "Strict live imported isolated-type comparison and numeric0-or1 result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Strict live imported isolated-type comparison and numeric0-or1 result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_type_to_margin_mode`."
 
 [[symbol]]
 ts = "LighterExchange#getMarketConfiguredMarginMode"
@@ -392,7 +392,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_market_configured_margin_mode"
 status = "ported"
-note = "Live optional info, captured owner parser and four nullish configuration spellings. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live optional info, captured owner parser and four nullish configuration spellings. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_market_configured_margin_mode`."
 
 [[symbol]]
 ts = "LighterExchange#getCurrentMarginModeForSymbol"
@@ -408,7 +408,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_current_leverage_for_symbol"
 status = "ported"
-note = "Live exposure/fallback finds, nullish leverage rereads, market/default fallback, nested min/max and current-class tier snap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live exposure/fallback finds, nullish leverage rereads, market/default fallback, nested min/max and current-class tier snap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_current_leverage_for_symbol`."
 
 [[symbol]]
 ts = "LighterExchange.fetchPositions"
@@ -416,7 +416,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_positions.rs::fetch_positions"
 status = "ported"
-note = "Snapshot await, null-only mapped-position filtering, leverage and margin reducers, mode-cache writes, placeholders and first-id uniqBy. Raw assignment keys precede the RHS; PutValue follows it, including nullish-accumulator throws. Required mapPosition/import/realm bindings; bounded own-string-key/nonthenable live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+note = "Snapshot await, null-only mapped-position filtering, leverage and margin reducers, mode-cache writes, placeholders and first-id uniqBy. Raw assignment keys precede the RHS; PutValue follows it, including nullish-accumulator throws. Required mapPosition/import/realm bindings; bounded own-string-key/nonthenable live witness. See sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_positions.rs::fetch_positions`."
 
 [[symbol]]
 ts = "LighterExchange.shouldSkipOrderReconciliationFetch"
@@ -432,7 +432,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_orders"
 status = "ported"
-note = "Live promise guard/reread or captured fetchOrdersOnce/finally call with fresh native callback; sets stored promise then returns a live reread through required async-return adoption. Actual callback captures clock, sets timestamp then clears cache on fulfillment/rejection, and callback error overrides original completion. Native promise/array identity, cache argument Number/undefined, original throws and deferred completion checked. Full Promise/finally/species/recursive assimilation and exchange/store engine binding required."
+note = "Live promise guard/reread or captured fetchOrdersOnce/finally call with fresh native callback; sets stored promise then returns a live reread through required async-return adoption. Actual callback captures clock, sets timestamp then clears cache on fulfillment/rejection, and callback error overrides original completion. Native promise/array identity, cache argument Number/undefined, original throws and deferred completion checked. Full Promise/finally/species/recursive assimilation and exchange/store engine binding required. Rename target: `safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_orders`."
 
 [[symbol]]
 ts = "LighterExchange#fetchOrdersOnce"
@@ -440,7 +440,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::fetch_orders_once"
 status = "ported"
-note = "Rust active-order body, local candidate parsing, invalid-auth deduplication, market fallback, native async callback adoption, and cancellation filtering. Required live JS/import/iterator boundaries; 60-case source-backed native floor through iteration59, not a complete engine census."
+note = "Rust active-order body, local candidate parsing, invalid-auth deduplication, market fallback, native async callback adoption, and cancellation filtering. Required live JS/import/iterator boundaries; 60-case source-backed native floor through iteration59, not a complete engine census. Rename target: `safe-cex-venue-lighter/src/exchange_order_snapshot.rs::fetch_orders_once`."
 
 [[symbol]]
 ts = "LighterExchange.fetchHistoricalFills"
@@ -448,7 +448,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::fetch_historical_fills"
 status = "ported"
-note = "Rust timestamp/symbol/side normalization, eager row extraction, execution parsing, authenticated endpoint fallback, last-write deduplication, sorting and warning catch. Required live JS/import/iterator/Promise bindings; native source-backed floor90 through iteration89, not a full engine or exchange construction proof."
+note = "Rust timestamp/symbol/side normalization, eager row extraction, execution parsing, authenticated endpoint fallback, last-write deduplication, sorting and warning catch. Required live JS/import/iterator/Promise bindings; native source-backed floor90 through iteration89, not a full engine or exchange construction proof. Rename target: `safe-cex-venue-lighter/src/exchange_historical_fills.rs::fetch_historical_fills`."
 
 [[symbol]]
 ts = "LighterExchange.fetchMarkets"
@@ -456,7 +456,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_markets"
 status = "ported"
-note = "Captured helper call/await then actual some callback for strict-null entries; emits source failure and returns live store.markets or original market array identity. Native callback booleans, receiver/args and decoded return checked. Required full Array/Promise/async-return/store binding, not a fallback fabricated list."
+note = "Captured helper call/await then actual some callback for strict-null entries; emits source failure and returns live store.markets or original market array identity. Native callback booleans, receiver/args and decoded return checked. Required full Array/Promise/async-return/store binding, not a fallback fabricated list. Rename target: `safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_markets`."
 
 [[symbol]]
 ts = "LighterExchange#fetchLighterMarketRows"
@@ -464,7 +464,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_lighter_market_rows"
 status = "ported"
-note = "Captures client.get before live endpoint and suppress-error options, queued details await with source array-alias/code selection; all lookup/select/constructor errors enter one Warning fallback catch. Fallback request/await/check lies outside that catch, with original error/message and returned array identity. Native options schema, endpoint/callee order and completions asserted. Full HTTP/JS/Error/Promise bindings separate."
+note = "Captures client.get before live endpoint and suppress-error options, queued details await with source array-alias/code selection; all lookup/select/constructor errors enter one Warning fallback catch. Fallback request/await/check lies outside that catch, with original error/message and returned array identity. Native options schema, endpoint/callee order and completions asserted. Full HTTP/JS/Error/Promise bindings separate. Rename target: `safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_lighter_market_rows`."
 
 [[symbol]]
 ts = "LighterExchange.fetchMarketsHelper"
@@ -472,7 +472,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_markets_helper"
 status = "ported"
-note = "Source rows await, captured filter/imported predicate then map/fresh native callback. Captured symbol/destructure/Number/helper calls, source precision exponentiation and full amount/leverage/flags/info record in property order. Direct decoded nested fields and callback/array identities, inherited-then outcomes checked; independent schemas for four nonescaping allocations on fixed spread failures are not observed allocations. Required full Number::exponentiate/CopyDataProperties/Array/JS hosts; integer-exponent/ASCII-spread fixture limits. Missing callback arguments bind Undefined, preserving native JS TypeError instead of a bounds panic."
+note = "Source rows await, captured filter/imported predicate then map/fresh native callback. Captured symbol/destructure/Number/helper calls, source precision exponentiation and full amount/leverage/flags/info record in property order. Direct decoded nested fields and callback/array identities, inherited-then outcomes checked; independent schemas for four nonescaping allocations on fixed spread failures are not observed allocations. Required full Number::exponentiate/CopyDataProperties/Array/JS hosts; integer-exponent/ASCII-spread fixture limits. Missing callback arguments bind Undefined, preserving native JS TypeError instead of a bounds panic. Rename target: `safe-cex-venue-lighter/src/exchange_market_reads.rs::fetch_markets_helper`."
 
 [[symbol]]
 ts = "LighterExchange.fetchOHLCV"
@@ -480,7 +480,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::fetch_ohlcv"
 status = "ported"
-note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_ohlcv.rs::fetch_ohlcv`."
 
 [[symbol]]
 ts = "LighterExchange#getOhlcvFallbackKey"
@@ -488,7 +488,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_ohlcv_fallback_key"
 status = "ported"
-note = "Live symbol/interval Get and template substitution preserve the literal colon and native UTF16 output. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live symbol/interval Get and template substitution preserve the literal colon and native UTF16 output. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_ohlcv_fallback_key`."
 
 [[symbol]]
 ts = "LighterExchange#fetchLatestOhlcvWithSharedFallback"
@@ -496,7 +496,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::fetch_latest_ohlcv_with_shared_fallback"
 status = "ported"
-note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_ohlcv.rs::fetch_latest_ohlcv_with_shared_fallback`."
 
 [[symbol]]
 ts = "LighterExchange.listenOHLCV"
@@ -504,7 +504,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::listen_ohlcv"
 status = "ported"
-note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_ohlcv.rs::listen_ohlcv`."
 
 [[symbol]]
 ts = "LighterExchange.listenOrderBook"
@@ -512,7 +512,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::listen_order_book"
 status = "ported"
-note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required realm bindings; bounded native witness live_ohlcv. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_ohlcv.rs::listen_order_book`."
 
 [[symbol]]
 ts = "LighterExchange.getPrivateWsAuthToken"
@@ -520,7 +520,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::get_private_ws_auth_token"
 status = "ported"
-note = "Undefined-only60 TTL default, initial signer truthiness, eager ensure/await with initialization-warning catch, then independent live signer reread and captured auth call/await. Auth errors log Warning and return undefined; initialization, auth, logger and UTF16/ToString failures preserve source catch boundaries and original throw identity. Full signer/engine owner binding separate."
+note = "Undefined-only60 TTL default, initial signer truthiness, eager ensure/await with initialization-warning catch, then independent live signer reread and captured auth call/await. Auth errors log Warning and return undefined; initialization, auth, logger and UTF16/ToString failures preserve source catch boundaries and original throw identity. Full signer/engine owner binding separate. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::get_private_ws_auth_token`."
 
 [[symbol]]
 ts = "LighterExchange.getPrivateWsAccountIndex"
@@ -528,7 +528,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::get_private_ws_account_index"
 status = "ported"
-note = "Undefined-only account cache guard, repeated cache read and captured native toString receiver, otherwise captured imported API-key string helper before live options/key reads. Native UTF16 and BigInt receiver identity preserve large indices and original throws. Required JS/import/owner hosts; full runtime pending."
+note = "Undefined-only account cache guard, repeated cache read and captured native toString receiver, otherwise captured imported API-key string helper before live options/key reads. Native UTF16 and BigInt receiver identity preserve large indices and original throws. Required JS/import/owner hosts; full runtime pending. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::get_private_ws_account_index`."
 
 [[symbol]]
 ts = "LighterExchange.getPrivateWsApiKeyIndex"
@@ -536,7 +536,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::get_private_ws_api_key_index"
 status = "ported"
-note = "Exact helper delegation: capture imported toLighterApiKeyIndexString before owner options and key reads, preserving native input identity, UTF16 output and original get/call errors. Actual TypeScript helper/import oracle, bounded native assertions before source pin; full exchange binding remains pending."
+note = "Exact helper delegation: capture imported toLighterApiKeyIndexString before owner options and key reads, preserving native input identity, UTF16 output and original get/call errors. Actual TypeScript helper/import oracle, bounded native assertions before source pin; full exchange binding remains pending. Rename target: `safe-cex-venue-lighter/src/exchange_account_access.rs::get_private_ws_api_key_index`."
 
 [[symbol]]
 ts = "LighterExchange#getReduceOnlyClosingPositionSide"
@@ -544,7 +544,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_reduce_only_closing_position_side"
 status = "ported"
-note = "Strict live Buy comparison selects the imported Short or Long value. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Strict live Buy comparison selects the imported Short or Long value. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_reduce_only_closing_position_side`."
 
 [[symbol]]
 ts = "LighterExchange#hasOpenReduceOnlyTargetPosition"
@@ -552,7 +552,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::has_open_reduce_only_target_position"
 status = "ported"
-note = "Undefined-only positions default reads the owner store; actual some callback uses exact symbol/side and positive contracts. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Undefined-only positions default reads the owner store; actual some callback uses exact symbol/side and positive contracts. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::has_open_reduce_only_target_position`."
 
 [[symbol]]
 ts = "LighterExchange#buildNoPositionReduceOnlyMessage"
@@ -560,7 +560,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_no_position_reduce_only_message"
 status = "ported"
-note = "Live template substitutions and exact closing-side label. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live template substitutions and exact closing-side label. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_no_position_reduce_only_message`."
 
 [[symbol]]
 ts = "LighterExchange#isTransientLighterRestTransportError"
@@ -568,7 +568,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::is_transient_lighter_rest_transport_error"
 status = "ported"
-note = "String captured before optional code paths, full receiver-bound uppercase/lowercase methods after actual extraction, source strict code/message cases then fresh timeout regexp test host. Native argument/receiver/error/type floor incl undefined extraction TypeError; full JS Unicode/regex/property/runtime bridge required."
+note = "String captured before optional code paths, full receiver-bound uppercase/lowercase methods after actual extraction, source strict code/message cases then fresh timeout regexp test host. Native argument/receiver/error/type floor incl undefined extraction TypeError; full JS Unicode/regex/property/runtime bridge required. Rename target: `safe-cex-venue-lighter/src/exchange_error_recovery.rs::is_transient_lighter_rest_transport_error`."
 
 [[symbol]]
 ts = "LighterExchange#handlePrivateSnapshotFetchError"
@@ -576,7 +576,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::handle_private_snapshot_fetch_error"
 status = "ported"
-note = "Captured transient decision; nontransient emit captured before instanceof/string classification/extraction, retaining original error value; transient Number clock then two independent warning timestamp reads, assignment before log captured before extraction/template. Native identity/UTF16/partial-state/cooldown/getter-order floor; concrete owner/clock/error/log bridge pending."
+note = "Captured transient decision; nontransient emit captured before instanceof/string classification/extraction, retaining original error value; transient Number clock then two independent warning timestamp reads, assignment before log captured before extraction/template. Native identity/UTF16/partial-state/cooldown/getter-order floor; concrete owner/clock/error/log bridge pending. Rename target: `safe-cex-venue-lighter/src/exchange_error_recovery.rs::handle_private_snapshot_fetch_error`."
 
 [[symbol]]
 ts = "LighterExchange#extractOrderErrorMessage"
@@ -584,7 +584,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::extract_order_error_message"
 status = "ported"
-note = "Original string fast path, actual Error instanceof and repeated message Gets; ordered independently live nullish response/data/error/message paths, String candidate, JSON lookup/call try-catch then String fallback. Native original values/throws/undefined JSON return retained, no codec proof; full JS property/coercion/JSON bridge required."
+note = "Original string fast path, actual Error instanceof and repeated message Gets; ordered independently live nullish response/data/error/message paths, String candidate, JSON lookup/call try-catch then String fallback. Native original values/throws/undefined JSON return retained, no codec proof; full JS property/coercion/JSON bridge required. Rename target: `safe-cex-venue-lighter/src/exchange_error_recovery.rs::extract_order_error_message`."
 
 [[symbol]]
 ts = "LighterExchange#isRateLimitOrderError"
@@ -592,7 +592,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_rate_limit_order_error"
 status = "ported"
-note = "Captured Number before status reads, then String/code/lowercase/message evaluation and ordered405/429/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captured Number before status reads, then String/code/lowercase/message evaluation and ordered405/429/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_rate_limit_order_error`."
 
 [[symbol]]
 ts = "LighterExchange#isInvalidMarginModeOrderError"
@@ -600,7 +600,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_invalid_margin_mode_order_error"
 status = "ported"
-note = "Live nested code precedence and captured String/lowercase/message calls before21613/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live nested code precedence and captured String/lowercase/message calls before21613/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_invalid_margin_mode_order_error`."
 
 [[symbol]]
 ts = "LighterExchange#isPartnerAttributionTierOrderError"
@@ -608,7 +608,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_tier_order_error"
 status = "ported"
-note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_tier_order_error`."
 
 [[symbol]]
 ts = "LighterExchange#isPartnerAttributionApprovalMissingOrderError"
@@ -616,7 +616,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error"
 status = "ported"
-note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error`."
 
 [[symbol]]
 ts = "LighterExchange#buildInvalidMarginModeOrderMessage"
@@ -624,7 +624,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_invalid_margin_mode_order_message"
 status = "ported"
-note = "Reads the owner market table and configured-mode helper, retaining exact symbol and source generic/default wording. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Reads the owner market table and configured-mode helper, retaining exact symbol and source generic/default wording. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_invalid_margin_mode_order_message`."
 
 [[symbol]]
 ts = "LighterExchange#refreshMarginModeStateAfterInvalidOrder"
@@ -632,7 +632,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::refresh_margin_mode_state_after_invalid_order"
 status = "ported"
-note = "Captures configured-mode lookup before market reads and actual some callback for matching positive exposure. Inverts configured mode only when flat, invalidates before fetch try; await/update errors log Warning with source UTF16 symbol/error order, disposed guard retains source catch boundary. Native cache numeric arguments, callback booleans, update identity and completion checked. Required live store/cache/array/JS/Promise engine binding; typed Number contracts domain."
+note = "Captures configured-mode lookup before market reads and actual some callback for matching positive exposure. Inverts configured mode only when flat, invalidates before fetch try; await/update errors log Warning with source UTF16 symbol/error order, disposed guard retains source catch boundary. Native cache numeric arguments, callback booleans, update identity and completion checked. Required live store/cache/array/JS/Promise engine binding; typed Number contracts domain. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::refresh_margin_mode_state_after_invalid_order`."
 
 [[symbol]]
 ts = "LighterExchange#normalizePlaceOrderErrorMessage"
@@ -640,7 +640,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::normalize_place_order_error_message"
 status = "ported"
-note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_order_actions.rs::normalize_place_order_error_message`."
 
 [[symbol]]
 ts = "LighterExchange#assertReduceOnlyLimitHasPosition"
@@ -648,7 +648,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::assert_reduce_only_limit_has_position"
 status = "ported"
-note = "Source limit/Boolean reduceOnly guard, first cached target check, fetch/await and optional store update in try; retains refreshed positions even if update throws, logs then performs live fallback target check. Captures message builder before opts getters, emits then constructs original Error. Native receiver/args/record/error UTF16 and completion checks; full source store/engine/runtime dependencies required."
+note = "Source limit/Boolean reduceOnly guard, first cached target check, fetch/await and optional store update in try; retains refreshed positions even if update throws, logs then performs live fallback target check. Captures message builder before opts getters, emits then constructs original Error. Native receiver/args/record/error UTF16 and completion checks; full source store/engine/runtime dependencies required. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::assert_reduce_only_limit_has_position`."
 
 [[symbol]]
 ts = "LighterExchange#getOrderMinimumViolationReasons"
@@ -656,7 +656,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_order_minimum_violation_reasons"
 status = "ported"
-note = "Live arithmetic/comparisons, base-before-quote templates and actual filter(Boolean)/join calls. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live arithmetic/comparisons, base-before-quote templates and actual filter(Boolean)/join calls. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_order_minimum_violation_reasons`."
 
 [[symbol]]
 ts = "LighterExchange#getPositivePriceCandidate"
@@ -664,7 +664,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_positive_price_candidate"
 status = "ported"
-note = "Fresh rest array and native callback retain first finite strictly positive Number policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Fresh rest array and native callback retain first finite strictly positive Number policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_positive_price_candidate`."
 
 [[symbol]]
 ts = "LighterExchange#resolveMarketOrderReferencePrice"
@@ -672,7 +672,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_market_order_reference_price"
 status = "ported"
-note = "Reads the live ticker store using the original symbol; preserves candidate priority and both original constructed Errors. Native surrogate store-key and Error-message witnesses close the earlier typed-adapter choice; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Reads the live ticker store using the original symbol; preserves candidate priority and both original constructed Errors. Native surrogate store-key and Error-message witnesses close the earlier typed-adapter choice; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_market_order_reference_price`."
 
 [[symbol]]
 ts = "LighterExchange#resolveStopSlippagePct"
@@ -680,7 +680,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_stop_slippage_pct"
 status = "ported"
-note = "Captures each local normalization helper before live order/options reads; nullish fallback preserves zero. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captures each local normalization helper before live order/options reads; nullish fallback preserves zero. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_stop_slippage_pct`."
 
 [[symbol]]
 ts = "LighterExchange#resolveConditionalExecutionPrice"
@@ -688,7 +688,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_conditional_execution_price"
 status = "ported"
-note = "Live stop-slippage call and arithmetic, captures adjust before owner precision-table/key reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live stop-slippage call and arithmetic, captures adjust before owner precision-table/key reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_conditional_execution_price`."
 
 [[symbol]]
 ts = "LighterExchange.placeOrder"
@@ -696,7 +696,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::place_order"
 status = "ported"
-note = "Rust preparation, lot splitting and merging, submission/error recovery, delays and protective sibling composition. Required live realm/import/owner/iterator/Promise bindings; native source floor91 through iteration90, all decoded native assertions before deferred scalar-JSON wire checks. Source lot rounding and per-lot ID overflow are preserved; full recursive class/engine and exotic host domains remain unproved."
+note = "Rust preparation, lot splitting and merging, submission/error recovery, delays and protective sibling composition. Required live realm/import/owner/iterator/Promise bindings; native source floor91 through iteration90, all decoded native assertions before deferred scalar-JSON wire checks. Source lot rounding and per-lot ID overflow are preserved; full recursive class/engine and exotic host domains remain unproved. Rename target: `safe-cex-venue-lighter/src/exchange_single_placement.rs::place_order`."
 
 [[symbol]]
 ts = "LighterExchange#shouldUseBatchedCreateOrders"
@@ -704,7 +704,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_use_batched_create_orders"
 status = "ported"
-note = "Live length/index/every operations preserve same-symbol limit-only, reduce-only, stop/take-profit and finite-positive-price policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live length/index/every operations preserve same-symbol limit-only, reduce-only, stop/take-profit and finite-positive-price policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_use_batched_create_orders`."
 
 [[symbol]]
 ts = "LighterExchange#placeOrdersSequentially"
@@ -712,7 +712,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::place_orders_sequentially"
 status = "ported"
-note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_order_actions.rs::place_orders_sequentially`."
 
 [[symbol]]
 ts = "LighterExchange.placeOrders"
@@ -720,7 +720,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_batch_placement.rs::place_orders"
 status = "ported"
-note = "Rust batch preparation, source BigInt ID generation and zero fallback, ordered hint/request construction, signer submission, cleanup and margin-refresh catch body. Required live JS/import/operator/iterator boundaries; native source-backed floor58 through iteration57. Single-order placement and full runtime construction remain separate."
+note = "Rust batch preparation, source BigInt ID generation and zero fallback, ordered hint/request construction, signer submission, cleanup and margin-refresh catch body. Required live JS/import/operator/iterator boundaries; native source-backed floor58 through iteration57. Single-order placement and full runtime construction remain separate. Rename target: `safe-cex-venue-lighter/src/exchange_batch_placement.rs::place_orders`."
 
 [[symbol]]
 ts = "LighterExchange.updateOrder"
@@ -728,7 +728,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::update_order"
 status = "ported"
-note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_order_actions.rs::update_order`."
 
 [[symbol]]
 ts = "LighterExchange.cancelOrders"
@@ -736,7 +736,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::cancel_orders"
 status = "ported"
-note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias."
+note = "Actual method body with required live language/import bindings; bounded native witness live_order_actions. See MANIFEST-SPEC.md#shared-utf8-string-boundary and #owned-snapshot-vs-live-alias. Rename target: `safe-cex-venue-lighter/src/exchange_order_actions.rs::cancel_orders`."
 
 [[symbol]]
 ts = "LighterExchange.cancelSymbolOrders"
@@ -744,7 +744,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::cancel_symbol_orders"
 status = "ported"
-note = "Captures actual orders.filter and creates fresh native strict-symbol callback, native callback decoded booleans checked; positive filtered length triggers captured cancelOrders call/await then undefined, empty list short circuits. Original callback/filter/cancel throws preserved with receiver and array identity checks. Full source Array/filter/Promise/store/exchange binding remains required, not a fake list fallback."
+note = "Captures actual orders.filter and creates fresh native strict-symbol callback, native callback decoded booleans checked; positive filtered length triggers captured cancelOrders call/await then undefined, empty list short circuits. Original callback/filter/cancel throws preserved with receiver and array identity checks. Full source Array/filter/Promise/store/exchange binding remains required, not a fake list fallback. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::cancel_symbol_orders`."
 
 [[symbol]]
 ts = "LighterExchange#snapToLeverageTier"
@@ -752,7 +752,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::snap_to_leverage_tier"
 status = "ported"
-note = "Reads the lexical class mutable tier array, preserves source first-tier ties and IteratorClose on body throws. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Reads the lexical class mutable tier array, preserves source first-tier ties and IteratorClose on body throws. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::snap_to_leverage_tier`."
 
 [[symbol]]
 ts = "LighterExchange.setLeverage"
@@ -760,7 +760,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage"
 status = "ported"
-note = "Live market lookup and original Error guards, signer await, captured Number.parseInt/String and finite check, Math capture/order and source clamped leverage/tier/mode calls. Native marketId/leverage/marginMode record before signed update; unsupported/restricted/fraction catch precedence, mandatory sync before rethrow and success Info log. Native payload schema/numbers, original throws, UTF16 warning/error and completion verified; actual signer/network/JS/Promise integration separate."
+note = "Live market lookup and original Error guards, signer await, captured Number.parseInt/String and finite check, Math capture/order and source clamped leverage/tier/mode calls. Native marketId/leverage/marginMode record before signed update; unsupported/restricted/fraction catch precedence, mandatory sync before rethrow and success Info log. Native payload schema/numbers, original throws, UTF16 warning/error and completion verified; actual signer/network/JS/Promise integration separate. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage`."
 
 [[symbol]]
 ts = "LighterExchange.changeMarginType"
@@ -768,7 +768,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::change_margin_type"
 status = "ported"
-note = "Symbol/market/finite-id guards and signer await, target mode from source truthiness, captured current-leverage call and exact update record. Catch detects active-position/order guard and constructs source Error or rethrows original; success updates cache before sync/Info log. Native args/field values/identity/error and UTF16 symbol log checked; typed Number and full live signer/cache/engine/Promise bindings required."
+note = "Symbol/market/finite-id guards and signer await, target mode from source truthiness, captured current-leverage call and exact update record. Catch detects active-position/order guard and constructs source Error or rethrows original; success updates cache before sync/Info log. Native args/field values/identity/error and UTF16 symbol log checked; typed Number and full live signer/cache/engine/Promise bindings required. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::change_margin_type`."
 
 [[symbol]]
 ts = "LighterExchange#syncLeverageFromExchange"
@@ -776,7 +776,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::sync_leverage_from_exchange"
 status = "ported"
-note = "Source fetchPositions call/await inside try, disposed guard and receiver-bound full store update; both synchronous and awaited errors enter Warning log, capture log before UTF16 symbol/error template coercion and optional-message/String fallback. Original callback/get/log/coercion errors reject. Typed Number/ordinary runtime domains and full owner/store/JS hosts required."
+note = "Source fetchPositions call/await inside try, disposed guard and receiver-bound full store update; both synchronous and awaited errors enter Warning log, capture log before UTF16 symbol/error template coercion and optional-message/String fallback. Original callback/get/log/coercion errors reject. Typed Number/ordinary runtime domains and full owner/store/JS hosts required. Rename target: `safe-cex-venue-lighter/src/exchange_reconciliation.rs::sync_leverage_from_exchange`."
 
 [[symbol]]
 ts = "LighterExchange#resolvePositionLeverage"
@@ -784,7 +784,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::resolve_position_leverage"
 status = "ported"
-note = "Live limits optional/falsy defaults, fresh three-candidate Array and required actual for-of/IteratorClose; parsed String/nullish candidates, finite/positive guard and captured Math clamp. Then margin fraction with terminal-null preservation, reciprocal guard or max fallback. Native decoded Number and captured args/iterator effects asserted. Full JS/iterator/import/Number-host binding separate; bounded iterator fixture return absent and stop9, not full engine proof."
+note = "Live limits optional/falsy defaults, fresh three-candidate Array and required actual for-of/IteratorClose; parsed String/nullish candidates, finite/positive guard and captured Math clamp. Then margin fraction with terminal-null preservation, reciprocal guard or max fallback. Native decoded Number and captured args/iterator effects asserted. Full JS/iterator/import/Number-host binding separate; bounded iterator fixture return absent and stop9, not full engine proof. Rename target: `safe-cex-venue-lighter/src/exchange_market_reads.rs::resolve_position_leverage`."
 
 [[symbol]]
 ts = "LighterExchange#resolvePositionLiquidationPrice"
@@ -792,7 +792,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_position_liquidation_price"
 status = "ported"
-note = "Live Number.parseFloat/String/v calls, raw-profit-mode guards, source isolated formula and allocated/maintenance fallbacks with repeated market.info reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live Number.parseFloat/String/v calls, raw-profit-mode guards, source isolated formula and allocated/maintenance fallbacks with repeated market.info reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_position_liquidation_price`."
 
 [[symbol]]
 ts = "LighterExchange.mapPosition"
@@ -800,7 +800,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::map_position"
 status = "ported"
-note = "Source entry/size/sign/side parsing and zero-or-NaN null return, native market-id nullish chain retains terminal Null, fallback symbol lookup and missing-market Warning. Captured margin/helper/id calls, cache set and exact fourteen-field position with original info identity and live clock. Native own schema/decoded fields/numbers/UTF16 and original throws checked before source pin. Required JS/helper/store/engine binding; full exchange construction separate."
+note = "Source entry/size/sign/side parsing and zero-or-NaN null return, native market-id nullish chain retains terminal Null, fallback symbol lookup and missing-market Warning. Captured margin/helper/id calls, cache set and exact fourteen-field position with original info identity and live clock. Native own schema/decoded fields/numbers/UTF16 and original throws checked before source pin. Required JS/helper/store/engine binding; full exchange construction separate. Rename target: `safe-cex-venue-lighter/src/exchange_market_reads.rs::map_position`."
 
 [[symbol]]
 ts = "LighterExchange.mapOrder"
@@ -808,4 +808,4 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::map_order"
 status = "ported"
-note = "Maintained synchronous body with direct/normalized loose-field search, iterator closing, signed-int64 IDs, sticky hints/type/TIF and native order/extra records retaining original or fresh merged info identity. Required live language/import/owner bindings; actual source floor100 through iteration99 asserts decoded native values before source pin, with no wire comparison. Dense arrays/primitive numeric and string fixture; full Unicode casing, prototype/exotic coercion and complete class/engine remain unproved. Retained source finding at raw typeByNumericCode/tifByNumericCode lookups: inherited truthy members suppress defaults (see scripts/table-inheritance-oracle.cjs); this100-case fixture does not close that prototype finding."
+note = "Maintained synchronous body with direct/normalized loose-field search, iterator closing, signed-int64 IDs, sticky hints/type/TIF and native order/extra records retaining original or fresh merged info identity. Required live language/import/owner bindings; actual source floor100 through iteration99 asserts decoded native values before source pin, with no wire comparison. Dense arrays/primitive numeric and string fixture; full Unicode casing, prototype/exotic coercion and complete class/engine remain unproved. Retained source finding at raw typeByNumericCode/tifByNumericCode lookups: inherited truthy members suppress defaults (see scripts/table-inheritance-oracle.cjs); this100-case fixture does not close that prototype finding. Rename target: `safe-cex-venue-lighter/src/exchange_order_mapping.rs::map_order`."
