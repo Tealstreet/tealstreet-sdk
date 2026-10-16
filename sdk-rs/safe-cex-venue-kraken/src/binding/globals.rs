@@ -24,6 +24,7 @@ fn base(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown> {
         options: extra.options.clone(),
         store: rt.shared.store.clone(),
         settings: super::exchange::settings(),
+        external_public_data: extra.external_public_data.clone(),
     };
     let (this, core) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
     let _ = rt.shared.base.set(core);
