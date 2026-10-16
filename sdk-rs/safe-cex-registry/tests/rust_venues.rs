@@ -5,7 +5,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
-use safe_cex_registry::rust_venues::BlofinDependencies;
+use safe_cex_registry::rust_venues::{BitunixDependencies, BlofinDependencies};
 use safe_cex_registry::{
     module_host::{ExchangeModule, ModuleError, NativeModuleHost},
     rust_venues::{
@@ -530,6 +530,38 @@ impl RustVenueHost for Venues {
             date_parse: Rc::new(|_| Ok(1_735_689_600_000.0)),
         })
     }
+    fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("bitunix");
+        let wire = self.wire.clone();
+        let runtime = self.runtime.clone();
+        Ok(BitunixDependencies {
+            runtime: self.runtime.clone(),
+            build: Rc::new(move |options| {
+                Ok(safe_cex_axios_create_no_proxy(HttpClientOptions {
+                    response_transform: None,
+                    params_serializer: None,
+                    exchange: ExchangeName::Bitunix,
+                    options: options.clone(),
+                    request: RestRequest::default(),
+                    provider: None,
+                    signer: None,
+                    account_name: None,
+                    adapter: wire.clone(),
+                    host: Rc::new(Host),
+                    runtime: runtime.clone(),
+                    store: None,
+                    stats: None,
+                    logs: None,
+                    every: vec![],
+                    periodic: vec![],
+                    next_id: Arc::new(|| "id".into()),
+                    signing_now: Arc::new(|| 0),
+                }))
+            }),
+            install: Rc::new(|_| Ok(())),
+            external_public_data: None,
+        })
+    }
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError> {
         self.calls.borrow_mut().push("blofin");
         let wire = self.wire.clone();
@@ -617,6 +649,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Binance,
             ExchangeName::Binancepm,
             ExchangeName::Binancespot,
+            ExchangeName::Bitunix,
             ExchangeName::Blofin,
             ExchangeName::Okx,
             ExchangeName::Okxdemo,
@@ -711,6 +744,39 @@ fn binance_pm_and_spot_construct_through_the_registry_on_the_binance_inputs() {
             "REGISTRY binance family reuses the binance host inputs once"
         );
     }
+}
+
+#[test]
+fn bitunix_constructs_through_the_registry_and_reads_its_markets() {
+    let host = venues();
+    let exchange = construct(
+        ExchangeName::Bitunix,
+        &host,
+        json!({"key":"k","secret":"s","publicDataOnly":true}),
+    );
+    assert_eq!(
+        exchange.name(),
+        &ExchangeName::Bitunix,
+        "REGISTRY bitunix name"
+    );
+    assert_eq!(
+        *host.calls.borrow(),
+        ["bitunix"],
+        "REGISTRY bitunix host inputs requested once"
+    );
+    host.wire.bodies.lock().unwrap().insert(
+        "/api/v1/futures/market/trading_pairs".into(),
+        json!({"code":0,"msg":"Success","data":[{
+            "symbol":"BTCUSDT","base":"BTC","quote":"USDT","minTradeVolume":"0.0001",
+            "maxLimitOrderVolume":"500","maxMarketOrderVolume":"300","basePrecision":3,
+            "quotePrecision":1,"maxLeverage":125,"minLeverage":1,"defaultLeverage":20,
+            "defaultMarginMode":"2","symbolStatus":"OPEN"
+        }]}),
+    );
+    let markets = run(&host.runtime, exchange.fetch_markets())
+        .unwrap_or_else(|e| panic!("REGISTRY bitunix fetchMarkets: {}", e.message));
+    assert_eq!(markets.len(), 1, "REGISTRY bitunix markets");
+    assert_eq!(markets[0].id, "BTC/USDT", "REGISTRY bitunix market id");
 }
 
 #[test]
