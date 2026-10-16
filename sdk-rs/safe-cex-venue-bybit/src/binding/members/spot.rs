@@ -27,6 +27,27 @@ fn error(message: impl AsRef<str>) -> Thrown {
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     rt.this.define("isSpot", Js::Bool(true))?;
+    method(rt, "getTickerSymbolsForSubscription", |rt, a| {
+        let available: Vec<String> = to_typed(&arg(&a, 0))?;
+        let base = rt
+            .shared
+            .base
+            .get()
+            .ok_or_else(|| error("Bybit base unavailable"))?;
+        from_typed(&base.get_ticker_symbols_for_subscription(&available))
+    })?;
+    method(rt, "getTickerSymbolsForPublicStream", |rt, _| {
+        let markets: Vec<safe_cex_types::Market> =
+            to_typed(&rt.this.get("store")?.get("markets")?)?;
+        let available = crate::variant_accessors::spot_get_ticker_symbols_for_public_stream(
+            &markets,
+            <[String]>::to_vec,
+        );
+        rt.this.call_method(
+            "getTickerSymbolsForSubscription",
+            vec![from_typed(&available)?],
+        )
+    })?;
     method(rt, "start", start)?;
     method(rt, "fetchPositions", |rt, _| {
         Ok(rt.spawn(Box::pin(async { Ok(Js::array(vec![])) })))
