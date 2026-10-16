@@ -32,7 +32,7 @@ kind = "class"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/classes.rs::orderly"
 status = "ported"
-note = "Adapted source class initializer/composition factory: sdk-rs/parity/MANIFEST-SPEC.md#orderly-exchange-class-factories. Complete exact-source ABIs for all 39 existing members and superclass/API/socket construction are mandatory external bindings; this row gates factory/initializer semantics, not fixed native class assembly or the inherited members' existing divergences. Actual-source/native witness tests/classes.rs::orderly_native, compiled family discrimination scripts/classes-controls.py. Only candle delegation and cached position mode are invoked as native member chains; the other 37 member bindings are required dependencies, not new adapter coverage."
+note = "Adapted source class initializer/composition factory: sdk-rs/parity/MANIFEST-SPEC.md#orderly-exchange-class-factories. Complete exact-source ABIs for all 39 existing members and superclass/API/socket construction are mandatory external bindings; this row gates factory/initializer semantics, not fixed native class assembly or the inherited members' existing divergences. Actual-source/native witness tests/classes.rs::orderly_native, compiled family discrimination scripts/classes-controls.py. Only candle delegation and cached position mode are invoked as native member chains; the other 37 member bindings are required dependencies, not new adapter coverage. Rename target: `safe-cex-venue-orderly/src/classes.rs::orderly`."
 
 [[symbol]]
 ts = "OrderlyExchange.constructor"
@@ -40,7 +40,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/classes.rs::constructor"
 status = "ported"
-note = "Adapted source class initializer/composition factory: sdk-rs/parity/MANIFEST-SPEC.md#orderly-exchange-class-factories. Complete exact-source ABIs for all 39 existing members and superclass/API/socket construction are mandatory external bindings; this row gates factory/initializer semantics, not fixed native class assembly or the inherited members' existing divergences. Actual-source/native witness tests/classes.rs::constructor_native, compiled family discrimination scripts/classes-controls.py. Only candle delegation and cached position mode are invoked as native member chains; the other 37 member bindings are required dependencies, not new adapter coverage."
+note = "Adapted source class initializer/composition factory: sdk-rs/parity/MANIFEST-SPEC.md#orderly-exchange-class-factories. Complete exact-source ABIs for all 39 existing members and superclass/API/socket construction are mandatory external bindings; this row gates factory/initializer semantics, not fixed native class assembly or the inherited members' existing divergences. Actual-source/native witness tests/classes.rs::constructor_native, compiled family discrimination scripts/classes-controls.py. Only candle delegation and cached position mode are invoked as native member chains; the other 37 member bindings are required dependencies, not new adapter coverage. Rename target: `safe-cex-venue-orderly/src/classes.rs::constructor`."
 
 [[symbol]]
 ts = "OrderlyExchange.dispose"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/runtime_actions.rs::dispose"
 status = "ported"
-note = "Complete source runtime/action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-runtime-and-order-execution-bodies. Actual-TypeScript/native witness tests/runtime_actions.rs::dispose_native; compiled discrimination scripts/runtime-actions-controls.py. Original values, current method calls, await/guard order, callback bodies and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP/scheduler engine or live trading integration claim."
+note = "Complete source runtime/action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-runtime-and-order-execution-bodies. Actual-TypeScript/native witness tests/runtime_actions.rs::dispose_native; compiled discrimination scripts/runtime-actions-controls.py. Original values, current method calls, await/guard order, callback bodies and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP/scheduler engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/runtime_actions.rs::dispose`."
 
 [[symbol]]
 ts = "OrderlyExchange.getPositionMode"
@@ -56,7 +56,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::position_mode"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::position_mode_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::position_mode_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::position_mode`."
 
 [[symbol]]
 ts = "OrderlyExchange.getAccount"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::account"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::account_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::account_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::account`."
 
 [[symbol]]
 ts = "OrderlyExchange.validateAccount"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::validate"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::validation_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::validation_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::validate`."
 
 [[symbol]]
 ts = "OrderlyExchange.start"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::leverage"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::leverage_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::leverage_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::leverage`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchAndUpdateMarginTypes"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::margin_types"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::margin_types_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::margin_types_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::margin_types`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchMarkets"
@@ -112,7 +112,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::markets"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::markets_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::markets_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::markets`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchTickers"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::tickers"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::tickers_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::tickers_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::tickers`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchPositions"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::positions"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::positions_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::positions_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::positions`."
 
 [[symbol]]
 ts = "OrderlyExchange#mapMarginType"
@@ -168,7 +168,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::map_position"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::position_mapper_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::position_mapper_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::map_position`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchOrders"
@@ -176,7 +176,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::orders"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::orders_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::orders_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::orders`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchOHLCV"
@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::candles"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::candles_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::candles_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::candles`."
 
 [[symbol]]
 ts = "OrderlyExchange.listenOHLCV"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::listen_candles"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::listen_candles_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::listen_candles_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::listen_candles`."
 
 [[symbol]]
 ts = "OrderlyExchange.listenOrderBook"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::listen_book"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::listen_book_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::listen_book_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::listen_book`."
 
 [[symbol]]
 ts = "OrderlyExchange.updateOrder"
@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::update_algo"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::update_algo_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::update_algo_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::update_algo`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchLimitOrders"
@@ -224,7 +224,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::limit_orders"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::limit_orders_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::limit_orders_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::limit_orders`."
 
 [[symbol]]
 ts = "OrderlyExchange.mapLimitOrder"
@@ -232,7 +232,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::map_limit"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::limit_mapper_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::limit_mapper_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::map_limit`."
 
 [[symbol]]
 ts = "OrderlyExchange.fetchAlgoOrders"
@@ -240,7 +240,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/account_order_reads.rs::algo_orders"
 status = "ported"
-note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::algo_orders_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim."
+note = "Complete source body over original runtime values/callables and awaits: sdk-rs/parity/MANIFEST-SPEC.md#orderly-account-and-order-rest-read-bodies. Actual-TypeScript/native witness tests/account_order_reads.rs::algo_orders_native; compiled discrimination scripts/account-order-reads-controls.py. Current receiver/mapper/error state, exception scope and ordered calls retained; REST/Promise engine, array engines, imports and mappers remain dependencies. No fixed class, mapper, signing or live network integration claim. Rename target: `safe-cex-venue-orderly/src/account_order_reads.rs::algo_orders`."
 
 [[symbol]]
 ts = "OrderlyExchange.mapAlgoOrder"
@@ -248,7 +248,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/data_mappers.rs::map_algo"
 status = "ported"
-note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::algo_mapper_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim."
+note = "Complete source data body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-data-and-mapper-bodies. Actual-TypeScript/native witness tests/data_mappers.rs::algo_mapper_native; compiled discrimination scripts/data-mappers-controls.py. Original values, raw versus cloned info, current runtime methods, await order and source catch/throw scope retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live integration claim. Rename target: `safe-cex-venue-orderly/src/data_mappers.rs::map_algo`."
 
 [[symbol]]
 ts = "OrderlyExchange.cancelOrders"
@@ -256,7 +256,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::cancel_orders"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_orders_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_orders_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::cancel_orders`."
 
 [[symbol]]
 ts = "OrderlyExchange.cancelAlgoOrder"
@@ -264,7 +264,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::cancel_algo"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_algo_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_algo_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::cancel_algo`."
 
 [[symbol]]
 ts = "OrderlyExchange.getPositionSideForOrder"
@@ -288,7 +288,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/runtime_actions.rs::place_algo"
 status = "ported"
-note = "Complete source runtime/action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-runtime-and-order-execution-bodies. Actual-TypeScript/native witness tests/runtime_actions.rs::algo_native; compiled discrimination scripts/runtime-actions-controls.py. Original values, current method calls, await/guard order, callback bodies and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP/scheduler engine or live trading integration claim."
+note = "Complete source runtime/action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-runtime-and-order-execution-bodies. Actual-TypeScript/native witness tests/runtime_actions.rs::algo_native; compiled discrimination scripts/runtime-actions-controls.py. Original values, current method calls, await/guard order, callback bodies and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP/scheduler engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/runtime_actions.rs::place_algo`."
 
 [[symbol]]
 ts = "OrderlyExchange#resolveMarginTypeForOrder"
@@ -304,7 +304,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/runtime_actions.rs::place_positional"
 status = "ported"
-note = "Complete source runtime/action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-runtime-and-order-execution-bodies. Actual-TypeScript/native witness tests/runtime_actions.rs::positional_native; compiled discrimination scripts/runtime-actions-controls.py. Original values, current method calls, await/guard order, callback bodies and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP/scheduler engine or live trading integration claim."
+note = "Complete source runtime/action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-runtime-and-order-execution-bodies. Actual-TypeScript/native witness tests/runtime_actions.rs::positional_native; compiled discrimination scripts/runtime-actions-controls.py. Original values, current method calls, await/guard order, callback bodies and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP/scheduler engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/runtime_actions.rs::place_positional`."
 
 [[symbol]]
 ts = "OrderlyExchange.cancelAllOrders"
@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::cancel_all"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_all_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_all_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::cancel_all`."
 
 [[symbol]]
 ts = "OrderlyExchange.cancelSymbolOrders"
@@ -320,7 +320,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::cancel_symbol"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_symbol_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::cancel_symbol_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::cancel_symbol`."
 
 [[symbol]]
 ts = "OrderlyExchange.setLeverage"
@@ -328,7 +328,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::set_leverage"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::leverage_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::leverage_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::set_leverage`."
 
 [[symbol]]
 ts = "OrderlyExchange.setAllLeverage"
@@ -336,7 +336,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::set_all_leverage"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::all_leverage_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::all_leverage_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::set_all_leverage`."
 
 [[symbol]]
 ts = "OrderlyExchange.changeMarginType"
@@ -344,7 +344,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/trading_actions.rs::change_margin"
 status = "ported"
-note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::margin_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim."
+note = "Complete source action body: sdk-rs/parity/MANIFEST-SPEC.md#orderly-trading-action-bodies. Actual-TypeScript/native witness tests/trading_actions.rs::margin_native; compiled discrimination scripts/trading-actions-controls.py. Original values, live runtime methods, await order and source catch/throw scopes retained over explicit intrinsic/imported/REST bindings. No fixed class, full Promise/HTTP engine or live trading integration claim. Rename target: `safe-cex-venue-orderly/src/trading_actions.rs::change_margin`."
 
 [[symbol]]
 ts = "OrderlyExchange#isAlgoOrder"

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/backpack/backpack.exchange.ts"
-rust_files = [ "safe-cex-venue-backpack/src/order_utils.rs", "safe-cex-venue-backpack/src/account_reads.rs", "safe-cex-venue-backpack/src/rest_reads.rs", "safe-cex-venue-backpack/src/startup_recovery.rs", "safe-cex-venue-backpack/src/order_actions.rs" ]
+rust_files = [ "safe-cex-venue-backpack/src/order_utils.rs", "safe-cex-venue-backpack/src/account_reads.rs", "safe-cex-venue-backpack/src/rest_reads.rs", "safe-cex-venue-backpack/src/startup_recovery.rs", "safe-cex-venue-backpack/src/order_actions.rs", "safe-cex-venue-backpack/src/adapter.rs", "safe-cex-venue-backpack/src/batch_orders.rs" ]
 
 [[symbol]]
 ts = "BackpackExchange"
@@ -24,7 +24,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/startup_recovery.rs::construct_exchange"
 status = "ported"
-note = "Super call before source default field initialization; preserve original construction context, account leverage1, client uint32 rule and Grafana tables; configured createAPI/secondary-key composition with rate-limit10 before public/private socket construction and assignment. Native opaque base/xhr/socket identity and original failures; full class/method binding and HTTP factory remain pending. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions."
+note = "Super call before source default field initialization; preserve original construction context, account leverage1, client uint32 rule and Grafana tables; configured createAPI/secondary-key composition with rate-limit10 before public/private socket construction and assignment. Native opaque base/xhr/socket identity and original failures; full class/method binding and HTTP factory remain pending. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::construct_exchange`."
 
 [[symbol]]
 ts = "BackpackExchange.dispose"
@@ -40,7 +40,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/account_reads.rs::get_position_mode"
 status = "ported"
-note = "Returns the native shared PositionMode::Hedged exactly as the source. Preserves the source UI-mode claim despite upstream single net positions. Actual-source witness tests/account_reads.rs::actual_typescript_position_mode asserts the native enum before serialization."
+note = "Returns the native shared PositionMode::Hedged exactly as the source. Preserves the source UI-mode claim despite upstream single net positions. Actual-source witness tests/account_reads.rs::actual_typescript_position_mode asserts the native enum before serialization. Rename target: `safe-cex-venue-backpack/src/account_reads.rs::get_position_mode`."
 
 [[symbol]]
 ts = "BackpackExchange.getAccount"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/account_reads.rs::listen_ohlcv"
 status = "ported"
-note = "Synchronous public-socket delegation preserves option/callback identity and exact unsubscribe return or thrown error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Synchronous public-socket delegation preserves option/callback identity and exact unsubscribe return or thrown error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/account_reads.rs::listen_ohlcv`."
 
 [[symbol]]
 ts = "BackpackExchange.listenOrderBook"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/account_reads.rs::listen_order_book"
 status = "ported"
-note = "Synchronous public-socket delegation preserves symbol/callback identity and exact unsubscribe return or thrown error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Synchronous public-socket delegation preserves symbol/callback identity and exact unsubscribe return or thrown error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/account_reads.rs::listen_order_book`."
 
 [[symbol]]
 ts = "BackpackExchange.fetchOrderBook"

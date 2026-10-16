@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/backpack/backpack.ws-public.ts"
-rust_files = [ "safe-cex-venue-backpack/src/public_listeners.rs" ]
+rust_files = [ "safe-cex-venue-backpack/src/public_listeners.rs", "safe-cex-venue-backpack/src/orderbook_state.rs", "safe-cex-venue-backpack/src/public_adapter.rs", "safe-cex-venue-backpack/src/public_control.rs", "safe-cex-venue-backpack/src/socket_events.rs", "safe-cex-venue-backpack/src/socket_lifecycle.rs", "safe-cex-venue-backpack/src/startup_recovery.rs" ]
 
 [[symbol]]
 ts = "BackpackPublicWebSocket"
@@ -16,7 +16,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/startup_recovery.rs::construct_public"
 status = "ported"
-note = "Super constructor before fresh subscription Set/topics/state/fetcher/depth-throttle maps; initialize ticker handler with1000ms/leading/trailing true after native state initialization, retaining handler/base identity and original super/factory errors. Full class and ordinary arrow-method bindings remain pending; compatible ticker-handler factory is supplied. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions."
+note = "Super constructor before fresh subscription Set/topics/state/fetcher/depth-throttle maps; initialize ticker handler with1000ms/leading/trailing true after native state initialization, retaining handler/base identity and original super/factory errors. Full class and ordinary arrow-method bindings remain pending; compatible ticker-handler factory is supplied. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::construct_public`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.connectAndSubscribe"
@@ -24,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_public"
 status = "ported"
-note = "Disposed guard; network URL lookup, socket creation/assignment, ordered open/message/close listener calls against live sockets with receiver lookup before handler lookup. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Disposed guard; network URL lookup, socket creation/assignment, ordered open/message/close listener calls against live sockets with receiver lookup before handler lookup. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_public`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.onOpen"
@@ -32,7 +32,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::on_open"
 status = "ported"
-note = "Disposed guard once; track/reset/resubscribe/ping callback order and original errors over compatible callbacks. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "Disposed guard once; track/reset/resubscribe/ping callback order and original errors over compatible callbacks. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::on_open`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.ping"
@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::ping"
 status = "ported"
-note = "Disposed/connected short circuit; monotonic time stored before PING send; preserves f64 bits and original callback errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "Disposed/connected short circuit; monotonic time stored before PING send; preserves f64 bits and original callback errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::ping`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#resetAndRefetchOrderBooks"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/orderbook_state.rs::reset_and_refetch_order_books"
 status = "ported"
-note = "Complete ordered own-key snapshots and live property operations through compatible host view; fresh state object identity and existing terminal handler Set identity retained; snapshot fetchers invoked without awaiting. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Complete ordered own-key snapshots and live property operations through compatible host view; fresh state object identity and existing terminal handler Set identity retained; snapshot fetchers invoked without awaiting. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::reset_and_refetch_order_books`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#resubscribe"
@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::resubscribe"
 status = "ported"
-note = "Ordered Set snapshot, empty no-op, UTF-16 JSON.stringify strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "Ordered Set snapshot, empty no-op, UTF-16 JSON.stringify strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::resubscribe`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToOrderBook"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_order_book"
 status = "ported"
-note = "depth prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "depth prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_order_book`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToTicker"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_ticker"
 status = "ported"
-note = "ticker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "ticker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_ticker`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToTrades"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_trades"
 status = "ported"
-note = "trade prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "trade prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_trades`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToBookTicker"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_book_ticker"
 status = "ported"
-note = "bookTicker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "bookTicker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_book_ticker`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToKline"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_kline"
 status = "ported"
-note = "kline.interval.symbol, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "kline.interval.symbol, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_kline`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.unsubscribeFromKline"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::unsubscribe_from_kline"
 status = "ported"
-note = "Delegates one kline.interval.symbol stream through compatible callback preserving original errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "Delegates one kline.interval.symbol stream through compatible callback preserving original errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::unsubscribe_from_kline`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.onMessage"
@@ -112,7 +112,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::on_public_message"
 status = "ported"
-note = "Disposed guard/receive tracking outside catch; jsonParse dependency, confirmation/error/pong guards, wrapped-data fallback, repeated event reads, captured dispatch and native stream identity; emitter lookup before error serialization/coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Disposed guard/receive tracking outside catch; jsonParse dependency, confirmation/error/pong guards, wrapped-data fallback, repeated event reads, captured dispatch and native stream identity; emitter lookup before error serialization/coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::on_public_message`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#handleDepthUpdate"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::handle_depth_update"
 status = "ported"
-note = "Capture topic and handler array, record statistics, forEach initial length/live slots with per-handler catch; capture throttle factory before second live symbol read, then invoke captured factory and throttle with original data. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Capture topic and handler array, record statistics, forEach initial length/live slots with per-handler catch; capture throttle factory before second live symbol read, then invoke captured factory and throttle with original data. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::handle_depth_update`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#getDepthTickerUpdateThrottle"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_lifecycle.rs::get_depth_ticker_update_throttle"
 status = "ported"
-note = "JavaScript cache truthiness; capture assignment map before updater lookup and throttle factory; 100ms leading/trailing throttle; write captured map and return live current cache property. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "JavaScript cache truthiness; capture assignment map before updater lookup and throttle factory; 100ms leading/trailing throttle; write captured map and return live current cache property. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/socket_lifecycle.rs::get_depth_ticker_update_throttle`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#updateTickerFromDepth"
@@ -136,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::update_ticker_from_depth"
 status = "ported"
-note = "Ticker lookup before short-circuit/repeated side lengths; parseFloat best prices; exclude only NaN, retain signed zero/infinities; omit empty patches; source catch with emitter-before-error coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Ticker lookup before short-circuit/repeated side lengths; parseFloat best prices; exclude only NaN, retain signed zero/infinities; omit empty patches; source catch with emitter-before-error coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::update_ticker_from_depth`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#handleTickerUpdate"
@@ -144,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::create_ticker_handler"
 status = "ported"
-note = "Install supplied throttle with native callback, 1000ms leading/trailing; callback reads ticker then c/P/v/q in order, parseFloat fields and percentage times 100; omit NaNs and empty patches, preserve error boundary. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Install supplied throttle with native callback, 1000ms leading/trailing; callback reads ticker then c/P/v/q in order, parseFloat fields and percentage times 100; omit NaNs and empty patches, preserve error boundary. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::create_ticker_handler`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#handleTradeUpdate"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::handle_trade_update"
 status = "ported"
-note = "Ticker lookup, parseFloat trade price, only-NaN rejection, native last-price patch and ticker identity; source catch/emitter/error coercion order. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Ticker lookup, parseFloat trade price, only-NaN rejection, native last-price patch and ticker identity; source catch/emitter/error coercion order. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::handle_trade_update`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#handleBookTickerUpdate"
@@ -160,7 +160,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::handle_book_ticker_update"
 status = "ported"
-note = "Ticker lookup then bid/ask parseFloat in order; only-NaN omission, signed-zero/infinity retention, no empty patch; source catch/emitter/error coercion order. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Ticker lookup then bid/ask parseFloat in order; only-NaN omission, signed-zero/infinity retention, no empty patch; source catch/emitter/error coercion order. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::handle_book_ticker_update`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#handleKlineUpdate"
@@ -168,7 +168,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::handle_kline_update"
 status = "ported"
-note = "Use truthy UTF-16 stream or interval/symbol fallback; capture handler array, guard open/close null, record stats and native forEach initial length/live slots; one outer catch stops on callback failure. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Use truthy UTF-16 stream or interval/symbol fallback; capture handler array, guard open/close null, record stats and native forEach initial length/live slots; one outer catch stops on callback failure. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::handle_kline_update`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.listenOHLCV"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/orderbook_state.rs::apply_order_book_update"
 status = "ported"
-note = "Bids then asks; UTF-16 parseFloat prefixes, zero totals, live array length and ask property read after bid callbacks; original helper error propagation. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Bids then asks; UTF-16 parseFloat prefixes, zero totals, live array length and ask property read after bid callbacks; original helper error propagation. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::apply_order_book_update`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#createOrderBookState"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/orderbook_state.rs::create_order_book_state"
 status = "ported"
-note = "Fresh empty update array and identity handler Set; exact false flags and positive-zero counters. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Fresh empty update array and identity handler Set; exact false flags and positive-zero counters. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::create_order_book_state`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#isInitialOrderBookBridge"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/orderbook_state.rs::is_initial_order_book_bridge"
 status = "ported"
-note = "Complete undefined/reversed-range guards and inclusive first delta bridge; native f64 preserves NaN, infinity, signed zero and binary64 rounding. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Complete undefined/reversed-range guards and inclusive first delta bridge; native f64 preserves NaN, infinity, signed zero and binary64 rounding. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::is_initial_order_book_bridge`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#isContinuousOrderBookUpdate"
@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/orderbook_state.rs::is_continuous_order_book_update"
 status = "ported"
-note = "Complete undefined guards, non-reversed range and strict next-first-ID equality on native f64 values. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Complete undefined guards, non-reversed range and strict next-first-ID equality on native f64 values. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::is_continuous_order_book_update`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#recoverOrderBook"
@@ -224,7 +224,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/startup_recovery.rs::recover_order_book"
 status = "ported"
-note = "State and snapshot-fetcher lookup before guard; terminal/in-flight/scheduled no-ops, exhaustion at3, increment f64 attempt and reset snapshot/id before warning; enqueue one deferred callback retaining original fetcher and state identity, disposed/replaced-state guard before scheduled clear and fetch. UTF16 messages and JS number spellings, native state/callee identity. Compatible native fields and supplied microtask/log/fetch operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions."
+note = "State and snapshot-fetcher lookup before guard; terminal/in-flight/scheduled no-ops, exhaustion at3, increment f64 attempt and reset snapshot/id before warning; enqueue one deferred callback retaining original fetcher and state identity, disposed/replaced-state guard before scheduled clear and fetch. UTF16 messages and JS number spellings, native state/callee identity. Compatible native fields and supplied microtask/log/fetch operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::recover_order_book`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#terminateOrderBook"
@@ -232,7 +232,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/startup_recovery.rs::terminate_order_book"
 status = "ported"
-note = "Terminal guard, mark terminal/unload/clear deltas, set error-emitted before one notification; capture live handler Set after emission and traverse live slots including additions/deletions; each thrown handler warns and continues, logger errors stop. Native handler identity and UTF16 reason/error messages. Compatible native fields and supplied emit/log/callback operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions."
+note = "Terminal guard, mark terminal/unload/clear deltas, set error-emitted before one notification; capture live handler Set after emission and traverse live slots including additions/deletions; each thrown handler warns and continues, logger errors stop. Native handler identity and UTF16 reason/error messages. Compatible native fields and supplied emit/log/callback operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::terminate_order_book`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.unsubscribe"
@@ -240,7 +240,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/public_control.rs::unsubscribe"
 status = "ported"
-note = "Empty no-op; send snapshot before deleting; live streams after reentrant send, holes skipped; original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs."
+note = "Empty no-op; send snapshot before deleting; live streams after reentrant send, holes skipped; original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::unsubscribe`."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.dispose"
@@ -248,4 +248,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/orderbook_state.rs::dispose"
 status = "ported"
-note = "Clear subscriptions, replace state/fetcher records, cancel snapshotted throttle values, replace throttle record, read socket twice and close current value; preserves partial state and original errors through compatible host operations. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Clear subscriptions, replace state/fetcher records, cancel snapshotted throttle values, replace throttle record, read socket twice and close current value; preserves partial state and original errors through compatible host operations. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::dispose`."

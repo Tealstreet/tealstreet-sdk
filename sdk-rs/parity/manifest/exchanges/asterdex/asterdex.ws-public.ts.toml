@@ -8,7 +8,7 @@ kind = "class"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream"
 status = "divergent"
-note = "CHOSEN: PublicStream assembles a concrete BaseWebSocket and PublicSubscriptions with four live handlers and host-owned socket tasks; native disposal cancels controller waits permanently, while the source class can retain uncancelled kline waits and finish its open IIFE after disposal. This aggregate owns native lifetimes rather than browser instance/prototype referents."
+note = "CHOSEN: PublicStream assembles a concrete BaseWebSocket and PublicSubscriptions with four live handlers and host-owned socket tasks; native disposal cancels controller waits permanently, while the source class can retain uncancelled kline waits and finish its open IIFE after disposal. This aggregate owns native lifetimes rather than browser instance/prototype referents. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket.constructor"
@@ -16,7 +16,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::new"
 status = "ported"
-note = "Creates the actual socket/controller, topics/callback maps, IDs initially 1, ready=false and empty pending queue; registers ticker/trade/mark/kline callbacks in source order and installs the readiness/pending close hook before base close processing. The unused source _store argument is supplied through parent.owner().store."
+note = "Creates the actual socket/controller, topics/callback maps, IDs initially 1, ready=false and empty pending queue; registers ticker/trade/mark/kline callbacks in source order and installs the readiness/pending close hook before base close processing. The unused source _store argument is supplied through parent.owner().store. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::new`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket.get connectionURL"
@@ -32,7 +32,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::connect_and_subscribe"
 status = "divergent"
-note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. The note accurately names asynchronous native dial and socket Error logging versus direct source onClose. However no reason is given for the error-event routing change: avoiding shared trait change alone does not explain why mirroring source would be worse. Audit the resulting socket close/reconnect effects before calling a new behavior defect. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-87. Historical note follows: MIXED: connect_and_subscribe preserves the disposed guard, readiness reset, fresh requestId, network endpoint and silent dial catch. Native caller polls the dial future instead of synchronous browser construction; shared BaseWebSocket handles socket Error as an error log, whereas this source method wires Error directly to onClose. No shared runtime trait is changed."
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. The note accurately names asynchronous native dial and socket Error logging versus direct source onClose. However no reason is given for the error-event routing change: avoiding shared trait change alone does not explain why mirroring source would be worse. Audit the resulting socket close/reconnect effects before calling a new behavior defect. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-87. Historical note follows: MIXED: connect_and_subscribe preserves the disposed guard, readiness reset, fresh requestId, network endpoint and silent dial catch. Native caller polls the dial future instead of synchronous browser construction; shared BaseWebSocket handles socket Error as an error log, whereas this source method wires Error directly to onClose. No shared runtime trait is changed. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::connect_and_subscribe`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket.onOpen"
@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::on_open"
 status = "divergent"
-note = "CHOSEN: PublicSubscriptions::on_open runs its continuation as owner-bound native work. Replay and finally happen in one poll rather than the source additional await/microtask after replay; disposal cancels the continuation rather than allowing the JavaScript IIFE to finish afterward. Native scheduler ownership is required for cancellation. Immediate ping/aggregate send, ordered replay, retry clearing, caught sends, finally-ready and the undrained pending queue are retained at settled-state boundaries."
+note = "CHOSEN: PublicSubscriptions::on_open runs its continuation as owner-bound native work. Replay and finally happen in one poll rather than the source additional await/microtask after replay; disposal cancels the continuation rather than allowing the JavaScript IIFE to finish afterward. Native scheduler ownership is required for cancellation. Immediate ping/aggregate send, ordered replay, retry clearing, caught sends, finally-ready and the undrained pending queue are retained at settled-state boundaries. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::on_open`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#subscribe"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::on_message"
 status = "divergent"
-note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Actual JSON parser and onMessage route a ticker whose symbol is materialized D800 through actual handleTickerUpdate: its keyed Store target changes last to7 and ticker event exposes the D800 key before serialization. Native Value/String frame ingress cannot retain it, refusing the entire frame, not just a symbol field. Owned snapshot choice is separate; the blanket CHOSEN string clause does not price this program observation under section19. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-90. Historical note follows: MIXED: on_message preserves receipt-before-catch, numeric -1 pong, subscription/error guards, aggregate arrays, legacy batches, single events and actual Store/callback effects. Native trade events require a String symbol and numeric timestamp; source forwards arbitrary/undefined s/T. CHOSEN: native ticker emissions own retained snapshots to release Store borrows before consumer callbacks rather than shared JS ticker references, fundingTime remains numeric in Store, and serde JSON cannot retain lone surrogate strings. All exceptions inside dispatch are swallowed as in source."
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Actual JSON parser and onMessage route a ticker whose symbol is materialized D800 through actual handleTickerUpdate: its keyed Store target changes last to7 and ticker event exposes the D800 key before serialization. Native Value/String frame ingress cannot retain it, refusing the entire frame, not just a symbol field. Owned snapshot choice is separate; the blanket CHOSEN string clause does not price this program observation under section19. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-90. Historical note follows: MIXED: on_message preserves receipt-before-catch, numeric -1 pong, subscription/error guards, aggregate arrays, legacy batches, single events and actual Store/callback effects. Native trade events require a String symbol and numeric timestamp; source forwards arbitrary/undefined s/T. CHOSEN: native ticker emissions own retained snapshots to release Store borrows before consumer callbacks rather than shared JS ticker references, fundingTime remains numeric in Store, and serde JSON cannot retain lone surrogate strings. All exceptions inside dispatch are swallowed as in source. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::on_message`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#handleStreamData"
@@ -96,7 +96,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_ticker_update"
 status = "divergent"
-note = "CHOSEN: The concrete handler applies the fallible Store ticker write before emitting ticker. Native Ticker emissions own a retained snapshot and cannot carry inherited function/prototype hits; see sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Source inherited-hit witness remains scripts/public-ws-ticker-oracle.cjs; tests/live_public_stream.rs measures actual writes, emissions and reentrant removal. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-83: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped."
+note = "CHOSEN: The concrete handler applies the fallible Store ticker write before emitting ticker. Native Ticker emissions own a retained snapshot and cannot carry inherited function/prototype hits; see sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Source inherited-hit witness remains scripts/public-ws-ticker-oracle.cjs; tests/live_public_stream.rs measures actual writes, emissions and reentrant removal. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-83: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_ticker_update`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#handleDepthSnapshot"
@@ -104,7 +104,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_depth_snapshot"
 status = "divergent"
-note = "CHOSEN: The concrete handler validates and sorts authoritative levels, writes bid/ask, then delivers independently owned books through PublicSubscriptions. The typed native Store does not notify for Object.prototype ticker hits; see sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Native book ownership retains the source per-listener snapshot isolation. tests/live_public_stream.rs measures the actual Store and callbacks. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-78: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped."
+note = "CHOSEN: The concrete handler validates and sorts authoritative levels, writes bid/ask, then delivers independently owned books through PublicSubscriptions. The typed native Store does not notify for Object.prototype ticker hits; see sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Native book ownership retains the source per-listener snapshot isolation. tests/live_public_stream.rs measures the actual Store and callbacks. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-78: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_depth_snapshot`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#handleTradeUpdate"
@@ -112,7 +112,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_trade_update"
 status = "divergent"
-note = "CHOSEN: The concrete handler writes last through the fallible Store before emitting the decoded native trade. Its String symbol and numeric timestamp reject arbitrary source s/T values, and its typed Store excludes inherited ticker referents; see sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. tests/live_public_stream.rs measures native fields and Store state before wire checks. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-84: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped."
+note = "CHOSEN: The concrete handler writes last through the fallible Store before emitting the decoded native trade. Its String symbol and numeric timestamp reject arbitrary source s/T values, and its typed Store excludes inherited ticker referents; see sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. tests/live_public_stream.rs measures native fields and Store state before wire checks. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-84: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_trade_update`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#handleMarkPriceUpdate"
@@ -120,7 +120,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_mark_price_update"
 status = "divergent"
-note = "CHOSEN: The concrete handler applies mark/index/funding patches before emitting markPrice. Native emissions own retained Ticker snapshots; fundingTime remains numeric and inherited prototype/function ticker values cannot enter the typed Store. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. The live stream oracle includes reentrant ticker removal. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-81: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped."
+note = "CHOSEN: The concrete handler applies mark/index/funding patches before emitting markPrice. Native emissions own retained Ticker snapshots; fundingTime remains numeric and inherited prototype/function ticker values cannot enter the typed Store. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. The live stream oracle includes reentrant ticker removal. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-81: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_mark_price_update`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#handleKlineUpdate"
@@ -128,7 +128,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_kline_update"
 status = "ported"
-note = "The concrete handler selects the source stream, parses the candle and invokes the currently registered callback through PublicSubscriptions. tests/live_public_stream.rs checks every native candle field and callback count before subscription-wire checks; the existing method oracle retains non-finite and signed-zero field witnesses. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-80: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped."
+note = "The concrete handler selects the source stream, parses the candle and invokes the currently registered callback through PublicSubscriptions. tests/live_public_stream.rs checks every native candle field and callback count before subscription-wire checks; the existing method oracle retains non-finite and signed-zero field witnesses. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-80: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/public_stream.rs::PublicStream::handle_kline_update`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket.listenOrderBook"
@@ -136,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::listen_order_book"
 status = "divergent"
-note = "CHOSEN: PublicSubscriptions::listen_order_book stores typed Rc book callbacks and returns a fallible native cleanup closure instead of a JavaScript callback object/throwing closure. Structured callback ownership is needed by native consumers, and this owner can cancel its waiting task at shutdown. It retains lowercase topic creation, binary64 listener id allocation, shared subscriptions, duplicate-id overwrite and same-stream cleanup lookup."
+note = "CHOSEN: PublicSubscriptions::listen_order_book stores typed Rc book callbacks and returns a fallible native cleanup closure instead of a JavaScript callback object/throwing closure. Structured callback ownership is needed by native consumers, and this owner can cancel its waiting task at shutdown. It retains lowercase topic creation, binary64 listener id allocation, shared subscriptions, duplicate-id overwrite and same-stream cleanup lookup. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::listen_order_book`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#subscribeOrderBook"
@@ -144,7 +144,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::subscribe_order_book"
 status = "divergent"
-note = "CHOSEN: PublicSubscriptions::subscribe_order_book schedules its finite 100ms retry chain through owner-bound monotonic timers, with registration failure returned as ExchangeError instead of a Node timeout registration/uncaught host exception. This native ownership stops retries on owner shutdown. Rc identity and callback emptiness guard stale generations; ids advance before each failed send, successful sends stop retrying, and retry count50 ends the chain with the fired slot retained."
+note = "CHOSEN: PublicSubscriptions::subscribe_order_book schedules its finite 100ms retry chain through owner-bound monotonic timers, with registration failure returned as ExchangeError instead of a Node timeout registration/uncaught host exception. This native ownership stops retries on owner shutdown. Rc identity and callback emptiness guard stale generations; ids advance before each failed send, successful sends stop retrying, and retry count50 ends the chain with the fired slot retained. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::subscribe_order_book`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#unsubscribeOrderBookListener"
@@ -152,7 +152,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::unsubscribe_order_book_listener"
 status = "divergent"
-note = "CHOSEN: PublicSubscriptions::unsubscribe_order_book_listener reports a rejected detached unsubscribe via runtime.report_exception instead of the source void promise unhandled-rejection channel. Native errors need an explicit owner; cleanup-stat failures propagate as Result. Listener deletion, final-listener timer cancellation, topic removal, idempotence and the disposed guard preserve source sequencing."
+note = "CHOSEN: PublicSubscriptions::unsubscribe_order_book_listener reports a rejected detached unsubscribe via runtime.report_exception instead of the source void promise unhandled-rejection channel. Native errors need an explicit owner; cleanup-stat failures propagate as Result. Listener deletion, final-listener timer cancellation, topic removal, idempotence and the disposed guard preserve source sequencing. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::unsubscribe_order_book_listener`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket#clearOrderBookSubscriptionRetries"
@@ -160,7 +160,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::clear_order_book_subscription_retries"
 status = "ported"
-note = "PublicSubscriptions::clear_order_book_subscription_retries cancels actual native book retry registrations and clears only their slots. It preserves subscriptions, callbacks, topics and counters. The ceiling/reopen fixture cancels both a fired BTC handle and a live ETH retry, then crosses the ETH deadline without a duplicate send."
+note = "PublicSubscriptions::clear_order_book_subscription_retries cancels actual native book retry registrations and clears only their slots. It preserves subscriptions, callbacks, topics and counters. The ceiling/reopen fixture cancels both a fired BTC handle and a live ETH retry, then crosses the ETH deadline without a duplicate send. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::clear_order_book_subscription_retries`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket.subscribeToKline"
@@ -168,7 +168,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::subscribe_to_kline"
 status = "divergent"
-note = "CHOSEN: PublicSubscriptions::subscribe_to_kline uses typed candle callbacks and a native pending queue of captured stream names instead of callable JavaScript closures. Explicit owner-managed timers allow disposal cleanup and use Node-equivalent positive delay truncation. Same-stream callback replacement, source backoff calculation, the unexecuted initialization queue and continued waiting after unsubscribe are retained; arbitrary JavaScript callable/prototype identity is outside this native representation."
+note = "CHOSEN: PublicSubscriptions::subscribe_to_kline uses typed candle callbacks and a native pending queue of captured stream names instead of callable JavaScript closures. Explicit owner-managed timers allow disposal cleanup and use Node-equivalent positive delay truncation. Same-stream callback replacement, source backoff calculation, the unexecuted initialization queue and continued waiting after unsubscribe are retained; arbitrary JavaScript callable/prototype identity is outside this native representation. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::subscribe_to_kline`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket.unsubscribeFromKline"
@@ -176,7 +176,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::unsubscribe_from_kline"
 status = "ported"
-note = "PublicSubscriptions::unsubscribe_from_kline deletes the candle callback and topic, calls actual cleanup statistics and invokes unsubscribe with its send error intentionally caught. It does not cancel the captured waiting closure or remove pending work, matching the source. The orphan-unsubscribe witness later reconnects and observes the topic being re-added even though its callback is absent."
+note = "PublicSubscriptions::unsubscribe_from_kline deletes the candle callback and topic, calls actual cleanup statistics and invokes unsubscribe with its send error intentionally caught. It does not cancel the captured waiting closure or remove pending work, matching the source. The orphan-unsubscribe witness later reconnects and observes the topic being re-added even though its callback is absent. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::unsubscribe_from_kline`."
 
 [[symbol]]
 ts = "AsterDEXPublicWebsocket.dispose"
@@ -184,4 +184,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::dispose"
 status = "divergent"
-note = "CHOSEN: ts-bug: PublicSubscriptions::dispose cancels its captured kline waits and unfinished open tasks, because native owned work must be released when its controller is disposed. Source clears neither local kline timeout closures nor the unawaited open IIFE, so a disconnected wait survives and an opening continuation can emit/reinitialize after disposal. Both differences are observed against source; common callback/retry/topic/pending/ready clearing and base-socket disposal delegation are preserved, with counters retained."
+note = "CHOSEN: ts-bug: PublicSubscriptions::dispose cancels its captured kline waits and unfinished open tasks, because native owned work must be released when its controller is disposed. Source clears neither local kline timeout closures nor the unawaited open IIFE, so a disconnected wait survives and an opening continuation can emit/reinitialize after disposal. Both differences are observed against source; common callback/retry/topic/pending/ready clearing and base-socket disposal delegation are preserved, with counters retained. Rename target: `safe-cex-venue-asterdex/src/public_subscriptions.rs::PublicSubscriptions::dispose`."

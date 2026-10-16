@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/backpack/backpack.ws-private.ts"
+rust_files = [ "safe-cex-venue-backpack/src/private_adapter.rs", "safe-cex-venue-backpack/src/private_auth.rs", "safe-cex-venue-backpack/src/private_control.rs", "safe-cex-venue-backpack/src/private_events.rs", "safe-cex-venue-backpack/src/private_order_utils.rs", "safe-cex-venue-backpack/src/socket_events.rs", "safe-cex-venue-backpack/src/socket_lifecycle.rs" ]
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket"
@@ -15,7 +16,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::construct"
 status = "ported"
-note = "Super constructor completes before fresh independent subscription/position/balance state; source defaults 0/500/false/false and absent orders timer, native base identity and original super error. Adapted native state initialization; arrow-method bindings and full socket class remain pending. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "Super constructor completes before fresh independent subscription/position/balance state; source defaults 0/500/false/false and absent orders timer, native base identity and original super error. Adapted native state initialization; arrow-method bindings and full socket class remain pending. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::construct`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket.connectAndSubscribe"
@@ -23,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_private"
 status = "ported"
-note = "Connection guard, URL/socket assignment and listener operations execute eagerly before returning future; synchronous errors become future rejection, preserving order and identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Connection guard, URL/socket assignment and listener operations execute eagerly before returning future; synchronous errors become future rejection, preserving order and identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_private`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket.onOpen"
@@ -31,7 +32,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_lifecycle.rs::on_open_private"
 status = "ported"
-note = "Eager disposed guard, receive tracking and authentication factory; await one authentication, invoke resubscribe without awaiting its result, then ping; original errors propagate. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Eager disposed guard, receive tracking and authentication factory; await one authentication, invoke resubscribe without awaiting its result, then ping; original errors propagate. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/socket_lifecycle.rs::on_open_private`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket.ping"
@@ -39,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_control.rs::ping"
 status = "ported"
-note = "Disposed/connected short circuit, native f64 timestamp stored before PING send, original provider errors; UTF-16 command wire shares public JSON encoder. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Disposed/connected short circuit, native f64 timestamp stored before PING send, original provider errors; UTF-16 command wire shares public JSON encoder. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/private_control.rs::ping`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#authenticate"
@@ -47,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_auth.rs::authenticate"
 status = "ported"
-note = "Ordered native order/position streams; eager signer lookup before credential reads and signature factory with window 5000; await signature, resolve send before UTF-16 snapshot/serialization, add streams to live Set; source catch/emitter-before-error-coercion order. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Ordered native order/position streams; eager signer lookup before credential reads and signature factory with window 5000; await signature, resolve send before UTF-16 snapshot/serialization, add streams to live Set; source catch/emitter-before-error-coercion order. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/private_auth.rs::authenticate`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#resubscribe"
@@ -55,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_control.rs::resubscribe"
 status = "ported"
-note = "Empty Set no-op; nonempty guard and authenticate factory run eagerly before returning native future; await exactly one authentication, preserving synchronous factory errors and rejection identity. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Empty Set no-op; nonempty guard and authenticate factory run eagerly before returning native future; await exactly one authentication, preserving synchronous factory errors and rejection identity. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/private_control.rs::resubscribe`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket.subscribeToOrderUpdates"
@@ -63,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_auth.rs::subscribe_to_order_updates"
 status = "ported"
-note = "UTF-16 optional-symbol stream with empty string using base stream; live Set.has guard outside catch; eager signer/credentials/window-5000 signature factory, awaited signature, send then live Set.add; source logging and error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "UTF-16 optional-symbol stream with empty string using base stream; live Set.has guard outside catch; eager signer/credentials/window-5000 signature factory, awaited signature, send then live Set.add; source logging and error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/private_auth.rs::subscribe_to_order_updates`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket.subscribeToPositionUpdates"
@@ -71,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_auth.rs::subscribe_to_position_updates"
 status = "ported"
-note = "Position stream live Set.has guard outside catch; eager signer/credentials/window-5000 signature factory, awaited signature, send then live Set.add; source logging and error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Position stream live Set.has guard outside catch; eager signer/credentials/window-5000 signature factory, awaited signature, send then live Set.add; source logging and error identity. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/private_auth.rs::subscribe_to_position_updates`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket.onMessage"
@@ -79,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_events.rs::on_private_message"
 status = "ported"
-note = "Disposed guard/receive tracking outside catch; confirmation/error/pong guards; truthy stream/data guard, exact or prefixed order stream, exact position stream; capture handler before final live payload read; emitter-before-error serialization/coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied."
+note = "Disposed guard/receive tracking outside catch; confirmation/error/pong guards; truthy stream/data guard, exact or prefixed order stream, exact position stream; capture handler before final live payload read; emitter-before-error serialization/coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::on_private_message`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#handleOrderUpdate"
@@ -87,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::handle_order_update"
 status = "ported"
-note = "Market guard, capture trigger classifier before symbol getter, repeated field reads, trigger/type/price/quantity selection, native order/fill values, add before fill and throttled position/balance/orders calls; JS parseFloat/NaN/infinity/signed-zero and UTF-16 IDs, source logging. Compatible declared fields and supplied operations; arbitrary overridden mapping methods/prototypes are not claimed. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "Market guard, capture trigger classifier before symbol getter, repeated field reads, trigger/type/price/quantity selection, native order/fill values, add before fill and throttled position/balance/orders calls; JS parseFloat/NaN/infinity/signed-zero and UTF-16 IDs, source logging. Compatible declared fields and supplied operations; arbitrary overridden mapping methods/prototypes are not claimed. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::handle_order_update`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#handlePositionUpdate"
@@ -95,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::handle_position_update"
 status = "ported"
-note = "Eager market lookup and quantity parse before mode future; retain market/data identity across await, clear both sides at zero and capture store-update callee before filtering the opposite side; JS numeric fallback/Math.round and UTF-16 IDs, source logging. Compatible declared fields with captured-array length and live sparse slots during filter/some, retaining kept-record identity. Full socket adapter and arbitrary host prototypes are not claimed. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "Eager market lookup and quantity parse before mode future; retain market/data identity across await, clear both sides at zero and capture store-update callee before filtering the opposite side; JS numeric fallback/Math.round and UTF-16 IDs, source logging. Compatible declared fields with captured-array length and live sparse slots during filter/some, retaining kept-record identity. Full socket adapter and arbitrary host prototypes are not claimed. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::handle_position_update`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#mapOrderType"
@@ -135,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_control.rs::unsubscribe"
 status = "ported"
-note = "Empty no-op, UTF-16 UNSUBSCRIBE snapshot before deletion, live streams after send with sparse holes and original send errors. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Empty no-op, UTF-16 UNSUBSCRIBE snapshot before deletion, live streams after send with sparse holes and original send errors. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/private_control.rs::unsubscribe`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#throttledFetchPositions"
@@ -143,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::throttled_fetch_positions"
 status = "ported"
-note = "Date.now before disposed guard, pending before scheduled guard, inclusive 500ms immediate threshold or one trailing timer; callback clears scheduled before live disposed/pending guards and selects position executor. Compatible native state and supplied timer/host operations. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "Date.now before disposed guard, pending before scheduled guard, inclusive 500ms immediate threshold or one trailing timer; callback clears scheduled before live disposed/pending guards and selects position executor. Compatible native state and supplied timer/host operations. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::throttled_fetch_positions`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#executePositionFetch"
@@ -151,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::execute_position_fetch"
 status = "divergent"
-note = "CHOSEN: Return original position-fetch/update errors visibly through Result instead of source silent catch so callers can report/retry failure. Preserve eager timestamp and pending clear before fetch factory, awaited native positions identity and live post-await disposal guard. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "CHOSEN: Return original position-fetch/update errors visibly through Result instead of source silent catch so callers can report/retry failure. Preserve eager timestamp and pending clear before fetch factory, awaited native positions identity and live post-await disposal guard. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::execute_position_fetch`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#throttledFetchOrders"
@@ -159,7 +160,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_control.rs::throttled_fetch_orders"
 status = "ported"
-note = "Complete existing-handle truthiness guard, original callback identity and 10000 ms timeout, handle assignment after scheduling; opaque native handles and original errors preserved. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed."
+note = "Complete existing-handle truthiness guard, original callback identity and 10000 ms timeout, handle assignment after scheduling; opaque native handles and original errors preserved. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/private_control.rs::throttled_fetch_orders`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#fetchThrottledOrders"
@@ -167,7 +168,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::fetch_throttled_orders"
 status = "divergent"
-note = "CHOSEN: Return caught orders-fetch/loaded-read/update errors through Result instead of source silent catch so order reconciliation failures are observable. Preserve eager timer unset, pre-fetch disposal guard, no second guard after await, native orders identity, store-update callee captured before loaded getter, copied loaded fields with orders=true and original loaded unchanged. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "CHOSEN: Return caught orders-fetch/loaded-read/update errors through Result instead of source silent catch so order reconciliation failures are observable. Preserve eager timer unset, pre-fetch disposal guard, no second guard after await, native orders identity, store-update callee captured before loaded getter, copied loaded fields with orders=true and original loaded unchanged. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::fetch_throttled_orders`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#throttledFetchBalance"
@@ -175,7 +176,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::throttled_fetch_balance"
 status = "ported"
-note = "Date.now before disposed guard, balance pending before scheduled guard, inclusive 500ms immediate threshold or one trailing timer; callback clears scheduled before live disposed/pending guards and selects balance executor. Compatible native state and supplied timer/host operations. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "Date.now before disposed guard, balance pending before scheduled guard, inclusive 500ms immediate threshold or one trailing timer; callback clears scheduled before live disposed/pending guards and selects balance executor. Compatible native state and supplied timer/host operations. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::throttled_fetch_balance`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket#executeBalanceFetch"
@@ -183,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/private_events.rs::execute_balance_fetch"
 status = "divergent"
-note = "CHOSEN: Return original balance-fetch/update failures through Result instead of source silent catch so failed balance reconciliation is observable. Preserve eager timestamp/pending state, awaited balance identity and post-await disposed guard. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions."
+note = "CHOSEN: Return original balance-fetch/update failures through Result instead of source silent catch so failed balance reconciliation is observable. Preserve eager timestamp/pending state, awaited balance identity and post-await disposed guard. Actual-source oracle: tests/private_events.rs; finite independently pinned corpus and native assertions. Rename target: `safe-cex-venue-backpack/src/private_events.rs::execute_balance_fetch`."
 
 [[symbol]]
 ts = "BackpackPrivateWebSocket.dispose"
@@ -191,4 +192,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-backpack/src/socket_lifecycle.rs::dispose_private"
 status = "ported"
-note = "Clear live subscriptions, truthy timeout guard then second timeout read/clear/unset, socket guard then second socket read/close; provider errors and absent second socket property error preserved. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary."
+note = "Clear live subscriptions, truthy timeout guard then second timeout read/clear/unset, socket guard then second socket read/close; provider errors and absent second socket property error preserved. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/socket_lifecycle.rs::dispose_private`."

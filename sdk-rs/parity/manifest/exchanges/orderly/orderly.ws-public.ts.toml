@@ -8,7 +8,7 @@ kind = "class"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/socket_classes.rs::public"
 status = "ported"
-note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::public_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim."
+note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::public_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim. Rename target: `safe-cex-venue-orderly/src/socket_classes.rs::public`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.connectAndSubscribe"
@@ -16,7 +16,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/ws_controls.rs::public_connect"
 status = "ported"
-note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_connect_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim."
+note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_connect_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim. Rename target: `safe-cex-venue-orderly/src/ws_controls.rs::public_connect`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.onOpen"
@@ -24,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/ws_controls.rs::public_open"
 status = "ported"
-note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_open_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim."
+note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_open_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim. Rename target: `safe-cex-venue-orderly/src/ws_controls.rs::public_open`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.subscribe"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/ws_controls.rs::public_ping"
 status = "ported"
-note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_ping_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim."
+note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_ping_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim. Rename target: `safe-cex-venue-orderly/src/ws_controls.rs::public_ping`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.handlePingEvent"
@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/ws_controls.rs::public_handle_ping"
 status = "ported"
-note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_pong_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim."
+note = "Complete source body over original opaque receiver/runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-websocket-control-bodies. Paired actual-TypeScript/native witness tests/ws_controls.rs::public_pong_native; compiled family mutation scripts/ws-controls-controls.py. Preserves live member lookup, effect/exception order and original callbacks/errors over explicit intrinsic/imported dependencies; no fixed class, codec/signing or live network claim. Rename target: `safe-cex-venue-orderly/src/ws_controls.rs::public_handle_ping`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.handleTickersStreamEvents"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/stream_reports.rs::tickers"
 status = "ported"
-note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::tickers_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim."
+note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::tickers_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim. Rename target: `safe-cex-venue-orderly/src/stream_reports.rs::tickers`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.handleBBOStreamEvents"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/stream_reports.rs::bbo"
 status = "ported"
-note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::bbo_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim."
+note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::bbo_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim. Rename target: `safe-cex-venue-orderly/src/stream_reports.rs::bbo`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.handleMarkPricesStreamEvents"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/stream_reports.rs::mark_prices"
 status = "ported"
-note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::mark_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim."
+note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::mark_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim. Rename target: `safe-cex-venue-orderly/src/stream_reports.rs::mark_prices`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.handleFundingRateStreamEvents"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/stream_reports.rs::funding_rates"
 status = "ported"
-note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::funding_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim."
+note = "Complete source body over original opaque runtime values: sdk-rs/parity/MANIFEST-SPEC.md#orderly-stream-and-report-bodies. Actual-TypeScript/native witness tests/stream_reports.rs::funding_native; compiled family discrimination scripts/stream-reports-controls.py. Original row/mapper/store/error identities, mutable-state reads and effect/exception order retained over explicit runtime/import dependencies. Mappers, JSON, normalization/get-key and array engines are dependencies; no fixed class or live exchange integration claim. Rename target: `safe-cex-venue-orderly/src/stream_reports.rs::funding_rates`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.listenOHLCV"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/public_feeds.rs::listen_candles"
 status = "ported"
-note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::candles_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim."
+note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::candles_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim. Rename target: `safe-cex-venue-orderly/src/public_feeds.rs::listen_candles`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.listenOrderBook"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/public_feeds.rs::listen_book"
 status = "ported"
-note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::book_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim."
+note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::book_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim. Rename target: `safe-cex-venue-orderly/src/public_feeds.rs::listen_book`."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket#processOrderBookUpdate"
@@ -112,4 +112,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-orderly/src/public_feeds.rs::process_book"
 status = "ported"
-note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::process_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim."
+note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::process_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim. Rename target: `safe-cex-venue-orderly/src/public_feeds.rs::process_book`."
