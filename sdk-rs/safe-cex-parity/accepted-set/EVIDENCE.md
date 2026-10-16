@@ -508,3 +508,26 @@ The ordinary transport inventory now passes both future registrations and stops
 at the separate `safe_cex_transport::secondary::RateLimitWrapper` declaration:
 its lifetime-only generic target requires another exact compiler review. No
 whole-package or workspace gate clearance is claimed here.
+
+
+## Transport rate-limit wrapper identity
+
+One finite registry entry reviews the actual
+`safe_cex_transport::secondary::RateLimitWrapper<'static>` alias on source base
+`4c2a8c0962`. Its raw and expanded compiler targets are the unsized
+`dyn Fn(Arc<dyn RestAdapter>)->Arc<dyn RestAdapter>+'a`, with one original
+unbounded lifetime parameter and no type substitution. Fresh pinned native
+rustdoc/check discovery retains 108 owners, six aliases and nine construction
+obligations; the selected Fn and repeated Arc roots authenticate against the
+actual sysroot artifacts. The independently authored native expected type
+retains the actual local RestAdapter trait in both positions. Existing registry
+entries and shared helper guards remain unchanged.
+
+Actual production alias probes without cfg(test) pass with one explicit
+classification and zero failed owners. The native emitter requires invariant
+function/pointer equality for this unsized type and runs its ordinary Serde and
+conversion checks; no callback invocation is claimed. All 24 focused alias
+policy regressions pass. Fresh compiler preflight also retains seven refusals
+for changed source/raw target/expanded target/generic bounds, caller redirect,
+missing serde_json origin and unknown owner. The focused temporary contract
+is not an installed production classification.
