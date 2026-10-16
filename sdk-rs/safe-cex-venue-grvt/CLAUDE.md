@@ -6,6 +6,11 @@ The first slice implements five protocol tables: all 44 endpoint/URL/telemetry
 entries are compared in order with the actual TypeScript module at test time.
 Eleven protocol string enums now require string-only deserialization and compare
 44 literals against the live TypeScript checker, plus 748 refusal probes.
+Their eleven private Wire decoders independently admit strings; public filtering
+is not a private decoder guarantee. Native tests match all 44 variants before
+wire checks and reject each tagged object through owned, borrowed, text and
+qualified deserialization. Restoring the private derived decoders makes all
+eleven named shape tests fail; retain that compiling regression control.
 Twenty-three top-level protocol records use the shared map-only decoder and private metadata
 companions. Optional typed fields reject explicit null; opaque payloads retain it. The 1,782-case TypeScript-checker
 corpus includes 264 deliberate lone-surrogate representation refusals; those
