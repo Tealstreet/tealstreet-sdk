@@ -2,6 +2,7 @@
 """Isolate each reviewed object's guard removal, then restore exact source bytes."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
@@ -10,9 +11,13 @@ crate = workspace / 'safe-cex-venue-apexomni'
 fixtures = json.loads((crate / 'tests/support/accepted_map_record_fixtures.json').read_text())
 assert len(fixtures) == 26, 'fixed independently reviewed owner census'
 originals = {row['module']: (crate / 'src' / (row['module'] + '.rs')).read_bytes() for row in fixtures.values()}
+guards = {}
 for name, row in fixtures.items():
-    anchor = f'{name}Wire::deserialize(safe_cex_types::strict_decode::object(decoder))'.encode()
-    assert originals[row['module']].count(anchor) == 1, (name, 'unique reviewed guard required')
+    # rustfmt wraps longer companion names; only whitespace/comma spelling varies.
+    pattern = (rb'\b' + re.escape(name.encode()) + rb'Wire::deserialize\(safe_cex_types::strict_decode::object\(\s*decoder,?\s*\)\)')
+    matches = list(re.finditer(pattern, originals[row['module']]))
+    assert len(matches) == 1, (name, 'unique reviewed guard required')
+    guards[name] = matches[0].group(0)
 
 
 def restore():
@@ -44,7 +49,7 @@ try:
         module = row['module']
         source = crate / 'src' / (module + '.rs')
         original = originals[module]
-        old = f'{name}Wire::deserialize(safe_cex_types::strict_decode::object(decoder))'.encode()
+        old = guards[name]
         new = f'{name}Wire::deserialize(decoder)'.encode()
         test = name + '_rejects_complete_positional_array'
         try:
