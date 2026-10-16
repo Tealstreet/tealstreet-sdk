@@ -466,6 +466,8 @@ struct LocalTypes {
     generated_provider_module: bool,
     number_output_used: bool,
     number_output_glob: bool,
+    number_output_imported: bool,
+    number_output_shadowed: bool,
     module_recipes: ModuleRecipes,
     foreign_imports: HashSet<String>,
     inspected_recipes: HashSet<String>,
@@ -545,7 +547,15 @@ impl LocalTypes {
                         && item.path.segments[0].ident == "crate"
                         && self
                             .verified_macro_origins
-                            .contains("safe_cex_num::js_number_output::self")));
+                            .contains("safe_cex_num::js_number_output::self")))
+                || (item.path.segments.len() == 1
+                    && item.path.leading_colon.is_none()
+                    && item.path.segments[0].arguments.is_empty()
+                    && self.number_output_imported
+                    && !self.number_output_shadowed
+                    && self
+                        .verified_macro_origins
+                        .contains("safe_cex_num::js_number_output"));
             if !verified || !number_output_grammar(item.tokens.clone()) {
                 let end = item.span().end();
                 self.names.push((
@@ -950,6 +960,43 @@ impl<'ast> Visit<'ast> for LocalTypes {
             }
         }
         self.number_output_glob |= glob(&item.tree);
+        // Only a direct `safe_cex_num::js_number_output` binding authorizes the
+        // unqualified spelling; any other binding of that name revokes it.
+        fn number_output_bindings(
+            tree: &syn::UseTree,
+            parent: Option<&syn::Ident>,
+            verified: &mut bool,
+            other: &mut bool,
+        ) {
+            match tree {
+                syn::UseTree::Name(name) if name.ident == "js_number_output" => {
+                    if parent.is_some_and(|parent| parent == "safe_cex_num") {
+                        *verified = true;
+                    } else {
+                        *other = true;
+                    }
+                }
+                syn::UseTree::Rename(name)
+                    if name.rename == "js_number_output" || name.ident == "js_number_output" =>
+                {
+                    *other = true
+                }
+                syn::UseTree::Group(group) => {
+                    for tree in &group.items {
+                        number_output_bindings(tree, parent, verified, other);
+                    }
+                }
+                syn::UseTree::Path(path) => {
+                    number_output_bindings(&path.tree, Some(&path.ident), verified, other)
+                }
+                _ => {}
+            }
+        }
+        let (mut verified, mut other) = (false, false);
+        number_output_bindings(&item.tree, None, &mut verified, &mut other);
+        let rooted = matches!(&item.tree, syn::UseTree::Path(path) if path.ident == "safe_cex_num");
+        self.number_output_imported |= verified && rooted;
+        self.number_output_shadowed |= other || (verified && !rooted);
         fn foreign_leaves(tree: &syn::UseTree, local: bool, output: &mut HashSet<String>) {
             match tree {
                 syn::UseTree::Name(name) if !local => {
@@ -1504,6 +1551,41 @@ pub fn local_types_with_recipes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn number_output_unqualified_spelling_requires_a_direct_verified_import() {
+        let scan = |source: &str| {
+            let mut visitor = LocalTypes {
+                verified_macro_origins: ["safe_cex_num::js_number_output".into()].into(),
+                ..LocalTypes::default()
+            };
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            visitor.names
+        };
+        let call = "fn check(&self) { js_number_output!(self, struct {} passthrough { value }); }";
+        for import in [
+            "use safe_cex_num::js_number_output;",
+            "use safe_cex_num::{js_number_output, numeric_ingress::JsNumberOutput};",
+        ] {
+            let names = scan(&format!("{import} {call}"));
+            assert!(names.is_empty(), "{import}: {names:?}");
+        }
+        for import in [
+            "",
+            "use vendor::js_number_output;",
+            "use safe_cex_num::js_number_output; use vendor::js_number_output;",
+            "use safe_cex_num::other::js_number_output;",
+            "use safe_cex_num::{js_number_output, js_number_output as other};",
+            "use vendor::hidden as js_number_output; use safe_cex_num::js_number_output;",
+        ] {
+            let names = scan(&format!("{import} {call}"));
+            assert!(
+                names
+                    .iter()
+                    .any(|(name, _, _)| name == "UNSUPPORTED_NUMBER_OUTPUT_ORIGIN_OR_GRAMMAR"),
+                "{import}: {names:?}"
+            );
+        }
+    }
     #[test]
     fn number_output_accepts_only_the_verified_self_registration_subset() {
         for registration in [
