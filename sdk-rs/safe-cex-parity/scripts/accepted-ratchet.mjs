@@ -38,7 +38,9 @@ export function checkRatchet(results, debt) {
   for (const name of failures.keys()) assert.ok(listed.has(name), `${name}: NEW deserialization widening; classify and prove declaration birth or repair it`);
   return failures.size;
 }
-const origin = { commit: '266f305ac1642598cac948efb8ecba3466c66bb0', path: 'sdk-rs/safe-cex-parity/accepted-set/outstanding-defects.json' };
+// Mirror seed that restored this ledger byte-identical to monorepo 266f305ac1's
+// reviewed lineage; the monorepo history is not an ancestor in this repository.
+const origin = { commit: '91a50c7a2c14cc5e291c4b4f0633fde32f752757', path: 'sdk-rs/safe-cex-parity/accepted-set/outstanding-defects.json' };
 export function checkHistory(repo, relative, debt, options = {}) {
   function git(args, optional = false) {
     const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 });

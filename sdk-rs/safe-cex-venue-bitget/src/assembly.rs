@@ -104,7 +104,20 @@ pub fn create_api<H: AssemblyHost>(
         vec![config, options.clone(), exchange.clone()],
     )?;
     let retry = h.global("retry")?;
-    let condition = imported(h, "networkErrorOnRead", vec![])?;
+    // Evaluated per retry decision: read-only network errors, then signature rejections.
+    let condition_host = h.clone();
+    let condition = h.function(Rc::new(move |args| {
+        let h = &condition_host;
+        let error = args.first().cloned().unwrap_or_else(|| h.undefined());
+        let read_only = imported(h, "networkErrorOnRead", vec![])?;
+        let retried = h.invoke(read_only, vec![error.clone()])?;
+        if h.truthy(&retried) {
+            return Ok(retried);
+        }
+        let predicate = h.global("isBitgetSignatureRejection")?;
+        let rejected = imported(h, "signatureRejectedResponse", vec![predicate])?;
+        h.invoke(rejected, vec![error])
+    }));
     h.invoke(
         retry,
         vec![
@@ -172,7 +185,14 @@ pub fn create_api<H: AssemblyHost>(
             )?;
             url = imported(h, "signingQueryTemplate", vec![url, query])?;
         }
-        let body = if h.truthy(&h.property(&config, "data")?) {
+        // A replayed config carries the body axios already serialized: sign those bytes.
+        let data = h.property(&config, "data")?;
+        let body = if h.equal(
+            &imported(h, "typeof", vec![data.clone()])?,
+            &h.string("string"),
+        ) {
+            data
+        } else if h.truthy(&data) {
             let json = h.global("toJsonString")?;
             let data = h.spread(&h.property(&config, "data")?)?;
             if h.truthy(&h.property(&h.property(&config, "data")?, "symbol")?) {
@@ -205,11 +225,27 @@ pub fn create_api<H: AssemblyHost>(
         &h.property(&h.property(&xhr, "interceptors")?, "response")?,
         "use",
     )?;
+    let seen_responses = h.construct(h.global("WeakSet")?, vec![])?;
     let response_host = h.clone();
     let response_exchange = exchange.clone();
+    let response_xhr = xhr.clone();
     let response = h.async_function(Rc::new(move |args| {
         let h = &response_host;
         let r = args.first().cloned().unwrap_or_else(|| h.undefined());
+        let predicate = h.global("isBitgetSignatureRejection")?;
+        let resend = imported(
+            h,
+            "resendOnSignatureRejection",
+            vec![response_xhr.clone(), r.clone(), predicate],
+        )?;
+        if h.truthy(&resend) {
+            return Ok(resend);
+        }
+        // An axios-retry resend reaches here twice (its chain, then the original's): emit once.
+        if h.truthy(&member(h, &seen_responses, "has", vec![r.clone()])?) {
+            return Ok(r);
+        }
+        member(h, &seen_responses, "add", vec![r.clone()])?;
         if h.truthy(&h.property(&r, "data")?)
             && !h.truthy(&imported(
                 h,
@@ -570,6 +606,26 @@ fn initialize_exchange<H: AssemblyHost>(h: &H, r: &H::Value) -> Result<(), H::Er
             "BitgetExchange",
             "_fetchFillsPage",
             &["safe-cex-venue-bitget/src/history_reads.rs::fetch_fills_page"],
+        )?,
+    )?;
+    h.define(
+        r,
+        "_fetchUtaFillsPage",
+        h.bind_mapped(
+            r,
+            "BitgetExchange",
+            "_fetchUtaFillsPage",
+            &["safe-cex-venue-bitget/src/history_reads.rs::fetch_uta_fills_page"],
+        )?,
+    )?;
+    h.define(
+        r,
+        "_fetchHistoricalUtaFills",
+        h.bind_mapped(
+            r,
+            "BitgetExchange",
+            "_fetchHistoricalUtaFills",
+            &["safe-cex-venue-bitget/src/history_reads.rs::fetch_historical_uta_fills"],
         )?,
     )?;
     h.define(

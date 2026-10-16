@@ -51,6 +51,7 @@ const generationByEndpoint = {
   "UTA_POSITIONS": "v3",
   "UTA_ORDERS": "v3",
   "UTA_STRATEGY_ORDERS": "v3",
+  "UTA_ORDER_FILLS": "v3",
   "UTA_PLACE_ORDER": "v3",
   "UTA_PLACE_STRATEGY_ORDER": "v3",
   "UTA_CANCEL_ORDER": "v3",
@@ -141,7 +142,7 @@ for (const [name, s] of Object.entries(shapes)) {
 }
 // Preserve numeric bits before JSON.stringify would erase -0 and infinities.
 const numericIngress=[];
-for(const name of ['FETCH_UTA_ACCOUNT_ASSETS_RESPONSE','FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE','FETCH_UTA_POSITIONS_RESPONSE','FETCH_UTA_ORDERS_RESPONSE','FETCH_POSITIONS_V2_RESPONSE']) {
+for(const name of ['FETCH_UTA_ACCOUNT_ASSETS_RESPONSE','FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE','FETCH_UTA_POSITIONS_RESPONSE','FETCH_UTA_ORDERS_RESPONSE','FETCH_UTA_FILLS_RESPONSE','FETCH_POSITIONS_V2_RESPONSE']) {
  require('node:assert/strict').equal(shapes[name].fields.requestTime.shape.kind,'number',`${name}.requestTime numeric ingress source contract`);
 }
 for(const [name,s] of Object.entries(shapes)) {
@@ -156,7 +157,7 @@ for(const [name,s] of Object.entries(shapes)) {
   }
  }
 }
-require('node:assert/strict').equal(numericIngress.length,90,'all five Bitget numeric wire fields inventoried');
+require('node:assert/strict').equal(numericIngress.length,108,'all six Bitget numeric wire fields inventoried');
 // Separate native-field identity lane: never changes the frozen shape corpus.
 if (process.argv.includes('--field-identity')) {
   let serial = 0;
