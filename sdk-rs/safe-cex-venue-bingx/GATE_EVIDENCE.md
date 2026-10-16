@@ -1492,3 +1492,14 @@ the named native E2E and restore to pass. Relevant source/test bytes are restore
 before any other Cargo invocation. Only the two reviewed constructor body hashes
 change in the shared dispatch inventory; its other37 BingX rows and every other
 lane's rows remain unchanged. Final scoped gate results are reported in the PR.
+
+After merging master5e76c883d1 at64a5aef5e1: full venue95 and native registry2
+pass; strict host all-targets Clippy for venue/registry, wasm library Clippy and
+workspace fmt pass. Global invention/status parity0 (7459rows/17118public items)
+after mapping both new trait capability members to source createAPI/constructor.
+Cancellation inventory7 including its temporary exporter and four override tests
+including live TS inventory pass. Full dispatch census stops only at two stale
+Hyperliquid base_exchange_class body hashes from master; all39 BingX rows match.
+Control receipts precede this master integration; positive suites reran afterward.
+Logs /tmp/bingx-hosted-{before,after,controls,full,native-final,clippy,wasm,fmt,
+parity,audits}.txt. No live credentials, venue requests or deployment used.
