@@ -176,6 +176,7 @@ impl WsRuntime for Runtime {
 
 #[derive(Default)]
 pub struct Wire {
+    pub sequence: RefCell<BTreeMap<String, VecDeque<(u16, Value)>>>,
     pub requests: RefCell<Vec<RestRequest>>,
     pub responses: RefCell<BTreeMap<String, Value>>,
     pub statuses: RefCell<BTreeMap<String, u16>>,
@@ -193,6 +194,12 @@ impl RestAdapter for Wire {
             .cloned()
             .unwrap_or(json!([]));
         let status = self.statuses.borrow().get(path).copied().unwrap_or(200);
+        let (status, data) = self
+            .sequence
+            .borrow_mut()
+            .get_mut(path)
+            .and_then(VecDeque::pop_front)
+            .unwrap_or((status, data));
         self.requests.borrow_mut().push(request);
         Box::pin(async move {
             Ok(RestResponse {

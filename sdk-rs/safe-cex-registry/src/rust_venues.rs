@@ -64,6 +64,15 @@ pub struct BlofinDependencies {
 
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    /// AsterDEX needs a per-lane HTTP factory to preserve secondary routing.
+    fn asterdex(
+        &self,
+    ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "asterdex inputs are unavailable on this host",
+        ))
+    }
+
     /// Optional hosted account capability; no host-local secret is required.
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
@@ -92,6 +101,7 @@ type RustConstructorEntry = fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor;
 
 /// Bound venues only; each later venue is added by its own follow-up.
 pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
+    (ExchangeName::Asterdex, asterdex_constructor),
     (ExchangeName::Backpack, backpack_constructor),
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
@@ -108,6 +118,19 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
 ];
+
+pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_asterdex::native_exchange::AsterDEXExchange::new(
+                name,
+                options,
+                store,
+                host.asterdex()?,
+            )?,
+        )
+    })
+}
 
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {

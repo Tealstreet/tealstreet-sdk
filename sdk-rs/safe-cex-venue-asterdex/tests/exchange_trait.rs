@@ -412,3 +412,86 @@ fn constructed_exchange_starts_with_real_signed_clients_and_native_sockets() {
     );
     venue.dispose().unwrap();
 }
+
+#[test]
+fn v1_signature_rejection_resends_once_from_unsigned_parameters() {
+    for status in [200, 400] {
+        for repeated in [false, true] {
+            let (venue, rt, _, wire) =
+                support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+            script(&wire);
+            let markets = drive(&rt, venue.fetch_markets()).unwrap();
+            venue
+                .base()
+                .store
+                .update(
+                    safe_cex_store::StoreUpdate {
+                        markets: Some(markets),
+                        ..Default::default()
+                    },
+                    false,
+                )
+                .unwrap();
+            take(&wire);
+            let rejection = json!({"code":-1022,"msg":"Signature for this request is not valid"});
+            wire.sequence.borrow_mut().insert(
+                "/fapi/v1/order".into(),
+                [
+                    (status, rejection.clone()),
+                    if repeated {
+                        (status, rejection)
+                    } else {
+                        (200, json!({"orderId":1234567}))
+                    },
+                ]
+                .into(),
+            );
+            let opts:PlaceOrderOpts=serde_json::from_value(json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.012,"price":101.37})).unwrap();
+            let result = drive(&rt, venue.base().place_order(venue.as_ref(), opts));
+            if repeated {
+                assert!(result.is_err(), "second signature rejection surfaces");
+            } else {
+                assert_eq!(result.unwrap(), ["1234567"]);
+            }
+            let requests = wire
+                .requests
+                .borrow()
+                .iter()
+                .filter(|r| r.url == "/fapi/v1/order")
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                requests.len(),
+                2,
+                "one resend for status {status}, repeated={repeated}"
+            );
+            for request in requests {
+                let mut params = request.params.unwrap().as_object().unwrap().clone();
+                let signature = params.remove("signature").unwrap();
+                assert_eq!(params["symbol"], json!("BTCUSDT"));
+                assert_eq!(params["quantity"], json!("0.012"));
+                assert_eq!(
+                    params.len(),
+                    8,
+                    "no old signature is retained among unsigned order fields"
+                );
+                let query =
+                    safe_cex_venue_asterdex::api_helpers::build_query_string(&params).unwrap();
+                let expected = drive(
+                    &rt,
+                    safe_cex_venue_asterdex::api_helpers::generate_v1_signature(
+                        &query,
+                        "fixture-secret",
+                    ),
+                )
+                .unwrap();
+                assert_eq!(
+                    signature,
+                    json!(expected),
+                    "each resend signs exactly the sent params"
+                );
+            }
+            venue.dispose().unwrap();
+        }
+    }
+}

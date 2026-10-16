@@ -45,7 +45,9 @@ fn hex_bytes(value: &Js) -> Result<Vec<u8>, Thrown> {
         return Err(Thrown::type_error("invalid BytesLike value"));
     }
     hex.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let pair = std::str::from_utf8(pair).map_err(failure)?;
             u8::from_str_radix(pair, 16).map_err(failure)
@@ -237,6 +239,36 @@ pub(super) fn build(weak: Weak<Shared>) -> Js {
     });
     bind("buildV3SigningPayload", |_, a| {
         from_typed(&api::build_v3_signing_payload(&to_typed(&arg(&a, 0))?).map_err(coercion)?)
+    });
+    bind("withoutSigningFields", |_, a| {
+        let data = arg(&a, 0);
+        let result = Js::object(vec![]);
+        if data.truthy() && data.type_of() == "object" {
+            for (key, value) in data.own_entries()? {
+                if ![
+                    "signature",
+                    "timestamp",
+                    "recvWindow",
+                    "user",
+                    "signer",
+                    "nonce",
+                ]
+                .iter()
+                .any(|field| key.as_ref() == field.encode_utf16().collect::<Vec<_>>().as_slice())
+                {
+                    result.define_key(&key, value)?;
+                }
+            }
+        }
+        Ok(result)
+    });
+    bind("isBinanceStyleSignatureRejection", |_, a| {
+        Ok(Js::Bool(
+            safe_cex_transport::signature_rejection::is_binance_style_signature_rejection(
+                &to_json(&arg(&a, 0))?,
+            )
+            .map_err(coercion)?,
+        ))
     });
     bind("generateV1Signature", |_, a| {
         let query = text(&arg(&a, 0))?;

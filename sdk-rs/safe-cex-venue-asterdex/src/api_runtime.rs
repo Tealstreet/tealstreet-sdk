@@ -165,11 +165,12 @@ async fn signed_request<H: RuntimeHost>(
         )?;
         let timestamp = clock(h.as_ref(), "getCurrentTimeMs", vec![])?;
         let data = or(h.as_ref(), h.get(&config, "__asterUnsignedParams")?, || {
-            or(h.as_ref(), h.get(&config, "data")?, || {
+            let data = or(h.as_ref(), h.get(&config, "data")?, || {
                 or(h.as_ref(), h.get(&config, "params")?, || {
                     Ok(h.object(vec![]))
                 })
-            })
+            })?;
+            h.import("withoutSigningFields", vec![data])
         })?;
         h.set(
             &config,
@@ -272,11 +273,43 @@ fn detail<H: RuntimeHost>(h: &H, data: &H::Value, field: &str) -> ResultValue<H:
         vec![h.get(data, field)?, opt(h, data.clone(), "code")?],
     )
 }
+fn resend_signature_rejection<H: RuntimeHost>(
+    h: &H,
+    api: H::Value,
+    config: H::Value,
+    data: H::Value,
+) -> ResultValue<H::Value> {
+    if !h.truthy(&config) {
+        return Ok(h.undefined());
+    }
+    let url = h.get(&config, "url")?;
+    if (!h.nullish(&url) && h.truthy(&invoke!(h, url, "includes", vec![h.text("/fapi/v3/")])?))
+        || h.truthy(&h.get(&config, "safeCexSignatureRetry")?)
+    {
+        return Ok(h.undefined());
+    }
+    if !h.truthy(&h.import("isBinanceStyleSignatureRejection", vec![data])?) {
+        return Ok(h.undefined());
+    }
+    let resent = copy(h, config)?;
+    h.define(&resent, "safeCexSignatureRetry", h.boolean(true))?;
+    invoke!(h, api, "request", vec![resent])
+}
 async fn response_ok<H: RuntimeHost>(
     h: Rc<H>,
     exchange: H::Value,
+    api: H::Value,
     response: H::Value,
 ) -> ResultValue<H::Value> {
+    let resend = resend_signature_rejection(
+        h.as_ref(),
+        api,
+        h.get(&response, "config")?,
+        h.get(&response, "data")?,
+    )?;
+    if h.truthy(&resend) {
+        return Ok(resend);
+    }
     let data = h.get(&response, "data")?;
     if h.truthy(&opt(h.as_ref(), data.clone(), "code")?)
         && h.less(h.get(&h.get(&response, "data")?, "code")?, h.number(0.))?
@@ -325,6 +358,15 @@ async fn response_error<H: RuntimeHost>(
         )?;
         let status = fields[0].clone();
         let data = fields[1].clone();
+        let resend = resend_signature_rejection(
+            h.as_ref(),
+            api.clone(),
+            h.get(&error, "config")?,
+            data.clone(),
+        )?;
+        if h.truthy(&resend) {
+            return Ok(resend);
+        }
         if h.strict_equal(&opt(h.as_ref(), data.clone(), "code")?, &h.number(-1021.)) {
             let msg = opt(h.as_ref(), data.clone(), "msg")?;
             let includes = if h.nullish(&msg) {
@@ -488,11 +530,15 @@ pub fn create_api<H: RuntimeHost>(
     )?;
     let host = h.clone();
     let ex = exchange.clone();
+    let response_api = api.clone();
     let fulfilled = h.function(Rc::new(move |args| {
         let h = host.clone();
         let ex = ex.clone();
         let response = args.first().cloned().unwrap_or_else(|| h.undefined());
-        let task = host.start(Box::pin(async move { response_ok(h, ex, response).await }));
+        let api = response_api.clone();
+        let task = host.start(Box::pin(
+            async move { response_ok(h, ex, api, response).await },
+        ));
         Ok(host.promise(task))
     }));
     let host = h.clone();

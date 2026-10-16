@@ -884,6 +884,33 @@ impl RuntimeHost for Host {
                     .map(|v| self.text(&v))
                     .map_err(|e| error(&e.message))
             }
+            "withoutSigningFields" => {
+                let result = self.object(vec![]);
+                if let Value::Object(entries) = a[0].wire() {
+                    for (key, _) in entries {
+                        if ![
+                            "signature",
+                            "timestamp",
+                            "recvWindow",
+                            "user",
+                            "signer",
+                            "nonce",
+                        ]
+                        .contains(&key.as_str())
+                        {
+                            result.set(&key, a[0].get(&key));
+                        }
+                    }
+                }
+                Ok(result)
+            }
+            "isBinanceStyleSignatureRejection" => {
+                safe_cex_transport::signature_rejection::is_binance_style_signature_rejection(
+                    &a[0].wire(),
+                )
+                .map(|v| self.boolean(v))
+                .map_err(|e| error(&e.message))
+            }
             "generateV1Signature" => ready(ah::generate_v1_signature(&a[0].text(), &a[1].text()))
                 .map(|v| self.text(&v))
                 .map_err(err),

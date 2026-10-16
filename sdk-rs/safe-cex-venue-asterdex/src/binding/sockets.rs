@@ -115,28 +115,26 @@ impl crate::private_repairs::RepairParent for Parent {
         let rt = self.rt();
         Box::pin(async move {
             let rt = rt?;
-            Ok(rt
-                .shared
+            rt.shared
                 .extra
                 .account
                 .get()
                 .expect("account assembled")
                 .fetch_positions(None)
-                .await?)
+                .await
         })
     }
     fn fetch_orders(&self) -> ExchangeFuture<'static, Vec<Order>> {
         let rt = self.rt();
         Box::pin(async move {
             let rt = rt?;
-            Ok(rt
-                .shared
+            rt.shared
                 .extra
                 .account
                 .get()
                 .expect("account assembled")
                 .fetch_orders(None)
-                .await?)
+                .await
         })
     }
     fn reconcile_balance_after_private_update(
