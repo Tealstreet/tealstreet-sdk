@@ -3487,79 +3487,79 @@
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: startup :: start",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: account :: get_account",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: account :: validate_account",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: controls :: set_leverage",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: controls :: change_position_mode",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: controls :: change_margin_type",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: markets :: fetch_markets",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: markets :: fetch_tickers",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: amend :: update_order",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: cancel :: cancel_orders",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "snapshot :: fetch_orders",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "snapshot :: fetch_positions",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "snapshot :: fetch_and_set_private_snapshot",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },

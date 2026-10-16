@@ -511,3 +511,17 @@ flags. The shared native typed-value bridge preserves nonfinite numbers and
 signed zero before request formatting or result projection. Concrete regressions
 cover leverage clamping and ticker results; restoring either former JSON bridge
 makes its corresponding regression fail.
+
+The concrete private protocol now delivers frames through `WsProtocol::on_message`
+to `ws_private/messages.rs`. It calls the variant's live receiver mappers,
+clears recently-placed snapshot grace on sighting, maintains one canonical
+incremental-fill tracker per protocol, publishes terminal rows, and updates
+positions/balance in source order. Primary/Demo filter categories by the account
+switches. Dedicated Spot omits positions; dedicated Inverse preserves its
+qty/value fill pricing and [position, position] Store update pairs. Their
+constructor/session bindings remain separately owned work. Execution and wallet
+topics are ignored in maintained TS and remain ignored here.
+`tests/private_event_delivery.rs` feeds the actual core socket pump. Its source
+oracle executes maintained handler, mapper, fill helper, selectors and Store
+bodies for 24 fixed compositions. `scripts/private-delivery-controls.py` proves
+six independent regressions fail and restores exact production bytes.
