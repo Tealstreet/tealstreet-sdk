@@ -174,6 +174,11 @@ pub const ENDPOINTS: &[Endpoint] = &[
         generation: ApiGeneration::UnifiedV3,
     },
     Endpoint {
+        name: "UTA_ORDER_FILLS",
+        path: "/api/v3/trade/fills",
+        generation: ApiGeneration::UnifiedV3,
+    },
+    Endpoint {
         name: "UTA_PLACE_ORDER",
         path: "/api/v3/trade/place-order",
         generation: ApiGeneration::UnifiedV3,
@@ -282,6 +287,7 @@ pub const GRAFANA_ENDPOINTS_PERIODIC: &[&str] = &[
     "/api/v3/position/current-position",
     "/api/v3/trade/unfilled-orders",
     "/api/v3/trade/unfilled-strategy-orders",
+    "/api/v3/trade/fills",
     "/api/v2/mix/position/all-position",
     "/api/v2/mix/position/all-position",
     "/api/v2/mix/order/orders-pending",
