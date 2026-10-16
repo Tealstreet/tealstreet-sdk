@@ -174,3 +174,7 @@ gateway factory through their existing `external_public_data` dependency. The
 loopback `native_host_bitget_external_data` test covers all three names: gateway
 market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
 with no venue REST or private/public venue sockets in public-only mode.
+
+WEEX is registered through its concrete native binding and the shared signed HTTP
+host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
+its account read and exact request HMAC over loopback HTTP.
