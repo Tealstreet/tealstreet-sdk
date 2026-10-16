@@ -10,7 +10,6 @@ use safe_cex_exchange::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
     },
     exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
-    external::ExternalPublicData,
     journal::HistoricalPositionOptions,
     runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
     websocket::WsRuntime,
@@ -44,8 +43,7 @@ impl BlofinNativeExchange {
         base: BaseExchange,
         http: impl Fn(&ExchangeOptions, &str, i64) -> Result<Rc<dyn RestAdapter>, String> + 'static,
         runtime: Rc<dyn WsRuntime>,
-        external_public_data: impl Fn(&ExchangeOptionsExternalPublicData) -> Rc<dyn ExternalPublicData>
-        + 'static,
+        external_public_data: safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
         remote_signer_account_name: Option<String>,
     ) -> Result<Rc<Self>, ExchangeError> {
         let name = base.name.clone();
@@ -55,7 +53,7 @@ impl BlofinNativeExchange {
             base,
             Rc::new(http),
             runtime,
-            Rc::new(external_public_data),
+            external_public_data,
             remote_signer_account_name,
         ));
         let inner = BlofinExchange::new(host.clone(), name, options, store)?;

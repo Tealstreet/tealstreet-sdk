@@ -13,10 +13,10 @@ note = ""
 [[symbol]]
 ts = "cleanFloat"
 kind = "const-fn"
-layer = "adapted"
+layer = "mirror"
 rs = [ "safe-cex-store/src/incremental_fills.rs::clean_float", "safe-cex-num/src/lib.rs::js_to_precision" ]
 status = "ported"
-note = "The maintained fifteen-significant-digit implementation from #88 uses shared ECMAScript toPrecision rounding, including decimal ties and signed zero; nonfinite inputs return unchanged. Consumer and intrinsic targets: safe-cex-store/src/incremental_fills.rs::clean_float and safe-cex-num/src/lib.rs::js_to_precision. Store incremental-fill and numeric precision witnesses pin both native and live-source behavior."
+note = "Renamed to safe-cex-store/src/incremental_fills.rs::clean_float. Split member safe-cex-num/src/lib.rs::js_to_precision implements this Number.toPrecision call at the shared numeric layer; the caller supplies 15 significant digits and preserves nonfinite inputs. Native bit assertions and the actual-source fill-noise oracle: safe-cex-store/tests/incremental_fills_noise.rs. Shared live Node oracle compares 4800 significant-digit results: safe-cex-num/tests/js_to_precision.rs."
 
 [[symbol]]
 ts = "decimalsOf"
