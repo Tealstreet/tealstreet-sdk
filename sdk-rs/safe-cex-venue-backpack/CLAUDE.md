@@ -286,3 +286,9 @@ stages, ten cancellation records and a deferred-response case. It checks native
 booleans, payload fields, preflight order, callback counts, original errors,
 live request/data/result identities and UTF-16 result contents before source
 trace comparisons. No live order placement or cancellation is performed.
+
+`tests/exchange_trait.rs` constructs `BackpackExchange` and drives all 16
+`not_implemented()` defaults of the `Exchange` trait through `dyn Exchange` on a
+scripted transport. TS backpack overrides neither `fetchSymbolMaxLeverage`,
+`scheduleCancel` nor `fetchPublicTrades`, so their Rust overrides return the
+inherited `base.ts` 'Not implemented' rejection; do not invent venue bodies.
