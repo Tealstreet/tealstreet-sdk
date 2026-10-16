@@ -237,28 +237,6 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         "native ExchangeMetadata.supportsSpotToggle"
     );
     assert_eq!(
-        native.supports_options_toggle,
-        serde_json::from_value::<Option<bool>>(
-            source
-                .get("supportsOptionsToggle")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null)
-        )
-        .expect("source field supportsOptionsToggle"),
-        "native ExchangeMetadata.supportsOptionsToggle"
-    );
-    assert_eq!(
-        native.supports_inverse_toggle,
-        serde_json::from_value::<Option<bool>>(
-            source
-                .get("supportsInverseToggle")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null)
-        )
-        .expect("source field supportsInverseToggle"),
-        "native ExchangeMetadata.supportsInverseToggle"
-    );
-    assert_eq!(
         native.supports_testnet,
         serde_json::from_value::<bool>(
             source
@@ -268,6 +246,17 @@ pub fn assert_exchange_metadata_native(native: &ExchangeMetadata, source: &serde
         )
         .expect("source field supportsTestnet"),
         "native ExchangeMetadata.supportsTestnet"
+    );
+    assert_eq!(
+        native.supports_executions_history,
+        serde_json::from_value::<bool>(
+            source
+                .get("supportsExecutionsHistory")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        )
+        .expect("source field supportsExecutionsHistory"),
+        "native ExchangeMetadata.supportsExecutionsHistory"
     );
     assert_eq!(
         native.leverage_magnets,
