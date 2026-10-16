@@ -2,7 +2,7 @@
 use crate::{lifecycle::*, polling::*, runtime::RuntimeReads};
 use safe_cex_exchange::{exchange::BaseExchange, runtime::*};
 use safe_cex_num::numeric_ingress::JsNumberInput;
-use safe_cex_store::{store::DefaultStore, Store};
+use safe_cex_store::{Store, store::DefaultStore};
 use safe_cex_transport::provider::RestRequest;
 use safe_cex_types::{ExchangeName, ExchangeOptions, Market, Ticker};
 use std::{cell::RefCell, rc::Rc};
@@ -33,6 +33,9 @@ pub struct Host {
 }
 struct Client(Rc<RefCell<Vec<RestRequest>>>);
 impl DxClient for Client {
+    fn rate_limit(&self, _: f64) -> Result<(), ExchangeError> {
+        panic!("finite source-helper fixture must not enter production client limiting")
+    }
     fn request(&self, request: RestRequest) -> ExchangeFuture<'static, JsNumberInput> {
         self.0.borrow_mut().push(request);
         Box::pin(async {
@@ -41,6 +44,9 @@ impl DxClient for Client {
     }
 }
 impl BreakoutHost for Host {
+    fn runtime_host(&self) -> Rc<dyn crate::native_reads::NativeRuntimeHost> {
+        panic!("finite source-helper fixture must not enter production runtime reads")
+    }
     fn construct_base(
         &self,
         name: ExchangeName,

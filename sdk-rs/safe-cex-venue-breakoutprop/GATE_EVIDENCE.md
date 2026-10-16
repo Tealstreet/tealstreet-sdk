@@ -647,3 +647,53 @@ The corrected expressions name the actual owner and invoke its Exchange trait
 methods on the native observer's production receiver. All five exact expressions
 compile and execute the ten independently expected native cases. The observer
 returns the actual ExchangeError after polling; it creates no policy exception.
+
+# Five new binding owners and expanded lifecycle review
+
+The binding-integrated compiler inventory contains 67 owners/aliases: the original
+62 plus binding::decoded, binding::native_call, binding::report, host::PollingBase
+and host::ProductionHost. All 61 retained contracts outside the lifecycle owner
+remain structurally identical. That owner's entrypoints now retain all nine actual
+compiler APIs: its original constructor/listener, two portfolio reads and five
+indexed inherited refusals. The separate Clone construction obligation remains.
+
+The generic decoded function executes a concrete production Vec<String> profile
+with independent valid/order/Unicode and malformed shape/type cases. native_call
+executes actual production reads, an invalid order DTO and unbound dispatch.
+Portfolio reads observe native position/order fields and numeric bits, original
+auth headers and unchanged store/loading state. Their independent expectations
+also match executions of the actual maintained TypeScript formatters.
+PollingBase observations materialize real callbacks, reconcile native shared stats
+and inspect decoded ticker bid bits. ProductionHost observations exercise changing
+clock values, retained/released caller handler ownership, cleanup and zero HTTP.
+The report helper alone is classified as a specific native-string telemetry effect;
+it projects no raw error data, unlike the separately executed raw-error helpers.
+Its direct native witness checks exact worker error metadata and disposal suppression.
+
+scripts/accepted-binding-controls.py compiles seven exact production witnesses
+in their owning modules; all seven pass. Five independent behavior controls then
+produce their exact named native test failures at exit 101 and restored passes:
+decoder rejection, raw dispatch, statistics cleanup, handler ownership and telemetry.
+The script injects only test modules for baseline/restored runs and restores all
+production files byte-for-byte in finally. The named failure lines were separately
+verified for all five controls. The first telemetry expectation assumed a main-thread
+runtime; source review showed this maintained clock fixture is a worker, so that
+expectation was corrected before any telemetry control. It is not a porting-bug RED.
+
+These native witnesses do not grant shared inherited-refusal policy permission or
+clear the ordinary dependency/feature/wasm gates. PR252 remains draft for those gates.
+
+Fresh binding-integrated discovery and default native probing retain all 60 owners
+and seven aliases, exact compiler artifacts/expanded alias claims, one separately
+reviewed construction owner, and a clean local macro/helper scan. The 67 receipts
+contain 66 passes and one explicit lifecycle-owner refusal: the shared policy has
+not yet installed its five inherited constant-output entries. No owner is omitted.
+The seven direct production witnesses and ten exact refusal cases pass separately;
+they do not convert that policy refusal into an accepted-set pass.
+
+The pre-binding finite helper fixture also now implements the two newly required
+trait hooks with explicit panics outside its witness scope. A missing-method
+compile failure was fixed before runtime probing; it is not a negative control.
+All 76 tests in the integrated venue suite pass, and strict native all-targets
+clippy passes. Shared policy-table sharding and its ordinary gate refresh remain
+pending; the PR stays draft.
