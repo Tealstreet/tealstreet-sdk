@@ -145,11 +145,22 @@ impl BybitExchange {
         } else {
             safe_cex_types::PositionSide::Long
         };
+        // An inverse amount is USD contracts, so compare it with the position's native size.
+        let inverse = crate::inverse_symbol::is_bybit_inverse_symbol(symbol);
         self.base.store.positions().iter().any(|position| {
+            let size = if inverse {
+                position
+                    .extra
+                    .as_ref()
+                    .and_then(|extra| extra.contracts_native)
+                    .unwrap_or(0.0)
+            } else {
+                position.contracts
+            };
             position.symbol == symbol
                 && position.side == opposite
                 && position.contracts != 0.0
-                && position.contracts >= amount
+                && size >= amount
         })
     }
 

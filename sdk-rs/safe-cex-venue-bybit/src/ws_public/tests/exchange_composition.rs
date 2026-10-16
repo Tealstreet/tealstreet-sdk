@@ -1500,6 +1500,51 @@ fn opposite_position_matches_source_signed_contracts() {
         |_| Rc::new(Protocol),
     )
     .unwrap();
+    let inverse = fixture["inverseCases"].as_array().unwrap();
+    assert_eq!(inverse.len(), 30, "OPPOSITE inverse source total");
+    for (index, case) in inverse.iter().enumerate() {
+        let positions = case["positions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(row_index, row)| {
+                let mut position: safe_cex_types::Position = serde_json::from_value(json!({
+                    "id":format!("p{row_index}"), "symbol":"BTCUSD", "side":row[0], "entryPrice":1, "leverage":1,
+                    "liquidationPrice":0, "notional":1, "unrealizedPnl":0, "contracts":row[1]
+                }))
+                .unwrap();
+                position.extra = row[2].as_f64().map(|native| safe_cex_types::PositionExtra {
+                    contracts_native: Some(native),
+                    unrealized_pnl_native: None,
+                });
+                position
+            })
+            .collect::<Vec<_>>();
+        Store::update(
+            store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                positions: Some(positions),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let side = if case["side"] == "buy" {
+            safe_cex_types::OrderSide::Buy
+        } else {
+            safe_cex_types::OrderSide::Sell
+        };
+        assert_eq!(
+            json!(venue.has_full_sized_position_opposite_side(
+                "BTCUSD",
+                side,
+                case["amount"].as_f64().unwrap()
+            )),
+            case["expected"],
+            "OPPOSITE inverse native size case {index}: {case}"
+        );
+    }
     let returns = RefCell::new(Vec::<usize>::new());
     let mut branches = [0_usize; 2];
     for index in 0..396 {
