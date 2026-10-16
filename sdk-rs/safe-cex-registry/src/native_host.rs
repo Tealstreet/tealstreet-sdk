@@ -16,7 +16,10 @@ use safe_cex_exchange::{
     runtime::{ExchangeTask, ListenerCleanup, LogSeverity, RemoteSigner},
     websocket::{WsEvent, WsSocket},
 };
-use safe_cex_exchange::{native::native_runtime, runtime::ExchangeError, websocket::WsRuntime};
+use safe_cex_exchange::{
+    js_runtime::base_exchange::ExternalPublicDataFactory, native::native_runtime,
+    runtime::ExchangeError, websocket::WsRuntime,
+};
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_transport::{RestAdapter, native::reqwest_adapter};
@@ -139,7 +142,7 @@ impl RustVenueHost for NativeVenueHost {
                 );
                 Ok(())
             }),
-            external_public_data: None,
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
     // externalPublicData stays unset: the constructor refuses that option visibly.
@@ -152,7 +155,7 @@ impl RustVenueHost for NativeVenueHost {
         Ok(BlofinDependencies {
             runtime: self.runtime.clone(),
             http: blofin_http(self.runtime.clone(), self.adapter.clone()),
-            external_public_data: None,
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
             remote_signer_account_name: None,
         })
     }
@@ -169,7 +172,7 @@ impl RustVenueHost for NativeVenueHost {
                 self.runtime.clone(),
                 (self.adapter)()?,
             ),
-            external_public_data: None,
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
 }
@@ -230,12 +233,10 @@ fn blofin_http(runtime: Rc<dyn WsRuntime>, adapter: AdapterFactory) -> BlofinHtt
     })
 }
 
-type ExternalFactory =
-    Rc<dyn Fn(&ExchangeOptionsExternalPublicData, Rc<BaseExchange>) -> Rc<dyn ExternalPublicData>>;
 /// ts: BaseExchange#initExternalPublicData. The websocket gateway runs the shared
 /// provider over native sockets and timers; an in-process source cannot be named in
 /// options (its capability type is uninhabited), so that variant fails visibly.
-fn gateway_factory(runtime: Rc<dyn WsRuntime>) -> ExternalFactory {
+fn gateway_factory(runtime: Rc<dyn WsRuntime>) -> ExternalPublicDataFactory {
     Rc::new(move |options, base| match options {
         ExchangeOptionsExternalPublicData::Variant0(config) => {
             let host = Rc::new(NativeGatewayHost {

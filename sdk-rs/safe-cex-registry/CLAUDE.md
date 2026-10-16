@@ -74,7 +74,10 @@ native `GatewayHost` (runtime dials and timers) with the exchange Store as paren
 the gateway always delivers whole batches, so the owned Store copy is current.
 The in-process variant cannot be named in native options (its capability type is
 uninhabited) and fails visibly until a host-registered source exists.
-`tests/native_host_external_data.rs` starts Binance on a local gateway socket.
+Every venue takes the provider through js_runtime's `ExternalPublicDataFactory`,
+called with the exchange's own `Rc<BaseExchange>`, so OKX, Bitget, BloFin and
+Bitunix share Binance's gateway path. `tests/native_host_external_data.rs` starts
+Binance and OKX on a local gateway socket.
 
 `native_venue_host_signed` is one account's host with a hosted `remoteSigner`
 (exchange-server's browser relay) and its accountName; no secret is held. Binance

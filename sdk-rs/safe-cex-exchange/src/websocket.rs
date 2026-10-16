@@ -122,6 +122,21 @@ pub trait WsProtocol {
     fn on_error(&self, _socket: &BaseWebSocket, _message: &str) -> Result<(), ExchangeError> {
         Ok(())
     }
+    /// True when the venue replaced the base close handler (a TS subclass `onClose`
+    /// arrow field): a transport close then skips the core's close handling.
+    fn owns_close_handling(&self) -> bool {
+        false
+    }
+    /// The transport's `close` event, after the core's own close handling (if it
+    /// runs); TS fires venue close listeners for it.
+    fn on_transport_close(
+        &self,
+        _socket: &Rc<BaseWebSocket>,
+        _code: Option<u16>,
+        _reason: &str,
+    ) -> Result<(), ExchangeError> {
+        Ok(())
+    }
     fn recovery_complete(&self) -> bool {
         true
     }
@@ -728,6 +743,10 @@ impl BaseWebSocket {
     pub fn mark_ping_sent(&self) {
         self.state.borrow_mut().ping_at = self.runtime.monotonic_now_ms();
     }
+    /// Writes the ping time a venue recorded itself (`this.pingAt = performance.now()`).
+    pub fn set_ping_at(&self, at: f64) {
+        self.state.borrow_mut().ping_at = at;
+    }
     pub fn handle_pong_event(self: &Rc<Self>, next_ping_time: u64) -> Result<(), ExchangeError> {
         self.record_message_handler_stats("pong")?;
         let ping_at = self.state.borrow().ping_at;
@@ -1307,7 +1326,7 @@ impl BaseWebSocket {
                             owner.report_callback_result(owner.handle_web_socket_error(&error))
                         }
                         Ok(WsEvent::Close { code, reason }) => {
-                            owner.report_callback_result(owner.on_close(code, &reason));
+                            owner.report_callback_result(owner.transport_close(code, &reason));
                             if !socket.is_reconnecting() {
                                 break;
                             }
@@ -1316,7 +1335,7 @@ impl BaseWebSocket {
                             owner.report_callback_result(
                                 owner
                                     .handle_web_socket_error(&error.to_string())
-                                    .and_then(|()| owner.on_close(Some(1006), "")),
+                                    .and_then(|()| owner.transport_close(Some(1006), "")),
                             );
                             break;
                         }
@@ -1482,7 +1501,9 @@ impl BaseWebSocket {
                             }
                             Some(Ok(RelayEvent::Close { code, reason, .. })) => {
                                 socket.state.borrow_mut().relay_open = false;
-                                socket.report_callback_result(socket.on_close(Some(code), &reason));
+                                socket.report_callback_result(
+                                    socket.transport_close(Some(code), &reason),
+                                );
                                 break;
                             }
                             other => {
@@ -1496,7 +1517,7 @@ impl BaseWebSocket {
                                 socket.state.borrow_mut().relay_open = false;
                                 socket.report_callback_result(
                                     socket
-                                        .on_close(Some(1000), reason)
+                                        .transport_close(Some(1000), reason)
                                         .and_then(|()| socket.handle_web_socket_error(&message)),
                                 );
                                 break;
@@ -1828,6 +1849,16 @@ impl BaseWebSocket {
             }
         }
         Ok(true)
+    }
+    fn transport_close(
+        self: &Rc<Self>,
+        code: Option<u16>,
+        reason: &str,
+    ) -> Result<(), ExchangeError> {
+        if !self.protocol.owns_close_handling() {
+            self.on_close(code, reason)?;
+        }
+        self.protocol.on_transport_close(self, code, reason)
     }
     pub fn on_close(self: &Rc<Self>, code: Option<u16>, reason: &str) -> Result<(), ExchangeError> {
         let before_close = self.before_close.borrow().clone();
