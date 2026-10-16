@@ -1,8 +1,5 @@
 //! Hyperliquid-owned state over the shared exchange core. Transport/WS wiring is incomplete.
-use safe_cex_exchange::{
-    capabilities::ExchangeCapabilities,
-    exchange::BaseExchange,
-};
+use safe_cex_exchange::{capabilities::ExchangeCapabilities, exchange::BaseExchange};
 use safe_cex_types::{Market, OrderSide, OrderTimeInForce, PlaceOrderOpts, PositionSide};
 use std::{
     cell::{Cell, RefCell},

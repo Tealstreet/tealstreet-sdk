@@ -19,7 +19,11 @@ fn quote(units: &[u16], out: &mut Vec<u16>) {
             0x0d => escape("\\r", out),
             0x09 => escape("\\t", out),
             u if u < 0x20 => escape(&format!("\\u{u:04x}"), out),
-            0xd800..=0xdbff if units.get(i + 1).is_some_and(|n| (0xdc00..0xe000).contains(n)) => {
+            0xd800..=0xdbff
+                if units
+                    .get(i + 1)
+                    .is_some_and(|n| (0xdc00..0xe000).contains(n)) =>
+            {
                 out.push(u);
                 out.push(units[i + 1]);
                 i += 1;
@@ -62,10 +66,7 @@ impl Realm {
         let text = String::from_utf16_lossy(text);
         match serde_json::from_str::<JsonValue>(&text) {
             Ok(v) => Ok(self.from_json(v)),
-            Err(e) => Err(self.error_of(
-                "SyntaxError",
-                &format!("Unexpected token in JSON: {e}"),
-            )),
+            Err(e) => Err(self.error_of("SyntaxError", &format!("Unexpected token in JSON: {e}"))),
         }
     }
     /// JSON.stringify(value) without replacer/space; None is a top-level undefined.
@@ -218,7 +219,12 @@ impl Realm {
             Value::Symbol(_) => J::Undefined,
             Value::Object(_) if value.is_array() => {
                 let items = self.collect_iterable(value)?;
-                J::Array(items.iter().map(|v| self.to_js_json(v)).collect::<Result<_, _>>()?)
+                J::Array(
+                    items
+                        .iter()
+                        .map(|v| self.to_js_json(v))
+                        .collect::<Result<_, _>>()?,
+                )
             }
             Value::Object(_) => {
                 let mut out = vec![];
@@ -226,7 +232,10 @@ impl Realm {
                     if v.is_callable() {
                         continue;
                     }
-                    out.push((String::from_utf16_lossy(k.units().unwrap_or_default()), self.to_js_json(&v)?));
+                    out.push((
+                        String::from_utf16_lossy(k.units().unwrap_or_default()),
+                        self.to_js_json(&v)?,
+                    ));
                 }
                 J::Object(out)
             }

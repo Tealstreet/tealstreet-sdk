@@ -96,7 +96,11 @@ impl Realm {
     pub fn index(&mut self, o: &Value, key: &Value) -> Result<Value, Thrown> {
         if o.is_nullish() {
             let name = self.to_rust_string(key).unwrap_or_default();
-            let what = if matches!(o, Value::Null) { "null" } else { "undefined" };
+            let what = if matches!(o, Value::Null) {
+                "null"
+            } else {
+                "undefined"
+            };
             return Err(self.type_error(&format!(
                 "Cannot read properties of {what} (reading '{name}')"
             )));
@@ -137,7 +141,12 @@ impl Realm {
         })
     }
     /// Abstract relational comparison `a < b`; None is undefined (NaN involved).
-    pub fn less_than(&mut self, a: &Value, b: &Value, left_first: bool) -> Result<Option<bool>, Thrown> {
+    pub fn less_than(
+        &mut self,
+        a: &Value,
+        b: &Value,
+        left_first: bool,
+    ) -> Result<Option<bool>, Thrown> {
         let (pa, pb) = if left_first {
             let pa = self.to_primitive(a, Hint::Number)?;
             (pa, self.to_primitive(b, Hint::Number)?)
@@ -262,5 +271,9 @@ pub fn to_int32(n: f64) -> i32 {
     }
     let int = n.trunc();
     let modulo = int.rem_euclid(4294967296.0);
-    (if modulo >= 2147483648.0 { modulo - 4294967296.0 } else { modulo }) as i32
+    (if modulo >= 2147483648.0 {
+        modulo - 4294967296.0
+    } else {
+        modulo
+    }) as i32
 }

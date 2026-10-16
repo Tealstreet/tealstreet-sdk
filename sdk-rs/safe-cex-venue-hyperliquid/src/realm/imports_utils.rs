@@ -33,7 +33,11 @@ pub fn bind(realm: &Realm) {
     realm.bind_import(
         "uniqBy",
         realm.native("uniqBy", 2, |r, _, a| {
-            let items = if arg(a, 0).is_nullish() { vec![] } else { r.collect_iterable(&arg(a, 0))? };
+            let items = if arg(a, 0).is_nullish() {
+                vec![]
+            } else {
+                r.collect_iterable(&arg(a, 0))?
+            };
             let iteratee = arg(a, 1);
             let mut keys: Vec<Value> = vec![];
             let mut out = vec![];
@@ -44,7 +48,11 @@ pub fn bind(realm: &Realm) {
                     item.clone()
                 } else {
                     let k = r.to_property_key(&iteratee)?;
-                    if item.is_nullish() { Value::Undefined } else { r.get(&item, &k)? }
+                    if item.is_nullish() {
+                        Value::Undefined
+                    } else {
+                        r.get(&item, &k)?
+                    }
                 };
                 if !keys.iter().any(|k| k.same_value_zero(&key)) {
                     keys.push(key);
@@ -108,7 +116,9 @@ pub fn bind(realm: &Realm) {
             let f = arg(a, 0);
             let interval = arg(a, 1);
             let interval = match interval {
-                Value::Number(n) if n == f64::INFINITY => return Ok(r.settled_promise(Ok(Value::Undefined))),
+                Value::Number(n) if n == f64::INFINITY => {
+                    return Ok(r.settled_promise(Ok(Value::Undefined)));
+                }
                 Value::Number(n) if n > 0.0 => n,
                 _ => {
                     r.runtime().console(
@@ -166,7 +176,9 @@ pub fn bind(realm: &Realm) {
         realm.native("adjust", 2, |r, _, a| {
             let value = r.to_number(&arg(a, 0))?;
             let step = match arg(a, 1) {
-                Value::String(u) => safe_cex_num::PrecisionInput::String(String::from_utf16_lossy(&u)),
+                Value::String(u) => {
+                    safe_cex_num::PrecisionInput::String(String::from_utf16_lossy(&u))
+                }
                 other => safe_cex_num::PrecisionInput::Number(r.to_number(&other)?),
             };
             Ok(Value::Number(safe_cex_num::adjust(value, step)))
@@ -176,14 +188,19 @@ pub fn bind(realm: &Realm) {
     realm.bind_import(
         "nanoid",
         realm.native("nanoid", 1, |r, _, a| {
-            const ALPHABET: &[u8] = b"useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+            const ALPHABET: &[u8] =
+                b"useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
             let size = match arg(a, 0) {
                 Value::Undefined => 21,
                 n => r.to_number(&n)?.max(0.0) as usize,
             };
             let mut bytes = vec![0u8; size];
-            getrandom::getrandom(&mut bytes).map_err(|e| r.error(&format!("nanoid: CSPRNG unavailable: {e}")))?;
-            let id: String = bytes.iter().map(|b| ALPHABET[(b & 63) as usize] as char).collect();
+            getrandom::getrandom(&mut bytes)
+                .map_err(|e| r.error(&format!("nanoid: CSPRNG unavailable: {e}")))?;
+            let id: String = bytes
+                .iter()
+                .map(|b| ALPHABET[(b & 63) as usize] as char)
+                .collect();
             Ok(Value::str(&id))
         }),
     );

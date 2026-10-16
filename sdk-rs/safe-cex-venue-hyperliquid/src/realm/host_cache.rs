@@ -46,13 +46,25 @@ impl CacheRuntimeHost for Realm {
             0,
             &base,
             Rc::new(move |r, _, _, _| {
-                let module = slot.borrow().clone().ok_or_else(|| r.error("cross cache module not initialized"))?;
+                let module = slot
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| r.error("cross cache module not initialized"))?;
                 Ok(cache_runtime::new_cache(r, &module)?.value)
             }),
         )
     }
-    fn define_method(&mut self, prototype: &Value, name: &JsString, function: &Value) -> Result<(), Value> {
-        self.define_hidden(prototype, PropKey::String(name.0.as_slice().into()), function.clone());
+    fn define_method(
+        &mut self,
+        prototype: &Value,
+        name: &JsString,
+        function: &Value,
+    ) -> Result<(), Value> {
+        self.define_hidden(
+            prototype,
+            PropKey::String(name.0.as_slice().into()),
+            function.clone(),
+        );
         Ok(())
     }
     fn instance(&mut self, prototype: &Value) -> Result<Value, Value> {
@@ -65,7 +77,9 @@ impl CacheRuntimeHost for Realm {
         Ok(Realm::new_set(self))
     }
     fn function(&mut self, capture: Value, body: Callback) -> Result<Value, Value> {
-        Ok(self.native("", 0, move |r, this, args| cache_runtime::run_callback(r, body, &capture, this, args)))
+        Ok(self.native("", 0, move |r, this, args| {
+            cache_runtime::run_callback(r, body, &capture, this, args)
+        }))
     }
     fn broadcast_constructor(&mut self) -> Result<Value, Value> {
         let globals = Value::Object(self.state.globals.clone());
@@ -86,8 +100,13 @@ impl CacheRuntimeHost for Realm {
 
 impl Realm {
     fn module_slot(&self) -> ModuleSlot {
-        let holder = self.singleton("crossCacheModuleSlot", |r| r.host_object(Rc::new(ModuleSlot::default())));
-        holder.host::<ModuleSlot>().map(|s| (*s).clone()).expect("module slot host object")
+        let holder = self.singleton("crossCacheModuleSlot", |r| {
+            r.host_object(Rc::new(ModuleSlot::default()))
+        });
+        holder
+            .host::<ModuleSlot>()
+            .map(|s| (*s).clone())
+            .expect("module slot host object")
     }
 }
 

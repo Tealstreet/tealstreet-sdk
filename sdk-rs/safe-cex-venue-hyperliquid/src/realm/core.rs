@@ -1,9 +1,6 @@
 //! Object allocation, property access, calls and the iteration protocol.
 //! No RefCell borrow is held across a call back into script.
-use super::{
-    Realm,
-    value::*,
-};
+use super::{Realm, value::*};
 use crate::spot_json::JsString;
 use std::{cell::RefCell, rc::Rc};
 
@@ -101,9 +98,18 @@ impl Realm {
 
     // ---- properties ----
     fn nullish_read(&self, v: &Value, key: &PropKey) -> Thrown {
-        let what = if matches!(v, Value::Null) { "null" } else { "undefined" };
-        let name = key.units().map(String::from_utf16_lossy).unwrap_or_else(|| "Symbol()".into());
-        self.type_error(&format!("Cannot read properties of {what} (reading '{name}')"))
+        let what = if matches!(v, Value::Null) {
+            "null"
+        } else {
+            "undefined"
+        };
+        let name = key
+            .units()
+            .map(String::from_utf16_lossy)
+            .unwrap_or_else(|| "Symbol()".into());
+        self.type_error(&format!(
+            "Cannot read properties of {what} (reading '{name}')"
+        ))
     }
     fn primitive_proto(&self, v: &Value) -> Option<Obj> {
         let i = self.intrinsics();
@@ -195,14 +201,24 @@ impl Realm {
         let o = match target {
             Value::Object(o) => o.clone(),
             Value::Undefined | Value::Null => {
-                let what = if matches!(target, Value::Null) { "null" } else { "undefined" };
-                let name = key.units().map(String::from_utf16_lossy).unwrap_or_default();
+                let what = if matches!(target, Value::Null) {
+                    "null"
+                } else {
+                    "undefined"
+                };
+                let name = key
+                    .units()
+                    .map(String::from_utf16_lossy)
+                    .unwrap_or_default();
                 return Err(self.type_error(&format!(
                     "Cannot set properties of {what} (setting '{name}')"
                 )));
             }
             _ => {
-                let name = key.units().map(String::from_utf16_lossy).unwrap_or_default();
+                let name = key
+                    .units()
+                    .map(String::from_utf16_lossy)
+                    .unwrap_or_default();
                 let shown = String::from_utf16_lossy(&self.to_string(target)?);
                 return Err(self.type_error(&format!(
                     "Cannot create property '{name}' on {} '{shown}'",
@@ -227,7 +243,9 @@ impl Realm {
                     drop(data);
                     let n = self.to_number(&value)?;
                     let mut data = o.borrow_mut();
-                    let Kind::Array(items) = &mut data.kind else { unreachable!() };
+                    let Kind::Array(items) = &mut data.kind else {
+                        unreachable!()
+                    };
                     if n < 0.0 || n.fract() != 0.0 || n > u32::MAX as f64 {
                         drop(data);
                         return Err(self.error_of("RangeError", "Invalid array length"));
@@ -248,13 +266,19 @@ impl Realm {
                         return Ok(());
                     }
                     Slot::Accessor { set: None, .. } => {
-                        let name = key.units().map(String::from_utf16_lossy).unwrap_or_default();
+                        let name = key
+                            .units()
+                            .map(String::from_utf16_lossy)
+                            .unwrap_or_default();
                         return Err(self.type_error(&format!(
                             "Cannot set property {name} of #<Object> which has only a getter"
                         )));
                     }
                     Slot::Data(_) if !p.writable => {
-                        let name = key.units().map(String::from_utf16_lossy).unwrap_or_default();
+                        let name = key
+                            .units()
+                            .map(String::from_utf16_lossy)
+                            .unwrap_or_default();
                         return Err(self.type_error(&format!(
                             "Cannot assign to read only property '{name}' of object"
                         )));
@@ -373,10 +397,13 @@ impl Realm {
         if let Some(pos) = data.props.iter().position(|p| p.key.same(key)) {
             if !data.props[pos].configurable {
                 drop(data);
-                let name = key.units().map(String::from_utf16_lossy).unwrap_or_default();
-                return Err(self.type_error(&format!(
-                    "Cannot delete property '{name}' of #<Object>"
-                )));
+                let name = key
+                    .units()
+                    .map(String::from_utf16_lossy)
+                    .unwrap_or_default();
+                return Err(
+                    self.type_error(&format!("Cannot delete property '{name}' of #<Object>"))
+                );
             }
             data.props.remove(pos);
         }
@@ -385,7 +412,10 @@ impl Realm {
     /// The `in` operator.
     pub fn has_property(&mut self, target: &Value, key: &PropKey) -> Result<bool, Thrown> {
         let Some(o) = target.object() else {
-            let name = key.units().map(String::from_utf16_lossy).unwrap_or_default();
+            let name = key
+                .units()
+                .map(String::from_utf16_lossy)
+                .unwrap_or_default();
             let shown =
                 String::from_utf16_lossy(&self.to_string(target).unwrap_or_else(|_| units("")));
             return Err(self.type_error(&format!(
@@ -475,10 +505,12 @@ impl Realm {
                         "Class constructor {} cannot be invoked without 'new'",
                         String::from_utf16_lossy(&func.name.0)
                     ),
-                    None if matches!(f, Value::Undefined) => match self.state.last_missing.borrow().as_deref() {
-                        Some(name) => format!("{name} is not a function"),
-                        None => "undefined is not a function".into(),
-                    },
+                    None if matches!(f, Value::Undefined) => {
+                        match self.state.last_missing.borrow().as_deref() {
+                            Some(name) => format!("{name} is not a function"),
+                            None => "undefined is not a function".into(),
+                        }
+                    }
                     None => format!("{f:?} is not a function"),
                 };
                 Err(self.type_error(&name))
@@ -513,7 +545,11 @@ impl Realm {
         body(self, args, &target)
     }
     /// The `prototype` of `new_target`, for allocating a constructed instance.
-    pub fn prototype_of_target(&mut self, new_target: &Value, fallback: &Obj) -> Result<Obj, Thrown> {
+    pub fn prototype_of_target(
+        &mut self,
+        new_target: &Value,
+        fallback: &Obj,
+    ) -> Result<Obj, Thrown> {
         let p = self.get_str(new_target, "prototype")?;
         Ok(p.object().cloned().unwrap_or_else(|| fallback.clone()))
     }
@@ -537,7 +573,10 @@ impl Realm {
 
     // ---- iteration ----
     pub fn iterator_object(&self, source: IterSource) -> Value {
-        self.alloc(Kind::Iterator(source), Some(&self.intrinsics().iterator_proto))
+        self.alloc(
+            Kind::Iterator(source),
+            Some(&self.intrinsics().iterator_proto),
+        )
     }
     /// GetIterator for for-of / spread / destructuring.
     pub fn get_iterator(&mut self, v: &Value) -> Result<Value, Thrown> {
@@ -550,16 +589,29 @@ impl Realm {
             }
             Value::Object(o) => {
                 let native = match &o.borrow().kind {
-                    Kind::Array(_) => Some(IterSource::Array { target: o.clone(), index: 0 }),
-                    Kind::Map(_) => Some(IterSource::MapEntries { target: o.clone(), index: 0 }),
-                    Kind::Set(_) => Some(IterSource::SetValues { target: o.clone(), index: 0 }),
+                    Kind::Array(_) => Some(IterSource::Array {
+                        target: o.clone(),
+                        index: 0,
+                    }),
+                    Kind::Map(_) => Some(IterSource::MapEntries {
+                        target: o.clone(),
+                        index: 0,
+                    }),
+                    Kind::Set(_) => Some(IterSource::SetValues {
+                        target: o.clone(),
+                        index: 0,
+                    }),
                     Kind::Iterator(_) => return Ok(v.clone()),
                     _ => None,
                 };
                 // A built-in collection still honours an own/proto override of @@iterator.
                 let key = PropKey::Symbol(self.intrinsics().symbol_iterator.clone());
                 let method = self.get(v, &key)?;
-                if method.is_callable() && method.function().is_some_and(|f| f.name.0 != units("[Symbol.iterator]")[..]) {
+                if method.is_callable()
+                    && method
+                        .function()
+                        .is_some_and(|f| f.name.0 != units("[Symbol.iterator]")[..])
+                {
                     let iterator = self.call(&method, v, &[])?;
                     let next = self.get_str(&iterator, "next")?;
                     return Ok(self.iterator_object(IterSource::Protocol { iterator, next }));
@@ -570,7 +622,8 @@ impl Realm {
             }
             _ => {}
         }
-        let shown = String::from_utf16_lossy(&self.to_string(v).unwrap_or_else(|_| units("object")));
+        let shown =
+            String::from_utf16_lossy(&self.to_string(v).unwrap_or_else(|_| units("object")));
         Err(self.type_error(&format!("{shown} is not iterable")))
     }
     pub fn iterator_step(&mut self, iterator: &Value) -> Result<Option<Value>, Thrown> {
@@ -601,7 +654,9 @@ impl Realm {
                     }
                     let unit = units[*index];
                     let width = if (0xd800..0xdc00).contains(&unit)
-                        && units.get(*index + 1).is_some_and(|u| (0xdc00..0xe000).contains(u))
+                        && units
+                            .get(*index + 1)
+                            .is_some_and(|u| (0xdc00..0xe000).contains(u))
                     {
                         2
                     } else {
@@ -636,7 +691,9 @@ impl Realm {
         }
         let (step, project) = {
             let mut data = o.borrow_mut();
-            let Kind::Iterator(source) = &mut data.kind else { unreachable!() };
+            let Kind::Iterator(source) = &mut data.kind else {
+                unreachable!()
+            };
             let step = match source {
                 IterSource::Array { target, index } => {
                     let v = match &target.borrow().kind {

@@ -122,11 +122,15 @@ impl Realm {
     /// The ExchangeError view of a thrown value: an Error's message (and its
     /// `name` when not plain Error), otherwise String(value).
     pub fn exchange_error(&mut self, thrown: &Value) -> safe_cex_exchange::runtime::ExchangeError {
-        let message = if thrown.object().is_some_and(|o| matches!(o.borrow().kind, Kind::Error)) {
+        let message = if thrown
+            .object()
+            .is_some_and(|o| matches!(o.borrow().kind, Kind::Error))
+        {
             let m = self.get_str(thrown, "message").unwrap_or(Value::Undefined);
             self.to_rust_string(&m).unwrap_or_default()
         } else {
-            self.to_rust_string(thrown).unwrap_or_else(|_| "[object]".into())
+            self.to_rust_string(thrown)
+                .unwrap_or_else(|_| "[object]".into())
         };
         let mut error = safe_cex_exchange::runtime::ExchangeError::new(message);
         if thrown.object().is_some() {

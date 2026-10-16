@@ -2,10 +2,7 @@
 //! extends. Each inherited member the venue bodies use delegates to the Rust
 //! BaseExchange; members the bodies never reach are absent rather than stubbed.
 use super::{Realm, value::*};
-use safe_cex_exchange::{
-    error_reporting::ExchangeErrorInput,
-    exchange::BaseExchange,
-};
+use safe_cex_exchange::{error_reporting::ExchangeErrorInput, exchange::BaseExchange};
 use safe_cex_types::PlaceOrderOpts;
 use std::rc::Rc;
 
@@ -35,7 +32,10 @@ pub fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, T
     Ok(match value {
         Value::Undefined => ExchangeErrorInput::Missing,
         Value::String(u) => ExchangeErrorInput::Message(String::from_utf16_lossy(u)),
-        v if v.object().is_some_and(|o| matches!(o.borrow().kind, Kind::Error)) => {
+        v if v
+            .object()
+            .is_some_and(|o| matches!(o.borrow().kind, Kind::Error)) =>
+        {
             ExchangeErrorInput::Error(Box::new(r.exchange_error(v)))
         }
         v => ExchangeErrorInput::Raw(r.to_serde(v)?),
@@ -85,76 +85,137 @@ pub fn base_exchange_class(realm: &mut Realm, base: Rc<BaseExchange>) -> Value {
     }
     realm.define_hidden(&prototype, PropKey::str("constructor"), class.clone());
 
-    let method = |realm: &Realm, name: &str, length: u8, body: Rc<dyn Fn(&mut Realm, &Rc<BaseExchange>, &Value, &[Value]) -> Result<Value, Thrown>>| {
+    let method = |realm: &Realm,
+                  name: &str,
+                  length: u8,
+                  body: Rc<
+        dyn Fn(&mut Realm, &Rc<BaseExchange>, &Value, &[Value]) -> Result<Value, Thrown>,
+    >| {
         let b = base.clone();
         let f = realm.native(name, length, move |r, this, args| body(r, &b, this, args));
         realm.define_hidden(&prototype, PropKey::str(name), f);
     };
-    method(realm, "log", 2, Rc::new(|r, b, _, a| {
-        let message = r.to_rust_string(&arg(a, 0))?;
-        let severity = match arg(a, 1) {
-            Value::Undefined => "Info".to_owned(),
-            s => r.to_rust_string(&s)?,
-        };
-        b.log(&message, &severity).map_err(|e| thrown(r, e))?;
-        Ok(Value::Undefined)
-    }));
-    method(realm, "emitAndLogError", 3, Rc::new(|r, b, _, a| {
-        let input = error_input(r, &arg(a, 0))?;
-        let message = match arg(a, 1) {
-            Value::Undefined => None,
-            m => Some(r.to_rust_string(&m)?),
-        };
-        let extra = match arg(a, 2) {
-            Value::Undefined => None,
-            x => Some(r.to_serde(&x)?),
-        };
-        b.emit_and_log_error(input, message.as_deref(), extra.as_ref())
-            .map_err(|e| thrown(r, e))?;
-        Ok(Value::Undefined)
-    }));
-    method(realm, "resolveCallerClientOrderId", 1, Rc::new(|r, b, _, a| {
-        let opts: PlaceOrderOpts = r.to_typed(&arg(a, 0))?;
-        Ok(match b.resolve_caller_client_order_id(&opts).map_err(|e| thrown(r, e))? {
-            Some(id) => Value::str(&id),
-            None => Value::Undefined,
-        })
-    }));
-    method(realm, "assertCallerClientOrderIds", 1, Rc::new(|r, b, _, a| {
-        let orders: Vec<PlaceOrderOpts> = r.to_typed(&arg(a, 0))?;
-        b.assert_caller_client_order_ids(&orders).map_err(|e| thrown(r, e))?;
-        Ok(Value::Undefined)
-    }));
-    method(realm, "getTickInterval", 0, Rc::new(|_, b, _, _| {
-        Ok(b.get_tick_interval().map_or(Value::Undefined, Value::Number))
-    }));
-    method(realm, "getActiveTickerSymbols", 0, Rc::new(|r, b, _, _| {
-        let symbols = b.get_active_ticker_symbols();
-        r.from_typed(&symbols)
-    }));
-    method(realm, "initExternalPublicData", 0, Rc::new(|r, b, _, _| {
-        // External public data is a hosted provider the Rust binding does not
-        // attach; a configured account must hear that, not silently go direct.
-        let configured = b.options().external_public_data.is_some();
-        Ok(r.settled_promise(if configured {
-            Err(r.error("Hyperliquid (Rust): external public data is not supported by this binding"))
-        } else {
-            Ok(Value::Bool(false))
-        }))
-    }));
-    method(realm, "foldClosedPositionRecords", 2, Rc::new(|r, _, _, _| {
-        Ok(r.settled_promise(Err(
-            r.error("Hyperliquid (Rust): fetchHistoricalPositions is not bound by this realm"),
-        )))
-    }));
-    method(realm, "dispose", 0, Rc::new(|r, b, _, _| {
-        b.dispose().map_err(|e| thrown(r, e))?;
-        Ok(Value::Undefined)
-    }));
+    method(
+        realm,
+        "log",
+        2,
+        Rc::new(|r, b, _, a| {
+            let message = r.to_rust_string(&arg(a, 0))?;
+            let severity = match arg(a, 1) {
+                Value::Undefined => "Info".to_owned(),
+                s => r.to_rust_string(&s)?,
+            };
+            b.log(&message, &severity).map_err(|e| thrown(r, e))?;
+            Ok(Value::Undefined)
+        }),
+    );
+    method(
+        realm,
+        "emitAndLogError",
+        3,
+        Rc::new(|r, b, _, a| {
+            let input = error_input(r, &arg(a, 0))?;
+            let message = match arg(a, 1) {
+                Value::Undefined => None,
+                m => Some(r.to_rust_string(&m)?),
+            };
+            let extra = match arg(a, 2) {
+                Value::Undefined => None,
+                x => Some(r.to_serde(&x)?),
+            };
+            b.emit_and_log_error(input, message.as_deref(), extra.as_ref())
+                .map_err(|e| thrown(r, e))?;
+            Ok(Value::Undefined)
+        }),
+    );
+    method(
+        realm,
+        "resolveCallerClientOrderId",
+        1,
+        Rc::new(|r, b, _, a| {
+            let opts: PlaceOrderOpts = r.to_typed(&arg(a, 0))?;
+            Ok(
+                match b
+                    .resolve_caller_client_order_id(&opts)
+                    .map_err(|e| thrown(r, e))?
+                {
+                    Some(id) => Value::str(&id),
+                    None => Value::Undefined,
+                },
+            )
+        }),
+    );
+    method(
+        realm,
+        "assertCallerClientOrderIds",
+        1,
+        Rc::new(|r, b, _, a| {
+            let orders: Vec<PlaceOrderOpts> = r.to_typed(&arg(a, 0))?;
+            b.assert_caller_client_order_ids(&orders)
+                .map_err(|e| thrown(r, e))?;
+            Ok(Value::Undefined)
+        }),
+    );
+    method(
+        realm,
+        "getTickInterval",
+        0,
+        Rc::new(|_, b, _, _| {
+            Ok(b.get_tick_interval()
+                .map_or(Value::Undefined, Value::Number))
+        }),
+    );
+    method(
+        realm,
+        "getActiveTickerSymbols",
+        0,
+        Rc::new(|r, b, _, _| {
+            let symbols = b.get_active_ticker_symbols();
+            r.from_typed(&symbols)
+        }),
+    );
+    method(
+        realm,
+        "initExternalPublicData",
+        0,
+        Rc::new(|r, b, _, _| {
+            // External public data is a hosted provider the Rust binding does not
+            // attach; a configured account must hear that, not silently go direct.
+            let configured = b.options().external_public_data.is_some();
+            Ok(r.settled_promise(if configured {
+                Err(r.error(
+                    "Hyperliquid (Rust): external public data is not supported by this binding",
+                ))
+            } else {
+                Ok(Value::Bool(false))
+            }))
+        }),
+    );
+    method(
+        realm,
+        "foldClosedPositionRecords",
+        2,
+        Rc::new(|r, _, _, _| {
+            Ok(r.settled_promise(Err(r.error(
+                "Hyperliquid (Rust): fetchHistoricalPositions is not bound by this realm",
+            ))))
+        }),
+    );
+    method(
+        realm,
+        "dispose",
+        0,
+        Rc::new(|r, b, _, _| {
+            b.dispose().map_err(|e| thrown(r, e))?;
+            Ok(Value::Undefined)
+        }),
+    );
     // The Rust base owns disposal (super.dispose() reaches it above); no venue
     // body assigns isDisposed directly, so the setter has nothing to forward.
     let b = base.clone();
-    let disposed = realm.native("get isDisposed", 0, move |_, _, _| Ok(Value::Bool(b.is_disposed())));
+    let disposed = realm.native("get isDisposed", 0, move |_, _, _| {
+        Ok(Value::Bool(b.is_disposed()))
+    });
     if let Some(o) = prototype.object() {
         o.borrow_mut().props.push(Prop {
             key: PropKey::str("isDisposed"),
@@ -168,9 +229,7 @@ pub fn base_exchange_class(realm: &mut Realm, base: Rc<BaseExchange>) -> Value {
         });
     }
     let b = base.clone();
-    let name = realm.native("get name", 0, move |r, _, _| {
-        r.from_typed(b.name())
-    });
+    let name = realm.native("get name", 0, move |r, _, _| r.from_typed(b.name()));
     realm.define_getter(&prototype, PropKey::str("name"), name);
     class
 }

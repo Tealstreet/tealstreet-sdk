@@ -263,7 +263,11 @@ impl CrossCacheHost for Realm {
         self.set_index(object, key, value.clone())
     }
     fn define_data(&mut self, object: &Value, key: &JsString, value: &Value) -> Result<(), Value> {
-        self.define(object, PropKey::String(key.0.as_slice().into()), value.clone())
+        self.define(
+            object,
+            PropKey::String(key.0.as_slice().into()),
+            value.clone(),
+        )
     }
     fn call(&mut self, function: &Value, receiver: &Value, args: &[Value]) -> Result<Value, Value> {
         Realm::call(self, function, receiver, args)
@@ -311,7 +315,12 @@ impl CacheOrdersHost for Realm {
         let key = self.to_property_key(key)?;
         Realm::delete(self, value, &key).map(|_| ())
     }
-    fn older_than(&mut self, now: &Value, timestamp: &Value, milliseconds: f64) -> Result<bool, Value> {
+    fn older_than(
+        &mut self,
+        now: &Value,
+        timestamp: &Value,
+        milliseconds: f64,
+    ) -> Result<bool, Value> {
         let elapsed = Realm::binary(self, "-", now, timestamp)?;
         Ok(Realm::binary(self, ">", &elapsed, &Value::Number(milliseconds))?.truthy())
     }

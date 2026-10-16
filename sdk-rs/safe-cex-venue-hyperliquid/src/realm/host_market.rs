@@ -20,7 +20,9 @@ pub fn compare_decimal(a: &str, b: &str) -> Option<Ordering> {
             None => (false, s.strip_prefix('+').unwrap_or(s)),
         };
         let (int, frac) = s.split_once('.').unwrap_or((s, ""));
-        if int.is_empty() && frac.is_empty() || !int.bytes().chain(frac.bytes()).all(|c| c.is_ascii_digit()) {
+        if int.is_empty() && frac.is_empty()
+            || !int.bytes().chain(frac.bytes()).all(|c| c.is_ascii_digit())
+        {
             return None;
         }
         let int = int.trim_start_matches('0').to_owned();
@@ -52,7 +54,12 @@ impl MarketScalarHost for Realm {
     }
     fn value_by_key(&mut self, value: &Value, key: &str) -> Result<Value, Value> {
         let v = self.import("v")?;
-        Realm::call(self, &v, &Value::Undefined, &[value.clone(), Value::str(key)])
+        Realm::call(
+            self,
+            &v,
+            &Value::Undefined,
+            &[value.clone(), Value::str(key)],
+        )
     }
     fn parse_float(&mut self, text: &[u16]) -> Result<f64, Value> {
         Ok(safe_cex_num::parse_float(&String::from_utf16_lossy(text)))
@@ -63,7 +70,12 @@ impl MarketScalarHost for Realm {
     fn number_to_string(&mut self, number: f64) -> Result<Option<JsString>, Value> {
         Ok(Some(units(&ccxt::number_to_string(number))))
     }
-    fn precise_compare(&mut self, kind: PreciseComparison, left: &[u16], right: &str) -> Result<bool, Value> {
+    fn precise_compare(
+        &mut self,
+        kind: PreciseComparison,
+        left: &[u16],
+        right: &str,
+    ) -> Result<bool, Value> {
         let left = String::from_utf16_lossy(left);
         let order = compare_decimal(&left, right)
             .ok_or_else(|| self.error(&format!("Precise: invalid number {left}")))?;
@@ -76,7 +88,10 @@ impl MarketScalarHost for Realm {
     /// ccxt parseToInt: parseInt(parseFloat(numberToString(n))).
     fn parse_to_int(&mut self, number: f64) -> Result<f64, Value> {
         let float = safe_cex_num::parse_float(&ccxt::number_to_string(number));
-        Ok(safe_cex_num::parse_int(&safe_cex_num::js_number_string(float), None))
+        Ok(safe_cex_num::parse_int(
+            &safe_cex_num::js_number_string(float),
+            None,
+        ))
     }
 }
 
@@ -91,10 +106,16 @@ impl FastAssetCtxHost for Realm {
             &alphabet::STANDARD,
             GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
         );
-        let cleaned: String = String::from_utf16_lossy(text).chars().filter(|c| !c.is_ascii_whitespace()).collect();
-        let bytes = ENGINE
-            .decode(cleaned)
-            .map_err(|_| self.error_of("InvalidCharacterError", "The string to be decoded is not correctly encoded."))?;
+        let cleaned: String = String::from_utf16_lossy(text)
+            .chars()
+            .filter(|c| !c.is_ascii_whitespace())
+            .collect();
+        let bytes = ENGINE.decode(cleaned).map_err(|_| {
+            self.error_of(
+                "InvalidCharacterError",
+                "The string to be decoded is not correctly encoded.",
+            )
+        })?;
         // atob yields a binary string: one code unit per byte.
         Ok(JsString(bytes.into_iter().map(u16::from).collect()))
     }

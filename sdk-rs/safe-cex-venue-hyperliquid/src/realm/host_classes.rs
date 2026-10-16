@@ -11,7 +11,10 @@ use crate::{
     public_constructor::{PublicConstructorHost, PublicSocketCapture},
     spot_json::JsString,
 };
-use std::{cell::RefCell, rc::{Rc, Weak}};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 type ClassBody = Rc<dyn Fn(&mut Realm, &Value, &[Value], &Value) -> Result<Value, Thrown>>;
 
@@ -35,7 +38,10 @@ impl Realm {
             b => match self.get_str(b, "prototype")? {
                 Value::Object(o) => Some(o),
                 Value::Null => None,
-                _ => return Err(self.type_error("Class extends value does not have valid prototype property")),
+                _ => {
+                    return Err(self
+                        .type_error("Class extends value does not have valid prototype property"));
+                }
             },
         };
         let prototype = self.alloc(Kind::Ordinary, base_proto.as_ref());
@@ -72,13 +78,22 @@ impl Realm {
         Ok((class, prototype))
     }
     /// `super(...args)`: construct the class's *current* superclass with the original newTarget.
-    pub fn super_construct(&mut self, class: &Value, args: &[Value], new_target: &Value) -> Result<Value, Thrown> {
+    pub fn super_construct(
+        &mut self,
+        class: &Value,
+        args: &[Value],
+        new_target: &Value,
+    ) -> Result<Value, Thrown> {
         let parent = class
             .object()
             .and_then(|o| o.borrow().proto.clone())
             .map(Value::Object)
             .unwrap_or(Value::Null);
-        if parent.function().and_then(|f| f.construct.clone()).is_none() {
+        if parent
+            .function()
+            .and_then(|f| f.construct.clone())
+            .is_none()
+        {
             return Err(self.type_error("Super constructor is not a constructor"));
         }
         Realm::construct(self, &parent, args, Some(new_target))
@@ -96,7 +111,12 @@ impl CoreExchangeClassHost for Realm {
             base,
             Rc::new(|r, class, args, new_target| {
                 let args = [arg(args, 0), arg(args, 1), arg(args, 2)];
-                core_exchange_class::construct_core_exchange_class(r, class, &args, Some(new_target))
+                core_exchange_class::construct_core_exchange_class(
+                    r,
+                    class,
+                    &args,
+                    Some(new_target),
+                )
             }),
         )
     }
@@ -109,10 +129,18 @@ impl CoreExchangeClassHost for Realm {
         Ok(self.method_function(
             name,
             length,
-            Rc::new(move |r, this, args| core_exchange_class::call_core_exchange(r, &capture, this, args)),
+            Rc::new(move |r, this, args| {
+                core_exchange_class::call_core_exchange(r, &capture, this, args)
+            }),
         ))
     }
-    fn define_exchange_method(&mut self, prototype: &Value, name: &str, value: &Value, getter: bool) -> Result<(), Value> {
+    fn define_exchange_method(
+        &mut self,
+        prototype: &Value,
+        name: &str,
+        value: &Value,
+        getter: bool,
+    ) -> Result<(), Value> {
         if getter {
             self.define_getter(prototype, PropKey::str(name), value.clone());
         } else {
@@ -120,7 +148,12 @@ impl CoreExchangeClassHost for Realm {
         }
         Ok(())
     }
-    fn exchange_super(&mut self, class: &Value, args: &[Value; 3], target: &Value) -> Result<Value, Value> {
+    fn exchange_super(
+        &mut self,
+        class: &Value,
+        args: &[Value; 3],
+        target: &Value,
+    ) -> Result<Value, Value> {
         self.super_construct(class, args, target)
     }
     fn with_exchange_class(&self, class: &Value) -> Self {
@@ -138,7 +171,12 @@ impl CorePrivateClassHost for Realm {
             1,
             base,
             Rc::new(|r, class, args, new_target| {
-                private_class::construct_core_private_class(r, class, &arg(args, 0), Some(new_target))
+                private_class::construct_core_private_class(
+                    r,
+                    class,
+                    &arg(args, 0),
+                    Some(new_target),
+                )
             }),
         )
     }
@@ -151,10 +189,17 @@ impl CorePrivateClassHost for Realm {
         Ok(self.method_function(
             name,
             length,
-            Rc::new(move |r, this, args| private_class::call_core_private_method(r, &capture, this, args)),
+            Rc::new(move |r, this, args| {
+                private_class::call_core_private_method(r, &capture, this, args)
+            }),
         ))
     }
-    fn define_private_method(&mut self, prototype: &Value, name: &str, value: &Value) -> Result<(), Value> {
+    fn define_private_method(
+        &mut self,
+        prototype: &Value,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), Value> {
         self.define_hidden(prototype, PropKey::str(name), value.clone());
         Ok(())
     }
@@ -170,10 +215,20 @@ impl PrivateConstructorHost for Realm {
     fn construct(&mut self, constructor: &Value, args: &[Value]) -> Result<Value, Value> {
         Realm::construct(self, constructor, args, None)
     }
-    fn private_super(&mut self, class: &Value, parent: &Value, new_target: &Value) -> Result<Value, Value> {
+    fn private_super(
+        &mut self,
+        class: &Value,
+        parent: &Value,
+        new_target: &Value,
+    ) -> Result<Value, Value> {
         self.super_construct(class, std::slice::from_ref(parent), new_target)
     }
-    fn private_arrow(&mut self, capture: CorePrivateCapture<Value>, name: &str, length: u8) -> Result<Value, Value> {
+    fn private_arrow(
+        &mut self,
+        capture: CorePrivateCapture<Value>,
+        name: &str,
+        length: u8,
+    ) -> Result<Value, Value> {
         Ok(self.method_function(
             name,
             length,
@@ -201,11 +256,21 @@ impl CorePublicClassHost for Realm {
             Rc::new(move |r, this, _| public_class::call_core_public_dispose(r, &class, this)),
         ))
     }
-    fn define_public_method(&mut self, prototype: &Value, name: &str, value: &Value) -> Result<(), Value> {
+    fn define_public_method(
+        &mut self,
+        prototype: &Value,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), Value> {
         self.define_hidden(prototype, PropKey::str(name), value.clone());
         Ok(())
     }
-    fn public_super_get(&mut self, class: &Value, receiver: &Value, name: &str) -> Result<Value, Value> {
+    fn public_super_get(
+        &mut self,
+        class: &Value,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, Value> {
         let home = self.get_str(class, "prototype")?;
         self.super_get(&home, receiver, name)
     }
@@ -218,10 +283,20 @@ impl PublicConstructorHost for Realm {
     fn construct(&mut self, constructor: &Value, args: &[Value]) -> Result<Value, Value> {
         Realm::construct(self, constructor, args, None)
     }
-    fn public_super(&mut self, class: &Value, parent: &Value, new_target: &Value) -> Result<Value, Value> {
+    fn public_super(
+        &mut self,
+        class: &Value,
+        parent: &Value,
+        new_target: &Value,
+    ) -> Result<Value, Value> {
         self.super_construct(class, std::slice::from_ref(parent), new_target)
     }
-    fn public_arrow(&mut self, capture: PublicSocketCapture<Value>, name: &str, length: u8) -> Result<Value, Value> {
+    fn public_arrow(
+        &mut self,
+        capture: PublicSocketCapture<Value>,
+        name: &str,
+        length: u8,
+    ) -> Result<Value, Value> {
         Ok(self.method_function(
             name,
             length,

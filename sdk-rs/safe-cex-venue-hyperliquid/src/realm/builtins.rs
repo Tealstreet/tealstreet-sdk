@@ -71,16 +71,26 @@ fn constructor(
         call: call.map(|c| Rc::new(c) as NativeFn),
         construct: construct.map(|c| Rc::new(c) as NativeConstruct),
     });
-    def_value(f.object().unwrap(), "prototype", Value::Object(proto.clone()));
-    proto.borrow_mut().put(PropKey::str("constructor"), f.clone(), false);
+    def_value(
+        f.object().unwrap(),
+        "prototype",
+        Value::Object(proto.clone()),
+    );
+    proto
+        .borrow_mut()
+        .put(PropKey::str("constructor"), f.clone(), false);
     f
 }
 
 fn array_items(realm: &mut Realm, this: &Value) -> Result<Vec<Value>, Thrown> {
-    match this.object().map(|o| o.borrow()).as_deref().map(|d| match &d.kind {
-        Kind::Array(items) => Some(items.clone()),
-        _ => None,
-    }) {
+    match this
+        .object()
+        .map(|o| o.borrow())
+        .as_deref()
+        .map(|d| match &d.kind {
+            Kind::Array(items) => Some(items.clone()),
+            _ => None,
+        }) {
         Some(Some(items)) => Ok(items),
         _ => {
             if this.is_nullish() {
@@ -88,7 +98,11 @@ fn array_items(realm: &mut Realm, this: &Value) -> Result<Vec<Value>, Thrown> {
             }
             let len = realm.get_str(this, "length")?;
             let len = realm.to_number(&len)?;
-            let len = if len.is_finite() && len > 0.0 { len as usize } else { 0 };
+            let len = if len.is_finite() && len > 0.0 {
+                len as usize
+            } else {
+                0
+            };
             (0..len)
                 .map(|i| realm.get(this, &PropKey::str(&i.to_string())))
                 .collect()
@@ -110,7 +124,12 @@ fn callable(realm: &Realm, f: &Value) -> Result<(), Thrown> {
         Err(realm.type_error(&format!("{f:?} is not a function")))
     }
 }
-fn relative_index(realm: &mut Realm, v: &Value, len: usize, default: usize) -> Result<usize, Thrown> {
+fn relative_index(
+    realm: &mut Realm,
+    v: &Value,
+    len: usize,
+    default: usize,
+) -> Result<usize, Thrown> {
     if matches!(v, Value::Undefined) {
         return Ok(default);
     }
@@ -198,7 +217,11 @@ fn install_object(realm: &mut Realm) {
         if v.is_nullish() {
             return Err(r.type_error("Cannot convert undefined or null to object"));
         }
-        let keys = r.own_keys(&v, true).into_iter().map(|k| k.to_value()).collect();
+        let keys = r
+            .own_keys(&v, true)
+            .into_iter()
+            .map(|k| k.to_value())
+            .collect();
         Ok(r.new_array(keys))
     });
     def(realm, &o, "values", 1, |r, _, args| {
@@ -290,7 +313,11 @@ fn install_function(realm: &mut Realm) {
     });
     def(realm, &p, "apply", 2, |r, this, args| {
         let list = arg(args, 1);
-        let list = if list.is_nullish() { vec![] } else { array_items(r, &list)? };
+        let list = if list.is_nullish() {
+            vec![]
+        } else {
+            array_items(r, &list)?
+        };
         r.call(this, &arg(args, 0), &list)
     });
     def(realm, &p, "bind", 1, |r, this, args| {
@@ -339,12 +366,16 @@ fn install_array(realm: &mut Realm) {
         }
     });
     def(realm, &p, "pop", 0, |_, this, _| {
-        Ok(with_array(this, |items| items.pop()).flatten().unwrap_or(Value::Undefined))
-    });
-    def(realm, &p, "shift", 0, |_, this, _| {
-        Ok(with_array(this, |items| (!items.is_empty()).then(|| items.remove(0)))
+        Ok(with_array(this, |items| items.pop())
             .flatten()
             .unwrap_or(Value::Undefined))
+    });
+    def(realm, &p, "shift", 0, |_, this, _| {
+        Ok(
+            with_array(this, |items| (!items.is_empty()).then(|| items.remove(0)))
+                .flatten()
+                .unwrap_or(Value::Undefined),
+        )
     });
     def(realm, &p, "unshift", 1, |_, this, args| {
         Ok(Value::Number(
@@ -361,7 +392,12 @@ fn install_array(realm: &mut Realm) {
         let items = array_items(r, this)?;
         let start = relative_index(r, &arg(args, 0), items.len(), 0)?;
         let end = relative_index(r, &arg(args, 1), items.len(), items.len())?;
-        Ok(r.new_array(items.get(start..end.max(start)).unwrap_or_default().to_vec()))
+        Ok(r.new_array(
+            items
+                .get(start..end.max(start))
+                .unwrap_or_default()
+                .to_vec(),
+        ))
     });
     def(realm, &p, "splice", 2, |r, this, args| {
         let len = array_items(r, this)?.len();
@@ -374,7 +410,9 @@ fn install_array(realm: &mut Realm) {
         };
         let inserted = args.get(2..).unwrap_or_default().to_vec();
         let removed = with_array(this, |items| {
-            items.splice(start..start + count, inserted).collect::<Vec<_>>()
+            items
+                .splice(start..start + count, inserted)
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
         Ok(r.new_array(removed))
@@ -405,7 +443,9 @@ fn install_array(realm: &mut Realm) {
     def(realm, &p, "includes", 1, |r, this, args| {
         let items = array_items(r, this)?;
         let needle = arg(args, 0);
-        Ok(Value::Bool(items.iter().any(|v| v.same_value_zero(&needle))))
+        Ok(Value::Bool(
+            items.iter().any(|v| v.same_value_zero(&needle)),
+        ))
     });
     def(realm, &p, "indexOf", 1, |r, this, args| {
         let items = array_items(r, this)?;
@@ -434,7 +474,11 @@ fn install_array(realm: &mut Realm) {
                 continue;
             }
             let v = r.get(this, &key)?;
-            let result = r.call(&f, &this_arg, &[v.clone(), Value::Number(i as f64), this.clone()])?;
+            let result = r.call(
+                &f,
+                &this_arg,
+                &[v.clone(), Value::Number(i as f64), this.clone()],
+            )?;
             if !visit(r, i, v, result)? {
                 break;
             }
@@ -487,7 +531,11 @@ fn install_array(realm: &mut Realm) {
         let len = array_items(r, this)?.len();
         for i in 0..len {
             let v = r.get(this, &PropKey::str(&i.to_string()))?;
-            let hit = r.call(&f, &this_arg, &[v.clone(), Value::Number(i as f64), this.clone()])?;
+            let hit = r.call(
+                &f,
+                &this_arg,
+                &[v.clone(), Value::Number(i as f64), this.clone()],
+            )?;
             if hit.truthy() {
                 return Ok(Some((i, v)));
             }
@@ -498,7 +546,9 @@ fn install_array(realm: &mut Realm) {
         Ok(find(r, this, args)?.map_or(Value::Undefined, |(_, v)| v))
     });
     def(realm, &p, "findIndex", 1, |r, this, args| {
-        Ok(Value::Number(find(r, this, args)?.map_or(-1.0, |(i, _)| i as f64)))
+        Ok(Value::Number(
+            find(r, this, args)?.map_or(-1.0, |(i, _)| i as f64),
+        ))
     });
     def(realm, &p, "reduce", 2, |r, this, args| {
         let f = arg(args, 0);
@@ -523,7 +573,11 @@ fn install_array(realm: &mut Realm) {
             let key = PropKey::str(&i.to_string());
             if r.has_property(this, &key)? {
                 let v = r.get(this, &key)?;
-                acc = r.call(&f, &Value::Undefined, &[acc, v, Value::Number(i as f64), this.clone()])?;
+                acc = r.call(
+                    &f,
+                    &Value::Undefined,
+                    &[acc, v, Value::Number(i as f64), this.clone()],
+                )?;
             }
             i += 1;
         }
@@ -532,35 +586,26 @@ fn install_array(realm: &mut Realm) {
     def(realm, &p, "sort", 1, |r, this, args| {
         let compare = arg(args, 0);
         let mut items = array_items(r, this)?;
-        // Stable merge-insertion sort; comparator errors propagate.
-        let mut error = None;
+        // Stable insertion sort; comparator and ToString errors propagate.
         let mut sorted: Vec<Value> = Vec::with_capacity(items.len());
         let undefined_count = items.iter().filter(|v| matches!(v, Value::Undefined)).count();
         items.retain(|v| !matches!(v, Value::Undefined));
         for v in items {
             let mut pos = sorted.len();
             while pos > 0 {
-                let before = &sorted[pos - 1];
-                let order = if compare.is_callable() {
-                    match r.call(&compare, &Value::Undefined, &[before.clone(), v.clone()]) {
-                        Ok(x) => r.to_number(&x).unwrap_or(0.0),
-                        Err(e) => {
-                            error = Some(e);
-                            0.0
-                        }
-                    }
+                let before = sorted[pos - 1].clone();
+                let after = if compare.is_callable() {
+                    let x = r.call(&compare, &Value::Undefined, &[before, v.clone()])?;
+                    r.to_number(&x)? > 0.0
                 } else {
-                    let a = r.to_string(before).unwrap_or_else(|_| units(""));
-                    let b = r.to_string(&v).unwrap_or_else(|_| units(""));
-                    if a[..] > b[..] { 1.0 } else { 0.0 }
+                    let a = r.to_string(&before)?;
+                    let b = r.to_string(&v)?;
+                    a[..] > b[..]
                 };
-                if error.is_some() || !(order > 0.0) {
+                if !after {
                     break;
                 }
                 pos -= 1;
-            }
-            if let Some(e) = error {
-                return Err(e);
             }
             sorted.insert(pos, v);
         }
@@ -573,7 +618,12 @@ fn install_array(realm: &mut Realm) {
             Value::Undefined => 1.0,
             d => r.to_number(&d)?,
         };
-        fn flatten(r: &mut Realm, items: Vec<Value>, depth: f64, out: &mut Vec<Value>) -> Result<(), Thrown> {
+        fn flatten(
+            r: &mut Realm,
+            items: Vec<Value>,
+            depth: f64,
+            out: &mut Vec<Value>,
+        ) -> Result<(), Thrown> {
             for v in items {
                 if depth >= 1.0 && v.is_array() {
                     let inner = array_items(r, &v)?;
@@ -605,7 +655,12 @@ fn install_array(realm: &mut Realm) {
         let items = array_items(r, this)?;
         let n = r.to_number(&arg(args, 0))?.trunc();
         let i = if n < 0.0 { items.len() as f64 + n } else { n };
-        Ok(if i >= 0.0 { items.get(i as usize).cloned() } else { None }.unwrap_or(Value::Undefined))
+        Ok(if i >= 0.0 {
+            items.get(i as usize).cloned()
+        } else {
+            None
+        }
+        .unwrap_or(Value::Undefined))
     });
     def(realm, &p, "keys", 0, |r, this, _| {
         let len = array_items(r, this)?.len();
@@ -613,7 +668,10 @@ fn install_array(realm: &mut Realm) {
         Ok(r.iterator_object(IterSource::Keys { keys, index: 0 }))
     });
     def(realm, &p, "values", 0, |r, this, _| match this.object() {
-        Some(o) => Ok(r.iterator_object(IterSource::Array { target: o.clone(), index: 0 })),
+        Some(o) => Ok(r.iterator_object(IterSource::Array {
+            target: o.clone(),
+            index: 0,
+        })),
         None => Err(r.type_error("Array.prototype.values called on non-object")),
     });
     def(realm, &p, "entries", 0, |r, this, _| {
@@ -626,7 +684,10 @@ fn install_array(realm: &mut Realm) {
         Ok(r.iterator_object(IterSource::Keys { keys, index: 0 }))
     });
     def_iterator(realm, &p, |r, this, _| match this.object() {
-        Some(o) => Ok(r.iterator_object(IterSource::Array { target: o.clone(), index: 0 })),
+        Some(o) => Ok(r.iterator_object(IterSource::Array {
+            target: o.clone(),
+            index: 0,
+        })),
         None => Err(r.type_error("not iterable")),
     });
     let array = constructor(
@@ -638,15 +699,22 @@ fn install_array(realm: &mut Realm) {
         Some(|r, args, _| Ok(r.new_array(args.to_vec()))),
     );
     let a = array.object().unwrap().clone();
-    def(realm, &a, "isArray", 1, |_, _, args| Ok(Value::Bool(arg(args, 0).is_array())));
-    def(realm, &a, "of", 0, |r, _, args| Ok(r.new_array(args.to_vec())));
+    def(realm, &a, "isArray", 1, |_, _, args| {
+        Ok(Value::Bool(arg(args, 0).is_array()))
+    });
+    def(realm, &a, "of", 0, |r, _, args| {
+        Ok(r.new_array(args.to_vec()))
+    });
     def(realm, &a, "from", 1, |r, _, args| {
         let source = arg(args, 0);
         let f = arg(args, 1);
         let items = if source.is_nullish() {
             return Err(r.type_error("Cannot convert undefined or null to object"));
         } else if source.object().is_some_and(|o| {
-            matches!(o.borrow().kind, Kind::Array(_) | Kind::Map(_) | Kind::Set(_) | Kind::Iterator(_))
+            matches!(
+                o.borrow().kind,
+                Kind::Array(_) | Kind::Map(_) | Kind::Set(_) | Kind::Iterator(_)
+            )
         }) || matches!(source, Value::String(_))
         {
             r.collect_iterable(&source)?
@@ -673,15 +741,22 @@ fn install_array(realm: &mut Realm) {
     });
     def(realm, &it, "return", 0, |r, this, _| {
         r.iterator_close(this)?;
-        Ok(r.object_from(vec![("value", Value::Undefined), ("done", Value::Bool(true))]))
+        Ok(r.object_from(vec![
+            ("value", Value::Undefined),
+            ("done", Value::Bool(true)),
+        ]))
     });
     def_iterator(realm, &it, |_, this, _| Ok(this.clone()));
 }
 
 fn install_string(realm: &mut Realm) {
     let p = realm.intrinsics().string_proto.clone();
-    def(realm, &p, "toString", 0, |r, this, _| Ok(Value::String(this_units(r, this)?)));
-    def(realm, &p, "valueOf", 0, |r, this, _| Ok(Value::String(this_units(r, this)?)));
+    def(realm, &p, "toString", 0, |r, this, _| {
+        Ok(Value::String(this_units(r, this)?))
+    });
+    def(realm, &p, "valueOf", 0, |r, this, _| {
+        Ok(Value::String(this_units(r, this)?))
+    });
     def(realm, &p, "toLowerCase", 0, |r, this, _| {
         let s = String::from_utf16_lossy(&this_units(r, this)?);
         Ok(Value::str(&s.to_lowercase()))
@@ -714,13 +789,17 @@ fn install_string(realm: &mut Realm) {
         let s = this_units(r, this)?;
         let needle = r.to_string(&arg(args, 0))?;
         let from = relative_index(r, &arg(args, 1), s.len(), 0)?;
-        Ok(Value::Number(find_units(&s, &needle, from).map_or(-1.0, |i| i as f64)))
+        Ok(Value::Number(
+            find_units(&s, &needle, from).map_or(-1.0, |i| i as f64),
+        ))
     });
     def(realm, &p, "slice", 2, |r, this, args| {
         let s = this_units(r, this)?;
         let start = relative_index(r, &arg(args, 0), s.len(), 0)?;
         let end = relative_index(r, &arg(args, 1), s.len(), s.len())?;
-        Ok(Value::units(s.get(start..end.max(start)).unwrap_or_default()))
+        Ok(Value::units(
+            s.get(start..end.max(start)).unwrap_or_default(),
+        ))
     });
     def(realm, &p, "substring", 2, |r, this, args| {
         let s = this_units(r, this)?;
@@ -729,7 +808,11 @@ fn install_string(realm: &mut Realm) {
                 return Ok(d);
             }
             let n = r.to_number(v)?;
-            Ok(if n.is_nan() { 0 } else { n.clamp(0.0, s.len() as f64) as usize })
+            Ok(if n.is_nan() {
+                0
+            } else {
+                n.clamp(0.0, s.len() as f64) as usize
+            })
         };
         let a = clamp(r, &arg(args, 0), 0)?;
         let b = clamp(r, &arg(args, 1), s.len())?;
@@ -742,7 +825,8 @@ fn install_string(realm: &mut Realm) {
             Value::Undefined => s.len() - start,
             v => {
                 let n = r.to_number(&v)?;
-                (if n.is_nan() { 0.0 } else { n.trunc() }).clamp(0.0, (s.len() - start) as f64) as usize
+                (if n.is_nan() { 0.0 } else { n.trunc() }).clamp(0.0, (s.len() - start) as f64)
+                    as usize
             }
         };
         Ok(Value::units(&s[start..start + len]))
@@ -767,8 +851,12 @@ fn install_string(realm: &mut Realm) {
             f64::NAN
         }))
     });
-    def(realm, &p, "padStart", 2, |r, this, args| pad(r, this, args, true));
-    def(realm, &p, "padEnd", 2, |r, this, args| pad(r, this, args, false));
+    def(realm, &p, "padStart", 2, |r, this, args| {
+        pad(r, this, args, true)
+    });
+    def(realm, &p, "padEnd", 2, |r, this, args| {
+        pad(r, this, args, false)
+    });
     def(realm, &p, "repeat", 1, |r, this, args| {
         let s = this_units(r, this)?;
         let n = r.to_number(&arg(args, 0))?;
@@ -811,8 +899,12 @@ fn install_string(realm: &mut Realm) {
         parts.push(Value::units(&s[last..]));
         Ok(r.new_array(parts))
     });
-    def(realm, &p, "replace", 2, |r, this, args| replace(r, this, args, false));
-    def(realm, &p, "replaceAll", 2, |r, this, args| replace(r, this, args, true));
+    def(realm, &p, "replace", 2, |r, this, args| {
+        replace(r, this, args, false)
+    });
+    def(realm, &p, "replaceAll", 2, |r, this, args| {
+        replace(r, this, args, true)
+    });
     def(realm, &p, "match", 1, |r, this, args| {
         let s = this_units(r, this)?;
         let p = match arg(args, 0).object().map(|o| match &o.borrow().kind {
@@ -822,7 +914,10 @@ fn install_string(realm: &mut Realm) {
             Some(Some(p)) => p,
             _ => {
                 let source = r.to_rust_string(&arg(args, 0))?;
-                Rc::new(Pattern::new(&regex_escape(&source), "").map_err(|e| r.error_of("SyntaxError", &e))?)
+                Rc::new(
+                    Pattern::new(&regex_escape(&source), "")
+                        .map_err(|e| r.error_of("SyntaxError", &e))?,
+                )
             }
         };
         exec_result(r, &p, &s)
@@ -889,11 +984,20 @@ fn pad(r: &mut Realm, this: &Value, args: &[Value], start: bool) -> Result<Value
         Value::Undefined => units(" "),
         v => r.to_string(&v)?,
     };
-    let target = if target.is_nan() { 0 } else { target.max(0.0) as usize };
+    let target = if target.is_nan() {
+        0
+    } else {
+        target.max(0.0) as usize
+    };
     if target <= s.len() || filler.is_empty() {
         return Ok(Value::String(s));
     }
-    let fill: Vec<u16> = filler.iter().cycle().take(target - s.len()).copied().collect();
+    let fill: Vec<u16> = filler
+        .iter()
+        .cycle()
+        .take(target - s.len())
+        .copied()
+        .collect();
     let out: Vec<u16> = if start {
         fill.into_iter().chain(s.iter().copied()).collect()
     } else {
@@ -951,7 +1055,11 @@ pub fn radix_string(value: f64, radix: u32) -> String {
         return "NaN".into();
     }
     if value.is_infinite() {
-        return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() };
+        return if value > 0.0 {
+            "Infinity".into()
+        } else {
+            "-Infinity".into()
+        };
     }
     if value == 0.0 {
         return "0".into();
@@ -1053,7 +1161,9 @@ fn install_number(realm: &mut Realm) {
             }
         }
     });
-    def(realm, &p, "valueOf", 0, |r, this, _| Ok(Value::Number(this_number(r, this)?)));
+    def(realm, &p, "valueOf", 0, |r, this, _| {
+        Ok(Value::Number(this_number(r, this)?))
+    });
     let number = constructor(
         realm,
         "Number",
@@ -1069,14 +1179,20 @@ fn install_number(realm: &mut Realm) {
     );
     let n = number.object().unwrap().clone();
     def(realm, &n, "isFinite", 1, |_, _, args| {
-        Ok(Value::Bool(arg(args, 0).as_number().is_some_and(f64::is_finite)))
+        Ok(Value::Bool(
+            arg(args, 0).as_number().is_some_and(f64::is_finite),
+        ))
     });
     def(realm, &n, "isNaN", 1, |_, _, args| {
-        Ok(Value::Bool(arg(args, 0).as_number().is_some_and(f64::is_nan)))
+        Ok(Value::Bool(
+            arg(args, 0).as_number().is_some_and(f64::is_nan),
+        ))
     });
     def(realm, &n, "isInteger", 1, |_, _, args| {
         Ok(Value::Bool(
-            arg(args, 0).as_number().is_some_and(|n| n.is_finite() && n.fract() == 0.0),
+            arg(args, 0)
+                .as_number()
+                .is_some_and(|n| n.is_finite() && n.fract() == 0.0),
         ))
     });
     def(realm, &n, "isSafeInteger", 1, |_, _, args| {
@@ -1096,7 +1212,14 @@ fn install_number(realm: &mut Realm) {
         Ok(Value::str(if this.truthy() { "true" } else { "false" }))
     });
     def(realm, &b, "valueOf", 0, |_, this, _| Ok(this.clone()));
-    let boolean = constructor(realm, "Boolean", 1, &b, Some(|_, _, args| Ok(Value::Bool(arg(args, 0).truthy()))), None);
+    let boolean = constructor(
+        realm,
+        "Boolean",
+        1,
+        &b,
+        Some(|_, _, args| Ok(Value::Bool(arg(args, 0).truthy()))),
+        None,
+    );
     realm.set_global("Boolean", boolean);
 
     let math = realm.new_object();
@@ -1110,10 +1233,20 @@ fn install_number(realm: &mut Realm) {
     def(realm, &m, "trunc", 1, |r, _, a| unary(r, a, f64::trunc));
     def(realm, &m, "sqrt", 1, |r, _, a| unary(r, a, f64::sqrt));
     def(realm, &m, "log", 1, |r, _, a| unary(r, a, f64::ln));
-    def(realm, &m, "log10", 1, |r, _, a| unary(r, a, safe_cex_num::math_log10));
-    def(realm, &m, "round", 1, |r, _, a| unary(r, a, safe_cex_num::math_round));
+    def(realm, &m, "log10", 1, |r, _, a| {
+        unary(r, a, safe_cex_num::math_log10)
+    });
+    def(realm, &m, "round", 1, |r, _, a| {
+        unary(r, a, safe_cex_num::math_round)
+    });
     def(realm, &m, "sign", 1, |r, _, a| {
-        unary(r, a, |n| if n.is_nan() || n == 0.0 { n } else { n.signum() })
+        unary(r, a, |n| {
+            if n.is_nan() || n == 0.0 {
+                n
+            } else {
+                n.signum()
+            }
+        })
     });
     def(realm, &m, "pow", 2, |r, _, a| {
         let x = r.to_number(&arg(a, 0))?;
@@ -1134,7 +1267,9 @@ fn install_number(realm: &mut Realm) {
         }
         Ok(Value::Number(acc))
     });
-    def(realm, &m, "random", 0, |r, _, _| Ok(Value::Number(r.runtime().random())));
+    def(realm, &m, "random", 0, |r, _, _| {
+        Ok(Value::Number(r.runtime().random()))
+    });
     realm.set_global("Math", math);
 }
 
@@ -1154,21 +1289,27 @@ fn parse_int(r: &mut Realm, _: &Value, args: &[Value]) -> Result<Value, Thrown> 
 fn install_collections(realm: &mut Realm) {
     let p = realm.intrinsics().map_proto.clone();
     def(realm, &p, "get", 1, |r, this, args| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.get called on incompatible receiver"))?;
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.get called on incompatible receiver"))?;
         let k = arg(args, 0);
         let d = o.borrow();
-        let Kind::Map(entries) = &d.kind else { unreachable!() };
+        let Kind::Map(entries) = &d.kind else {
+            unreachable!()
+        };
         Ok(entries
             .iter()
             .find(|(key, _)| key.same_value_zero(&k))
             .map_or(Value::Undefined, |(_, v)| v.clone()))
     });
     def(realm, &p, "set", 2, |r, this, args| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.set called on incompatible receiver"))?;
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.set called on incompatible receiver"))?;
         let k = normalize_key(&arg(args, 0));
         let v = arg(args, 1);
         let mut d = o.borrow_mut();
-        let Kind::Map(entries) = &mut d.kind else { unreachable!() };
+        let Kind::Map(entries) = &mut d.kind else {
+            unreachable!()
+        };
         match entries.iter_mut().find(|(key, _)| key.same_value_zero(&k)) {
             Some(e) => e.1 = v,
             None => entries.push((k, v)),
@@ -1176,17 +1317,25 @@ fn install_collections(realm: &mut Realm) {
         Ok(this.clone())
     });
     def(realm, &p, "has", 1, |r, this, args| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.has called on incompatible receiver"))?;
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.has called on incompatible receiver"))?;
         let k = arg(args, 0);
         let d = o.borrow();
-        let Kind::Map(entries) = &d.kind else { unreachable!() };
-        Ok(Value::Bool(entries.iter().any(|(key, _)| key.same_value_zero(&k))))
+        let Kind::Map(entries) = &d.kind else {
+            unreachable!()
+        };
+        Ok(Value::Bool(
+            entries.iter().any(|(key, _)| key.same_value_zero(&k)),
+        ))
     });
     def(realm, &p, "delete", 1, |r, this, args| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.delete called on incompatible receiver"))?;
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.delete called on incompatible receiver"))?;
         let k = arg(args, 0);
         let mut d = o.borrow_mut();
-        let Kind::Map(entries) = &mut d.kind else { unreachable!() };
+        let Kind::Map(entries) = &mut d.kind else {
+            unreachable!()
+        };
         let before = entries.len();
         entries.retain(|(key, _)| !key.same_value_zero(&k));
         Ok(Value::Bool(entries.len() != before))
@@ -1201,11 +1350,14 @@ fn install_collections(realm: &mut Realm) {
     });
     def_getter(realm, &p, "size", |r, this, _| {
         let o = map_cell(this).ok_or_else(|| r.type_error("Map size on incompatible receiver"))?;
-        let Kind::Map(entries) = &o.borrow().kind else { unreachable!() };
+        let Kind::Map(entries) = &o.borrow().kind else {
+            unreachable!()
+        };
         Ok(Value::Number(entries.len() as f64))
     });
     def(realm, &p, "forEach", 1, |r, this, args| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.forEach on incompatible receiver"))?;
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.forEach on incompatible receiver"))?;
         let f = arg(args, 0);
         callable(r, &f)?;
         let mut i = 0;
@@ -1221,20 +1373,36 @@ fn install_collections(realm: &mut Realm) {
         Ok(Value::Undefined)
     });
     def(realm, &p, "keys", 0, |r, this, _| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.keys on incompatible receiver"))?;
-        Ok(r.iterator_object(IterSource::MapKeys { target: o, index: 0 }))
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.keys on incompatible receiver"))?;
+        Ok(r.iterator_object(IterSource::MapKeys {
+            target: o,
+            index: 0,
+        }))
     });
     def(realm, &p, "values", 0, |r, this, _| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.values on incompatible receiver"))?;
-        Ok(r.iterator_object(IterSource::MapValues { target: o, index: 0 }))
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.values on incompatible receiver"))?;
+        Ok(r.iterator_object(IterSource::MapValues {
+            target: o,
+            index: 0,
+        }))
     });
     def(realm, &p, "entries", 0, |r, this, _| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map.prototype.entries on incompatible receiver"))?;
-        Ok(r.iterator_object(IterSource::MapEntries { target: o, index: 0 }))
+        let o = map_cell(this)
+            .ok_or_else(|| r.type_error("Map.prototype.entries on incompatible receiver"))?;
+        Ok(r.iterator_object(IterSource::MapEntries {
+            target: o,
+            index: 0,
+        }))
     });
     def_iterator(realm, &p, |r, this, _| {
-        let o = map_cell(this).ok_or_else(|| r.type_error("Map iterator on incompatible receiver"))?;
-        Ok(r.iterator_object(IterSource::MapEntries { target: o, index: 0 }))
+        let o =
+            map_cell(this).ok_or_else(|| r.type_error("Map iterator on incompatible receiver"))?;
+        Ok(r.iterator_object(IterSource::MapEntries {
+            target: o,
+            index: 0,
+        }))
     });
     let map = constructor(
         realm,
@@ -1261,26 +1429,35 @@ fn install_collections(realm: &mut Realm) {
 
     let p = realm.intrinsics().set_proto.clone();
     def(realm, &p, "add", 1, |r, this, args| {
-        let o = set_cell(this).ok_or_else(|| r.type_error("Set.prototype.add called on incompatible receiver"))?;
+        let o = set_cell(this)
+            .ok_or_else(|| r.type_error("Set.prototype.add called on incompatible receiver"))?;
         let v = normalize_key(&arg(args, 0));
         let mut d = o.borrow_mut();
-        let Kind::Set(items) = &mut d.kind else { unreachable!() };
+        let Kind::Set(items) = &mut d.kind else {
+            unreachable!()
+        };
         if !items.iter().any(|x| x.same_value_zero(&v)) {
             items.push(v);
         }
         Ok(this.clone())
     });
     def(realm, &p, "has", 1, |r, this, args| {
-        let o = set_cell(this).ok_or_else(|| r.type_error("Set.prototype.has called on incompatible receiver"))?;
+        let o = set_cell(this)
+            .ok_or_else(|| r.type_error("Set.prototype.has called on incompatible receiver"))?;
         let v = arg(args, 0);
-        let Kind::Set(items) = &o.borrow().kind else { unreachable!() };
+        let Kind::Set(items) = &o.borrow().kind else {
+            unreachable!()
+        };
         Ok(Value::Bool(items.iter().any(|x| x.same_value_zero(&v))))
     });
     def(realm, &p, "delete", 1, |r, this, args| {
-        let o = set_cell(this).ok_or_else(|| r.type_error("Set.prototype.delete called on incompatible receiver"))?;
+        let o = set_cell(this)
+            .ok_or_else(|| r.type_error("Set.prototype.delete called on incompatible receiver"))?;
         let v = arg(args, 0);
         let mut d = o.borrow_mut();
-        let Kind::Set(items) = &mut d.kind else { unreachable!() };
+        let Kind::Set(items) = &mut d.kind else {
+            unreachable!()
+        };
         let before = items.len();
         items.retain(|x| !x.same_value_zero(&v));
         Ok(Value::Bool(before != items.len()))
@@ -1295,11 +1472,14 @@ fn install_collections(realm: &mut Realm) {
     });
     def_getter(realm, &p, "size", |r, this, _| {
         let o = set_cell(this).ok_or_else(|| r.type_error("Set size on incompatible receiver"))?;
-        let Kind::Set(items) = &o.borrow().kind else { unreachable!() };
+        let Kind::Set(items) = &o.borrow().kind else {
+            unreachable!()
+        };
         Ok(Value::Number(items.len() as f64))
     });
     def(realm, &p, "forEach", 1, |r, this, args| {
-        let o = set_cell(this).ok_or_else(|| r.type_error("Set.prototype.forEach on incompatible receiver"))?;
+        let o = set_cell(this)
+            .ok_or_else(|| r.type_error("Set.prototype.forEach on incompatible receiver"))?;
         let f = arg(args, 0);
         callable(r, &f)?;
         let mut i = 0;
@@ -1316,13 +1496,21 @@ fn install_collections(realm: &mut Realm) {
     });
     for name in ["values", "keys"] {
         def(realm, &p, name, 0, |r, this, _| {
-            let o = set_cell(this).ok_or_else(|| r.type_error("Set iterator on incompatible receiver"))?;
-            Ok(r.iterator_object(IterSource::SetValues { target: o, index: 0 }))
+            let o = set_cell(this)
+                .ok_or_else(|| r.type_error("Set iterator on incompatible receiver"))?;
+            Ok(r.iterator_object(IterSource::SetValues {
+                target: o,
+                index: 0,
+            }))
         });
     }
     def_iterator(realm, &p, |r, this, _| {
-        let o = set_cell(this).ok_or_else(|| r.type_error("Set iterator on incompatible receiver"))?;
-        Ok(r.iterator_object(IterSource::SetValues { target: o, index: 0 }))
+        let o =
+            set_cell(this).ok_or_else(|| r.type_error("Set iterator on incompatible receiver"))?;
+        Ok(r.iterator_object(IterSource::SetValues {
+            target: o,
+            index: 0,
+        }))
     });
     let set = constructor(
         realm,
@@ -1374,7 +1562,10 @@ fn then(r: &mut Realm, this: &Value, fulfilled: Value, rejected: Value) -> Resul
 struct Race(Vec<super::promise::ValueFuture>);
 impl std::future::Future for Race {
     type Output = Result<Value, Thrown>;
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
         for f in self.0.iter_mut() {
             if let std::task::Poll::Ready(v) = f.as_mut().poll(cx) {
                 return std::task::Poll::Ready(v);
@@ -1386,8 +1577,12 @@ impl std::future::Future for Race {
 
 fn install_promise(realm: &mut Realm) {
     let p = realm.intrinsics().promise_proto.clone();
-    def(realm, &p, "then", 2, |r, this, args| then(r, this, arg(args, 0), arg(args, 1)));
-    def(realm, &p, "catch", 1, |r, this, args| then(r, this, Value::Undefined, arg(args, 0)));
+    def(realm, &p, "then", 2, |r, this, args| {
+        then(r, this, arg(args, 0), arg(args, 1))
+    });
+    def(realm, &p, "catch", 1, |r, this, args| {
+        then(r, this, Value::Undefined, arg(args, 0))
+    });
     def(realm, &p, "finally", 1, |r, this, args| {
         let f = arg(args, 0);
         let source = r.await_value(this.clone());
@@ -1438,7 +1633,9 @@ fn install_promise(realm: &mut Realm) {
         r.resolve_promise(&cell, v);
         Ok(p)
     });
-    def(realm, &c, "reject", 1, |r, _, args| Ok(r.settled_promise(Err(arg(args, 0)))));
+    def(realm, &c, "reject", 1, |r, _, args| {
+        Ok(r.settled_promise(Err(arg(args, 0))))
+    });
     def(realm, &c, "all", 1, |r, _, args| {
         let items = r.collect_iterable(&arg(args, 0))?;
         let futures: Vec<_> = items.into_iter().map(|v| r.await_value(v)).collect();
@@ -1459,8 +1656,12 @@ fn install_promise(realm: &mut Realm) {
             let mut out = vec![];
             for f in futures {
                 out.push(match f.await {
-                    Ok(v) => realm.object_from(vec![("status", Value::str("fulfilled")), ("value", v)]),
-                    Err(e) => realm.object_from(vec![("status", Value::str("rejected")), ("reason", e)]),
+                    Ok(v) => {
+                        realm.object_from(vec![("status", Value::str("fulfilled")), ("value", v)])
+                    }
+                    Err(e) => {
+                        realm.object_from(vec![("status", Value::str("rejected")), ("reason", e)])
+                    }
                 });
             }
             Ok(realm.new_array(out))
@@ -1475,7 +1676,9 @@ fn install_promise(realm: &mut Realm) {
 }
 
 fn install_errors(realm: &mut Realm) {
-    fn error_construct(class: &'static str) -> fn(&mut Realm, &[Value], &Value) -> Result<Value, Thrown> {
+    fn error_construct(
+        class: &'static str,
+    ) -> fn(&mut Realm, &[Value], &Value) -> Result<Value, Thrown> {
         match class {
             "TypeError" => |r, args, t| make_error(r, "TypeError", args, t),
             "RangeError" => |r, args, t| make_error(r, "RangeError", args, t),
@@ -1483,7 +1686,12 @@ fn install_errors(realm: &mut Realm) {
             _ => |r, args, t| make_error(r, "Error", args, t),
         }
     }
-    fn make_error(r: &mut Realm, class: &str, args: &[Value], target: &Value) -> Result<Value, Thrown> {
+    fn make_error(
+        r: &mut Realm,
+        class: &str,
+        args: &[Value],
+        target: &Value,
+    ) -> Result<Value, Thrown> {
         let fallback = r.error_proto_for(class);
         let proto = r.prototype_of_target(target, &fallback)?;
         let e = r.alloc(Kind::Error, Some(&proto));
@@ -1507,8 +1715,12 @@ fn install_errors(realm: &mut Realm) {
     ];
     let mut base: Option<Obj> = None;
     for (name, proto) in classes {
-        proto.borrow_mut().put(PropKey::str("name"), Value::str(name), false);
-        proto.borrow_mut().put(PropKey::str("message"), Value::str(""), false);
+        proto
+            .borrow_mut()
+            .put(PropKey::str("name"), Value::str(name), false);
+        proto
+            .borrow_mut()
+            .put(PropKey::str("message"), Value::str(""), false);
         let construct = error_construct(name);
         let f = realm.function_data(FunctionData {
             name: JsString(name.encode_utf16().collect()),
@@ -1519,8 +1731,14 @@ fn install_errors(realm: &mut Realm) {
             })),
             construct: Some(Rc::new(construct)),
         });
-        def_value(f.object().unwrap(), "prototype", Value::Object(proto.clone()));
-        proto.borrow_mut().put(PropKey::str("constructor"), f.clone(), false);
+        def_value(
+            f.object().unwrap(),
+            "prototype",
+            Value::Object(proto.clone()),
+        );
+        proto
+            .borrow_mut()
+            .put(PropKey::str("constructor"), f.clone(), false);
         if let Some(base) = &base
             && let Some(o) = f.object()
         {
@@ -1530,9 +1748,17 @@ fn install_errors(realm: &mut Realm) {
             base = f.object().cloned();
             def(realm, &proto, "toString", 0, |r, this, _| {
                 let name = r.get_str(this, "name")?;
-                let name = if matches!(name, Value::Undefined) { units("Error") } else { r.to_string(&name)? };
+                let name = if matches!(name, Value::Undefined) {
+                    units("Error")
+                } else {
+                    r.to_string(&name)?
+                };
                 let message = r.get_str(this, "message")?;
-                let message = if matches!(message, Value::Undefined) { units("") } else { r.to_string(&message)? };
+                let message = if matches!(message, Value::Undefined) {
+                    units("")
+                } else {
+                    r.to_string(&message)?
+                };
                 Ok(Value::String(match (name.is_empty(), message.is_empty()) {
                     (_, true) => name,
                     (true, false) => message,
@@ -1598,8 +1824,12 @@ fn install_misc(realm: &mut Realm) {
             _ => Err(r.type_error("this is not a Date object.")),
         }
     }
-    def(realm, &d, "getTime", 0, |r, this, _| Ok(Value::Number(time(r, this)?)));
-    def(realm, &d, "valueOf", 0, |r, this, _| Ok(Value::Number(time(r, this)?)));
+    def(realm, &d, "getTime", 0, |r, this, _| {
+        Ok(Value::Number(time(r, this)?))
+    });
+    def(realm, &d, "valueOf", 0, |r, this, _| {
+        Ok(Value::Number(time(r, this)?))
+    });
     def(realm, &d, "toISOString", 0, |r, this, _| {
         let t = time(r, this)?;
         if !t.is_finite() {
@@ -1609,7 +1839,11 @@ fn install_misc(realm: &mut Realm) {
     });
     def(realm, &d, "toJSON", 1, |r, this, _| {
         let t = time(r, this)?;
-        Ok(if t.is_finite() { Value::str(&iso_string(t)) } else { Value::Null })
+        Ok(if t.is_finite() {
+            Value::str(&iso_string(t))
+        } else {
+            Value::Null
+        })
     });
     let date = constructor(
         realm,
@@ -1636,7 +1870,9 @@ fn install_misc(realm: &mut Realm) {
             Ok(r.alloc(Kind::Date(t), Some(&proto)))
         }),
     );
-    def(realm, date.object().unwrap(), "now", 0, |r, _, _| Ok(Value::Number(r.runtime().now_ms())));
+    def(realm, date.object().unwrap(), "now", 0, |r, _, _| {
+        Ok(Value::Number(r.runtime().now_ms()))
+    });
     realm.set_global("Date", date);
 
     let realm_copy = realm.clone();
@@ -1663,7 +1899,11 @@ fn install_timers(realm: &mut Realm) {
     let set_timeout = realm.native("setTimeout", 2, move |r, _, args| {
         let callback = arg(args, 0);
         let delay = r.to_number(&arg(args, 1))?;
-        let delay = if delay.is_finite() && delay > 0.0 { delay as u64 } else { 0 };
+        let delay = if delay.is_finite() && delay > 0.0 {
+            delay as u64
+        } else {
+            0
+        };
         let rest: Vec<Value> = args.get(2..).unwrap_or_default().to_vec();
         let cancelled = Rc::new(std::cell::Cell::new(false));
         let id = {
@@ -1706,7 +1946,13 @@ fn install_timers(realm: &mut Realm) {
 fn install_console(realm: &mut Realm) {
     let console = realm.new_object();
     let c = console.object().unwrap().clone();
-    for (name, severity) in [("log", "info"), ("info", "info"), ("debug", "debug"), ("warn", "warning"), ("error", "error")] {
+    for (name, severity) in [
+        ("log", "info"),
+        ("info", "info"),
+        ("debug", "debug"),
+        ("warn", "warning"),
+        ("error", "error"),
+    ] {
         let f = realm.native(name, 0, move |r, _, args| {
             let mut parts = vec![];
             for a in args {
@@ -1720,7 +1966,9 @@ fn install_console(realm: &mut Realm) {
     realm.set_global("console", console);
     let performance = realm.new_object();
     let p = performance.object().unwrap().clone();
-    def(realm, &p, "now", 0, |r, _, _| Ok(Value::Number(r.runtime().monotonic_now_ms())));
+    def(realm, &p, "now", 0, |r, _, _| {
+        Ok(Value::Number(r.runtime().monotonic_now_ms()))
+    });
     realm.set_global("performance", performance);
 }
 
@@ -1729,7 +1977,12 @@ pub fn iso_string(t: f64) -> String {
     let ms = t as i64;
     let days = ms.div_euclid(86_400_000);
     let rem = ms.rem_euclid(86_400_000);
-    let (h, m, s, milli) = (rem / 3_600_000, rem / 60_000 % 60, rem / 1000 % 60, rem % 1000);
+    let (h, m, s, milli) = (
+        rem / 3_600_000,
+        rem / 60_000 % 60,
+        rem / 1000 % 60,
+        rem % 1000,
+    );
     // civil-from-days (Howard Hinnant).
     let z = days + 719_468;
     let era = z.div_euclid(146_097);

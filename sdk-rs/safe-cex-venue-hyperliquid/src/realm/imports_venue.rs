@@ -23,7 +23,9 @@ struct BuilderOptions {
 }
 impl HyperliquidBuilderProvider for BuilderOptions {
     type Error = std::convert::Infallible;
-    fn hyperliquid_builder(&self) -> Result<Option<Cow<'_, HyperliquidBuilderConfig>>, Self::Error> {
+    fn hyperliquid_builder(
+        &self,
+    ) -> Result<Option<Cow<'_, HyperliquidBuilderConfig>>, Self::Error> {
         Ok(self.builder.as_ref().map(Cow::Borrowed))
     }
     fn testnet(&self) -> Result<Option<bool>, Self::Error> {
@@ -51,7 +53,11 @@ fn unreadable_error_class(realm: &Realm) -> Value {
                 &base,
                 std::rc::Rc::new(|r, class, args, new_target| {
                     let e = r.super_construct(class, args, new_target)?;
-                    r.set_str(&e, "name", Value::str("HyperliquidUnreadableOrderResponseError"))?;
+                    r.set_str(
+                        &e,
+                        "name",
+                        Value::str("HyperliquidUnreadableOrderResponseError"),
+                    )?;
                     Ok(e)
                 }),
             )
@@ -61,12 +67,21 @@ fn unreadable_error_class(realm: &Realm) -> Value {
 }
 
 pub fn bind(realm: &Realm) {
-    realm.bind_import("HyperliquidUnreadableOrderResponseError", unreadable_error_class(realm));
-    let b = |name: &'static str, length: u8, body: fn(&mut Realm, &[Value]) -> Result<Value, Thrown>| {
+    realm.bind_import(
+        "HyperliquidUnreadableOrderResponseError",
+        unreadable_error_class(realm),
+    );
+    let b = |name: &'static str,
+             length: u8,
+             body: fn(&mut Realm, &[Value]) -> Result<Value, Thrown>| {
         realm.bind_import(name, realm.native(name, length, move |r, _, a| body(r, a)));
     };
     b("calculatePricePrecision", 3, |r, a| {
-        let (p, amount, max) = (num(r, &arg(a, 0))?, num(r, &arg(a, 1))?, num(r, &arg(a, 2))?);
+        let (p, amount, max) = (
+            num(r, &arg(a, 0))?,
+            num(r, &arg(a, 1))?,
+            num(r, &arg(a, 2))?,
+        );
         market_helpers::calculate_price_precision(r, p, amount, max).map(Value::Number)
     });
     b("symbolToCoin", 1, |r, a| {
@@ -75,21 +90,31 @@ pub fn bind(realm: &Realm) {
     });
     b("parseHyperliquidOpenInterestNotional", 2, |r, a| {
         let price = num(r, &arg(a, 1))?;
-        market_helpers::parse_hyperliquid_open_interest_notional(r, &arg(a, 0), price).map(Value::Number)
+        market_helpers::parse_hyperliquid_open_interest_notional(r, &arg(a, 0), price)
+            .map(Value::Number)
     });
     b("parseHyperliquidVolumeFields", 2, |r, a| {
         let price = num(r, &arg(a, 1))?;
         let f = market_helpers::parse_hyperliquid_volume_fields(r, &arg(a, 0), price)?;
-        Ok(r.object_from(vec![("volume", Value::Number(f.volume)), ("quoteVolume", Value::Number(f.quote_volume))]))
+        Ok(r.object_from(vec![
+            ("volume", Value::Number(f.volume)),
+            ("quoteVolume", Value::Number(f.quote_volume)),
+        ]))
     });
-    b("decodeHyperliquidFastAssetCtxs", 1, |r, a| market_helpers::decode_hyperliquid_fast_asset_ctxs(r, &arg(a, 0)));
+    b("decodeHyperliquidFastAssetCtxs", 1, |r, a| {
+        market_helpers::decode_hyperliquid_fast_asset_ctxs(r, &arg(a, 0))
+    });
     b("calculatePriceChangePercentage", 2, |r, a| {
         let (p, prev) = (num(r, &arg(a, 0))?, num(r, &arg(a, 1))?);
-        Ok(Value::Number(exchange_helpers::calculate_price_change_percentage(p, prev)))
+        Ok(Value::Number(
+            exchange_helpers::calculate_price_change_percentage(p, prev),
+        ))
     });
     b("parseFiniteNumber", 1, |r, a| {
         let v = r.to_serde(&arg(a, 0))?;
-        exchange_helpers::parse_finite_number(&v).map(Value::Number).map_err(|e| r.error_of(e.name, e.message))
+        exchange_helpers::parse_finite_number(&v)
+            .map(Value::Number)
+            .map_err(|e| r.error_of(e.name, e.message))
     });
     b("parseHyperliquidOrderTimeInForce", 1, |r, a| {
         let v = r.to_serde(&arg(a, 0))?;
@@ -100,7 +125,8 @@ pub fn bind(realm: &Realm) {
     });
     b("inferHyperliquidOrderTypeAndPrice", 1, |r, a| {
         let v = r.to_serde(&arg(a, 0))?;
-        let out = order_inference::infer_hyperliquid_order_type_and_price(&v).map_err(|e| r.error_of(&e.name.clone(), &e.message))?;
+        let out = order_inference::infer_hyperliquid_order_type_and_price(&v)
+            .map_err(|e| r.error_of(&e.name.clone(), &e.message))?;
         let kind = r.from_typed(&out.r#type)?;
         use order_inference::HyperliquidOrderInferenceSource as S;
         let source = match out.source {
@@ -113,9 +139,17 @@ pub fn bind(realm: &Realm) {
             S::NoOrderTypeFallback => "no-orderType-fallback",
             S::FallbackMarket => "fallback-market",
         };
-        Ok(r.object_from(vec![("type", kind), ("price", Value::Number(out.price)), ("source", Value::str(source))]))
+        Ok(r.object_from(vec![
+            ("type", kind),
+            ("price", Value::Number(out.price)),
+            ("source", Value::str(source)),
+        ]))
     });
-    b("getBuilderAddress", 1, |_, a| Ok(Value::str(constants::get_builder_address(arg(a, 0).truthy()))));
+    b("getBuilderAddress", 1, |_, a| {
+        Ok(Value::str(constants::get_builder_address(
+            arg(a, 0).truthy(),
+        )))
+    });
     b("builderFeeRateFromTenthsBps", 1, |r, a| {
         let n = num(r, &arg(a, 0))?;
         Ok(Value::str(&constants::builder_fee_rate_from_tenths_bps(n)))
@@ -131,10 +165,20 @@ pub fn bind(realm: &Realm) {
             } else {
                 let address = r.get_str(&builder, "address")?;
                 let fee = r.get_str(&builder, "feeTenthsBps")?;
-                Some(HyperliquidBuilderConfig { address: r.to_string(&address)?.to_vec(), fee_tenths_bps: r.to_number(&fee)? })
+                Some(HyperliquidBuilderConfig {
+                    address: r.to_string(&address)?.to_vec(),
+                    fee_tenths_bps: r.to_number(&fee)?,
+                })
             };
             let testnet = r.get_str(&options, "testnet")?;
-            Some(BuilderOptions { builder, testnet: if testnet.is_nullish() { None } else { Some(testnet.truthy()) } })
+            Some(BuilderOptions {
+                builder,
+                testnet: if testnet.is_nullish() {
+                    None
+                } else {
+                    Some(testnet.truthy())
+                },
+            })
         };
         let Ok(resolved) = constants::resolve_hyperliquid_builder(provider.as_ref());
         Ok(r.object_from(vec![
@@ -142,30 +186,44 @@ pub fn bind(realm: &Realm) {
             ("feeTenthsBps", Value::Number(resolved.fee_tenths_bps)),
         ]))
     });
-    b("maskHyperliquidAddress", 1, |r, a| Ok(opt_js(json_boundaries::mask_hyperliquid_address(r, &arg(a, 0)))));
+    b("maskHyperliquidAddress", 1, |r, a| {
+        Ok(opt_js(json_boundaries::mask_hyperliquid_address(
+            r,
+            &arg(a, 0),
+        )))
+    });
     b("formatHyperliquidWsDiagnostic", 2, |r, a| {
         let scope = js(r.to_string(&arg(a, 0))?);
-        json_boundaries::format_hyperliquid_ws_diagnostic(r, &scope, &arg(a, 1)).map(|s| Value::js(&s))
+        json_boundaries::format_hyperliquid_ws_diagnostic(r, &scope, &arg(a, 1))
+            .map(|s| Value::js(&s))
     });
     b("shouldEmitHyperliquidWsReceiveDiagnostic", 2, |r, a| {
         let scope = js(r.to_string(&arg(a, 0))?);
-        json_boundaries::should_emit_hyperliquid_ws_receive_diagnostic(r, &scope, &arg(a, 1)).map(Value::Bool)
+        json_boundaries::should_emit_hyperliquid_ws_receive_diagnostic(r, &scope, &arg(a, 1))
+            .map(Value::Bool)
     });
     b("shouldEmitHyperliquidWsSendDiagnostic", 1, |r, a| {
         json_boundaries::should_emit_hyperliquid_ws_send_diagnostic(r, &arg(a, 0)).map(Value::Bool)
     });
     b("parseHyperliquidExchangePayload", 1, |r, a| {
-        Ok(json_boundaries::parse_hyperliquid_exchange_payload(r, &arg(a, 0))?.unwrap_or(Value::Undefined))
+        Ok(
+            json_boundaries::parse_hyperliquid_exchange_payload(r, &arg(a, 0))?
+                .unwrap_or(Value::Undefined),
+        )
     });
     b("getHyperliquidRestRequestWeight", 2, |r, a| {
         let url = r.to_rust_string(&arg(a, 0))?;
         let data = r.to_serde(&arg(a, 1))?;
-        rate_limit::get_hyperliquid_rest_request_weight(&url, &data).map(Value::Number).map_err(|e| r.error_of(e.name, e.message))
+        rate_limit::get_hyperliquid_rest_request_weight(&url, &data)
+            .map(Value::Number)
+            .map_err(|e| r.error_of(e.name, e.message))
     });
     b("orderCarriesClientOrderId", 2, |r, a| {
         let order: safe_cex_types::Order = r.to_typed(&arg(a, 0))?;
         let id = r.to_rust_string(&arg(a, 1))?;
-        Ok(Value::Bool(safe_cex_exchange::client_order_id::order_carries_client_order_id(&order, &id)))
+        Ok(Value::Bool(
+            safe_cex_exchange::client_order_id::order_carries_client_order_id(&order, &id),
+        ))
     });
     // Object.assign(orderIds, { clientOrderId }): the same array, now carrying the ID.
     b("withReplacementClientOrderId", 2, |r, a| {
@@ -181,22 +239,31 @@ pub fn bind(realm: &Realm) {
             let args = [arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3)];
             Ok(r.spawn_value(Box::pin(async move {
                 let mut realm = realm;
-                crate::browser_approval_flows::check_builder_fee_approved(&mut realm, &args[0], &args[1], &args[2], &args[3]).await
+                crate::browser_approval_flows::check_builder_fee_approved(
+                    &mut realm, &args[0], &args[1], &args[2], &args[3],
+                )
+                .await
             })))
         }),
     );
     // ethers.Wallet stand-in: the address is public; the key stays native.
     b("createWalletFromPrivateKey", 1, |r, a| {
         let key = r.to_rust_string(&arg(a, 0))?;
-        let signer = safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&key).map_err(|e| r.error(&e))?;
+        let signer = safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&key)
+            .map_err(|e| r.error(&e))?;
         let wallet = r.host_object(std::rc::Rc::new(WalletKey(key)));
-        r.define_str(&wallet, "address", Value::str(&signer.address().to_string()))?;
+        r.define_str(
+            &wallet,
+            "address",
+            Value::str(&signer.address().to_string()),
+        )?;
         Ok(wallet)
     });
     b("orderRequestToOrderWire", 2, |r, a| {
         let order = r.to_serde(&arg(a, 0))?;
         let asset = num(r, &arg(a, 1))?;
-        let payload = crate::signing::order_request_to_order_wire(&order, asset).map_err(|e| r.error_of(e.name, &e.message))?;
+        let payload = crate::signing::order_request_to_order_wire(&order, asset)
+            .map_err(|e| r.error_of(e.name, &e.message))?;
         use crate::signing::SigningInput;
         Ok(r.from_js_json(&payload.encoding_view()))
     });
@@ -222,9 +289,9 @@ pub fn bind(realm: &Realm) {
         );
     }
     b("signL1Action", 5, |r, a| {
-        let wallet = arg(a, 0)
-            .host::<WalletKey>()
-            .ok_or_else(|| r.type_error("signL1Action expects a wallet from createWalletFromPrivateKey"))?;
+        let wallet = arg(a, 0).host::<WalletKey>().ok_or_else(|| {
+            r.type_error("signL1Action expects a wallet from createWalletFromPrivateKey")
+        })?;
         let action = SignedView(r.to_js_json(&arg(a, 1))?);
         let vault = match arg(a, 2) {
             v if v.is_nullish() => None,
@@ -235,9 +302,10 @@ pub fn bind(realm: &Realm) {
             Value::Undefined => true,
             v => v.truthy(),
         };
-        let result = crate::signing::sign_l1_action(&wallet.0, &action, vault.as_deref(), &nonce, mainnet)
-            .map_err(|e| r.error(&e))
-            .and_then(|sig| r.from_typed(&sig));
+        let result =
+            crate::signing::sign_l1_action(&wallet.0, &action, vault.as_deref(), &nonce, mainnet)
+                .map_err(|e| r.error(&e))
+                .and_then(|sig| r.from_typed(&sig));
         Ok(r.settled_promise(result))
     });
     b("parseHyperliquidOrderResponse", 1, |r, a| {
@@ -246,7 +314,10 @@ pub fn bind(realm: &Realm) {
         match crate::order_response::parse_hyperliquid_order_response(&data) {
             Ok(parsed) => {
                 let ids = r.from_typed(&parsed.order_ids)?;
-                Ok(r.object_from(vec![("orderIds", ids), ("waitingForTrigger", Value::Bool(parsed.waiting_for_trigger))]))
+                Ok(r.object_from(vec![
+                    ("orderIds", ids),
+                    ("waitingForTrigger", Value::Bool(parsed.waiting_for_trigger)),
+                ]))
             }
             Err(E::Unreadable(e)) => {
                 let class = unreadable_error_class(r);

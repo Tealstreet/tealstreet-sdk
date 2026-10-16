@@ -17,15 +17,15 @@ pub mod facade_exchange;
 pub mod facade_rest;
 pub mod facade_socket;
 pub mod facade_store;
-pub mod imports;
-pub mod imports_utils;
-pub mod imports_venue;
-mod host_classes;
 mod host_cache;
+mod host_classes;
 mod host_core;
 mod host_leaves;
 mod host_market;
 mod host_startup;
+pub mod imports;
+pub mod imports_utils;
+pub mod imports_venue;
 
 use crate::spot_json::JsString;
 use safe_cex_exchange::runtime::ExchangeRuntime;
@@ -74,7 +74,10 @@ pub struct Realm {
 }
 
 fn proto(parent: Option<&Obj>) -> Obj {
-    Rc::new(RefCell::new(ObjectData::new(Kind::Ordinary, parent.cloned())))
+    Rc::new(RefCell::new(ObjectData::new(
+        Kind::Ordinary,
+        parent.cloned(),
+    )))
 }
 
 impl Realm {

@@ -29,7 +29,15 @@ fn enumeration(r: &Realm, rows: &[(&str, &str)]) -> Value {
 
 pub fn bind(realm: &Realm) {
     let enums: [(&str, &[(&str, &str)]); 8] = [
-        ("LogSeverity", &[("Debug", "debug"), ("Info", "info"), ("Warning", "warning"), ("Error", "error")]),
+        (
+            "LogSeverity",
+            &[
+                ("Debug", "debug"),
+                ("Info", "info"),
+                ("Warning", "warning"),
+                ("Error", "error"),
+            ],
+        ),
         ("OrderSide", &[("Buy", "buy"), ("Sell", "sell")]),
         (
             "OrderType",
@@ -63,8 +71,14 @@ pub fn bind(realm: &Realm) {
             ],
         ),
         ("PositionSide", &[("Long", "long"), ("Short", "short")]),
-        ("PositionMode", &[("Hedged", "hedged"), ("OneWay", "oneway")]),
-        ("MarginType", &[("Isolated", "isolated"), ("Cross", "cross")]),
+        (
+            "PositionMode",
+            &[("Hedged", "hedged"), ("OneWay", "oneway")],
+        ),
+        (
+            "MarginType",
+            &[("Isolated", "isolated"), ("Cross", "cross")],
+        ),
     ];
     for (name, rows) in enums {
         realm.bind_import(name, enumeration(realm, rows));
@@ -73,9 +87,18 @@ pub fn bind(realm: &Realm) {
     realm.bind_import("ENDPOINTS", table(realm, types::ENDPOINTS));
     realm.bind_import("INFO_TYPES", table(realm, types::INFO_TYPES));
     realm.bind_import("EXCHANGE_TYPES", table(realm, types::EXCHANGE_TYPES));
-    realm.bind_import("GRAFANA_ENDPOINTS_EVERY", strings(realm, types::GRAFANA_ENDPOINTS_EVERY));
-    realm.bind_import("GRAFANA_ENDPOINTS_PERIODIC", strings(realm, types::GRAFANA_ENDPOINTS_PERIODIC));
-    realm.bind_import("SPOT_ASSET_INDEX_OFFSET", Value::Number(crate::constants::SPOT_ASSET_INDEX_OFFSET as f64));
+    realm.bind_import(
+        "GRAFANA_ENDPOINTS_EVERY",
+        strings(realm, types::GRAFANA_ENDPOINTS_EVERY),
+    );
+    realm.bind_import(
+        "GRAFANA_ENDPOINTS_PERIODIC",
+        strings(realm, types::GRAFANA_ENDPOINTS_PERIODIC),
+    );
+    realm.bind_import(
+        "SPOT_ASSET_INDEX_OFFSET",
+        Value::Number(crate::constants::SPOT_ASSET_INDEX_OFFSET as f64),
+    );
     realm.bind_import(
         "PERP_MAX_PRICE_DECIMALS",
         Value::Number(crate::constants::PERP_MAX_PRICE_DECIMALS as f64),
@@ -87,7 +110,9 @@ pub fn bind(realm: &Realm) {
 
     // virtualClock: the runtime's wall clock (the venue offset is host-owned).
     let clock = realm.new_object();
-    let now = realm.native("getCurrentTimeMs", 0, |r, _, _| Ok(Value::Number(r.runtime().now_ms())));
+    let now = realm.native("getCurrentTimeMs", 0, |r, _, _| {
+        Ok(Value::Number(r.runtime().now_ms()))
+    });
     realm.define_hidden(&clock, PropKey::str("getCurrentTimeMs"), now);
     realm.bind_import("virtualClock", clock);
 
@@ -104,14 +129,20 @@ fn bind_startup(realm: &Realm) {
     realm.bind_import(
         "fetchCoreMetaAndAssetCtxsWithFallback",
         realm.native("fetchCoreMetaAndAssetCtxsWithFallback", 1, |r, _, a| {
-            let observer = crate::market_startup::fetch_core_meta_and_asset_ctxs_with_fallback(r.clone(), arg(a, 0));
+            let observer = crate::market_startup::fetch_core_meta_and_asset_ctxs_with_fallback(
+                r.clone(),
+                arg(a, 0),
+            );
             Ok(r.spawn_value(Box::pin(observer)))
         }),
     );
     realm.bind_import(
         "fetchHip3MetaAndAssetCtxsWithRetry",
         realm.native("fetchHip3MetaAndAssetCtxsWithRetry", 1, |r, _, a| {
-            let observer = crate::market_startup::fetch_hip3_meta_and_asset_ctxs_with_retry(r.clone(), arg(a, 0));
+            let observer = crate::market_startup::fetch_hip3_meta_and_asset_ctxs_with_retry(
+                r.clone(),
+                arg(a, 0),
+            );
             Ok(r.spawn_value(Box::pin(observer)))
         }),
     );
@@ -138,12 +169,18 @@ fn bind_cloid(realm: &Realm) {
     let f = realm.native("mint", 0, |r, _, _| mint(r));
     realm.define_hidden(&o, PropKey::str("mint"), f);
     realm.bind_import("hyperliquidClientOrderIdRule", o);
-    realm.bind_import("mintHyperliquidCloid", realm.native("mintHyperliquidCloid", 0, |r, _, _| mint(r)));
+    realm.bind_import(
+        "mintHyperliquidCloid",
+        realm.native("mintHyperliquidCloid", 0, |r, _, _| mint(r)),
+    );
     realm.bind_import(
         "readHyperliquidCloid",
         realm.native("readHyperliquidCloid", 1, |r, _, a| {
             let v = r.to_serde(&arg(a, 0))?;
-            Ok(cloid::read_hyperliquid_cloid(Some(&v)).map_or(Value::Undefined, |s| Value::str(&s)))
+            Ok(
+                cloid::read_hyperliquid_cloid(Some(&v))
+                    .map_or(Value::Undefined, |s| Value::str(&s)),
+            )
         }),
     );
     realm.bind_import(
@@ -152,7 +189,8 @@ fn bind_cloid(realm: &Realm) {
             let wire = r.to_serde(&arg(a, 0))?;
             let symbol = r.to_rust_string(&arg(a, 1))?;
             let placed_at = r.to_number(&arg(a, 2))?;
-            let record = cloid::placement_record_from_wire(&wire, symbol, placed_at).map_err(|e| r.type_error(&e))?;
+            let record = cloid::placement_record_from_wire(&wire, symbol, placed_at)
+                .map_err(|e| r.type_error(&e))?;
             r.from_typed(&record)
         }),
     );
@@ -168,5 +206,9 @@ fn bind_cloid(realm: &Realm) {
 fn mint(r: &mut Realm) -> Result<Value, Thrown> {
     cloid::mint_hyperliquid_cloid()
         .map(|s| Value::str(&s))
-        .map_err(|e| r.error(&format!("platform CSPRNG unavailable for cloid minting: {e}")))
+        .map_err(|e| {
+            r.error(&format!(
+                "platform CSPRNG unavailable for cloid minting: {e}"
+            ))
+        })
 }

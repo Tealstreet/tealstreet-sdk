@@ -6,7 +6,9 @@ use crate::{
     api::{ApiClient, create_exchange_api, create_info_api},
     rate_limit::RateLimiter,
 };
-use safe_cex_exchange::{error_reporting::ExchangeErrorInput, exchange::BaseExchange, runtime::ExchangeError};
+use safe_cex_exchange::{
+    error_reporting::ExchangeErrorInput, exchange::BaseExchange, runtime::ExchangeError,
+};
 use safe_cex_transport::{
     RestAdapter, RestResponseBody,
     rate_limit::{RateLimitClock, RateLimitedAdapter},
@@ -57,9 +59,20 @@ pub fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
-fn build(deps: &RestDependencies, base: &Rc<BaseExchange>, kind: ClientKind, options: ExchangeOptions, max_rps: Option<usize>) -> ApiClient {
+fn build(
+    deps: &RestDependencies,
+    base: &Rc<BaseExchange>,
+    kind: ClientKind,
+    options: ExchangeOptions,
+    max_rps: Option<usize>,
+) -> ApiClient {
     let adapter: Arc<dyn RestAdapter> = match max_rps {
-        Some(n) => Arc::new(RateLimitedAdapter::new(deps.http.clone(), deps.clock.clone(), n.max(1), 1000)),
+        Some(n) => Arc::new(RateLimitedAdapter::new(
+            deps.http.clone(),
+            deps.clock.clone(),
+            n.max(1),
+            1000,
+        )),
         None => deps.http.clone(),
     };
     let reporter = base.clone();
@@ -67,7 +80,10 @@ fn build(deps: &RestDependencies, base: &Rc<BaseExchange>, kind: ClientKind, opt
         if let Err(error) =
             reporter.emit_and_log_error(ExchangeErrorInput::Message(message.into()), None, None)
         {
-            reporter.runtime.report_exception(&error, &serde_json::json!({ "context": "hyperliquid api emit" }));
+            reporter.runtime.report_exception(
+                &error,
+                &serde_json::json!({ "context": "hyperliquid api emit" }),
+            );
         }
     });
     match kind {
@@ -94,9 +110,13 @@ fn client_object(realm: &Realm, client: Client) -> Value {
                         RestResponseBody::Encoded(bytes) => {
                             let text = String::from_utf8_lossy(bytes);
                             let units: Vec<u16> = text.encode_utf16().collect();
-                            realm.parse_json(&units).unwrap_or_else(|_| Value::str(&text))
+                            realm
+                                .parse_json(&units)
+                                .unwrap_or_else(|_| Value::str(&text))
                         }
-                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => realm.from_serde(v),
+                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => {
+                            realm.from_serde(v)
+                        }
                     };
                     let headers = realm.from_typed(&response.headers)?;
                     Ok(realm.object_from(vec![
@@ -116,7 +136,10 @@ fn client_object(realm: &Realm, client: Client) -> Value {
 /// Bind the three API factory imports for one exchange instance.
 pub fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: RestDependencies) {
     let deps_for_fetch = deps.http.clone();
-    for (name, kind) in [("createExchangeAPI", ClientKind::Exchange), ("createInfoAPI", ClientKind::Info)] {
+    for (name, kind) in [
+        ("createExchangeAPI", ClientKind::Exchange),
+        ("createInfoAPI", ClientKind::Info),
+    ] {
         let deps = deps.clone();
         let base = base.clone();
         let factory = realm.native(name, 2, move |r, _, args| {
@@ -135,8 +158,21 @@ pub fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: RestDepen
         if !(max_rps.is_finite() && max_rps >= 1.0) {
             return Err(r.error_of("RangeError", "rateLimit maxRPS must be a positive number"));
         }
-        let api = Rc::new(build(&deps, &base, client.kind, client.options.clone(), Some(max_rps as usize)));
-        Ok(client_object(r, Client { kind: client.kind, options: client.options.clone(), api }))
+        let api = Rc::new(build(
+            &deps,
+            &base,
+            client.kind,
+            client.options.clone(),
+            Some(max_rps as usize),
+        ));
+        Ok(client_object(
+            r,
+            Client {
+                kind: client.kind,
+                options: client.options.clone(),
+                api,
+            },
+        ))
     });
     realm.bind_import("rateLimit", rate_limit);
     bind_fetch(realm, deps_for_fetch);
@@ -162,7 +198,10 @@ fn bind_fetch(realm: &Realm, http: Arc<dyn RestAdapter>) {
             if headers.object().is_some() {
                 for (k, v) in r.own_entries(&headers)? {
                     let value = r.to_rust_string(&v)?;
-                    request.headers.insert(String::from_utf16_lossy(k.units().unwrap_or_default()), value);
+                    request.headers.insert(
+                        String::from_utf16_lossy(k.units().unwrap_or_default()),
+                        value,
+                    );
                 }
             }
             let body = r.get_str(&init, "body")?;
@@ -175,10 +214,15 @@ fn bind_fetch(realm: &Realm, http: Arc<dyn RestAdapter>) {
         let realm = r.clone();
         Ok(r.spawn_value(Box::pin(async move {
             let mut realm = realm;
-            let response = http.execute(request).await.map_err(|f| thrown_from(&mut realm, ExchangeError::from(f)))?;
+            let response = http
+                .execute(request)
+                .await
+                .map_err(|f| thrown_from(&mut realm, ExchangeError::from(f)))?;
             let text = match &response.body {
                 RestResponseBody::Encoded(bytes) => String::from_utf8_lossy(bytes).into_owned(),
-                RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v.to_string(),
+                RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => {
+                    v.to_string()
+                }
             };
             let status = response.status;
             let out = realm.object_from(vec![
@@ -192,7 +236,9 @@ fn bind_fetch(realm: &Realm, http: Arc<dyn RestAdapter>) {
                 Ok(r.settled_promise(parsed))
             });
             realm.define_hidden(&out, PropKey::str("json"), json);
-            let text_fn = realm.native("text", 0, move |r, _, _| Ok(r.settled_promise(Ok(Value::str(&text)))));
+            let text_fn = realm.native("text", 0, move |r, _, _| {
+                Ok(r.settled_promise(Ok(Value::str(&text))))
+            });
             realm.define_hidden(&out, PropKey::str("text"), text_fn);
             Ok(out)
         })))

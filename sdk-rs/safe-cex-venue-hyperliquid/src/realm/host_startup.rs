@@ -47,7 +47,8 @@ impl MetaTupleHost for Realm {
         Ok(js(Realm::to_string(self, value)?))
     }
     fn log_warning(&mut self, message: &JsString) -> Result<(), Value> {
-        self.runtime().console("warning", &String::from_utf16_lossy(&message.0));
+        self.runtime()
+            .console("warning", &String::from_utf16_lossy(&message.0));
         Ok(())
     }
 }

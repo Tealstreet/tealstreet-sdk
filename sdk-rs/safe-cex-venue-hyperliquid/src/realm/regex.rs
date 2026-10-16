@@ -54,7 +54,11 @@ impl Pattern {
     pub fn split(&self, units: &[u16]) -> Vec<Option<Vec<u16>>> {
         let text = String::from_utf16_lossy(units);
         if text.is_empty() {
-            return if self.re.is_match("") { vec![] } else { vec![Some(vec![])] };
+            return if self.re.is_match("") {
+                vec![]
+            } else {
+                vec![Some(vec![])]
+            };
         }
         let mut out = vec![];
         let mut last = 0;
@@ -106,6 +110,9 @@ mod tests {
         let p = Pattern::literal(r#"/"type"\s*:\s*"([^\"]+)"/"#).unwrap();
         let (start, groups) = p.exec(&u(r#"{"a":1,"type" : "order"}"#)).unwrap();
         assert_eq!(start, 7);
-        assert_eq!(String::from_utf16_lossy(groups[1].as_ref().unwrap()), "order");
+        assert_eq!(
+            String::from_utf16_lossy(groups[1].as_ref().unwrap()),
+            "order"
+        );
     }
 }

@@ -2,12 +2,7 @@
 //! `Rc` cells, so cloning a `Value` keeps its native identity.
 use super::Realm;
 use crate::spot_json::JsString;
-use std::{
-    cell::RefCell,
-    fmt,
-    rc::Rc,
-    task::Waker,
-};
+use std::{cell::RefCell, fmt, rc::Rc, task::Waker};
 
 pub type Obj = Rc<RefCell<ObjectData>>;
 pub type Thrown = Value;
@@ -78,15 +73,39 @@ pub struct PromiseCell {
 }
 
 pub enum IterSource {
-    Array { target: Obj, index: usize },
-    MapEntries { target: Obj, index: usize },
-    MapKeys { target: Obj, index: usize },
-    MapValues { target: Obj, index: usize },
-    SetValues { target: Obj, index: usize },
-    String { units: Rc<[u16]>, index: usize },
-    Keys { keys: Vec<Value>, index: usize },
+    Array {
+        target: Obj,
+        index: usize,
+    },
+    MapEntries {
+        target: Obj,
+        index: usize,
+    },
+    MapKeys {
+        target: Obj,
+        index: usize,
+    },
+    MapValues {
+        target: Obj,
+        index: usize,
+    },
+    SetValues {
+        target: Obj,
+        index: usize,
+    },
+    String {
+        units: Rc<[u16]>,
+        index: usize,
+    },
+    Keys {
+        keys: Vec<Value>,
+        index: usize,
+    },
     /// A user iterator object with `next` (and optionally `return`).
-    Protocol { iterator: Value, next: Value },
+    Protocol {
+        iterator: Value,
+        next: Value,
+    },
     Done,
 }
 
@@ -249,7 +268,9 @@ impl PropKey {
             if !(b'0' as u16..=b'9' as u16).contains(&unit) {
                 return None;
             }
-            value = value.checked_mul(10)?.checked_add((unit - b'0' as u16) as usize)?;
+            value = value
+                .checked_mul(10)?
+                .checked_add((unit - b'0' as u16) as usize)?;
         }
         (value < u32::MAX as usize).then_some(value)
     }

@@ -20,7 +20,10 @@ pub fn number_to_string(x: f64) -> String {
     if x.abs() < 1.0 {
         let mut parts = s.splitn(2, "e-");
         let mantissa = parts.next().unwrap_or("");
-        let exponent = parts.next().map(|e| safe_cex_num::parse_int(e, None)).unwrap_or(f64::NAN);
+        let exponent = parts
+            .next()
+            .map(|e| safe_cex_num::parse_int(e, None))
+            .unwrap_or(f64::NAN);
         let n = mantissa.replacen('.', "", 1);
         let neg = s.starts_with('-');
         if exponent.is_finite() && exponent != 0.0 {
@@ -63,7 +66,11 @@ pub fn parse_precision(precision: &str) -> String {
     if n == 0.0 {
         return "1".into();
     }
-    let zeros = if n.is_finite() && n > 1.0 { "0".repeat(n as usize - 1) } else { String::new() };
+    let zeros = if n.is_finite() && n > 1.0 {
+        "0".repeat(n as usize - 1)
+    } else {
+        String::new()
+    };
     format!("0.{zeros}1")
 }
 
@@ -121,8 +128,13 @@ pub fn decimal_to_precision(
         }
     }
     if counting == TICK_SIZE {
-        let precision_string =
-            decimal_to_precision(Operand::Number(digits_n), ROUND, Operand::Number(22.0), DECIMAL_PLACES, NO_PADDING)?;
+        let precision_string = decimal_to_precision(
+            Operand::Number(digits_n),
+            ROUND,
+            Operand::Number(22.0),
+            DECIMAL_PLACES,
+            NO_PADDING,
+        )?;
         let new_digits = precision_from_string(&precision_string);
         let mut xv = x.number();
         let missing = xv % digits_n;
@@ -143,15 +155,29 @@ pub fn decimal_to_precision(
         if precision_from_string(&fp_error) != 0.0 {
             if rounding == ROUND {
                 if xv > 0.0 {
-                    xv = if missing >= digits_n / 2.0 { xv - missing + digits_n } else { xv - missing };
+                    xv = if missing >= digits_n / 2.0 {
+                        xv - missing + digits_n
+                    } else {
+                        xv - missing
+                    };
                 } else {
-                    xv = if missing >= digits_n / 2.0 { xv - missing } else { xv - missing - digits_n };
+                    xv = if missing >= digits_n / 2.0 {
+                        xv - missing
+                    } else {
+                        xv - missing - digits_n
+                    };
                 }
             } else if rounding == TRUNCATE {
                 xv -= missing;
             }
         }
-        return decimal_to_precision(Operand::Number(xv), ROUND, Operand::Number(new_digits), DECIMAL_PLACES, padding);
+        return decimal_to_precision(
+            Operand::Number(xv),
+            ROUND,
+            Operand::Number(new_digits),
+            DECIMAL_PLACES,
+            padding,
+        );
     }
     digits_n = digits_n.trunc();
     let s = x.string();
@@ -174,7 +200,10 @@ pub fn decimal_to_precision(
             j += 1;
             continue;
         } else if !c.is_ascii_digit() {
-            return Err(format!("{s}: invalid number (contains an illegal character '{}')", c as char));
+            return Err(format!(
+                "{s}: invalid number (contains an illegal character '{}')",
+                c as char
+            ));
         }
         chars[i] = c;
         if c != b'0' && digits_start < 0 {
@@ -186,7 +215,11 @@ pub fn decimal_to_precision(
     if digits_start < 0 {
         digits_start = 1;
     }
-    let mut precision_start = if counting == DECIMAL_PLACES { after_dot as isize } else { digits_start };
+    let mut precision_start = if counting == DECIMAL_PLACES {
+        after_dot as isize
+    } else {
+        digits_start
+    };
     let mut precision_end = precision_start + digits_n as isize;
     let mut digits_end: isize = -1;
     let mut all_zeros = true;
@@ -213,7 +246,11 @@ pub fn decimal_to_precision(
         if c != b'0' {
             all_zeros = false;
             digits_start = idx as isize;
-            digits_end = if digits_end < 0 { idx as isize + 1 } else { digits_end };
+            digits_end = if digits_end < 0 {
+                idx as isize + 1
+            } else {
+                digits_end
+            };
         }
     }
     if counting == SIGNIFICANT_DIGITS {
@@ -224,11 +261,23 @@ pub fn decimal_to_precision(
         sign_needed = false;
     }
     let after_dot_i = after_dot as isize;
-    let read_start = if digits_start >= after_dot_i || all_zeros { after_dot_i - 1 } else { digits_start };
-    let read_end = if digits_end < after_dot_i { after_dot_i } else { digits_end };
+    let read_start = if digits_start >= after_dot_i || all_zeros {
+        after_dot_i - 1
+    } else {
+        digits_start
+    };
+    let read_end = if digits_end < after_dot_i {
+        after_dot_i
+    } else {
+        digits_end
+    };
     let n_after_dot = (read_end - after_dot_i).max(0);
     let actual_length = read_end - read_start;
-    let desired_length = if padding == NO_PADDING { actual_length } else { precision_end - read_start };
+    let desired_length = if padding == NO_PADDING {
+        actual_length
+    } else {
+        precision_end - read_start
+    };
     let pad = (desired_length - actual_length).max(0);
     let is_integer = n_after_dot + pad == 0;
     let mut out = String::new();
@@ -322,15 +371,21 @@ pub fn bind(realm: &Realm) {
                 let k = r.to_property_key(&arg(a, 1))?;
                 let v = r.get(&o, &k)?;
                 let empty = matches!(&v, Value::String(u) if u.is_empty());
-                if empty || matches!(v, Value::Null) { Value::Undefined } else { v }
+                if empty || matches!(v, Value::Null) {
+                    Value::Undefined
+                } else {
+                    v
+                }
             } else {
                 Value::Undefined
             };
             let coercible = match &x {
-                Value::Number(n) => n.is_finite() || {
-                    let f = r.get_str(&x, "toString")?;
-                    f.truthy()
-                },
+                Value::Number(n) => {
+                    n.is_finite() || {
+                        let f = r.get_str(&x, "toString")?;
+                        f.truthy()
+                    }
+                }
                 v if v.is_nullish() => false,
                 v => r.get_str(v, "toString")?.truthy(),
             };
@@ -347,7 +402,14 @@ pub fn bind(realm: &Realm) {
 mod tests {
     use super::*;
     fn d(x: &str, rounding: f64, digits: u8, counting: f64) -> String {
-        decimal_to_precision(Operand::Text(x.into()), rounding, Operand::Number(digits as f64), counting, NO_PADDING).unwrap()
+        decimal_to_precision(
+            Operand::Text(x.into()),
+            rounding,
+            Operand::Number(digits as f64),
+            counting,
+            NO_PADDING,
+        )
+        .unwrap()
     }
     #[test]
     fn decimal_to_precision_matches_ccxt_examples() {
@@ -355,9 +417,15 @@ mod tests {
         assert_eq!(d("12.3456000", ROUND, 2, DECIMAL_PLACES), "12.35");
         assert_eq!(d("12.3456", ROUND, 1, DECIMAL_PLACES), "12.3");
         assert_eq!(d("12.3456", TRUNCATE, 2, DECIMAL_PLACES), "12.34");
-        assert_eq!(d("0.000123456789", ROUND, 3, SIGNIFICANT_DIGITS), "0.000123");
+        assert_eq!(
+            d("0.000123456789", ROUND, 3, SIGNIFICANT_DIGITS),
+            "0.000123"
+        );
         assert_eq!(d("0.00098765", ROUND, 2, SIGNIFICANT_DIGITS), "0.00099");
-        assert_eq!(d("-0.000123456789", ROUND, 8, DECIMAL_PLACES), "-0.00012346");
+        assert_eq!(
+            d("-0.000123456789", ROUND, 8, DECIMAL_PLACES),
+            "-0.00012346"
+        );
         assert_eq!(d("999.999", ROUND, 2, DECIMAL_PLACES), "1000");
         assert_eq!(d("1.45", ROUND, 1, DECIMAL_PLACES), "1.5");
         assert_eq!(number_to_string(1e-7), "0.0000001");

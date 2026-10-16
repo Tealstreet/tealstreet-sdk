@@ -11,7 +11,10 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
     socket_lifecycle::SocketSlot,
-    websocket::{BaseWebSocket, WsDiagnosticReceiveOptions, WsDiagnosticSendOptions, WsParent, WsProtocol, WsRuntime},
+    websocket::{
+        BaseWebSocket, WsDiagnosticReceiveOptions, WsDiagnosticSendOptions, WsParent, WsProtocol,
+        WsRuntime,
+    },
 };
 use safe_cex_transport::socket::SocketFrame;
 use std::{
@@ -61,11 +64,16 @@ impl Bridge {
         let Some(instance) = self.instance() else {
             return Ok(Value::Undefined);
         };
-        let f = r.get_str(&instance, name).map_err(|e| self.fail(&mut r, &e))?;
+        let f = r
+            .get_str(&instance, name)
+            .map_err(|e| self.fail(&mut r, &e))?;
         if !f.is_callable() {
-            return Err(ExchangeError::new(format!("Hyperliquid socket has no {name}")));
+            return Err(ExchangeError::new(format!(
+                "Hyperliquid socket has no {name}"
+            )));
         }
-        r.call(&f, &instance, args).map_err(|e| self.fail(&mut r, &e))
+        r.call(&f, &instance, args)
+            .map_err(|e| self.fail(&mut r, &e))
     }
 }
 
@@ -73,8 +81,13 @@ impl WsProtocol for Bridge {
     fn ping(&self, _: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         self.call_member("ping", &[]).map(|_| ())
     }
-    fn connect_and_subscribe(&self, _: Rc<BaseWebSocket>, is_reconnect: bool) -> Result<(), ExchangeError> {
-        self.call_member("connectAndSubscribe", &[Value::Bool(is_reconnect)]).map(|_| ())
+    fn connect_and_subscribe(
+        &self,
+        _: Rc<BaseWebSocket>,
+        is_reconnect: bool,
+    ) -> Result<(), ExchangeError> {
+        self.call_member("connectAndSubscribe", &[Value::Bool(is_reconnect)])
+            .map(|_| ())
     }
     fn on_open(&self, _: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
         let realm = self.realm.clone();
@@ -85,7 +98,9 @@ impl WsProtocol for Bridge {
             let event = r.object_from(vec![("type", Value::str("open"))]);
             for listener in listeners {
                 let this = instance.clone().unwrap_or(Value::Undefined);
-                let out = r.call(&listener, &this, std::slice::from_ref(&event)).map_err(|e| r.exchange_error(&e))?;
+                let out = r
+                    .call(&listener, &this, std::slice::from_ref(&event))
+                    .map_err(|e| r.exchange_error(&e))?;
                 // An async onOpen (auth before subscribe) is awaited.
                 r.await_value(out).await.map_err(|e| r.exchange_error(&e))?;
             }
@@ -103,7 +118,8 @@ impl WsProtocol for Bridge {
         let event = r.object_from(vec![("data", data)]);
         let this = self.instance().unwrap_or(Value::Undefined);
         for listener in listeners {
-            r.call(&listener, &this, std::slice::from_ref(&event)).map_err(|e| r.exchange_error(&e))?;
+            r.call(&listener, &this, std::slice::from_ref(&event))
+                .map_err(|e| r.exchange_error(&e))?;
         }
         Ok(())
     }
@@ -111,8 +127,9 @@ impl WsProtocol for Bridge {
 
 fn handle_of(r: &mut Realm, this: &Value) -> Result<Rc<Handle>, Thrown> {
     let slot = r.get_str(this, "__nativeSocket")?;
-    slot.host::<Handle>()
-        .ok_or_else(|| r.type_error("BaseWebSocket method called on an object that is not a socket"))
+    slot.host::<Handle>().ok_or_else(|| {
+        r.type_error("BaseWebSocket method called on an object that is not a socket")
+    })
 }
 fn thrown(r: &Realm, e: ExchangeError) -> Thrown {
     r.error(&e.message)
@@ -154,9 +171,21 @@ pub fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) -> Valu
             });
             let id = next_id.get();
             next_id.set(id + 1);
-            let socket = BaseWebSocket::new(id, deps.parent.clone(), deps.runtime.clone(), bridge.clone());
-            let class_name = new_target.function().map(|f| String::from_utf16_lossy(&f.name.0)).unwrap_or_default();
-            let slot = if class_name.contains("Private") { SocketSlot::Private } else { SocketSlot::Public };
+            let socket = BaseWebSocket::new(
+                id,
+                deps.parent.clone(),
+                deps.runtime.clone(),
+                bridge.clone(),
+            );
+            let class_name = new_target
+                .function()
+                .map(|f| String::from_utf16_lossy(&f.name.0))
+                .unwrap_or_default();
+            let slot = if class_name.contains("Private") {
+                SocketSlot::Private
+            } else {
+                SocketSlot::Public
+            };
             deps.base.set_socket(slot, Some(socket.clone()));
             let handle = r.host_object(Rc::new(Handle { socket, bridge }));
             r.define_hidden(&instance, PropKey::str("__nativeSocket"), handle);
@@ -256,31 +285,54 @@ pub fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) -> Valu
     });
     method(realm, "recordMessageHandlerStats", 1, |r, h, _, args| {
         let topic = r.to_rust_string(&arg(args, 0))?;
-        h.socket.record_message_handler_stats(&topic).map_err(|e| thrown(r, e))?;
+        h.socket
+            .record_message_handler_stats(&topic)
+            .map_err(|e| thrown(r, e))?;
         Ok(Value::Undefined)
     });
     method(realm, "cleanupMessageHandlerStats", 1, |r, h, _, args| {
         let topic = r.to_rust_string(&arg(args, 0))?;
-        h.socket.cleanup_message_handler_stats(&topic).map_err(|e| thrown(r, e))?;
+        h.socket
+            .cleanup_message_handler_stats(&topic)
+            .map_err(|e| thrown(r, e))?;
         Ok(Value::Undefined)
     });
     method(realm, "emitWsDiagnosticReceive", 2, |r, h, _, args| {
         let data = r.to_serde(&arg(args, 0))?;
         let options = arg(args, 1);
-        let format = if options.object().is_some() { r.get_str(&options, "format")? } else { Value::Undefined };
-        let options = WsDiagnosticReceiveOptions { format: formatter(r, format), ..Default::default() };
-        h.socket.emit_ws_diagnostic_receive(&data, &options).map_err(|e| thrown(r, e))?;
+        let format = if options.object().is_some() {
+            r.get_str(&options, "format")?
+        } else {
+            Value::Undefined
+        };
+        let options = WsDiagnosticReceiveOptions {
+            format: formatter(r, format),
+            ..Default::default()
+        };
+        h.socket
+            .emit_ws_diagnostic_receive(&data, &options)
+            .map_err(|e| thrown(r, e))?;
         Ok(Value::Undefined)
     });
     method(realm, "emitWsDiagnosticSend", 2, |r, h, _, args| {
         let data = r.to_rust_string(&arg(args, 0))?;
         let options = arg(args, 1);
-        let format = if options.object().is_some() { r.get_str(&options, "format")? } else { Value::Undefined };
+        let format = if options.object().is_some() {
+            r.get_str(&options, "format")?
+        } else {
+            Value::Undefined
+        };
         let format = formatter(r, format).map(|f| {
-            Rc::new(move |text: &str| f(&serde_json::Value::String(text.into()))) as Rc<dyn Fn(&str) -> Option<String>>
+            Rc::new(move |text: &str| f(&serde_json::Value::String(text.into())))
+                as Rc<dyn Fn(&str) -> Option<String>>
         });
-        let options = WsDiagnosticSendOptions { format, ..Default::default() };
-        h.socket.emit_ws_diagnostic_send(&data, &options).map_err(|e| thrown(r, e))?;
+        let options = WsDiagnosticSendOptions {
+            format,
+            ..Default::default()
+        };
+        h.socket
+            .emit_ws_diagnostic_send(&data, &options)
+            .map_err(|e| thrown(r, e))?;
         Ok(Value::Undefined)
     });
     method(realm, "resetOrderbook", 0, |_, h, _, _| {
@@ -292,7 +344,9 @@ pub fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) -> Valu
             Value::Undefined => 5000.0,
             v => r.to_number(&v)?,
         };
-        h.socket.handle_pong_event(next.max(0.0) as u64).map_err(|e| thrown(r, e))?;
+        h.socket
+            .handle_pong_event(next.max(0.0) as u64)
+            .map_err(|e| thrown(r, e))?;
         Ok(Value::Undefined)
     });
     method(realm, "emitWsReconnected", 0, |r, h, _, _| {
@@ -310,7 +364,11 @@ pub fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) -> Valu
             let code = r.get_str(&event, "code")?;
             let reason = r.get_str(&event, "reason")?;
             let code = code.as_number().map(|c| c as u16);
-            let reason = if reason.is_nullish() { String::new() } else { r.to_rust_string(&reason)? };
+            let reason = if reason.is_nullish() {
+                String::new()
+            } else {
+                r.to_rust_string(&reason)?
+            };
             (code, reason)
         } else {
             (None, String::new())
@@ -326,8 +384,12 @@ pub fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) -> Valu
         let parent = r.get_str(this, "parent")?;
         r.call_method(&parent, "emitAndLogError", args)
     });
-    getter(realm, "isConnected", |_, h, _, _| Ok(Value::Bool(h.socket.is_connected())));
-    getter(realm, "isDisposed", |_, h, _, _| Ok(Value::Bool(h.socket.is_disposed())));
+    getter(realm, "isConnected", |_, h, _, _| {
+        Ok(Value::Bool(h.socket.is_connected()))
+    });
+    getter(realm, "isDisposed", |_, h, _, _| {
+        Ok(Value::Bool(h.socket.is_disposed()))
+    });
     getter(realm, "store", |r, _, this, _| {
         let parent = r.get_str(this, "parent")?;
         r.get_str(&parent, "store")

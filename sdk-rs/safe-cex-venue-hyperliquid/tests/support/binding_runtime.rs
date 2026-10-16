@@ -5,10 +5,9 @@ use safe_cex_exchange::{
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
 use safe_cex_transport::{
-    DirectTransport, RestAdapter, RestBody, RestFuture, RestRequest, RestResponse, RestResponseBody,
-    TransportProvider,
+    DirectTransport, RestAdapter, RestBody, RestFuture, RestRequest, RestResponse,
+    RestResponseBody, TransportFuture, TransportProvider,
     socket::{SocketCapabilities, TunnelDialOptions, TunnelHost, TunnelSocket, TunnelTask},
-    TransportFuture,
 };
 use serde_json::{Value, json};
 use std::{
@@ -17,7 +16,10 @@ use std::{
     future::Future,
     pin::Pin,
     rc::Rc,
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll, Wake, Waker},
 };
 
@@ -36,7 +38,11 @@ struct Sleep(Rc<Cell<bool>>);
 impl Future for Sleep {
     type Output = Result<(), ExchangeError>;
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.0.get() { Poll::Ready(Ok(())) } else { Poll::Pending }
+        if self.0.get() {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 }
 
@@ -113,7 +119,11 @@ impl TunnelHost for NoTunnel {
     fn sleep_until(&self, _: u64) -> TransportFuture<'static, ()> {
         Box::pin(std::future::pending())
     }
-    fn connect(&self, _: String, _: TunnelDialOptions) -> TransportFuture<'static, Rc<dyn TunnelSocket>> {
+    fn connect(
+        &self,
+        _: String,
+        _: TunnelDialOptions,
+    ) -> TransportFuture<'static, Rc<dyn TunnelSocket>> {
         panic!("tests never tunnel")
     }
     fn proxy_token(&self) -> TransportFuture<'_, String> {
@@ -151,7 +161,11 @@ impl Host {
                 }
                 progressed = true;
                 let waker = Waker::from(flag.clone());
-                if job.as_mut().poll(&mut Context::from_waker(&waker)).is_pending() {
+                if job
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&waker))
+                    .is_pending()
+                {
                     pending.push((job, flag));
                 }
             }
@@ -241,15 +255,21 @@ impl ExchangeRuntime for Host {
     }
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()> {
         let fired = Rc::new(Cell::new(false));
-        self.timers.borrow_mut().push((self.now.get() + delay_ms as f64, fired.clone()));
+        self.timers
+            .borrow_mut()
+            .push((self.now.get() + delay_ms as f64, fired.clone()));
         Box::pin(Sleep(fired))
     }
     fn spawn_local(&self, future: Job) -> Box<dyn ExchangeTask> {
-        self.jobs.borrow_mut().push((future, Arc::new(Flag(AtomicBool::new(true)))));
+        self.jobs
+            .borrow_mut()
+            .push((future, Arc::new(Flag(AtomicBool::new(true)))));
         Box::new(Noop)
     }
     fn console(&self, severity: &str, message: &str) {
-        self.console.borrow_mut().push((severity.into(), message.into()));
+        self.console
+            .borrow_mut()
+            .push((severity.into(), message.into()));
     }
     fn unique_id(&self) -> String {
         "binding-test".into()
@@ -261,7 +281,9 @@ impl ExchangeRuntime for Host {
         0.5
     }
     fn report_exception(&self, error: &ExchangeError, context: &Value) {
-        self.reports.borrow_mut().push(format!("{} {context}", error.message));
+        self.reports
+            .borrow_mut()
+            .push(format!("{} {context}", error.message));
     }
     fn report_raw_exception(&self, error: &Value, _: &Value) {
         self.reports.borrow_mut().push(error.to_string());
@@ -277,7 +299,13 @@ impl WsRuntime for Host {
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         Rc::new(NoTunnel)
     }
-    fn dial(&self, url: String, _: Vec<String>, _: WebSocketConnectionOptions, _: bool) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+    fn dial(
+        &self,
+        url: String,
+        _: Vec<String>,
+        _: WebSocketConnectionOptions,
+        _: bool,
+    ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
         let wire = Rc::new(Wire::default());
         *wire.url.borrow_mut() = url;
         self.sockets.borrow_mut().push(wire.clone());
@@ -310,6 +338,8 @@ pub struct Routes {
     pub requests: RefCell<Vec<(String, Value)>>,
 }
 impl Routes {
+    // The transport takes Arc<dyn RestAdapter>; this single-threaded fixture is local.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new(routes: Vec<(&str, Value)>) -> Arc<Self> {
         Arc::new(Self {
             routes: RefCell::new(routes.into_iter().map(|(k, v)| (k.into(), v)).collect()),
@@ -318,13 +348,20 @@ impl Routes {
     }
     pub fn route_of(url: &str, body: &Value) -> String {
         if url.ends_with("/exchange") {
-            format!("exchange:{}", body["action"]["type"].as_str().unwrap_or("?"))
+            format!(
+                "exchange:{}",
+                body["action"]["type"].as_str().unwrap_or("?")
+            )
         } else {
             format!("info:{}", body["type"].as_str().unwrap_or("?"))
         }
     }
     pub fn count(&self, route: &str) -> usize {
-        self.requests.borrow().iter().filter(|(r, _)| r == route).count()
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|(r, _)| r == route)
+            .count()
     }
 }
 impl RestAdapter for Routes {

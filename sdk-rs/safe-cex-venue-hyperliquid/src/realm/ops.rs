@@ -43,8 +43,16 @@ impl Realm {
     pub fn object_pattern(&mut self, value: &Value, keys: &[&str]) -> Result<Vec<Value>, Thrown> {
         if value.is_nullish() {
             let first = keys.first().copied().unwrap_or("");
-            let shown = if matches!(value, Value::Null) { "object null" } else { "undefined" };
-            let what = if matches!(value, Value::Null) { "null" } else { "undefined" };
+            let shown = if matches!(value, Value::Null) {
+                "object null"
+            } else {
+                "undefined"
+            };
+            let what = if matches!(value, Value::Null) {
+                "null"
+            } else {
+                "undefined"
+            };
             return Err(self.type_error(&format!(
                 "Cannot destructure property '{first}' of '{shown}' as it is {what}."
             )));
@@ -114,7 +122,11 @@ impl Realm {
         let mut out = vec![];
         let mut current = value.object().cloned();
         if let Value::String(_) = value {
-            return self.own_keys(value, true).into_iter().map(|k| k.to_value()).collect();
+            return self
+                .own_keys(value, true)
+                .into_iter()
+                .map(|k| k.to_value())
+                .collect();
         }
         while let Some(o) = current {
             let v = Value::Object(o.clone());
@@ -134,7 +146,12 @@ impl Realm {
         out
     }
     /// `super.name` from a method whose home object's prototype is `home_proto`.
-    pub fn super_get(&mut self, home_proto: &Value, receiver: &Value, name: &str) -> Result<Value, Thrown> {
+    pub fn super_get(
+        &mut self,
+        home_proto: &Value,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, Thrown> {
         let parent = home_proto
             .object()
             .and_then(|o| o.borrow().proto.clone())

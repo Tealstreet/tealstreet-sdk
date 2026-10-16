@@ -5,7 +5,10 @@ use std::{
     future::Future,
     pin::Pin,
     rc::Rc,
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll, Wake, Waker},
 };
 
@@ -33,7 +36,11 @@ struct Sleep(Rc<Cell<bool>>);
 impl Future for Sleep {
     type Output = Result<(), ExchangeError>;
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.0.get() { Poll::Ready(Ok(())) } else { Poll::Pending }
+        if self.0.get() {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 }
 impl TestRuntime {
@@ -48,7 +55,11 @@ impl TestRuntime {
             for (mut job, flag) in jobs {
                 flag.0.store(false, Ordering::SeqCst);
                 let waker = Waker::from(flag.clone());
-                if job.as_mut().poll(&mut Context::from_waker(&waker)).is_pending() {
+                if job
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&waker))
+                    .is_pending()
+                {
                     pending.push((job, flag));
                 }
             }
@@ -67,7 +78,11 @@ impl TestRuntime {
     /// Advance the clock to the next timer; true when one fired.
     fn fire_timers(&self) -> bool {
         let mut timers = self.timers.borrow_mut();
-        let next = timers.iter().filter(|(_, f)| !f.get()).map(|(t, _)| *t).fold(f64::INFINITY, f64::min);
+        let next = timers
+            .iter()
+            .filter(|(_, f)| !f.get())
+            .map(|(t, _)| *t)
+            .fold(f64::INFINITY, f64::min);
         if !next.is_finite() {
             return false;
         }
@@ -94,15 +109,21 @@ impl ExchangeRuntime for TestRuntime {
     }
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()> {
         let fired = Rc::new(Cell::new(false));
-        self.timers.borrow_mut().push((self.now.get() + delay_ms as f64, fired.clone()));
+        self.timers
+            .borrow_mut()
+            .push((self.now.get() + delay_ms as f64, fired.clone()));
         Box::pin(Sleep(fired))
     }
     fn spawn_local(&self, future: Job) -> Box<dyn ExchangeTask> {
-        self.jobs.borrow_mut().push((future, Arc::new(Flag(AtomicBool::new(true)))));
+        self.jobs
+            .borrow_mut()
+            .push((future, Arc::new(Flag(AtomicBool::new(true)))));
         Box::new(Noop)
     }
     fn console(&self, severity: &str, message: &str) {
-        self.console.borrow_mut().push((severity.into(), message.into()));
+        self.console
+            .borrow_mut()
+            .push((severity.into(), message.into()));
     }
     fn unique_id(&self) -> String {
         "test".into()
@@ -119,7 +140,10 @@ impl ExchangeRuntime for TestRuntime {
     fn report_raw_exception(&self, error: &serde_json::Value, _: &serde_json::Value) {
         self.reports.borrow_mut().push(error.to_string());
     }
-    fn execute_worker_request(&self, _: serde_json::Value) -> ExchangeFuture<'static, serde_json::Value> {
+    fn execute_worker_request(
+        &self,
+        _: serde_json::Value,
+    ) -> ExchangeFuture<'static, serde_json::Value> {
         Box::pin(async { Err(ExchangeError::new("no worker in tests")) })
     }
 }

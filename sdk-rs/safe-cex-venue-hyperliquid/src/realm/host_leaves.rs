@@ -70,7 +70,8 @@ impl AccountPositionHost for Realm {
     }
     fn opposite_predicate(&mut self, capture: OppositePredicate<Value>) -> Result<Value, Value> {
         Ok(self.native("", 1, move |r, _, args| {
-            account_position_leaves::run_opposite_predicate(r, &capture, &first(args)).map(Value::Bool)
+            account_position_leaves::run_opposite_predicate(r, &capture, &first(args))
+                .map(Value::Bool)
         }))
     }
 }
@@ -140,7 +141,10 @@ impl BalanceHost for Realm {
     fn spread_into(&mut self, o: &Value, source: &Value) -> Result<(), Value> {
         self.copy_data_properties(o, source)
     }
-    fn spot_market_predicate(&mut self, capture: SpotMarketPredicate<Value>) -> Result<Value, Value> {
+    fn spot_market_predicate(
+        &mut self,
+        capture: SpotMarketPredicate<Value>,
+    ) -> Result<Value, Value> {
         Ok(self.native("", 1, move |r, _, args| {
             balance_state::run_spot_market_predicate(r, &capture, &first(args)).map(Value::Bool)
         }))
@@ -164,7 +168,9 @@ impl CancellationHost for Realm {
         self.iterator_close_after_throw(v)
     }
     fn cancel_callback(&mut self, c: CancelCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| cancellation::run_cancel_callback(r, &c, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            cancellation::run_cancel_callback(r, &c, args)
+        }))
     }
 }
 
@@ -206,7 +212,9 @@ impl CandleListenerHost for Realm {
         self.spread_to_array(iterable)
     }
     fn candle_callback(&mut self, capture: CandleCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| candle_listeners::run_candle_callback(r, &capture, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            candle_listeners::run_candle_callback(r, &capture, args)
+        }))
     }
 }
 
@@ -228,7 +236,9 @@ impl CoreBookHost for Realm {
         value
     }
     fn book_callback(&mut self, capture: CoreBookCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| core_book_listener::run_core_book_callback(r, &capture, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            core_book_listener::run_core_book_callback(r, &capture, args)
+        }))
     }
 }
 
@@ -239,7 +249,11 @@ impl CoreExchangeLeafHost for Realm {
     fn finite_positive_predicate(&mut self) -> Result<Value, Value> {
         Ok(self.singleton("finitePositivePredicate", |r| {
             r.native("", 1, |r, _, args| {
-                core_exchange_leaves::run_exchange_predicate(r, &ExchangePredicate::FinitePositive, &first(args))
+                core_exchange_leaves::run_exchange_predicate(
+                    r,
+                    &ExchangePredicate::FinitePositive,
+                    &first(args),
+                )
             })
         }))
     }
@@ -369,7 +383,11 @@ impl LifecycleHost for Realm {
                     lifecycle_delegates::run_order_refresh_timeout(r, &capture.exchange)?
                 }
                 LifecycleCallbackKind::OrderRefreshError => {
-                    lifecycle_delegates::run_order_refresh_error(r, &capture.exchange, &first(args))?
+                    lifecycle_delegates::run_order_refresh_error(
+                        r,
+                        &capture.exchange,
+                        &first(args),
+                    )?
                 }
             }
             Ok(Value::Undefined)
@@ -405,7 +423,10 @@ impl LimitOrderHost for Realm {
 }
 
 impl MarketBootstrapHost for Realm {
-    fn bootstrap_callback(&mut self, callback: MarketBootstrapCallback<Value>) -> Result<Value, Value> {
+    fn bootstrap_callback(
+        &mut self,
+        callback: MarketBootstrapCallback<Value>,
+    ) -> Result<Value, Value> {
         Ok(self.native("", 1, move |r, _, args| {
             market_bootstrap::run_market_bootstrap_callback(r, &callback, args)
         }))
@@ -477,7 +498,9 @@ impl MarketDataHost for Realm {
 
 impl OrderReadHost for Realm {
     fn order_read_callback(&mut self, c: OrderReadCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| order_reads::run_order_read_callback(r, &c, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            order_reads::run_order_read_callback(r, &c, args)
+        }))
     }
     fn iterator(&mut self, v: &Value) -> Result<Value, Value> {
         self.get_iterator(v)
@@ -515,7 +538,12 @@ impl OrderRequestHost for Realm {
     fn unary_number(&mut self, value: &Value) -> Result<Value, Value> {
         self.unary("+", value)
     }
-    fn compare(&mut self, op: RequestComparison, left: &Value, right: &Value) -> Result<Value, Value> {
+    fn compare(
+        &mut self,
+        op: RequestComparison,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Value, Value> {
         let op = match op {
             RequestComparison::Less => "<",
             RequestComparison::GreaterEqual => ">=",
@@ -526,7 +554,9 @@ impl OrderRequestHost for Realm {
 
 impl OrderRetryHost for Realm {
     fn order_retry_callback(&mut self, c: OrderRetryCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| order_retry::run_order_retry_callback(r, &c, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            order_retry::run_order_retry_callback(r, &c, args)
+        }))
     }
     fn iterator(&mut self, v: &Value) -> Result<Value, Value> {
         self.get_iterator(v)
@@ -554,7 +584,9 @@ impl OrderUpdateHost for Realm {
         self.head_rest(v)
     }
     fn update_callback(&mut self, c: UpdateCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| order_update::run_update_callback(r, &c, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            order_update::run_update_callback(r, &c, args)
+        }))
     }
 }
 
@@ -572,12 +604,19 @@ impl PlacementHost for Realm {
         self.iterator_close_after_throw(v)
     }
     fn serial_order_callback(&mut self, c: SerialOrderCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| placement_dispatch::run_serial_order_callback(r, &c, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            placement_dispatch::run_serial_order_callback(r, &c, args)
+        }))
     }
 }
 
 impl PositionOrderHost for Realm {
-    fn position_operator(&mut self, operator: &str, left: &Value, right: &Value) -> Result<Value, Value> {
+    fn position_operator(
+        &mut self,
+        operator: &str,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Value, Value> {
         Realm::binary(self, operator, left, right)
     }
     fn position_unary(&mut self, operator: &str, value: &Value) -> Result<Value, Value> {
@@ -588,7 +627,12 @@ impl PositionOrderHost for Realm {
             core_position_order_state::run_position_callback(r, &callback, args)
         }))
     }
-    fn set_position_index(&mut self, object: &Value, key: &Value, value: &Value) -> Result<(), Value> {
+    fn set_position_index(
+        &mut self,
+        object: &Value,
+        key: &Value,
+        value: &Value,
+    ) -> Result<(), Value> {
         Realm::set_index(self, object, key, value.clone())
     }
     /// A spread element `...value` inside an array literal under construction.
@@ -601,7 +645,10 @@ impl PositionOrderHost for Realm {
 }
 
 impl PositionRefreshHost for Realm {
-    fn position_refresh_callback(&mut self, capture: PositionRefreshCallback<Value>) -> Result<Value, Value> {
+    fn position_refresh_callback(
+        &mut self,
+        capture: PositionRefreshCallback<Value>,
+    ) -> Result<Value, Value> {
         Ok(self.native("", 1, move |r, _, args| {
             hip3_position_refresh::run_position_refresh_callback(r, &capture, args)
         }))
@@ -686,7 +733,12 @@ impl PrivatePositionHost for Realm {
         Value::Number(value)
     }
     fn lowercase(&mut self, value: &JsString) -> Result<JsString, Value> {
-        Ok(JsString(String::from_utf16_lossy(&value.0).to_lowercase().encode_utf16().collect()))
+        Ok(JsString(
+            String::from_utf16_lossy(&value.0)
+                .to_lowercase()
+                .encode_utf16()
+                .collect(),
+        ))
     }
     fn index(&mut self, object: &Value, key: &Value) -> Result<Value, Value> {
         Realm::index(self, object, key)
@@ -705,7 +757,9 @@ impl PrivatePositionHost for Realm {
 
 impl RestReadHost for Realm {
     fn rest_callback(&mut self, callback: RestCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| core_rest_reads::run_rest_callback(r, &callback, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            core_rest_reads::run_rest_callback(r, &callback, args)
+        }))
     }
     fn rest_exception(&self, value: Value) -> Value {
         value
@@ -732,7 +786,9 @@ impl SpotMarketBootstrapHost for Realm {
 
 impl StartupLifecycleHost for Realm {
     fn startup_callback(&mut self, callback: StartupCallback<Value>) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| startup_lifecycle::run_startup_callback(r, &callback, args)))
+        Ok(self.native("", 1, move |r, _, args| {
+            startup_lifecycle::run_startup_callback(r, &callback, args)
+        }))
     }
 }
 
@@ -770,7 +826,9 @@ impl WsEmissionHost for Realm {
         self.copy_data_properties(target, source)
     }
     fn formatter(&mut self, scope: DiagnosticScope) -> Result<Value, Value> {
-        Ok(self.native("", 1, move |r, _, args| ws_emission::run_diagnostic_formatter(r, scope, &first(args))))
+        Ok(self.native("", 1, move |r, _, args| {
+            ws_emission::run_diagnostic_formatter(r, scope, &first(args))
+        }))
     }
 }
 
@@ -778,11 +836,12 @@ impl WsTransportHost for Realm {
     fn urls_binding(&mut self, venue: WsVenue) -> Result<Value, Value> {
         Ok(match venue {
             WsVenue::Perp => self.singleton("WSS_URLS", |r| table(r, crate::types::WSS_URLS)),
-            WsVenue::Spot => self.singleton("SPOT_WSS_URLS", |r| table(r, crate::spot_types::WSS_URLS)),
+            WsVenue::Spot => {
+                self.singleton("SPOT_WSS_URLS", |r| table(r, crate::spot_types::WSS_URLS))
+            }
         })
     }
     fn boolean(&self, value: bool) -> Value {
         Value::Bool(value)
     }
 }
-
