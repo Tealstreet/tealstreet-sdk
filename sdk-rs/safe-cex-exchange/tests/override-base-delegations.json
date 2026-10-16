@@ -92,6 +92,18 @@
       "evidence": [{"file": "packages/safe-cex/src/exchanges/bingx/bingx.exchange.ts", "contains": "super.dispose();"}]
     },
     {
+      "file": "safe-cex-venue-bitunix/src/adapter.rs",
+      "finding": "dispose_venue bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [{"file": "packages/safe-cex/src/exchanges/bitunix/bitunix.exchange.ts", "contains": "super.dispose();"}]
+    },
+    {
+      "file": "safe-cex-venue-bitunix/src/sockets.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [{"file": "sdk-rs/safe-cex-venue-bitunix/src/sockets.rs", "contains": "pub(crate) base: Rc<BaseWebSocket>,"}]
+    },
+    {
       "file": "safe-cex-venue-breakoutprop/src/lifecycle.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
@@ -107,11 +119,47 @@
     },
     {
       "file": "safe-cex-venue-mexc/src/exchange.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [{"file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts", "contains": "super.dispose();"}]
+    },
+    {
+      "file": "safe-cex-venue-mexc/src/exchange.rs",
       "finding": "fetch_leverage_for_symbol bypasses dynamic hook is_public_data_only through base",
       "kind": "no-venue-override",
       "member": "isPublicDataOnly",
       "classes": ["MexcExchange"],
       "evidence": [{"file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts", "contains": "if (market && !this.isPublicDataOnly) {"}]
+    },
+    {
+      "file": "safe-cex-venue-mexc/src/exchange_binding.rs",
+      "finding": "base_dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [{"file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts", "contains": "super.dispose();"}]
+    },
+    {
+      "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs",
+      "finding": "create bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [{"file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts", "contains": "super.dispose();"}]
+    },
+    {
+      "file": "safe-cex-exchange/src/js_runtime/sockets.rs",
+      "finding": "base_websocket bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [{"file": "sdk-rs/safe-cex-exchange/src/js_runtime/sockets.rs", "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"}]
+    },
+    {
+      "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
+      "finding": "secondary_socket bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [{"file": "sdk-rs/safe-cex-venue-bitget/src/secondary_public.rs", "contains": "pub fn base(&self) -> &Rc<BaseWebSocket> {"}]
+    },
+    {
+      "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
+      "finding": "super_dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [{"file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts", "contains": "super.dispose();"}]
     }
   ]
 }

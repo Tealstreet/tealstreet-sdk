@@ -75,6 +75,14 @@ status = "ported"
 note = "Renamed target: `safe-cex-venue-cryptocom/src/api_guards.rs::should_suppress_validation_auth_error_emission`. Call the ported authentication-code helper first. Read the suppression property only after a true result, preserving conversion/getter failure identity. The full strict-boolean comparison partition is Some(true), Some(false), or None for all non-booleans; only Some(true) suppresses. No receiver property is read after a false/throwing code check. Function body parity is at the declared native classification/builtin/property boundaries; API factory/interceptors and host dependency implementations remain pending. Witness tests/api_guards.rs::api_guards_match_actual_typescript executes unchanged complete actual source arrow initializers and the actual authentication-code constant. Decoded native booleans, parsed-value/error identity, and ordered effects precede independent 20 record / 19 parse / 19 code / 16 message / 13 suppression inventory checks. Floor stops at suppress case12 flag-throw. One compiling runtime control per new row must fail its named native assertion, then pass after exact restoration."
 
 [[symbol]]
+ts = "isCryptocomSignatureRejection"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "createAPI"
 kind = "const-fn"
 layer = "adapted"
