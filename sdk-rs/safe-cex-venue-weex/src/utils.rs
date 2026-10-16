@@ -346,6 +346,7 @@ pub fn fake_positions_for_market(
         margin_size: None,
         extra: None,
         last_update: None,
+        option: None,
     };
     vec![
         create_fake(PositionSide::Long),

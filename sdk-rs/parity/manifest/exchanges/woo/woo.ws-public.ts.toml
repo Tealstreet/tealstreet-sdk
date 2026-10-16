@@ -16,7 +16,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-woo/src/legacy_socket_control.rs::public_connect_and_subscribe"
 status = "ported"
-note = "Preserves disposal guard, public/private livenet/testnet URL selection by JS truthiness, UTF16 applicationId coercion, resolved creation callee, socket assignment before ordered open/message/close listener registration, and listener failure propagation. Native method body over compatible Host primitives, with pure construction and resolved call tokens. Exact-source socket oracle/native assertions cover finite control cases, not completed socket-class/runtime registration; class/data-handler rows remain separately pending."
+note = "Preserves disposal guard, public/private livenet/testnet URL selection by JS truthiness, UTF16 applicationId coercion, resolved creation callee, socket assignment before ordered open/message/close listener registration, and listener failure propagation. Native method body over compatible Host primitives, with pure construction and resolved call tokens. Exact-source socket oracle/native assertions cover finite control cases, not completed socket-class/runtime registration; class/data-handler rows remain separately pending. Renamed Rust target: safe-cex-venue-woo/src/legacy_socket_control.rs::public_connect_and_subscribe."
 
 [[symbol]]
 ts = "WooPublicWebsocket.onOpen"

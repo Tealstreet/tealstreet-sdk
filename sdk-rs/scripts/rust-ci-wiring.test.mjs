@@ -86,7 +86,7 @@ function audit(source, scripts = packageScripts) {
   const matrix = native.match(/^      matrix:\n([\s\S]*?)(?=^    steps:)/m)?.[1];
   assert.ok(matrix, 'native test matrix missing');
   assert.match(matrix, /^        include:\n(?:          - check: [a-z]+\n            command: [^\n]+\n)+$/, 'native matrix must be a literal include without exclusions');
-  assert.match(matrix, /^          - check: test\n            command: cargo test --locked$/m, 'native matrix must satisfy matrix.check == test');
+  assert.match(matrix, /^          - check: test\n            command: cargo test --locked --no-fail-fast$/m, 'native matrix must satisfy matrix.check == test');
   const exactRun = (block, commands, label) => {
     assert.equal((block.match(/^        run:/gm) ?? []).length, 1, `${label} must have one run declaration`);
     const actual = block.match(/^        run: \|\n((?:          [^\n]*\n?)+)/m)?.[1]?.trimEnd().split('\n').map(line => line.slice(10));
@@ -140,9 +140,9 @@ function audit(source, scripts = packageScripts) {
     "matrix.check == 'test'");
   assert.match(routing, /^          node safe-cex-transport\/scripts\/routing.mjs --check --equivalence$/m, 'live routing command');
   assert.match(routing, /^          cargo test --locked -p safe-cex-transport --doc$/m, 'typed site ID compile-fail gate');
-  assert.match(routing, /^          node --test \.\.\/scripts\/rust-ci-wiring.test.mjs$/m, 'audit must invoke itself');
+  assert.match(routing, /^          node --test scripts\/rust-ci-wiring.test.mjs$/m, 'audit must invoke itself');
   exactRun(routing, [
-    'node --test ../scripts/rust-ci-wiring.test.mjs',
+    'node --test scripts/rust-ci-wiring.test.mjs',
     'node safe-cex-transport/scripts/routing.mjs --check --equivalence',
     'cargo test --locked -p safe-cex-transport --all-targets -- --include-ignored',
     'cargo test --locked -p safe-cex-transport --doc',
@@ -164,7 +164,7 @@ function audit(source, scripts = packageScripts) {
   exactRun(warning, ['node safe-cex-ffi/scripts/setup.mjs', 'node safe-cex-transport/scripts/warning-wasm.mjs'], 'wasm warning gate');
   for (const event of ['push', 'pull_request']) {
     const block = source.match(new RegExp(`^  ${event}:\\n([\\s\\S]*?)(?=^  [\\w-]+:|^permissions:)`, 'm'))?.[1];
-    for (const path of ['sdk-rs/**', 'packages/safe-cex/**', 'packages/safe-cex/src/exchanges/binance/**', 'packages/lighter-sdk/**', 'packages/poseidon-crypto/**', 'packages/script-api-core/src/order/**', 'packages/http-over-websocket/src/egressRegion.ts', 'packages/http-over-websocket/src/tunnelEndpoints.ts', 'scripts/rust-ci-wiring.test.mjs']) {
+    for (const path of ['sdk-rs/**', 'packages/safe-cex/**', 'packages/safe-cex/src/exchanges/binance/**', 'packages/lighter-sdk/**', 'packages/poseidon-crypto/**', 'packages/script-api-core/src/order/**', 'packages/http-over-websocket/src/egressRegion.ts', 'packages/http-over-websocket/src/tunnelEndpoints.ts', 'sdk-rs/scripts/rust-ci-wiring.test.mjs']) {
       assert.ok(block?.split('\n').includes(`      - '${path}'`), `${event} trigger missing ${path}`);
     }
   }
@@ -199,9 +199,9 @@ test('omitting ignored routing oracle is rejected', () => assert.throws(() => au
 test('omitting compile-fail gate is rejected', () => assert.throws(() => audit(workflow.replace('          cargo test --locked -p safe-cex-transport --doc\n', '')), /typed site ID compile-fail gate/));
 test('omitting wasm warning probe is rejected', () => assert.throws(() => audit(workflow.replace('          node safe-cex-transport/scripts/warning-wasm.mjs', '          echo skipped')), /Verify transport warnings in actual wasm command/));
 
-test('removing test matrix arm is rejected', () => assert.throws(() => audit(workflow.replace('          - check: test\n            command: cargo test --locked\n', '')), /native matrix must satisfy/));
-test('removing audit self invocation is rejected', () => assert.throws(() => audit(workflow.replace('          node --test ../scripts/rust-ci-wiring.test.mjs\n', '')), /audit must invoke itself/));
-test('masking a failed shell command is rejected', () => assert.throws(() => audit(workflow.replace('          node --test ../scripts/rust-ci-wiring.test.mjs', '          set +e\n          node --test ../scripts/rust-ci-wiring.test.mjs\n          exit 0')), /routing gate must retain fail-fast commands/));
+test('removing test matrix arm is rejected', () => assert.throws(() => audit(workflow.replace('          - check: test\n            command: cargo test --locked --no-fail-fast\n', '')), /native matrix must satisfy/));
+test('removing audit self invocation is rejected', () => assert.throws(() => audit(workflow.replace('          node --test scripts/rust-ci-wiring.test.mjs\n', '')), /audit must invoke itself/));
+test('masking a failed shell command is rejected', () => assert.throws(() => audit(workflow.replace('          node --test scripts/rust-ci-wiring.test.mjs', '          set +e\n          node --test scripts/rust-ci-wiring.test.mjs\n          exit 0')), /routing gate must retain fail-fast commands/));
 test('overriding the step shell is rejected', () => assert.throws(() => audit(workflow.replace('      - name: Run routing TypeScript equivalence gate\n', '      - name: Run routing TypeScript equivalence gate\n        shell: bash --noprofile --norc {0}\n')), /shell override/));
 test('overriding the default shell is rejected', () => assert.throws(() => audit(workflow.replace('defaults:\n  run:\n', 'defaults:\n  run:\n    shell: bash {0}\n')), /shell override/));
 
@@ -517,7 +517,7 @@ function audit(source, scripts = rootScripts) {
   const matrix = native.match(/^      matrix:\n([\s\S]*?)(?=^    steps:)/m)?.[1];
   assert.ok(matrix, 'native test matrix missing');
   assert.match(matrix, /^        include:\n(?:          - check: [a-z]+\n            command: [^\n]+\n)+$/, 'native matrix must be a literal include without exclusions');
-  assert.match(matrix, /^          - check: test\n            command: cargo test --locked$/m, 'native matrix must satisfy matrix.check == test');
+  assert.match(matrix, /^          - check: test\n            command: cargo test --locked --no-fail-fast$/m, 'native matrix must satisfy matrix.check == test');
   const exactRun = (block, commands, label) => {
     assert.equal((block.match(/^        run:/gm) ?? []).length, 1, `${label} must have one run declaration`);
     const actual = block.match(/^        run: \|\n((?:          [^\n]*\n?)+)/m)?.[1]?.trimEnd().split('\n').map(line => line.slice(10));
@@ -533,9 +533,9 @@ function audit(source, scripts = rootScripts) {
     "matrix.check == 'test'");
   assert.match(routing, /^          node safe-cex-transport\/scripts\/routing.mjs --check --equivalence$/m, 'live routing command');
   assert.match(routing, /^          cargo test --locked -p safe-cex-transport --doc$/m, 'typed site ID compile-fail gate');
-  assert.match(routing, /^          node --test \.\.\/scripts\/rust-ci-wiring.test.mjs$/m, 'audit must invoke itself');
+  assert.match(routing, /^          node --test scripts\/rust-ci-wiring.test.mjs$/m, 'audit must invoke itself');
   exactRun(routing, [
-    'node --test ../scripts/rust-ci-wiring.test.mjs',
+    'node --test scripts/rust-ci-wiring.test.mjs',
     'node safe-cex-transport/scripts/routing.mjs --check --equivalence',
     'cargo test --locked -p safe-cex-transport --all-targets -- --include-ignored',
     'cargo test --locked -p safe-cex-transport --doc',
@@ -568,7 +568,7 @@ function audit(source, scripts = rootScripts) {
     const block = source.match(new RegExp(`^  ${event}:\\n([\\s\\S]*?)(?=^  [\\w-]+:|^permissions:)`, 'm'))?.[1];
     if (event === 'pull_request') assert.doesNotMatch(block, /^    (?:branches|branches-ignore):/m, 'pull_request must not restrict target branches');
     if (event === 'push') assert.match(block, /^    branches: \[master, feat\/safe-cex-rust\]$/m, 'push must retain only master and integration; feature lanes run on PRs');
-    for (const path of ['sdk-rs/**', 'packages/safe-cex/**', 'packages/poseidon-crypto/**', 'packages/lighter-sdk/src/signer/**', 'packages/script-api-core/src/order/**', 'packages/http-over-websocket/src/egressRegion.ts', 'packages/http-over-websocket/src/tunnelEndpoints.ts', 'scripts/rust-ci-wiring.test.mjs']) {
+    for (const path of ['sdk-rs/**', 'packages/safe-cex/**', 'packages/poseidon-crypto/**', 'packages/lighter-sdk/src/signer/**', 'packages/script-api-core/src/order/**', 'packages/http-over-websocket/src/egressRegion.ts', 'packages/http-over-websocket/src/tunnelEndpoints.ts', 'sdk-rs/scripts/rust-ci-wiring.test.mjs']) {
       assert.ok(block?.split('\n').includes(`      - '${path}'`), `${event} trigger missing ${path}`);
     }
   }
@@ -583,9 +583,9 @@ test('omitting ignored routing oracle is rejected', () => assert.throws(() => au
 test('omitting compile-fail gate is rejected', () => assert.throws(() => audit(workflow.replace('          cargo test --locked -p safe-cex-transport --doc\n', '')), /typed site ID compile-fail gate/));
 test('omitting wasm warning probe is rejected', () => assert.throws(() => audit(workflow.replace('          node safe-cex-transport/scripts/warning-wasm.mjs', '          echo skipped')), /Verify transport warnings in actual wasm command/));
 
-test('removing test matrix arm is rejected', () => assert.throws(() => audit(workflow.replace('          - check: test\n            command: cargo test --locked\n', '')), /native matrix must satisfy/));
-test('removing audit self invocation is rejected', () => assert.throws(() => audit(workflow.replace('          node --test ../scripts/rust-ci-wiring.test.mjs\n', '')), /audit must invoke itself/));
-test('masking a failed shell command is rejected', () => assert.throws(() => audit(workflow.replace('          node --test ../scripts/rust-ci-wiring.test.mjs', '          set +e\n          node --test ../scripts/rust-ci-wiring.test.mjs\n          exit 0')), /routing gate must retain fail-fast commands/));
+test('removing test matrix arm is rejected', () => assert.throws(() => audit(workflow.replace('          - check: test\n            command: cargo test --locked --no-fail-fast\n', '')), /native matrix must satisfy/));
+test('removing audit self invocation is rejected', () => assert.throws(() => audit(workflow.replace('          node --test scripts/rust-ci-wiring.test.mjs\n', '')), /audit must invoke itself/));
+test('masking a failed shell command is rejected', () => assert.throws(() => audit(workflow.replace('          node --test scripts/rust-ci-wiring.test.mjs', '          set +e\n          node --test scripts/rust-ci-wiring.test.mjs\n          exit 0')), /routing gate must retain fail-fast commands/));
 test('overriding the step shell is rejected', () => assert.throws(() => audit(workflow.replace('      - name: Run routing TypeScript equivalence gate\n', '      - name: Run routing TypeScript equivalence gate\n        shell: bash --noprofile --norc {0}\n')), /shell override/));
 test('overriding the default shell is rejected', () => assert.throws(() => audit(workflow.replace('defaults:\n  run:\n', 'defaults:\n  run:\n    shell: bash {0}\n')), /shell override/));
 

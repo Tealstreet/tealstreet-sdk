@@ -12,7 +12,7 @@ signerAddress?: string,
 /**
  * @ts-mutable
  */
-privateKey?: string, }, paradexAddress?: string, subkeyAddress?: string, grvtSignerAddress?: string, grvtTradingAccountId?: string, starkPrivateKey?: string, vault?: string, applicationId?: string, apiKeyIndex?: string, hyperliquidBuilder?: { address: string, feeTenthsBps: number, }, testnet?: boolean, enableSpotMarkets?: boolean, bybitSiteId?: "BRA_BTL", privateOnly?: boolean, tealstreetProxy?: boolean, tealstreetTunnel?: boolean, tealstreetWsRoute?: boolean, overrideProxyUrl?: string, proxyRegion?: string, omniKeySeed?: string, subaccount?: string, orderlyExchangeId?: string, tuning?: { activeTickerSymbols?: Array<string>, calculateUpnlFromRealtimeLastPrice?: boolean, dataUpdateThrottleMultiplier?: number, skipRendersWhenWindowIsHidden?: boolean, consoleLogging?: boolean, }, extra?: { 
+privateKey?: string, }, paradexAddress?: string, subkeyAddress?: string, grvtSignerAddress?: string, grvtTradingAccountId?: string, starkPrivateKey?: string, vault?: string, applicationId?: string, apiKeyIndex?: string, hyperliquidBuilder?: { address: string, feeTenthsBps: number, }, testnet?: boolean, enableSpotMarkets?: boolean, enableOptionMarkets?: boolean, enableInverseMarkets?: boolean, bybitSiteId?: "BRA_BTL", privateOnly?: boolean, tealstreetProxy?: boolean, tealstreetTunnel?: boolean, tealstreetWsRoute?: boolean, overrideProxyUrl?: string, proxyRegion?: string, omniKeySeed?: string, subaccount?: string, orderlyExchangeId?: string, tuning?: { activeTickerSymbols?: Array<string>, calculateUpnlFromRealtimeLastPrice?: boolean, dataUpdateThrottleMultiplier?: number, skipRendersWhenWindowIsHidden?: boolean, consoleLogging?: boolean, }, extra?: { 
 /**
  * @ts-mutable
  */

@@ -3,6 +3,14 @@ ts = "packages/safe-cex/src/utils/unknownSendOutcome.ts"
 rust_files = [ "safe-cex-store/src/remaining_utils.rs" ]
 
 [[symbol]]
+ts = "isUnsentSigningFailure"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-store/src/remaining_utils.rs::is_unsent_signing_failure"
+status = "ported"
+note = "Direct implementation of the NOT_SENT_MESSAGE test over message ?? ''; is_unknown_outcome consumes it for its signing veto, as the source does. Scoped native assertions in safe-cex-store/tests/remaining_utils.rs (native_unknown_send_veto_response_precedence_and_codes). Explicit rename: `safe-cex-store/src/remaining_utils.rs::is_unsent_signing_failure` mirrors isUnsentSigningFailure."
+
+[[symbol]]
 ts = "isUnknownOutcome"
 kind = "const-fn"
 layer = "adapted"

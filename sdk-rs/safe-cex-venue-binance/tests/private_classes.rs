@@ -1193,6 +1193,8 @@ struct Imports {
     header_reads: Rc<RefCell<Vec<String>>>,
     header_failure: RefCell<Option<Failure>>,
     rejected_response: RefCell<Option<Result<Option<EventValue>, Failure>>>,
+    routes: RefCell<std::collections::HashMap<&'static str, Value>>,
+    loop_intervals: RefCell<Vec<f64>>,
 }
 fn client(label: &str) -> EventValue {
     record([("label", string(label))])
@@ -1255,13 +1257,17 @@ impl ExchangeImports for Imports {
         self.requests.borrow_mut().push(path.into());
         self.request_args.borrow_mut().push(args);
         let suspended = self.suspend_requests.clone();
+        let routed = self.routes.borrow().get(path).cloned();
         Ok(Box::pin(std::future::poll_fn(move |_| {
             if suspended.get() {
                 return Poll::Pending;
             }
             Poll::Ready(safe_cex_venue_binance::private_rest::SnapshotCompletion {
                 reaction_order: 0,
-                result: Ok(EventValue::Array(Default::default())),
+                result: Ok(routed.clone().map_or_else(
+                    || EventValue::Array(Default::default()),
+                    EventValue::from_json,
+                )),
             })
         })))
     }
@@ -1374,9 +1380,10 @@ impl ExchangeImports for Imports {
     fn loop_timer(
         &self,
         _: safe_cex_venue_binance::lifecycle::TickTimer,
-        _: EventValue,
+        interval: EventValue,
     ) -> Result<(), Failure> {
-        panic!("fixture does not schedule loop")
+        self.loop_intervals.borrow_mut().push(interval.number()?);
+        Ok(())
     }
 }
 #[test]
@@ -2632,6 +2639,429 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
             assert!(
                 state.upgrade().is_none(),
                 "native watchdog never leases released class state"
+            );
+        }
+    }
+}
+
+fn sixteen_method_routes(imports: &Imports) {
+    let corpus: Value = serde_json::from_str(include_str!("fixtures/public-rest.json")).unwrap();
+    let case = |family: &str| {
+        corpus
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["family"] == family && c["name"] == "normal")
+            .unwrap()["payloads"]
+            .clone()
+    };
+    let (markets, tickers) = (case("markets"), case("tickers"));
+    let position = json!({"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1});
+    imports.routes.borrow_mut().extend([
+        ("/fapi/v1/exchangeInfo", markets[0]["data"].clone()),
+        ("/fapi/v1/leverageBracket", json!([{"symbol":"BTCUSDT","brackets":[{"initialLeverage":125}]}])),
+        ("/papi/v1/um/leverageBracket", json!([{"symbol":"BTCUSDT","brackets":[{"initialLeverage":125}]}])),
+        ("/fapi/v1/ticker/24hr", tickers[0]["data"].clone()),
+        ("/fapi/v1/ticker/bookTicker", tickers[1]["data"].clone()),
+        ("/fapi/v1/premiumIndex", tickers[2]["data"].clone()),
+        ("/fapi/v3/balance", json!([{"accountAlias":"alias-futures","asset":"USDT","balance":"100"}])),
+        ("/papi/v1/balance", json!([{"accountAlias":"alias-pm","asset":"USDT","totalWalletBalance":"100","umUnrealizedPNL":"0"}])),
+        ("/fapi/v3/account", json!({"totalWalletBalance":"100","availableBalance":"60","totalUnrealizedProfit":"1"})),
+        ("/papi/v1/account", json!({"accountEquity":"100","totalAvailableBalance":"60","actualEquity":"100"})),
+        ("/api/v3/account", json!({"balances":[{"asset":"USDT","free":"60","locked":"40"}]})),
+        ("/fapi/v3/positionRisk", json!([position.clone()])),
+        ("/papi/v1/um/positionRisk", json!([position])),
+        ("/fapi/v1/symbolConfig", json!([{"symbol":"BTCUSDT","marginType":"CROSSED","leverage":5}])),
+        ("/fapi/v1/order", json!({"orderId":9001,"clientOrderId":"native-9001"})),
+        ("/papi/v1/um/order", json!({"orderId":9002,"clientOrderId":"native-9002"})),
+        ("/api/v3/order", json!({"orderId":9003,"clientOrderId":"native-9003"})),
+        ("/api/v3/exchangeInfo", json!({"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","status":"TRADING","baseAssetPrecision":8,"quoteAssetPrecision":8,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.01"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"100"}]}]})),
+        ("/api/v3/ticker/24hr", json!([{"symbol":"BTCUSDT","bidPrice":"10.1","askPrice":"10.9","lastPrice":"10.5","priceChangePercent":"1.5","volume":"100","quoteVolume":"1050"}])),
+        ("/fapi/v1/trades", json!([{"id":1,"price":"10","qty":"1","quoteQty":"10","time":1000,"isBuyerMaker":false}])),
+    ]);
+}
+
+/// Observed through the scripted transport. "Not implemented" rows reproduce the
+/// TS BaseExchange default each class inherits; see exchange_trait.rs.
+const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
+    (
+        "Futures",
+        "place_order",
+        r#"ok:["9001"]"#,
+        &["/fapi/v1/order"],
+    ),
+    (
+        "Futures",
+        "change_position_mode",
+        r#"ok:null"#,
+        &["/fapi/v1/positionSide/dual"],
+    ),
+    (
+        "Futures",
+        "start",
+        r#"ok:null"#,
+        &[
+            "/fapi/v1/exchangeInfo",
+            "/fapi/v1/leverageBracket",
+            "/fapi/v1/ticker/24hr",
+            "/fapi/v1/ticker/bookTicker",
+            "/fapi/v1/premiumIndex",
+            "/fapi/v1/listenKey",
+            "/fapi/v1/positionSide/dual",
+            "/fapi/v3/positionRisk",
+            "/fapi/v1/symbolConfig",
+            "/fapi/v3/account",
+            "/fapi/v1/openOrders",
+            "/fapi/v1/openAlgoOrders",
+        ],
+    ),
+    (
+        "Futures",
+        "get_account",
+        r#"ok:{"userId":"alias-futures"}"#,
+        &["/fapi/v3/balance"],
+    ),
+    (
+        "Futures",
+        "validate_account",
+        r#"ok:{"error":"","balance":{"used":40.0,"free":60.0,"total":100.0,"upnl":1.0}}"#,
+        &["/fapi/v3/account"],
+    ),
+    (
+        "Futures",
+        "fetch_positions",
+        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":0.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0,"marginSize":0.0,"info":{"synthetic":true,"symbolConfig":null}}]"#,
+        &["/fapi/v3/positionRisk", "/fapi/v1/symbolConfig"],
+    ),
+    (
+        "Futures",
+        "fetch_orders",
+        r#"ok:[]"#,
+        &["/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"],
+    ),
+    (
+        "Futures",
+        "fetch_markets",
+        r#"ok:[{"id":"BTC/USDT:USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.25},"limits":{"amount":{"min":0.2,"max":90.0},"leverage":{"min":1.0,"max":125.0}}},{"id":"ETH/USDC:USDC","symbol":"ETHUSDC","base":"ETH","quote":"USDC","active":false,"precision":{"amount":2.0,"price":0.05},"limits":{"amount":{"min":3.0,"max":40.0},"leverage":{"min":1.0,"max":1.0}}}]"#,
+        &["/fapi/v1/exchangeInfo", "/fapi/v1/leverageBracket"],
+    ),
+    (
+        "Futures",
+        "fetch_tickers",
+        r#"ok:[{"id":"BTC/USDT:USDT","symbol":"BTCUSDT","bid":10.1,"ask":10.9,"last":12.3,"mark":12.4,"index":12.5,"percentage":3.6,"openInterest":0.0,"fundingRate":0.002,"fundingTime":8000.0,"volume":27.1,"quoteVolume":44.2}]"#,
+        &[
+            "/fapi/v1/ticker/24hr",
+            "/fapi/v1/ticker/bookTicker",
+            "/fapi/v1/premiumIndex",
+        ],
+    ),
+    (
+        "Futures",
+        "fetch_symbol_max_leverage",
+        r#"err:Not implemented"#,
+        &[],
+    ),
+    (
+        "Futures",
+        "set_leverage",
+        r#"ok:null"#,
+        &["/fapi/v1/leverage"],
+    ),
+    (
+        "Futures",
+        "change_margin_type",
+        r#"ok:null"#,
+        &["/fapi/v1/marginType"],
+    ),
+    (
+        "Futures",
+        "update_order",
+        r#"ok:["9001"]"#,
+        &["/fapi/v1/order", "/fapi/v1/order"],
+    ),
+    (
+        "Futures",
+        "cancel_orders",
+        r#"ok:null"#,
+        &["/fapi/v1/order"],
+    ),
+    ("Futures", "schedule_cancel", r#"err:Not implemented"#, &[]),
+    (
+        "Futures",
+        "fetch_public_trades",
+        r#"ok:[{"id":"1","symbol":"BTCUSDT","price":10.0,"qty":1.0,"quoteQty":10.0,"timestamp":1000.0,"side":"buy"}]"#,
+        &["/fapi/v1/trades"],
+    ),
+    (
+        "PM",
+        "place_order",
+        r#"ok:["x-s3vFFRQpfixture"]"#,
+        &["/papi/v1/um/order"],
+    ),
+    (
+        "PM",
+        "change_position_mode",
+        r#"ok:null"#,
+        &["/papi/v1/um/positionSide/dual"],
+    ),
+    (
+        "PM",
+        "start",
+        r#"ok:null"#,
+        &[
+            "/fapi/v1/exchangeInfo",
+            "/papi/v1/um/leverageBracket",
+            "/fapi/v1/ticker/24hr",
+            "/fapi/v1/ticker/bookTicker",
+            "/fapi/v1/premiumIndex",
+            "/papi/v1/listenKey",
+            "/papi/v1/um/positionSide/dual",
+            "/papi/v1/um/positionRisk",
+            "/papi/v1/balance",
+            "/papi/v1/um/openOrders",
+            "/papi/v1/um/conditional/openOrders",
+        ],
+    ),
+    (
+        "PM",
+        "get_account",
+        r#"ok:{"userId":"alias-pm"}"#,
+        &["/papi/v1/balance"],
+    ),
+    (
+        "PM",
+        "validate_account",
+        r#"ok:{"error":"","balance":{"used":null,"free":null,"total":100.0,"upnl":0.0,"info":[{"accountAlias":"alias-pm","asset":"USDT","totalWalletBalance":"100","umUnrealizedPNL":"0"}]}}"#,
+        &["/papi/v1/account", "/papi/v1/balance"],
+    ),
+    (
+        "PM",
+        "fetch_positions",
+        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":10.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0}]"#,
+        &["/papi/v1/um/positionRisk"],
+    ),
+    (
+        "PM",
+        "fetch_orders",
+        r#"ok:[]"#,
+        &[
+            "/papi/v1/um/openOrders",
+            "/papi/v1/um/conditional/openOrders",
+        ],
+    ),
+    (
+        "PM",
+        "fetch_markets",
+        r#"ok:[{"id":"BTC/USDT:USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.25},"limits":{"amount":{"min":0.2,"max":90.0},"leverage":{"min":1.0,"max":125.0}}},{"id":"ETH/USDC:USDC","symbol":"ETHUSDC","base":"ETH","quote":"USDC","active":false,"precision":{"amount":2.0,"price":0.05},"limits":{"amount":{"min":3.0,"max":40.0},"leverage":{"min":1.0,"max":1.0}}}]"#,
+        &["/fapi/v1/exchangeInfo", "/papi/v1/um/leverageBracket"],
+    ),
+    (
+        "PM",
+        "fetch_tickers",
+        r#"ok:[{"id":"BTC/USDT:USDT","symbol":"BTCUSDT","bid":10.1,"ask":10.9,"last":12.3,"mark":12.4,"index":12.5,"percentage":3.6,"openInterest":0.0,"fundingRate":0.002,"fundingTime":8000.0,"volume":27.1,"quoteVolume":44.2}]"#,
+        &[
+            "/fapi/v1/ticker/24hr",
+            "/fapi/v1/ticker/bookTicker",
+            "/fapi/v1/premiumIndex",
+        ],
+    ),
+    (
+        "PM",
+        "fetch_symbol_max_leverage",
+        r#"err:Not implemented"#,
+        &[],
+    ),
+    (
+        "PM",
+        "set_leverage",
+        r#"ok:null"#,
+        &["/papi/v1/um/leverage"],
+    ),
+    (
+        "PM",
+        "change_margin_type",
+        r#"err:Portfolio margin is not supported"#,
+        &[],
+    ),
+    (
+        "PM",
+        "update_order",
+        r#"ok:["x-s3vFFRQpfixture"]"#,
+        &["/papi/v1/um/order", "/papi/v1/um/order"],
+    ),
+    ("PM", "cancel_orders", r#"ok:null"#, &["/papi/v1/um/order"]),
+    ("PM", "schedule_cancel", r#"err:Not implemented"#, &[]),
+    ("PM", "fetch_public_trades", r#"err:Not implemented"#, &[]),
+    (
+        "Spot",
+        "place_order",
+        r#"ok:["x-s3vFFRQpfixture"]"#,
+        &["/api/v3/order"],
+    ),
+    (
+        "Spot",
+        "change_position_mode",
+        r#"err:Not implemented"#,
+        &[],
+    ),
+    (
+        "Spot",
+        "start",
+        r#"ok:null"#,
+        &[
+            "/api/v3/exchangeInfo",
+            "/api/v3/ticker/24hr",
+            "/api/v3/account",
+            "/api/v3/openOrders",
+        ],
+    ),
+    ("Spot", "get_account", r#"err:Not implemented"#, &[]),
+    (
+        "Spot",
+        "validate_account",
+        r#"ok:{"error":"","balance":{"used":40.0,"free":60.0,"total":100.0,"upnl":0.0,"info":{"balances":[{"asset":"USDT","free":"60","locked":"40"}]},"currencies":{"USDT":{"used":40.0,"free":60.0,"total":100.0,"upnl":0.0,"info":{"asset":"USDT","free":"60","locked":"40"}}},"coins":{"USDT":{"base":"USDT","amount":100.0,"notional":100.0}}}}"#,
+        &["/api/v3/account", "/api/v3/account"],
+    ),
+    ("Spot", "fetch_positions", r#"ok:[]"#, &["/api/v3/account"]),
+    ("Spot", "fetch_orders", r#"ok:[]"#, &["/api/v3/openOrders"]),
+    (
+        "Spot",
+        "fetch_markets",
+        r#"ok:[{"id":"BTC/USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.01},"limits":{"amount":{"min":0.001,"max":100.0},"leverage":{"min":1.0,"max":1.0}},"isSpot":true}]"#,
+        &["/api/v3/exchangeInfo"],
+    ),
+    (
+        "Spot",
+        "fetch_tickers",
+        r#"ok:[{"id":"BTC/USDT","symbol":"BTCUSDT","bid":10.1,"ask":10.9,"last":10.5,"mark":10.5,"index":10.5,"percentage":1.5,"openInterest":0.0,"fundingRate":0.0,"fundingTime":0.0,"volume":100.0,"quoteVolume":1050.0}]"#,
+        &["/api/v3/ticker/24hr"],
+    ),
+    (
+        "Spot",
+        "fetch_symbol_max_leverage",
+        r#"err:Not implemented"#,
+        &[],
+    ),
+    ("Spot", "set_leverage", r#"err:Not implemented"#, &[]),
+    ("Spot", "change_margin_type", r#"err:Not implemented"#, &[]),
+    (
+        "Spot",
+        "update_order",
+        r#"ok:["x-s3vFFRQpfixture"]"#,
+        &["/api/v3/order", "/api/v3/order"],
+    ),
+    ("Spot", "cancel_orders", r#"ok:null"#, &["/api/v3/order"]),
+    ("Spot", "schedule_cancel", r#"err:Not implemented"#, &[]),
+    ("Spot", "fetch_public_trades", r#"err:Not implemented"#, &[]),
+];
+
+#[test]
+fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() {
+    use safe_cex_exchange::exchange::Exchange;
+    use safe_cex_venue_binance::exchange_classes::{
+        BinanceExchange, BinancePMExchange, BinanceSpotExchange,
+    };
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let runtime = Rc::new(Runtime::default());
+        let imports = Rc::new(Imports::default());
+        sixteen_method_routes(&imports);
+        let deps = ExchangeDependencies {
+            runtime: runtime.clone(),
+            imports: imports.clone(),
+            signers: Default::default(),
+            remote_signer_token: None,
+            payload_signer_token: None,
+        };
+        let stem = match venue {
+            Venue::Futures => "binance",
+            Venue::PM => "binancepm",
+            Venue::Spot => "binancespot",
+        };
+        let name = serde_json::from_value(json!(stem)).unwrap();
+        let options = serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap();
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let exchange: Rc<dyn Exchange> = match venue {
+            Venue::Futures => Rc::new(BinanceExchange::new(name, options, store, deps).unwrap()),
+            Venue::PM => Rc::new(BinancePMExchange::new(name, options, store, deps).unwrap()),
+            Venue::Spot => Rc::new(BinanceSpotExchange::new(name, options, store, deps).unwrap()),
+        };
+        let market = serde_json::from_value(json!({"id":"BTCUSDT", "symbol":"BTCUSDT", "base":"BTC", "quote":"USDT", "active":true, "precision":{"amount":0.1,"price":0.01},"limits":{"amount":{"min":0.1,"max":100},"leverage":{"min":1,"max":20}}})).unwrap();
+        exchange
+            .base()
+            .store
+            .update(
+                safe_cex_store::StoreUpdate {
+                    markets: Some(vec![market]),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+        let order: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":10}),
+        )
+        .unwrap();
+        let update: safe_cex_types::UpdateOrderOpts = serde_json::from_value(json!({"order":{"id":"1","symbol":"BTCUSDT","type":"limit","side":"buy","price":10,"amount":1,"status":"open","filled":0,"remaining":1,"reduceOnly":false,"lastUpdate":0},"update":{"price":11}})).unwrap();
+        let resting: safe_cex_types::Order = serde_json::from_value(json!({"id":"77","symbol":"BTCUSDT","type":"limit","side":"buy","price":10,"amount":1,"status":"open","filled":0,"remaining":1,"reduceOnly":false,"lastUpdate":0})).unwrap();
+        let mut observed = Vec::new();
+        macro_rules! probe {
+            ($label:literal, $call:expr) => {{
+                imports.requests.borrow_mut().clear();
+                let outcome = match run(&runtime, $call) {
+                    Ok(value) => format!("ok:{}", serde_json::to_string(&value).unwrap()),
+                    Err(error) => format!("err:{}", error.message),
+                };
+                observed.push(($label, outcome, imports.requests.borrow().clone()));
+            }};
+        }
+        let e = exchange.clone();
+        probe!("place_order", e.base().place_order(e.as_ref(), order));
+        probe!("change_position_mode", e.change_position_mode(true, None));
+        probe!("start", e.start());
+        probe!("get_account", e.get_account());
+        probe!("validate_account", e.validate_account());
+        probe!("fetch_positions", e.fetch_positions(None));
+        probe!("fetch_orders", e.fetch_orders(None));
+        probe!("fetch_markets", e.fetch_markets());
+        probe!("fetch_tickers", e.fetch_tickers());
+        probe!(
+            "fetch_symbol_max_leverage",
+            e.fetch_symbol_max_leverage("BTCUSDT".into())
+        );
+        probe!("set_leverage", e.set_leverage("BTCUSDT".into(), 7.0, None));
+        probe!(
+            "change_margin_type",
+            e.change_margin_type(true, Some("BTCUSDT".into()))
+        );
+        probe!("update_order", e.update_order(update));
+        probe!("cancel_orders", e.cancel_orders(vec![resting.clone()]));
+        probe!("schedule_cancel", e.schedule_cancel(None));
+        probe!(
+            "fetch_public_trades",
+            e.fetch_public_trades("BTCUSDT".into(), Some(5.0))
+        );
+        let expected: Vec<_> = SIXTEEN_METHOD_OUTCOMES
+            .iter()
+            .filter(|row| row.0 == format!("{venue:?}"))
+            .collect();
+        assert_eq!(
+            expected.len(),
+            16,
+            "all sixteen trait methods pinned: {venue:?}"
+        );
+        assert_eq!(
+            observed.len(),
+            16,
+            "all sixteen trait methods called: {venue:?}"
+        );
+        for ((label, outcome, requests), (_, want_label, want_outcome, want_requests)) in
+            observed.iter().zip(expected)
+        {
+            assert_eq!(label, want_label, "method order: {venue:?}");
+            assert_eq!(outcome, want_outcome, "{venue:?} {label} outcome");
+            assert_eq!(
+                requests, want_requests,
+                "{venue:?} {label} transport requests"
             );
         }
     }

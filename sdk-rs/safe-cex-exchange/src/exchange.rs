@@ -138,7 +138,6 @@ pub struct ExchangeSettings {
     pub tick_interval: Option<f64>,
     pub positions_supported: Option<bool>,
     pub supports_public_only: bool,
-    pub supports_executions_history: bool,
     pub client_order_id_rule: Option<ClientOrderIdRule>,
 }
 
@@ -372,6 +371,22 @@ pub trait Exchange: std::any::Any + ExchangeView {
         _options: Option<safe_cex_types::OrderHistoryOptions>,
     ) -> ExchangeFuture<'_, Vec<safe_cex_types::HistoricalOrder>> {
         Box::pin(async { Ok(vec![]) })
+    }
+    // Options are opt-in per venue: these reject naming the venue, never an empty chain.
+    fn fetch_option_chain(
+        &self,
+        _query: safe_cex_types::OptionChainQuery,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::OptionChainRow>> {
+        let error = crate::capabilities::options_unsupported(self.name(), "Option chains");
+        Box::pin(async move { Err(error) })
+    }
+    fn fetch_option_expiries(&self, _underlying: String) -> ExchangeFuture<'_, Vec<f64>> {
+        let error = crate::capabilities::options_unsupported(self.name(), "Option expiries");
+        Box::pin(async move { Err(error) })
+    }
+    fn fetch_account_greeks(&self) -> ExchangeFuture<'_, Vec<safe_cex_types::AccountGreeks>> {
+        let error = crate::capabilities::options_unsupported(self.name(), "Account greeks");
+        Box::pin(async move { Err(error) })
     }
 
     fn after_method_called_in_worker(

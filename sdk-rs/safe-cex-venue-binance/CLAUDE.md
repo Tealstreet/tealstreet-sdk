@@ -340,7 +340,7 @@ outside these extractions; preserve this boundary when wiring the classes.
 
 The concrete Futures, PM and Spot wrappers implement the shared Exchange trait
 through exchange_trait.rs. Capability brands and supported method routing follow
-their actual source constructors; inherited unsupported hooks stay inherited.
+their actual source constructors.
 Shared socket registration and imported owner observers are weak. Constructor
 watchdogs bind to the stable core parent rather than a temporary wrapper.
 Listener setup/cleanup, Store notifications and worker confirmation retain typed
@@ -349,3 +349,39 @@ errors and their source catch boundaries. See
 witnesses and [the canonical lease policy](../parity/MANIFEST-SPEC.md#owned-exchange-lease-policy)
 for retained-handle lifetime choices. These classes remain divergent; completing
 this closure is not a whole-venue equivalence claim.
+
+All 16 `Exchange` trait methods are overridden on all three classes. Methods the
+TS class inherits from `BaseExchange` (Futures: fetchSymbolMaxLeverage,
+scheduleCancel; PM adds fetchPublicTrades; Spot adds getAccount, setLeverage,
+changePositionMode, changeMarginType) go through `base_exchange_rejection`, which
+reproduces the base `Error('Not implemented')` with no request and no emit. Do not
+"implement" one without a TS override to port. The SDK path decodes typed values,
+so its projections must match that decoder: an absent TS key is omitted rather than
+written as undefined (Futures/PM `isSpot`), `class_decode` passes newtype capture
+through to the native value (position `info`), and `capture_is_algo` accepts the
+decoded order-type string as well as the native enum. `tests/private_classes.rs`
+pins every method's outcome and transport routes per class, constructed via each
+`::new` over a route-scripted `request` import.
+
+`native_host` (feature `native`) is the production `ExchangeImports`. Each
+factory call builds an axios-equivalent client over the shared `HttpClient`:
+the ported request interceptors run inside `execute_with_interceptor` (so a
+public endpoint's header removal stands), response stages run FIFO (factory
+interceptors, then weight guards), reads retry on network failure, and the
+secondary-key split routes `get` to the secondary client. The private base is a
+core `BaseWebSocket` with id 3 whose protocol forwards open/message to the
+registered listeners; close stays with the core. `PrivateBase::install_hooks`
+routes watchdog ping and reconnect back into `PrivateState`. `bind_owner` gives
+the host the exchange weakly: response interceptors emit through it, `paginate`
+runs the shared `income_paging` pager over the venue's rethrowing page fetch,
+and `fold_closed_positions` runs `build_records` over the exchange's own fills
+and income dispatch. A hosted remote signer arrives through `native_dependencies`:
+clients get it as the HTTP signer (the venue interceptor leaves requests unsigned
+when `options.remoteSigner` is set) and `remote_sign` relays ws-auth to it; the
+options token is stripped before typed decoding, since typed options cannot hold it.
+
+`ExchangeImports::request` args are the query params for GET/DELETE and the body
+for POST/PUT — never an axios config object; every call site passes that shape.
+Binance ledger ids arrive as JSON numbers and the class keeps them raw as TS
+does; `income_records` projects them through `String()` only at the typed
+`IncomeRecord` boundary (trait income methods, pager, fold).

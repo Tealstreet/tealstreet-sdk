@@ -92,6 +92,7 @@ fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, Exc
                 min: 1.0,
                 max: 100.0,
             },
+            price: None,
         },
         contract_size: None,
         is_expiring: None,
@@ -102,6 +103,7 @@ fn project_instrument(inst: &Value) -> Result<Result<Market, ExchangeError>, Exc
         info: Some(Value::Object(info)),
         taker_fee: None,
         maker_fee: None,
+        option: None,
     }))
 }
 

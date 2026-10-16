@@ -257,6 +257,7 @@ pub async fn fetch_positions<E: std::fmt::Display>(
                 realized_pnl: None,
                 margin_size: None,
                 last_update: None,
+                option: None,
             });
         }
         // Metadata carries both fields and source spread overrides the outer defaults.

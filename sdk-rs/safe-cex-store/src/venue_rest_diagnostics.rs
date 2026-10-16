@@ -66,6 +66,8 @@ pub struct VenueRestFailureSample {
     pub rest_proxy_header_sent: Option<String>,
     pub error_name: Option<String>,
     pub error_message: Option<String>,
+    /// Failed while getting its signature, so it never reached the venue.
+    pub unsent_signing: bool,
     pub endpoint: Option<String>,
     pub headers: JsObjectMap<String>,
 }
@@ -74,6 +76,8 @@ pub struct ExchangeDiagnostics {
     pub requests: f64,
     pub ok: f64,
     pub failures: f64,
+    /// Hosted requests that failed while signing; not failures of the venue.
+    pub unsent_signing: f64,
     pub timestamps: Vec<f64>,
     pub total_ms: Vec<f64>,
     pub sign_ms: Vec<f64>,
@@ -90,6 +94,7 @@ pub struct VenueRestStats {
     pub requests: f64,
     pub ok: f64,
     pub failures: f64,
+    pub unsent_signing: f64,
     pub per_minute: f64,
     pub tracked_samples: usize,
     pub total_p50_ms: Option<f64>,
@@ -198,6 +203,52 @@ pub fn read_headers(
     }
     Ok(out)
 }
+// Source `/<(style|script)[\s\S]*?<\/\1>/gi`. Rust regex has no backreference, so the
+// lazy scan is explicit; non-unicode /i folds these ASCII names only.
+fn strip_style_and_script(html: &str) -> String {
+    let bytes = html.as_bytes();
+    let starts_with = |at: usize, text: &str| {
+        bytes
+            .get(at..at + text.len())
+            .is_some_and(|run| run.eq_ignore_ascii_case(text.as_bytes()))
+    };
+    let mut out = String::with_capacity(html.len());
+    let (mut copied, mut at) = (0, 0);
+    while let Some(offset) = html[at..].find('<') {
+        let open = at + offset;
+        let name = ["style", "script"]
+            .into_iter()
+            .find(|name| starts_with(open + 1, name));
+        let close = name.and_then(|name| {
+            let closing = format!("</{name}>");
+            (open + 1 + name.len()..bytes.len())
+                .find(|&at| starts_with(at, &closing))
+                .map(|at| at + closing.len())
+        });
+        if let Some(end) = close {
+            out.push_str(&html[copied..open]);
+            out.push(' ');
+            copied = end;
+            at = end;
+        } else {
+            at = open + 1;
+        }
+    }
+    out.push_str(&html[copied..]);
+    out
+}
+/// ts: venueRestDiagnostics visibleText. An error page's reason line sits past its head.
+pub fn visible_text(html: &str) -> String {
+    const JS_WHITESPACE: &str = r"[\t\n\v\f\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]+";
+    let stripped = strip_style_and_script(&slice_utf16(html, 64_000));
+    let untagged = Regex::new(r"<[^>]+>")
+        .expect("literal regex")
+        .replace_all(&stripped, " ");
+    let collapsed = Regex::new(JS_WHITESPACE)
+        .expect("literal regex")
+        .replace_all(&untagged, " ");
+    js_trim(&collapsed).to_owned()
+}
 pub fn classify_body(data: Option<&Value>) -> (String, Option<String>) {
     let Some(data) = data.filter(|value| !value.is_null() && value.as_str() != Some("")) else {
         return ("empty".into(), None);
@@ -210,14 +261,13 @@ pub fn classify_body(data: Option<&Value>) -> (String, Option<String>) {
     }
     let text = js_string(Some(data)).expect("JSON primitive");
     let lower = text.to_lowercase();
-    let kind = if lower.contains("cloudfront") {
-        "cloudfront"
-    } else if lower.contains("<html") || lower.contains("<!doctype") {
-        "html"
-    } else {
-        "text"
-    };
-    (kind.into(), Some(scrub(&text)))
+    if lower.contains("cloudfront") {
+        return ("cloudfront".into(), Some(scrub(&visible_text(&text))));
+    }
+    if lower.contains("<html") || lower.contains("<!doctype") {
+        return ("html".into(), Some(scrub(&visible_text(&text))));
+    }
+    ("text".into(), Some(scrub(&text)))
 }
 pub fn normalize_error_key(message: &str) -> String {
     let scrubbed = scrub(message);
@@ -397,27 +447,37 @@ pub fn note_rest_failure(exchange: &str, error: Option<&RestDiagnosticError>, no
         let signature_age_ms = read_config_number(config, "safeCexRestDiagSignatureAgeMs");
         let status = response.and_then(|response| response.status);
         let code = error.and_then(|error| error.code.clone());
-        diagnostics.requests += 1.0;
-        diagnostics.failures += 1.0;
-        note_timestamp(&mut diagnostics, now);
-        if let Some(total_ms) = total_ms {
-            push(&mut diagnostics.total_ms, total_ms);
-        }
-        if let Some(sign_ms) = sign_ms {
-            push(&mut diagnostics.sign_ms, sign_ms);
-        }
-        if let Some(age) = signature_age_ms {
-            diagnostics.max_signature_age_ms = Some(safe_cex_num::math_max(
-                diagnostics.max_signature_age_ms.unwrap_or(0.0),
-                age,
-            ));
-        }
-        bump(
-            &mut diagnostics.status_counts,
-            &status.map_or_else(|| "none".into(), js_number_string),
-        );
-        if let Some(code) = code.as_deref().filter(|value| !value.is_empty()) {
-            bump(&mut diagnostics.code_counts, code);
+        // A signer that is asleep or gone is the device's state, not the venue's:
+        // counted and sampled, but kept out of the venue's rate and latency.
+        let unsent_signing = response.is_none()
+            && crate::remaining_utils::is_unsent_signing_failure(
+                error.and_then(|error| error.message.as_deref()),
+            );
+        if unsent_signing {
+            diagnostics.unsent_signing += 1.0;
+        } else {
+            diagnostics.requests += 1.0;
+            diagnostics.failures += 1.0;
+            note_timestamp(&mut diagnostics, now);
+            if let Some(total_ms) = total_ms {
+                push(&mut diagnostics.total_ms, total_ms);
+            }
+            if let Some(sign_ms) = sign_ms {
+                push(&mut diagnostics.sign_ms, sign_ms);
+            }
+            if let Some(age) = signature_age_ms {
+                diagnostics.max_signature_age_ms = Some(safe_cex_num::math_max(
+                    diagnostics.max_signature_age_ms.unwrap_or(0.0),
+                    age,
+                ));
+            }
+            bump(
+                &mut diagnostics.status_counts,
+                &status.map_or_else(|| "none".into(), js_number_string),
+            );
+            if let Some(code) = code.as_deref().filter(|value| !value.is_empty()) {
+                bump(&mut diagnostics.code_counts, code);
+            }
         }
         let message = error
             .and_then(|error| error.message.as_deref())
@@ -461,6 +521,7 @@ pub fn note_rest_failure(exchange: &str, error: Option<&RestDiagnosticError>, no
                 endpoint: endpoint_of(config),
                 error_name: error.and_then(|error| error.name.clone()),
                 error_message: message.map(scrub),
+                unsent_signing,
                 headers,
             });
             if state.failure_samples.len() > 25 {
@@ -512,6 +573,7 @@ pub fn get_venue_rest_stats(now: f64) -> JsObjectMap<VenueRestStats> {
                         requests: diagnostics.requests,
                         ok: diagnostics.ok,
                         failures: diagnostics.failures,
+                        unsent_signing: diagnostics.unsent_signing,
                         per_minute: math_round(recent as f64 / 5.0 * 10.0) / 10.0,
                         tracked_samples: diagnostics.timestamps.len(),
                         total_p50_ms: percentile(&diagnostics.total_ms, 0.5),

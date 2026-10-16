@@ -14,9 +14,9 @@ note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#kraken-module-utility-adapters. W
 ts = "KrakenSpotExchange"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-kraken/src/classes.rs::spot_exchange"
+rs = [ "safe-cex-venue-kraken/src/classes.rs::spot_exchange", "safe-cex-venue-kraken/src/classes.rs::definitions", "safe-cex-venue-kraken/src/classes.rs::initialize", "safe-cex-venue-kraken/src/rest_account.rs::Entries", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Id", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Items", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Order", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Orders", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::emit_error", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::error_message", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::first", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::id", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::items", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::length", "safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::post_cancel", "safe-cex-venue-kraken/src/stream_adapters.rs::CandleCallback", "safe-cex-venue-kraken/src/stream_adapters.rs::PublicStreams::listen_ohlcv", "safe-cex-venue-kraken/src/trading.rs::TradingHost::spot_client_id" ]
 status = "divergent"
-note = "CHOSEN: source KrakenSpotExchange fixes its own 17 arrow bodies and constructs with ordinary arguments; this executable native factory requires complete external callable member bindings (start is the first missing-binding rejection). Paired actual-source construction and native rejection/complete-instance behavior: tests/composition.rs::spot_exchange_class_native. Explicit assembly preserves field order, fresh receiver-bound arrows and containers while reusing separately mapped heterogeneous member interfaces; it does not ship fixed production body adapters. Canonical contract: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Existing member divergences remain in their own rows; scripts/composition-controls.py discriminates source-order construction."
+note = "CHOSEN: source KrakenSpotExchange fixes its own 17 arrow bodies and constructs with ordinary arguments; this executable native factory requires complete external callable member bindings (start is the first missing-binding rejection). Paired actual-source construction and native rejection/complete-instance behavior: tests/composition.rs::spot_exchange_class_native. Explicit assembly preserves field order, fresh receiver-bound arrows and containers while reusing separately mapped heterogeneous member interfaces; it does not ship fixed production body adapters. Canonical contract: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Existing member divergences remain in their own rows; scripts/composition-controls.py discriminates source-order construction. Rename target: `safe-cex-venue-kraken/src/classes.rs::spot_exchange`. Split member `safe-cex-venue-kraken/src/classes.rs::definitions`. Source-ordered instance-field and member definition table for each class kind, consumed by initialize. Split member `safe-cex-venue-kraken/src/classes.rs::initialize`. Class instance-field initialization in source order (undefined, boolean, Map, object and imported initializers) for each class kind. Split member `safe-cex-venue-kraken/src/rest_account.rs::Entries`. Rust-only carrier alias with no standalone TypeScript declaration, used by krakenspot.exchange KrakenSpotExchange.fetchMarkets. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost`. Host capability trait binding the imported, realm and owner operations used by krakenspot.exchange KrakenSpotExchange.cancelOrders; it adds no TypeScript symbol of its own and holds no venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Id`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Items`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Order`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::Orders`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::emit_error`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::error_message`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::first`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::id`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::items`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::length`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/spot_cancel.rs::SpotCancelHost::post_cancel`. Required member of the SpotCancelHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.cancelOrders. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/stream_adapters.rs::CandleCallback`. Rust-only callback alias with no standalone TypeScript declaration, used by krakenspot.exchange KrakenSpotExchange.listenOHLCV. Split member `safe-cex-venue-kraken/src/stream_adapters.rs::PublicStreams::listen_ohlcv`. Required member of the PublicStreams host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.listenOHLCV. No independent venue algorithm. Split member `safe-cex-venue-kraken/src/trading.rs::TradingHost::spot_client_id`. Required member of the TradingHost host capability (imported call, realm read/write, timer, emit or store access) used by krakenspot.exchange KrakenSpotExchange.placeOrder. No independent venue algorithm."
 
 [[symbol]]
 ts = "KrakenSpotExchange.constructor"
@@ -24,7 +24,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/construction.rs::spot_constructor"
 status = "ported"
-note = "Host-bound complete source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Actual-source/native witness tests/composition.rs::spot_constructor_native; compiled family discrimination scripts/composition-controls.py. Original values, current state, ordered callbacks/assignments and source exception boundaries are preserved over explicit runtime/intrinsic dependencies; no fixed class/runtime or live network claim."
+note = "Host-bound complete source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Actual-source/native witness tests/composition.rs::spot_constructor_native; compiled family discrimination scripts/composition-controls.py. Original values, current state, ordered callbacks/assignments and source exception boundaries are preserved over explicit runtime/intrinsic dependencies; no fixed class/runtime or live network claim. Rename target: `safe-cex-venue-kraken/src/construction.rs::spot_constructor`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.start"
@@ -32,7 +32,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/startup.rs::start_spot"
 status = "ported"
-note = "Host-bound Spot startup body with current flags and disposal guards, original fetched batch handles, exact loaded-flag merges, slot assignment before connection and unawaited tick(0). Concrete factories and tick implementation remain pending. Actual-source state/continuation/constructor witness: tests/startup.rs."
+note = "Host-bound Spot startup body with current flags and disposal guards, original fetched batch handles, exact loaded-flag merges, slot assignment before connection and unawaited tick(0). Concrete factories and tick implementation remain pending. Actual-source state/continuation/constructor witness: tests/startup.rs. Rename target: `safe-cex-venue-kraken/src/startup.rs::start_spot`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.fetchMarkets"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/rest_account.rs::spot_tickers"
 status = "ported"
-note = "Host-bound REST method body with original parsed values and current Store fallbacks; source branches, calculations, preference writes, own-key order, pagination or loaded patch preserved in production. Boundaries: sdk-rs/parity/MANIFEST-SPEC.md#kraken-rest-account-read-hosts. Actual-source native witness: tests/rest_account.rs::spot_tickers_native; discriminating production control: scripts/rest-account-controls.py."
+note = "Host-bound REST method body with original parsed values and current Store fallbacks; source branches, calculations, preference writes, own-key order, pagination or loaded patch preserved in production. Boundaries: sdk-rs/parity/MANIFEST-SPEC.md#kraken-rest-account-read-hosts. Actual-source native witness: tests/rest_account.rs::spot_tickers_native; discriminating production control: scripts/rest-account-controls.py. Rename target: `safe-cex-venue-kraken/src/rest_account.rs::spot_tickers`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.fetchOrders"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/startup.rs::fetch_and_set_orders"
 status = "ported"
-note = "Source method body retains and returns the exact original fetched batch handle; host-bound full-order mutation runs before the current loaded flags are read and orders marked true. Store dependency behavior remains at its own boundary. Reentrant batch/flag changes and original callback error identity are witnessed in tests/startup.rs."
+note = "Source method body retains and returns the exact original fetched batch handle; host-bound full-order mutation runs before the current loaded flags are read and orders marked true. Store dependency behavior remains at its own boundary. Reentrant batch/flag changes and original callback error identity are witnessed in tests/startup.rs. Rename target: `safe-cex-venue-kraken/src/startup.rs::fetch_and_set_orders`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.placeOrder"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/trading.rs::spot_place"
 status = "ported"
-note = "Host-bound trading/API body with production request construction, guards, ordered effects and source exception handling. Canonical boundaries and nonce ownership: sdk-rs/parity/MANIFEST-SPEC.md#kraken-trading-rest-and-api-hosts. Actual-source decoded-native witness: tests/trading.rs::spot_place_native; production discrimination: scripts/trading-controls.py. Imported encoding/crypto bindings are explicit; no live-signature or complete exchange-class claim."
+note = "Host-bound trading/API body with production request construction, guards, ordered effects and source exception handling. Canonical boundaries and nonce ownership: sdk-rs/parity/MANIFEST-SPEC.md#kraken-trading-rest-and-api-hosts. Actual-source decoded-native witness: tests/trading.rs::spot_place_native; production discrimination: scripts/trading-controls.py. Imported encoding/crypto bindings are explicit; no live-signature or complete exchange-class claim. Rename target: `safe-cex-venue-kraken/src/trading.rs::spot_place`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.updateOrder"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/trading.rs::spot_update"
 status = "ported"
-note = "Host-bound trading/API body with production request construction, guards, ordered effects and source exception handling. Canonical boundaries and nonce ownership: sdk-rs/parity/MANIFEST-SPEC.md#kraken-trading-rest-and-api-hosts. Actual-source decoded-native witness: tests/trading.rs::spot_update_native; production discrimination: scripts/trading-controls.py. Imported encoding/crypto bindings are explicit; no live-signature or complete exchange-class claim."
+note = "Host-bound trading/API body with production request construction, guards, ordered effects and source exception handling. Canonical boundaries and nonce ownership: sdk-rs/parity/MANIFEST-SPEC.md#kraken-trading-rest-and-api-hosts. Actual-source decoded-native witness: tests/trading.rs::spot_update_native; production discrimination: scripts/trading-controls.py. Imported encoding/crypto bindings are explicit; no live-signature or complete exchange-class claim. Rename target: `safe-cex-venue-kraken/src/trading.rs::spot_update`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.cancelOrders"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/spot_cancel.rs::cancel_orders"
 status = "ported"
-note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-periodic-synchronization-and-spot-cancellation-hosts. tests/spot_cancel.rs::cancel_orders_live_source executes the actual TypeScript body, asserts native current flags/IDs, opaque original identity, ordering and settlement. scripts/periodic-sync-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Promise ownership, loop scheduling, live arrays, HTTP, Store and shared exception representation remain bound dependencies; no complete-class/runtime claim."
+note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-periodic-synchronization-and-spot-cancellation-hosts. tests/spot_cancel.rs::cancel_orders_live_source executes the actual TypeScript body, asserts native current flags/IDs, opaque original identity, ordering and settlement. scripts/periodic-sync-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Promise ownership, loop scheduling, live arrays, HTTP, Store and shared exception representation remain bound dependencies; no complete-class/runtime claim. Rename target: `safe-cex-venue-kraken/src/spot_cancel.rs::cancel_orders`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.listenOrderBook"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/stream_adapters.rs::spot_listen_order_book"
 status = "ported"
-note = "Method-body port: host-bound Spot socket construction/assignment/first connection, then current-slot book delegation. Native callback/disposer identity, constructor parent, retained slot after failure and reentrant replacement are witnessed in tests/stream_adapters.rs. Concrete socket class/factory remains pending."
+note = "Method-body port: host-bound Spot socket construction/assignment/first connection, then current-slot book delegation. Native callback/disposer identity, constructor parent, retained slot after failure and reentrant replacement are witnessed in tests/stream_adapters.rs. Concrete socket class/factory remains pending. Rename target: `safe-cex-venue-kraken/src/stream_adapters.rs::spot_listen_order_book`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.fetchOHLCV"
@@ -112,7 +112,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/stream_adapters.rs::spot_listen_ohlcv"
 status = "ported"
-note = "Method-body port: host-bound Spot socket construction/assignment/first connection, then current-slot candle delegation with the same shared OHLCVOptions reference and callback/disposer identity. Error identity and reentrant slot replacement are witnessed in tests/stream_adapters.rs. Concrete socket class/factory remains pending."
+note = "Method-body port: host-bound Spot socket construction/assignment/first connection, then current-slot candle delegation with the same shared OHLCVOptions reference and callback/disposer identity. Error identity and reentrant slot replacement are witnessed in tests/stream_adapters.rs. Concrete socket class/factory remains pending. Rename target: `safe-cex-venue-kraken/src/stream_adapters.rs::spot_listen_ohlcv`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.fetchBalance"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/spot_balance.rs::fetch_balance"
 status = "divergent"
-note = "FINDING full-block audit (owner: rust-venue-polymarket): Source Spot balance POST541 before return versus spot_balance.rs12/26 lazy body. Separate source probe returns D800 at currencies.USDT.info.balance; omitted whole-response/fallback cost is a secondary justification cause. See sdk-rs/parity/evidence/okx-kraken-weex-audit/FULL-AUDIT.md and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Historical explanation retained below, not a ruling that the new cause is supported: CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#kraken-spot-balance-host. Parsed response/read/emitter host callbacks and shared Store balance snapshots. tests/spot_balance.rs::spot_balance_live_source asserts native fields, currency ordering, continuation-time ticker values and emitter metadata. Source/Rust witness pins the UTF-8 boundary. Runtime API factory remains pending."
+note = "FINDING full-block audit (owner: rust-venue-polymarket): Source Spot balance POST541 before return versus spot_balance.rs12/26 lazy body. Separate source probe returns D800 at currencies.USDT.info.balance; omitted whole-response/fallback cost is a secondary justification cause. See sdk-rs/parity/evidence/okx-kraken-weex-audit/FULL-AUDIT.md and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Historical explanation retained below, not a ruling that the new cause is supported: CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#kraken-spot-balance-host. Parsed response/read/emitter host callbacks and shared Store balance snapshots. tests/spot_balance.rs::spot_balance_live_source asserts native fields, currency ordering, continuation-time ticker values and emitter metadata. Source/Rust witness pins the UTF-8 boundary. Runtime API factory remains pending. Rename target: `safe-cex-venue-kraken/src/spot_balance.rs::fetch_balance`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.refreshBalance"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/validation.rs::validate_spot_account"
 status = "ported"
-note = "Source method body port at the existing parsed read/shared UTF-8 boundary. Native ValidationRead forwards the exact method, endpoint and body; shared ValidateAccountResult preserves errors and best-effort balance presence. Witness: tests/validation.rs executes the actual TS arrow and asserts decoded native errors, balance fields, request components and continuation ordering. Runtime API factory remains pending."
+note = "Source method body port at the existing parsed read/shared UTF-8 boundary. Native ValidationRead forwards the exact method, endpoint and body; shared ValidateAccountResult preserves errors and best-effort balance presence. Witness: tests/validation.rs executes the actual TS arrow and asserts decoded native errors, balance fields, request components and continuation ordering. Runtime API factory remains pending. Rename target: `safe-cex-venue-kraken/src/validation.rs::validate_spot_account`."
 
 [[symbol]]
 ts = "KrakenSpotExchange.tick"
@@ -160,4 +160,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/periodic_sync.rs::spot_tick"
 status = "ported"
-note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-periodic-synchronization-and-spot-cancellation-hosts. tests/periodic_sync.rs::spot_tick_live_source executes the actual TypeScript body, asserts native current flags/IDs, opaque original identity, ordering and settlement. scripts/periodic-sync-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Promise ownership, loop scheduling, live arrays, HTTP, Store and shared exception representation remain bound dependencies; no complete-class/runtime claim."
+note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-periodic-synchronization-and-spot-cancellation-hosts. tests/periodic_sync.rs::spot_tick_live_source executes the actual TypeScript body, asserts native current flags/IDs, opaque original identity, ordering and settlement. scripts/periodic-sync-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Promise ownership, loop scheduling, live arrays, HTTP, Store and shared exception representation remain bound dependencies; no complete-class/runtime claim. Rename target: `safe-cex-venue-kraken/src/periodic_sync.rs::spot_tick`."
