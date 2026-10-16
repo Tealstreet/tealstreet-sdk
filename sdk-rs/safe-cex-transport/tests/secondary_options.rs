@@ -90,6 +90,71 @@ fn assert_native_options(options: &ExchangeOptions, expected: &Value) {
         "native testnet identity"
     );
 }
+
+#[test]
+fn secondary_options_keep_native_signer_type_bits() {
+    for bits in [
+        0x7ff8_0000_0000_0042,
+        (-0.0_f64).to_bits(),
+        f64::INFINITY.to_bits(),
+        f64::NEG_INFINITY.to_bits(),
+        1.5_f64.to_bits(),
+    ] {
+        let mut options: ExchangeOptions = serde_json::from_value(serde_json::json!({
+            "key":"primary", "secret":"primary-secret", "passphrase":"primary-pass",
+            "secondary_key":"secondary", "secondary_secret":"", "secondary_passphrase":"",
+            "testnet":true, "overrideProxyUrl":"old://proxy"
+        }))
+        .unwrap();
+        options.polymarket = Some(safe_cex_types::ExchangeOptionsPolymarket {
+            api_key: Some("native-credential".into()),
+            signer_type: Some(f64::from_bits(bits)),
+            ..Default::default()
+        });
+        let provider = Provider {
+            proxy: None,
+            events: Rc::new(RefCell::new(Vec::new())),
+        };
+        let created = RefCell::new(Vec::new());
+        let clients = create_api_with_secondary_key(
+            &options,
+            &provider,
+            Some("selected://proxy"),
+            |row| {
+                created.borrow_mut().push(row.clone());
+                Ok(Arc::new(Client))
+            },
+            None,
+            None,
+        )
+        .expect("source shallow copy admits native signerType");
+        assert!(!clients.shares_primary_adapter());
+        let rows = created.borrow();
+        assert_eq!(rows.len(), 2);
+        for row in rows.iter() {
+            let polymarket = row.polymarket.as_ref().unwrap();
+            assert_eq!(
+                polymarket.signer_type.unwrap().to_bits(),
+                bits,
+                "native signerType bits"
+            );
+            assert_eq!(polymarket.api_key.as_deref(), Some("native-credential"));
+            assert_eq!(row.testnet, Some(true));
+        }
+        assert_eq!(rows[0].key, "primary");
+        assert_eq!(rows[1].key, "secondary");
+        assert_eq!(rows[1].secret, "");
+        assert_eq!(rows[1].passphrase.as_deref(), Some(""));
+        assert_eq!(
+            rows[1].override_proxy_url.as_deref(),
+            Some("selected://proxy")
+        );
+        assert_eq!(options.key, "primary");
+        assert_eq!(options.secret, "primary-secret");
+        assert_eq!(options.override_proxy_url.as_deref(), Some("old://proxy"));
+    }
+}
+
 #[test]
 #[ignore = "requires isolated TypeScript compiler; run with --include-ignored"]
 fn maintained_typescript_secondary_options_empty_strings_and_proxy_precedence() {
