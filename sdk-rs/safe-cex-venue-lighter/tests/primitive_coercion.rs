@@ -23,7 +23,7 @@ impl AccountObject for Plain {
     }
 }
 /// Clock reads 1000; `signerRetryBlockedUntil` holds the value under test.
-struct Host(AccountValue);
+struct Host(AccountValue, AccountValue);
 impl ExchangeErrorRecoveryHost for Host {
     fn owner(&self) -> AccountValue {
         AccountValue::Null
@@ -39,7 +39,7 @@ impl ExchangeErrorRecoveryHost for Host {
     }
     fn global(&self, name: &str) -> SigningResult<Rc<dyn ErrorRecoveryCall>> {
         assert_eq!(name, "virtualClock.getCurrentTimeMs");
-        Ok(Rc::new(Returns(AccountValue::Number(1000.0))))
+        Ok(Rc::new(Returns(self.1.clone())))
     }
     fn member(&self, _: &AccountValue, key: &str) -> SigningResult<Rc<dyn ErrorRecoveryCall>> {
         assert_eq!(key, "isWasmRuntimeIssueMessage");
@@ -88,7 +88,31 @@ fn non_number_owner_field_takes_js_comparison_result() {
     ];
     assert_eq!(cases.len(), 10);
     for (index, (field, expected)) in cases.into_iter().enumerate() {
-        let actual = should_short_circuit_signer_retry(&Host(field));
+        let actual = should_short_circuit_signer_retry(&Host(field, AccountValue::Number(1000.0)));
         assert_eq!(actual, expected, "case {index}");
+    }
+}
+
+#[test]
+fn retry_deadline_comparison_keeps_bigint_precision_and_lexical_strings() {
+    let cases = [
+        (
+            AccountValue::BigInt("9007199254740993".parse().unwrap()),
+            AccountValue::Number(9007199254740992.0),
+            true,
+        ),
+        (
+            AccountValue::BigInt(5000.into()),
+            AccountValue::Number(1000.0),
+            true,
+        ),
+        (s("10"), s("2"), false),
+        (s("2"), s("10"), true),
+    ];
+    for (deadline, clock, expected) in cases {
+        assert_eq!(
+            should_short_circuit_signer_retry(&Host(deadline, clock)),
+            Ok(expected)
+        );
     }
 }

@@ -141,6 +141,7 @@ impl World {
             runtime: runtime.clone(),
             http: http.clone(),
             registry: Rc::new(TransportRegistry::default()),
+            signing_entropy: None,
         };
         let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
         let options = serde_json::from_value(json!({ "key": "", "secret": "" })).unwrap();

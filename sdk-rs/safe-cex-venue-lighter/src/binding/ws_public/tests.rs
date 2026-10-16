@@ -280,6 +280,7 @@ fn fixture() -> Fixture {
         runtime: runtime.clone(),
         http: Rc::new(Http(runtime.clone())),
         registry: Rc::new(TransportRegistry::default()),
+        signing_entropy: None,
     };
     let realm = build_realm(&ExchangeName::Lighter, &options, &store, &deps)
         .unwrap_or_else(|e| panic!("realm: {}", e.message()));

@@ -226,7 +226,11 @@ fn primitive_account(value: Js) -> SigningResult<AccountValue> {
     })
 }
 fn thrown_error(thrown: Thrown) -> crate::transaction_signing::TransactionSigningError {
-    let name = thrown.value.get("name").map(|n| n.to_display()).unwrap_or_default();
+    let name = thrown
+        .value
+        .get("name")
+        .map(|n| n.to_display())
+        .unwrap_or_default();
     TransactionBuildError {
         name: match name.as_str() {
             "TypeError" => "TypeError",
@@ -273,7 +277,10 @@ pub(crate) fn primitive_relation(
     left: &AccountValue,
     right: &AccountValue,
 ) -> SigningResult<bool> {
-    let (left, right) = (primitive_js(left, "number")?, primitive_js(right, "number")?);
+    let (left, right) = (
+        primitive_js(left, "number")?,
+        primitive_js(right, "number")?,
+    );
     match op {
         JsRelation::Less => ops::less_than(&left, &right),
         JsRelation::Greater => ops::greater_than(&left, &right),

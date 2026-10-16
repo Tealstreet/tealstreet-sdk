@@ -102,7 +102,9 @@ impl ExchangeRuntime for Runtime {
         Box::new(Task(flag))
     }
     fn console(&self, severity: &str, message: &str) {
-        self.logs.borrow_mut().push(format!("{severity}: {message}"));
+        self.logs
+            .borrow_mut()
+            .push(format!("{severity}: {message}"));
     }
     fn unique_id(&self) -> String {
         "00000000-0000-4000-8000-000000000000".into()
@@ -272,7 +274,11 @@ impl Http {
         self.requests.borrow().len()
     }
     pub fn urls(&self) -> Vec<String> {
-        self.requests.borrow().iter().map(|r| r.url.clone()).collect()
+        self.requests
+            .borrow()
+            .iter()
+            .map(|r| r.url.clone())
+            .collect()
     }
 }
 impl JsHttpHost for Http {
@@ -363,6 +369,10 @@ pub fn harness(
             runtime: runtime.clone(),
             http: http.clone(),
             registry: Rc::new(TransportRegistry::default()),
+            signing_entropy: Some(Rc::new(|bytes| {
+                bytes.fill(0x42);
+                Ok(())
+            })),
         },
     )
     .unwrap_or_else(|e| panic!("LighterNativeExchange constructs: {}", e.message));

@@ -1,10 +1,9 @@
 //! Exchange error normalization, signer retry/warning and snapshot failure bodies.
 //! Native values/UTF16 are retained at required live JS property, callee, receiver,
 //! instanceof, regex and coercion hosts. Out-of-type state/clock/Math primitives
-//! take JS ToNumber; object values throw TypeError (no host ToPrimitive here).
-//! Full exchange/runtime construction pending.
+//! use JS primitive operators; object values throw TypeError (no host ToPrimitive here).
 use crate::{
-    sdk_account_api::{AccountValue, primitive_to_number},
+    sdk_account_api::{AccountValue, JsBinary, JsRelation, primitive_binary, primitive_relation},
     transaction_signing::SigningResult,
 };
 use std::rc::Rc;
@@ -40,9 +39,6 @@ fn text(s: &str) -> AccountValue {
 fn eq(value: &AccountValue, s: &str) -> bool {
     matches!(value,AccountValue::String(v) if *v==s.encode_utf16().collect::<Vec<_>>())
 }
-fn number(value: AccountValue) -> SigningResult<f64> {
-    primitive_to_number(&value)
-}
 fn call(
     h: &dyn ExchangeErrorRecoveryHost,
     key: &str,
@@ -67,8 +63,8 @@ fn optional(
 fn fallback_empty(value: AccountValue) -> AccountValue {
     if value.truthy() { value } else { text("") }
 }
-fn now(h: &dyn ExchangeErrorRecoveryHost) -> SigningResult<f64> {
-    number(h.global("virtualClock.getCurrentTimeMs")?.call(&[])?)
+fn now(h: &dyn ExchangeErrorRecoveryHost) -> SigningResult<AccountValue> {
+    h.global("virtualClock.getCurrentTimeMs")?.call(&[])
 }
 // ts: LighterExchange.getAccountRateLimitGuidanceMessage
 pub fn get_account_rate_limit_guidance_message(
@@ -102,7 +98,11 @@ pub fn should_short_circuit_signer_retry(h: &dyn ExchangeErrorRecoveryHost) -> S
     if issue && !h.global("isWasmReady")?.call(&[])?.truthy() {
         return Ok(true);
     }
-    Ok(now < number(h.get(&h.owner(), "signerRetryBlockedUntil")?)?)
+    primitive_relation(
+        JsRelation::Less,
+        &now,
+        &h.get(&h.owner(), "signerRetryBlockedUntil")?,
+    )
 }
 // ts: LighterExchange#getSignerRetryBlockMessage
 pub fn get_signer_retry_block_message(
@@ -110,9 +110,9 @@ pub fn get_signer_retry_block_message(
 ) -> SigningResult<AccountValue> {
     let now = now(h)?;
     let max = h.global("Math.max")?;
-    let until = number(h.get(&h.owner(), "signerRetryBlockedUntil")?)?;
-    let remaining =
-        number(max.call(&[AccountValue::Number(0.0), AccountValue::Number(until - now)])?)?;
+    let until = h.get(&h.owner(), "signerRetryBlockedUntil")?;
+    let difference = primitive_binary(JsBinary::Subtract, &until, &now)?;
+    let remaining = max.call(&[AccountValue::Number(0.0), difference])?;
     let issue = h.member(&h.owner(), "isWasmRuntimeIssueMessage")?;
     let message = fallback_empty(h.get(&h.owner(), "signerInitErrorMessage")?);
     let issue = issue.call(&[message])?.truthy();
@@ -120,9 +120,13 @@ pub fn get_signer_retry_block_message(
         "WASM runtime is still unavailable."
             .encode_utf16()
             .collect()
-    } else if remaining > 0.0 {
+    } else if primitive_relation(JsRelation::Greater, &remaining, &AccountValue::Number(0.0))? {
         let ceil = h.global("Math.ceil")?;
-        let seconds = ceil.call(&[AccountValue::Number(remaining / 1000.0)])?;
+        let seconds = ceil.call(&[primitive_binary(
+            JsBinary::Divide,
+            &remaining,
+            &AccountValue::Number(1000.0),
+        )?])?;
         let mut hint: Vec<u16> = "Retrying is paused for ".encode_utf16().collect();
         hint.extend(h.template_string(seconds)?);
         hint.extend("s.".encode_utf16());
@@ -151,10 +155,12 @@ pub fn warn_signer_unavailable(
     message: &[u16],
 ) -> SigningResult<()> {
     let now = now(h)?;
-    if now - number(h.get(&h.owner(), "lastSignerWarningAt")?)? < 10000.0 {
+    let last = h.get(&h.owner(), "lastSignerWarningAt")?;
+    let elapsed = primitive_binary(JsBinary::Subtract, &now, &last)?;
+    if primitive_relation(JsRelation::Less, &elapsed, &AccountValue::Number(10000.0))? {
         return Ok(());
     }
-    h.set(&h.owner(), "lastSignerWarningAt", AccountValue::Number(now))?;
+    h.set(&h.owner(), "lastSignerWarningAt", now)?;
     call(
         h,
         "log",
@@ -234,16 +240,22 @@ pub fn handle_private_snapshot_fetch_error(
         return Ok(());
     }
     let now = now(h)?;
-    if number(h.get(&h.owner(), "lastTransientSnapshotWarningAt")?)? > 0.0
-        && now - number(h.get(&h.owner(), "lastTransientSnapshotWarningAt")?)? < 60000.0
-    {
+    if primitive_relation(
+        JsRelation::Greater,
+        &h.get(&h.owner(), "lastTransientSnapshotWarningAt")?,
+        &AccountValue::Number(0.0),
+    )? && primitive_relation(
+        JsRelation::Less,
+        &primitive_binary(
+            JsBinary::Subtract,
+            &now,
+            &h.get(&h.owner(), "lastTransientSnapshotWarningAt")?,
+        )?,
+        &AccountValue::Number(60000.0),
+    )? {
         return Ok(());
     }
-    h.set(
-        &h.owner(),
-        "lastTransientSnapshotWarningAt",
-        AccountValue::Number(now),
-    )?;
+    h.set(&h.owner(), "lastTransientSnapshotWarningAt", now)?;
     let log = h.member(&h.owner(), "log")?;
     let value = call(h, "extractOrderErrorMessage", &[error.clone()])?;
     let mut message: Vec<u16> =

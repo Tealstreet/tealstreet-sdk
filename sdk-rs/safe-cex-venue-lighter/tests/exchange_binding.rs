@@ -129,7 +129,11 @@ fn assert_signed_by_account(info: &Value) {
     assert_eq!(info["AccountIndex"], json!(ACCOUNT_INDEX), "{info}");
     assert_eq!(info["ApiKeyIndex"], json!(API_KEY_INDEX), "{info}");
     let sig = info["Sig"].as_str().expect("Sig present");
-    assert_eq!(sig.len(), 108, "base64 of a 80-byte Schnorr signature: {sig}");
+    assert_eq!(
+        sig.len(),
+        108,
+        "base64 of a 80-byte Schnorr signature: {sig}"
+    );
 }
 
 /// The first nonce comes from nextNonce; later ones from the client's cache.
@@ -137,7 +141,10 @@ fn assert_nonce_read(h: &Harness) {
     let reads = h.http.calls(NEXT_NONCE);
     assert_eq!(reads.len(), 1, "one nextNonce read seeds the cache");
     assert_eq!(reads[0].params["account_index"], json!("42"));
-    assert_eq!(reads[0].params["api_key_index"].as_f64(), Some(API_KEY_INDEX as f64));
+    assert_eq!(
+        reads[0].params["api_key_index"].as_f64(),
+        Some(API_KEY_INDEX as f64)
+    );
 }
 
 fn auth_token_prefix() -> String {
@@ -240,7 +247,11 @@ fn fetch_positions_maps_the_account_snapshot_and_placeholders() {
             .iter()
             .all(|r| r.params == json!({"by": "index", "value": "42"}))
     );
-    assert_eq!(positions.len(), 1, "the real position wins its placeholder id");
+    assert_eq!(
+        positions.len(),
+        1,
+        "the real position wins its placeholder id"
+    );
     let p = &positions[0];
     assert_eq!(p.symbol, "BTC");
     assert_eq!(p.side, PositionSide::Long);
@@ -252,6 +263,10 @@ fn fetch_positions_maps_the_account_snapshot_and_placeholders() {
     assert_eq!(p.liquidation_price, 40000.0);
     assert_eq!(p.margin_type, Some(MarginType::Cross));
     assert_eq!(p.position_mode, Some(PositionMode::OneWay));
+    assert!(
+        h.store.positions().is_empty(),
+        "fetchPositions is a pure read"
+    );
 }
 
 #[test]
@@ -275,6 +290,7 @@ fn fetch_orders_reads_all_markets_with_a_signed_auth_token() {
     assert_eq!(o.price, 49000.0);
     assert_eq!(o.amount, 0.5);
     assert_eq!(o.status, OrderStatus::Open);
+    assert!(h.store.orders().is_empty(), "fetchOrders is a pure read");
 }
 
 #[test]
@@ -334,7 +350,9 @@ fn place_order_signs_an_attributed_create_order() {
     let before = h.http.count();
     let ids = h
         .drive(Box::pin(
-            h.venue().base().place_order(h.venue(), limit_order(json!({}))),
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
         ))
         .expect("placeOrder");
     let limits = h.http.calls(LIMITS);
@@ -426,7 +444,10 @@ fn cancel_orders_signs_a_cancel_for_the_order_index() {
     assert_eq!(info["MarketIndex"], json!(1));
     assert_eq!(info["Index"], json!(777));
     assert_eq!(info["Nonce"], json!(NONCE));
-    assert!(h.store.orders().is_empty(), "cancelled orders leave the store");
+    assert!(
+        h.store.orders().is_empty(),
+        "cancelled orders leave the store"
+    );
 }
 
 #[test]
@@ -452,7 +473,11 @@ fn update_order_cancels_then_replaces_at_the_new_price() {
     assert_eq!(create["Price"], json!(480_000));
     assert_eq!(create["BaseAmount"], json!(5000));
     assert_eq!(create["IsAsk"], json!(0));
-    assert_eq!(create["Nonce"], json!(NONCE + 1), "the cached nonce advances");
+    assert_eq!(
+        create["Nonce"],
+        json!(NONCE + 1),
+        "the cached nonce advances"
+    );
     assert_eq!(ids, vec![create["ClientOrderIndex"].to_string()]);
 }
 
@@ -474,7 +499,11 @@ fn start_dials_both_sockets_and_subscribes() {
     for read in h.http.calls(ACCOUNT) {
         assert_eq!(read.params, json!({"by": "index", "value": "42"}));
     }
-    assert!(h.runtime.reports.borrow().is_empty(), "{:?}", h.runtime.reports);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports
+    );
     let sockets = h.runtime.sockets.borrow();
     let urls: Vec<&str> = sockets.iter().map(|(u, _)| u.as_str()).collect();
     assert_eq!(urls.len(), 2, "{urls:?}");
@@ -506,7 +535,10 @@ fn inherited_base_methods_reject_without_a_request() {
     loaded(&h);
     let before = h.http.count();
     for (method, result) in [
-        ("fetchTickers", h.drive(h.venue().fetch_tickers()).map(|_| ())),
+        (
+            "fetchTickers",
+            h.drive(h.venue().fetch_tickers()).map(|_| ()),
+        ),
         (
             "fetchSymbolMaxLeverage",
             h.drive(h.venue().fetch_symbol_max_leverage("BTC".into()))
@@ -527,4 +559,23 @@ fn inherited_base_methods_reject_without_a_request() {
         assert_eq!(error.message, "Not implemented", "{method}");
     }
     assert_eq!(h.http.count(), before);
+}
+
+#[test]
+fn injected_entropy_repeats_the_signed_wire_payload() {
+    fn wire() -> Vec<(String, Value)> {
+        let h = harness(ExchangeName::Lighter, options(), lighter);
+        loaded(&h);
+        let before = h.http.count();
+        h.drive(h.venue().set_leverage("BTC".into(), 5.0, None))
+            .unwrap();
+        sent_txs(&h, before)
+    }
+    let first = wire();
+    let second = wire();
+    assert_eq!(first.len(), 1);
+    assert_eq!(
+        first, second,
+        "fixed clock, nonce and entropy reproduce the wire signature"
+    );
 }

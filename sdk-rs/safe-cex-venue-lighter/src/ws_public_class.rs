@@ -398,13 +398,16 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         text("")
     };
     let now = virtual_now(hr)?;
-    let time_since_connect =
-        if primitive_relation(JsRelation::Greater, &own(hr, "connectStartedAt")?, &number(0.0))? {
-            let started = own(hr, "connectStartedAt")?;
-            primitive_binary(JsBinary::Subtract, &now, &started)?
-        } else {
-            number(f64::INFINITY)
-        };
+    let time_since_connect = if primitive_relation(
+        JsRelation::Greater,
+        &own(hr, "connectStartedAt")?,
+        &number(0.0),
+    )? {
+        let started = own(hr, "connectStartedAt")?;
+        primitive_binary(JsBinary::Subtract, &now, &started)?
+    } else {
+        number(f64::INFINITY)
+    };
     let failed_before_open = !own(hr, "openedSinceLastConnect")?.truthy();
     let closed_before_first_message = own(hr, "openedSinceLastConnect")?.truthy()
         && !own(hr, "hasReceivedMessageSinceConnect")?.truthy();
@@ -475,8 +478,7 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
                 )?;
                 set_own(hr, "proxyRouteFailureCount", count)?;
                 let paused_until = own(hr, "directFallbackProbePausedUntil")?;
-                let can_probe =
-                    primitive_relation(JsRelation::GreaterEqual, &now, &paused_until)?;
+                let can_probe = primitive_relation(JsRelation::GreaterEqual, &now, &paused_until)?;
                 if !own(hr, "useDirectFallbackRoute")?.truthy()
                     && can_probe
                     && primitive_relation(
@@ -620,7 +622,11 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
     set_own(hr, "ws", AccountValue::Undefined)?;
     let count = primitive_increment(&own(hr, "onCloseCount")?)?;
     set_own(hr, "onCloseCount", count)?;
-    if primitive_relation(JsRelation::Greater, &own(hr, "onCloseCount")?, &number(100.0))? {
+    if primitive_relation(
+        JsRelation::Greater,
+        &own(hr, "onCloseCount")?,
+        &number(100.0),
+    )? {
         log(hr, "error", || {
             Ok(text(
                 "[Lighter] Public WS onClose count > 100, stopping reconnection",

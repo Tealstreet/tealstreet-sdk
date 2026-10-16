@@ -199,10 +199,44 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
         }),
         helper("resolveLighterBuilderFeeConfig", |a| {
             let input = arg(&a, 0);
-            let testnet = optional_bool(&input.get("testnet")?);
-            let mode = optional_json(&input.get("mode")?)?;
-            let index = optional_json(&input.get("configuredIntegratorIndex")?)?;
-            let name = exchange_name(&input.get("exchangeName")?)?;
+            // The source receives ExchangeOptions and the venue name separately.
+            // Its internal pure helper takes the projected extra fields.
+            let extra = input.get("extra")?;
+            let mode = if extra.is_nullish() {
+                Js::Undefined
+            } else {
+                extra.get("lighterBuilderFeeMode")?
+            };
+            let mode = match mode.as_str() {
+                Some(value)
+                    if value.as_ref()
+                        == safe_cex_exchange::js_runtime::value::utf16("static").as_ref() =>
+                {
+                    Some(serde_json::Value::String("static".into()))
+                }
+                _ => None,
+            };
+            let extra = input.get("extra")?;
+            let index = if extra.is_nullish() {
+                Js::Undefined
+            } else {
+                extra.get("lighterIntegratorAccountIndex")?
+            };
+            let index = match index {
+                Js::Undefined | Js::Null => None,
+                Js::String(value) => {
+                    Some(serde_json::Value::String(String::from_utf16_lossy(&value)))
+                }
+                // A non-string override is present but invalid; it must not
+                // fall back to the default integrator index.
+                _ => Some(serde_json::Value::Bool(false)),
+            };
+            let name = exchange_name(&arg(&a, 1))?;
+            let testnet = if name == Some(ExchangeName::LighterRobinhood) {
+                None
+            } else {
+                optional_bool(&input.get("testnet")?)
+            };
             Ok(
                 match resolve_lighter_builder_fee_config(
                     testnet,
@@ -269,4 +303,78 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
     )?;
     exchange_module_constants(globals)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(options: Js, name: ExchangeName) -> Js {
+        let globals = Js::object(vec![]);
+        install(&globals).unwrap();
+        globals
+            .call_method(
+                "resolveLighterBuilderFeeConfig",
+                vec![options, from_typed(&name).unwrap()],
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn builder_fee_reads_exchange_options_extra_and_the_venue_argument() {
+        let opts = Js::object(vec![(
+            "extra",
+            Js::object(vec![
+                ("lighterBuilderFeeMode", Js::str("static")),
+                ("lighterIntegratorAccountIndex", Js::str("007")),
+            ]),
+        )]);
+        let value = config(opts, ExchangeName::Lighter);
+        assert_eq!(value.get("mode").unwrap().to_display(), "static");
+        assert!(
+            value
+                .get("integratorAccountIndex")
+                .unwrap()
+                .strict_equals(&Js::BigInt(Rc::new(7.into())))
+        );
+        assert_eq!(value.get("integratorMakerFee").unwrap().as_f64(), Some(0.0));
+        assert_eq!(
+            value.get("integratorTakerFee").unwrap().as_f64(),
+            Some(250.0)
+        );
+        assert!(config(Js::object(vec![]), ExchangeName::LighterRobinhood).is_undefined());
+        assert!(
+            config(
+                Js::object(vec![("testnet", Js::Bool(true))]),
+                ExchangeName::Lighter
+            )
+            .is_undefined()
+        );
+    }
+
+    #[test]
+    fn invalid_present_integrator_override_does_not_select_the_default() {
+        for index in [
+            Js::Number(7.0),
+            Js::BigInt(Rc::new(7.into())),
+            Js::str("invalid"),
+        ] {
+            let opts = Js::object(vec![(
+                "extra",
+                Js::object(vec![("lighterIntegratorAccountIndex", index)]),
+            )]);
+            assert!(config(opts, ExchangeName::Lighter).is_undefined());
+        }
+        let opts = Js::object(vec![(
+            "extra",
+            Js::object(vec![("lighterIntegratorAccountIndex", Js::Null)]),
+        )]);
+        let value = config(opts, ExchangeName::Lighter);
+        assert!(
+            value
+                .get("integratorAccountIndex")
+                .unwrap()
+                .strict_equals(&Js::BigInt(Rc::new(158385.into())))
+        );
+    }
 }

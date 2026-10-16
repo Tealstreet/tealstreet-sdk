@@ -154,6 +154,7 @@ fn venue(replies: Vec<Value>) -> (Rc<LighterNativeExchange>, Rc<Runtime>, Rc<Htt
             runtime: runtime.clone(),
             http: http.clone(),
             registry: Rc::new(TransportRegistry::default()),
+            signing_entropy: None,
         },
     )
     .unwrap_or_else(|e| panic!("venue: {}", e.message));

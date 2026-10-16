@@ -39,6 +39,9 @@ pub struct LighterDependencies {
     /// The realm's default transport (TS `setDefaultTransport`), which the
     /// Lighter base URL is resolved through on every call.
     pub registry: Rc<TransportRegistry>,
+    /// Optional Schnorr nonce source. Omit to use the host CSPRNG. Scripted
+    /// transports can inject deterministic entropy for byte-exact wire tests.
+    pub signing_entropy: Option<Rc<dyn Fn(&mut [u8; 40]) -> Result<(), String>>>,
 }
 
 /// Lighter's metadata: a 2s tick, no public-only mode, and no client order ID
@@ -120,7 +123,10 @@ pub(crate) fn build_realm(
     let realm = Realm(shared.clone());
     install_sdk_client(&realm, deps.registry.clone())?;
     super::sdk_client::install(&realm)?;
-    super::signer::install(&realm)?;
+    match &deps.signing_entropy {
+        Some(entropy) => super::signer::install_with_entropy(&realm, entropy.clone())?,
+        None => super::signer::install(&realm)?,
+    }
     super::socket_globals::install(&realm)?;
     super::ws_public::install(&realm)?;
     super::ws_private::install(&realm)?;
@@ -593,6 +599,7 @@ mod tests {
             runtime: Rc::new(Untouched),
             http: Rc::new(Untouched),
             registry: Rc::new(TransportRegistry::default()),
+            signing_entropy: None,
         };
         let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
         let realm = build_realm(
