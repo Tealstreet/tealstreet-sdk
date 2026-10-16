@@ -445,32 +445,50 @@
   },
   {
     "function": "main",
-    "body": "b021aad37fdc6aad",
+    "body": "e4a465969d58e259",
     "call": "item . span () . start ()",
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
   {
     "function": "main",
-    "body": "b021aad37fdc6aad",
+    "body": "e4a465969d58e259",
     "call": "item . sig . fn_token . span . start ()",
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
   {
     "function": "main",
-    "body": "b021aad37fdc6aad",
+    "body": "e4a465969d58e259",
     "call": "item . sig . ident . span () . start ()",
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
   {
     "function": "main",
-    "body": "b021aad37fdc6aad",
+    "body": "e4a465969d58e259",
     "call": "ident . span () . start ()",
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
   {
     "function": "main",
-    "body": "b021aad37fdc6aad",
+    "body": "e4a465969d58e259",
     "call": "sig . ident . span () . start ()",
+    "file": "safe-cex-parity/src/bin/accepted-source.rs"
+  },
+  {
+    "function": "record",
+    "body": "142831853736a36a",
+    "call": "ident . span () . start ()",
+    "file": "safe-cex-parity/src/bin/accepted-source.rs"
+  },
+  {
+    "function": "declarations",
+    "body": "93f910eccb13806d",
+    "call": "module . ident . span () . start ()",
+    "file": "safe-cex-parity/src/bin/accepted-source.rs"
+  },
+  {
+    "function": "referenced",
+    "body": "9e2d7b28d91c9d95",
+    "call": "ident . span () . start ()",
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
   {
