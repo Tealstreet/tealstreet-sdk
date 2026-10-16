@@ -135,10 +135,15 @@ KuCoin futures/Spot and MEXC registry entries reuse their concrete constructors.
 Their native host inputs retain each API's signing/transport/retry middleware.
 Private MEXC fills must reach the venue emitter; retain the weak callback when
 adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
-native request signatures against a local server. MEXC also shares the hosted
-account with HTTP, BaseExchange availability and private WS login; preserve the
-private socket account name. `native_host_mexc_hosted` compares actual source
-success/error/missing-signature outcomes over native HTTP and WS.
+native request signatures against a local server.
+KuCoin futures/Spot also retain the shared hosted signer and account name in
+both HTTP clients and BaseExchange availability. Private WS uses its HTTP
+bullet-private token, as in TypeScript. `native_host_kucoin_hosted` verifies
+account and unlimited HTTP plus real private subscriptions without a local secret.
+MEXC shares the hosted account with HTTP, BaseExchange availability and private
+WS login; preserve the private socket account name. `native_host_mexc_hosted`
+compares actual source success/error/missing-signature outcomes over native HTTP
+and WS.
 
 Crypto.com constructs through `cryptocom_constructor` using its bound Js runtime.
 Native HTTP inputs carry the account's hosted signer and supply the existing
