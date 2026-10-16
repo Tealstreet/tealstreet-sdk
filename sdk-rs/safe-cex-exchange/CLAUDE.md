@@ -933,3 +933,10 @@ including non-2xx responses. It preserves raw JSON tokens and whitespace until a
 venue's bigint-safe parser runs. The default continues ordinary JSON projection.
 
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
+
+The js_runtime socket terminal preserves Binary as the host binary object: native
+Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
+Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
+compressed-frame consumers must read the bytes and use their source decoder.
+`ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
+checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
