@@ -177,6 +177,9 @@ impl WsPingHost for Host {
         if matches!(v, N::S(_)) && k == "toLowerCase" {
             return Ok(N::Builtin("toLowerCase".into()));
         }
+        if matches!(v, N::A(_)) && k == "find" {
+            return Ok(N::Builtin("array-find".into()));
+        }
         if matches!(v, N::A(_))
             && !matches!(k, "length" | "map" | "push")
             && k.parse::<usize>().is_err()
@@ -257,6 +260,73 @@ impl WsPingHost for Host {
                 a.borrow_mut().extend_from_slice(args);
                 let len = a.borrow().len();
                 return Ok(N::Num(len as f64));
+            }
+            "array-find" => {
+                let N::A(a) = r else { panic!("find") };
+                let values = a.borrow().clone();
+                for (i, value) in values.into_iter().enumerate() {
+                    let hit =
+                        self.call(&first, &N::U, &[value.clone(), N::Num(i as f64), r.clone()])?;
+                    if self.truthy(&hit) {
+                        return Ok(value);
+                    }
+                }
+                return Ok(N::U);
+            }
+            "orderCarriesClientOrderId" => {
+                let id = account::get(&first, "id");
+                self.record("carries", &[id, args[1].clone()]);
+                return Ok(N::B(eq(&account::get(&first, "clientOrderId"), &args[1])));
+            }
+            "cloid-test" => {
+                self.record("test", std::slice::from_ref(&first));
+                let N::S(text) = &first else {
+                    panic!("cloid test")
+                };
+                let text = String::from_utf16_lossy(&text.0);
+                return Ok(N::B(
+                    safe_cex_venue_hyperliquid::cloid::is_hyperliquid_cloid(&text),
+                ));
+            }
+            "info-post" => {
+                let body = &args[1];
+                let headers = account::get(&args[2], "headers");
+                self.record(
+                    "post",
+                    &[
+                        first.clone(),
+                        account::get(body, "type"),
+                        account::get(body, "user"),
+                        account::get(body, "oid"),
+                        account::get(&headers, "Content-Type"),
+                    ],
+                );
+                let data = self.st.borrow().core.clone();
+                return Ok(self.ready(if scene == "post-reject" {
+                    Err(self.st.borrow().marker.clone())
+                } else {
+                    Ok(object(vec![("data", data)]))
+                }));
+            }
+            "mapOpenOrderRow" => {
+                assert!(eq(r, &self.e()), "native mapOpenOrderRow receiver");
+                self.record("map", &[account::get(&first, "oid"), args[1].clone()]);
+                return Ok(if scene == "mapped-undefined" {
+                    N::U
+                } else {
+                    object(vec![
+                        ("id", s("mapped")),
+                        (
+                            "symbol",
+                            s(if scene == "mapped-other-symbol" {
+                                "ETH"
+                            } else {
+                                "BTC"
+                            }),
+                        ),
+                        ("status", args[1].clone()),
+                    ])
+                });
             }
             "toLowerCase" => {
                 let N::S(v) = r else { panic!("lowercase") };
@@ -472,10 +542,13 @@ impl SpotAccountHost for Host {
 
     fn imported(&mut self, k: &str) -> Result<N, N> {
         match k {
-            "INFO_TYPES" => Ok(object(vec![(
-                "FRONTEND_OPEN_ORDERS",
-                s("frontendOpenOrders"),
-            )])),
+            "INFO_TYPES" => Ok(object(vec![
+                ("FRONTEND_OPEN_ORDERS", s("frontendOpenOrders")),
+                ("ORDER_STATUS", s("orderStatus")),
+            ])),
+            "HYPERLIQUID_CLOID_PATTERN" => {
+                Ok(object(vec![("test", N::Builtin("cloid-test".into()))]))
+            }
             "OrderStatus" => Ok(account::get(&self.base.enums, "OrderStatus")),
             _ => SpotAccountHost::imported(&mut self.base, k),
         }
