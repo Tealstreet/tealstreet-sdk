@@ -1,8 +1,9 @@
 # Rust venue construction through the registry
 
-Status: implemented for `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
-Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
+Coinbase (`coinbase`, `coinbasespot`), `cryptocom`, `phemex`,
+the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), `polymarket` and `woo`, 2026-10-16 (`src/rust_venues.rs`,
@@ -22,6 +23,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `lighter` and `lighter-robinhood`, built with the existing `LighterNativeExchange::new`; the name selects deployment URLs and quote currency. The host retains the runtime transport and local signer entropy.
   - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. The shared hosted signer is installed on its HTTP clients; active SDK order signing still requires a local wallet.
   - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
     js_runtime. Its HTTP factory receives each lane's options, including secondary
@@ -274,3 +276,16 @@ OmniKey-seeded zkLink contract signer. Its native proof observes HTTP/WS startup
 wire HMAC over the transmitted order form, caller ID, private WS order delivery
 and cancellation. Unsupported hosted signing/wallet-provider operations reject
 visibly. The module-host path remains the default.
+
+Crypto.com is in the Rust constructor table. `tests/native_host_cryptocom.rs`
+constructs the bound venue using production native inputs and the shared host
+limiter argument, then checks its identity, distinct market precision steps,
+real local HTTP dispatch and Store read purity. The registry passes through the
+account's hosted signer and external-public-data provider to the venue binding.
+
+Phemex constructs through `phemex_constructor` and the production shared Js HTTP
+host, including hosted signing and the external-public-data gateway. Native host
+callers supply the shared limiter as for other venues. Phemex currently refuses
+`tealstreetTunnel` when no transport installer is supplied; the native host has
+no Phemex tunnel installer. `tests/native_host_phemex.rs` verifies real local HTTP
+market precision/read purity and signed account-query bytes through the registry.

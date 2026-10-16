@@ -50,6 +50,13 @@ short-vault right-padding and absolute exchange URL retry classification. Fixtur
 and historical controls remain intact. Local delivery requires formatting, locked
 workspace build and workspace host clippy; central wasm/wiring gates are separate.
 
+The family socket facade maps source `ws.close()` to the shared transport-only
+`close_current_websocket()` API. It closes the current native/relay connection
+while preserving `forceClosed`, generation and superclass resources. The private
+perpetual socket's source `dispose` has no super call; the production realm
+regression checks its wire close and unchanged force/parent-disposal flags against
+the actual TypeScript class, including a failing forceClose source mutation.
+
 Hyperliquid Spot uses `spot_binding::HyperliquidSpotExchange::new` over the same
 production family realm and native dependency shape. Its registry name is
 `Hyperliquidspot`; host callers now pass the selected name to
