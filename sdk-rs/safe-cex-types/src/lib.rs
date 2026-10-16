@@ -1259,6 +1259,8 @@ pub enum ExchangeName {
     Salsadex,
     #[serde(rename = "tealstreet-dex")]
     TealstreetDex,
+    #[serde(rename = "txflow")]
+    Txflow,
     #[serde(rename = "what")]
     What,
     #[serde(rename = "weex")]
@@ -4353,6 +4355,8 @@ mod strict_codecs {
         Salsadex,
         #[serde(rename = "tealstreet-dex")]
         TealstreetDex,
+        #[serde(rename = "txflow")]
+        Txflow,
         #[serde(rename = "what")]
         What,
         #[serde(rename = "weex")]
@@ -6506,6 +6510,11 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::TealstreetDex)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(ExchangeName::Txflow)
                         .unwrap()
                         .as_str()
                         .unwrap()

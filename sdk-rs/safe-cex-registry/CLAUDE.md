@@ -3,7 +3,7 @@
 The behavioral reference is [the exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md).
 
 `registry` holds ordered descriptors from both TS registries; `loaders` holds
-47 executable web/native pairs backed by the explicit `module_host` contracts.
+48 executable web/native pairs backed by the explicit `module_host` contracts.
 Descriptors support inspection without invoking hosts. Constructor capabilities
 call supplied factories; concrete venue host/facade assembly is separate.
 The SDK facade is one layer above registry.
@@ -38,7 +38,7 @@ Native future polling replaces JavaScript Promise microtask scheduling and is
 an explicit CHOSEN boundary. This wrapper is distinct from the executable venue loader entries and does
 not complete any venue constructor. `tests/native_load` executes the
 actual TypeScript initializer and observes native constructor identity and call
-order; the 47 entry functions in each registry have their own source/native witnesses.
+order; the 48 entry functions in each registry have their own source/native witnesses.
 
 Gateway opaque data and the raw provider frame use canonical retained JSON capture
 before Value construction. The public-data provider gate asserts literal reserved-
