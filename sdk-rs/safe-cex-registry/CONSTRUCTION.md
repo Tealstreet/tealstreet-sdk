@@ -227,3 +227,9 @@ table entry makes construction fail; dropping typed signer forwarding makes the
 secretless test fail. All three controls were compiled, observed failing, and
 restored before the passing two-test run. The existing 13 registry membership/
 construction tests and 20 Bybit binding tests also pass (one live oracle ignored).
+
+The untouched-origin witness records the terminal request before any URL rewrite.
+It proves Bybit mainnet selects `api.bybit.com`, Demo mainnet selects
+`api-demo.bybit.com`, and both testnet variants select `api-testnet.bybit.com`.
+The old constructor failed specifically on Demo mainnet. Demo's source receiver
+and socket connection options derive the same subclass flag by name.

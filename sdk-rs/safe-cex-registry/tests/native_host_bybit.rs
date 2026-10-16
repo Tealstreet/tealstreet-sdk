@@ -155,3 +155,79 @@ fn bybit_and_demo_use_hosted_signer_without_local_credentials() {
         }
     });
 }
+
+/// Records the production terminal request without resolving or rewriting its origin.
+#[derive(Default)]
+struct OriginWire {
+    seen: RefCell<Vec<safe_cex_transport::RestRequest>>,
+}
+impl safe_cex_transport::RestAdapter for OriginWire {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        self.seen.borrow_mut().push(request);
+        Box::pin(async {
+            Ok(safe_cex_transport::RestResponse {
+                status: 200,
+                reason: None,
+                headers: Default::default(),
+                body: safe_cex_transport::RestResponseBody::Encoded(
+                    json!({"retCode":0,"retMsg":"OK","result":{"userID":12345}})
+                        .to_string()
+                        .into_bytes(),
+                ),
+            })
+        })
+    }
+}
+
+#[test]
+#[allow(
+    clippy::arc_with_non_send_sync,
+    reason = "native adapters run on the LocalSet"
+)]
+fn registry_selects_demo_origin_before_any_transport_rewrite() {
+    support::run_local(async {
+        for (name, testnet, expected) in [
+            (ExchangeName::Bybit, false, "https://api.bybit.com"),
+            (ExchangeName::Bybitdemo, false, "https://api-demo.bybit.com"),
+            (ExchangeName::Bybit, true, "https://api-testnet.bybit.com"),
+            (
+                ExchangeName::Bybitdemo,
+                true,
+                "https://api-testnet.bybit.com",
+            ),
+        ] {
+            let wire = std::sync::Arc::new(OriginWire::default());
+            let terminal = wire.clone();
+            let host = safe_cex_registry::native_host::native_venue_host_with(
+                safe_cex_exchange::native::native_runtime(),
+                Rc::new(move || Ok(terminal.clone())),
+                safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+            );
+            let constructor =
+                safe_cex_registry::rust_venues::rust_constructor(&name, host).unwrap();
+            let exchange = constructor
+                .construct(
+                    name.clone(),
+                    serde_json::from_value(json!({
+                        "key":"origin-key", "secret":"origin-secret", "testnet":testnet
+                    }))
+                    .unwrap(),
+                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                )
+                .unwrap();
+            assert_eq!(exchange.get_account().await.unwrap().user_id, "12345");
+            let seen = wire.seen.borrow();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(
+                seen[0].base_url.as_deref(),
+                Some(expected),
+                "untouched {name:?} testnet={testnet} REST origin"
+            );
+            assert!(seen[0].url.starts_with("/v5/user/query-api?requestId="));
+            exchange.dispose().unwrap();
+        }
+    });
+}
