@@ -32,6 +32,7 @@ pub struct BitunixVenue {
     pub(crate) self_ref: Weak<Self>,
     pub(crate) tasks: RefCell<Vec<Box<dyn ExchangeTask>>>,
     pub(crate) external: ExternalFactory,
+    pub(crate) remote_account_name: Option<String>,
 }
 
 /// Error carrier for ported bodies whose host error must absorb JS coercion failures.
@@ -186,6 +187,7 @@ impl BitunixVenue {
         install: Rc<dyn Fn(&HttpClient) -> Result<(), ExchangeError>>,
         runtime: Rc<dyn WsRuntime>,
         external: ExternalFactory,
+        remote_account_name: Option<String>,
     ) -> Result<Rc<Self>, ExchangeError> {
         let options = base.options();
         let owner: OwnerSlot = Rc::new(RefCell::new(Weak::new()));
@@ -215,6 +217,7 @@ impl BitunixVenue {
             self_ref: weak.clone(),
             tasks: RefCell::new(vec![]),
             external,
+            remote_account_name,
         });
         *owner.borrow_mut() = Rc::downgrade(&venue);
         let state = venue.state.borrow();

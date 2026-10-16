@@ -22,6 +22,7 @@ use std::{
 /// assembled (cores are created lazily after that) and the core registry.
 pub struct JsSocketContext {
     pub runtime: Rc<dyn WsRuntime>,
+    pub(crate) http: RefCell<Option<Rc<dyn super::client::JsHttpHost>>>,
     pub venue: RefCell<Option<Weak<dyn Exchange>>>,
     pub ids: Cell<u64>,
     pub cores: RefCell<Vec<(Js, Rc<SocketCore>)>>,
@@ -32,6 +33,7 @@ impl JsSocketContext {
     pub fn new(runtime: Rc<dyn WsRuntime>) -> Rc<Self> {
         Rc::new(Self {
             runtime,
+            http: RefCell::new(None),
             venue: RefCell::new(None),
             ids: Cell::new(0),
             cores: RefCell::default(),

@@ -913,6 +913,11 @@ individual values, so earlier callbacks can change later siblings. Unreplaced
 BigInt and circular structures throw; replacers can convert or omit them.
 Array replacer lists and indentation remain outside this runtime surface.
 
+The JS HTTP client's retry loop resubmits the failed response's effective config,
+including interceptor changes and retry-predicate stamps. Rebuilding from the
+initial input loses one-shot signature-retry guards and can resend more often
+than the venue allows. Request interceptors still run again to refresh signing.
+
 ## Native host (`native` feature)
 
 `native::native_runtime()` is the production `ExchangeRuntime` + `WsRuntime` on a
@@ -931,6 +936,7 @@ authenticates with the account's proxy token and checks expiry with the canonica
 The JS HTTP terminal honors `responseType: 'text'` for encoded response bodies,
 including non-2xx responses. It preserves raw JSON tokens and whitespace until a
 venue's bigint-safe parser runs. The default continues ordinary JSON projection.
+Hosted JS venues receive the signer through JsHttpHost, shared by Scope and BaseExchange assembly. Structural exchange_options decoding omits capability handles without altering the JS options object; never serialize hosted signers into the uninhabited JSON markers. The native host binds the exchange name before sending, wraps the existing RemoteSigningAdapter and propagates its effective configuration to source response hooks. Query serialization uses the shared HTTP codec after signing; response/error configs retain signed params and source URLs for retries. Native registry tests exercise secretless validation and private websocket auth over real local sockets.
 
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
 

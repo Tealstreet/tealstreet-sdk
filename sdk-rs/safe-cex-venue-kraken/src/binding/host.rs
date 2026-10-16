@@ -118,6 +118,54 @@ fn qs_encode(s: &str, rfc1738: bool) -> String {
     out
 }
 
+// qs decodes '+' first and returns the entire input unchanged if UTF-8 or a
+// percent escape is invalid, rather than replacing individual invalid octets.
+fn qs_decode(s: &str) -> String {
+    let input = s.replace('+', " ");
+    let mut bytes = Vec::new();
+    let mut cursor = input.bytes();
+    while let Some(byte) = cursor.next() {
+        if byte == b'%' {
+            let digit = |b: u8| char::from(b).to_digit(16).map(|n| n as u8);
+            let pair = cursor
+                .next()
+                .and_then(digit)
+                .zip(cursor.next().and_then(digit));
+            let Some((high, low)) = pair else {
+                return input;
+            };
+            bytes.push(high * 16 + low);
+        } else {
+            bytes.push(byte);
+        }
+    }
+    String::from_utf8(bytes).unwrap_or(input)
+}
+
+fn qs_parse_form(value: &Js) -> Result<Js, Thrown> {
+    // The typed venue replays the flat form fields produced by its own
+    // Spot request formatter, rather than accepting arbitrary qs syntax.
+    let result = Js::object(vec![]);
+    for part in lossy(&value.to_js_string()?).split('&').take(1000) {
+        let (key, value) = part.split_once('=').unwrap_or((part, ""));
+        let key = units(&qs_decode(key));
+        if key.is_empty() {
+            continue;
+        }
+        let value = Js::str(&qs_decode(value));
+        let value = if result.has_own(&lossy(&key)) {
+            let previous = result.get_key(&key)?;
+            let mut values = previous.array_values().unwrap_or_else(|| vec![previous]);
+            values.push(value);
+            Js::array(values)
+        } else {
+            value
+        };
+        result.define_key(&key, value)?;
+    }
+    Ok(result)
+}
+
 /// `qs.stringify(value, { arrayFormat: 'repeat', sort?, format? })`.
 pub(crate) fn qs_stringify(value: &Js, sorted: bool, rfc1738: bool) -> Result<String, Thrown> {
     let collator = if sorted {
@@ -785,6 +833,39 @@ impl ApiHost for Rt {
         client.call_method("__configureRetry", vec![(*config).clone()])?;
         Ok(())
     }
+    fn spot_retry_condition(&self, posted: Vec<&'static str>) -> ReadResult<Self, Handle<Self>> {
+        let read = self.retry_condition(Some(posted))?;
+        let host = self.clone();
+        Ok(h(Js::function("retryCondition", move |_, a| {
+            use safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY;
+            let error = arg(&a, 0);
+            if read.call(Js::Undefined, vec![error.clone()])?.truthy() {
+                return Ok(Js::Bool(true));
+            }
+            let config = error.get("config")?;
+            let response = error.get("response")?;
+            if !config.truthy()
+                || !response.truthy()
+                || config.get(SIGNATURE_RETRY_CONFIG_KEY)?.truthy()
+                || !api::is_kraken_spot_signature_rejection(&host, &response.get("data")?)?
+            {
+                return Ok(Js::Bool(false));
+            }
+            config.set(SIGNATURE_RETRY_CONFIG_KEY, Js::Bool(true))?;
+            Ok(Js::Bool(true))
+        })))
+    }
+    fn qs_parse(&self, value: Handle<Self>) -> ReadResult<Self, Handle<Self>> {
+        Ok(h(qs_parse_form(&value)?))
+    }
+    fn resend(
+        &self,
+        client: Handle<Self>,
+        config: Handle<Self>,
+    ) -> ReadResult<Self, impl Future<Output = ReadResult<Self, Handle<Self>>>> {
+        let pending = client.call_method("request", vec![(*config).clone()])?;
+        Ok(async move { Ok(h(await_js(pending).await?)) })
+    }
     // ts: installTransportAdapter — the binding's JsHttpHost owns transport selection.
     fn install_transport(
         &self,
@@ -989,5 +1070,37 @@ impl ConstructorHost for Rt {
             vec![Js::object(vec![("maxRPS", Js::Number(max_rps))])],
         )?;
         Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod form_tests {
+    use super::*;
+
+    #[test]
+    fn spot_form_replays_match_the_actual_qs_dependency() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/spot_form_oracle.cjs");
+        let output = std::process::Command::new("node")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(cases.len(), 6, "replay input inventory");
+        for case in cases {
+            let parsed = qs_parse_form(&Js::str(case["input"].as_str().unwrap())).unwrap();
+            parsed.delete(&units("nonce"));
+            parsed.define("nonce", Js::str("next")).unwrap();
+            assert_eq!(
+                qs_stringify(&parsed, false, false).unwrap(),
+                case["expected"].as_str().unwrap(),
+                "{case}"
+            );
+        }
     }
 }
