@@ -51,11 +51,12 @@ async fn verify(name: ExchangeName, exchange: &'static str) {
     assert_eq!(h.store.markets()[0].symbol, "GWUSDT");
     assert_eq!(h.store.markets()[0].precision.amount, 0.1);
     assert_eq!(h.store.tickers()[0].last, 10.0);
-    let loaded = h.store.loaded();
-    assert!(
-        loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders
-    );
-    drop(loaded);
+    {
+        let loaded = h.store.loaded();
+        assert!(
+            loaded.markets && loaded.tickers && loaded.balance && loaded.positions && loaded.orders
+        );
+    }
     assert!(
         h.seen.borrow().is_empty(),
         "gateway public-only startup must avoid venue REST"
