@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { inventory } from '../../safe-cex-parity/scripts/accepted-inventory.mjs';
 import { runProbes } from '../../safe-cex-parity/scripts/accepted-probes.mjs';
 import { loadContracts } from '../../safe-cex-parity/scripts/accepted-contract-files.mjs';
+import { loadPolicy } from '../../safe-cex-parity/scripts/accepted-policy-files.mjs';
 
 assert.equal(process.argv.length, 2, 'selected census runner takes no scope-changing arguments');
 const workspace = fs.realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
@@ -46,6 +47,15 @@ cargo(['rustdoc', '--locked', '-p', packageMetadata.name, '--jobs', '1', '--lib'
 const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'doc', `${target.name}.json`)));
 const discovery = inventory(doc, { onlyOwners: selected, readSource: file => fs.readFileSync(path.resolve(workspace, file)) });
 assert.deepEqual(discovery.types.map(type => type.name).sort(), selected);
+const selectedConstruction = selected.filter(name => name.includes('::wire::'));
+assert.equal(selectedConstruction.length, 6);
+assert.deepEqual(discovery.construction.map(owner => owner.name).sort(), selectedConstruction);
+const construction = loadPolicy('construction');
+for (const owner of discovery.construction) {
+  assert.ok(construction[owner.name]?.reason?.trim(), `missing specific construction review: ${owner.name}`);
+  assert.deepEqual(owner.traits, construction[owner.name].traits, `construction traits changed: ${owner.name}`);
+}
+
 const contracts = loadContracts();
 for (const name of selected) assert.ok(contracts[name], `missing reviewed selected contract: ${name}`);
 const pkg = { ...discovery, package: packageMetadata.name, packageId: packageMetadata.id,
@@ -58,4 +68,5 @@ for (const row of results) assert.deepEqual(row.failures, [], row.name);
 assert.equal(results.filter(row => !row.classificationOnly).length, 14);
 assert.equal(results.filter(row => row.classificationOnly).length, 0);
 console.log('Crypto.com selected records/carriers14:14 native decoder results +0 classifications,0 failed owners.');
+console.log('Selected construction6: exact compiler traits reviewed; record observations execute actual Clone values.');
 console.log('Scope: six wire records and eight carrier enum APIs only; other census owners, aliases, construction, locals, features and wasm are separate obligations.');

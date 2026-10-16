@@ -55,9 +55,17 @@ node safe-cex-venue-cryptocom/scripts/record-carrier-contracts.mjs
 ```
 
 The maintained selector fixes these fourteen compiler identities, performs fresh
-rustdoc, loads the per-crate shard and executes canonical native production
-probes. Validation is pending while this review is being prepared; draft rows
-are not evidence of a pass. This slice covers only fourteen of the original 133
+rustdoc, loads the per-crate contract shard and executes canonical native
+production probes. It separately matches the six selected compiler Clone
+capabilities with loadPolicy('construction') and their specific Crypto.com
+shard reviews. These checks do not replace the actual Clone value observations.
+
+Before integrating master69fe03c566 and policy split315, the selected gate passed
+14 native decoder owners with zero failures/classification-only receipts. All14
+compiled mutation/restoration controls passed; the full scoped suite passed121
+with zero failures/two existing ignored tests; host/WASM all-target Clippy,
+formatting and parity0 passed. Integrated checks are being rerun after migration.
+The deleted flat policy tables remain absent. This slice covers only fourteen of the original 133
 native/default owners and six of fifteen construction reviews. Other owners,
 aliases, construction entries, newer discovery, locals, features and WASM
 contract execution remain separate obligations. No full-package completion is
