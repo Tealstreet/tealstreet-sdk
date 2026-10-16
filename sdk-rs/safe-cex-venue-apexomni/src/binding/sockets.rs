@@ -183,6 +183,12 @@ impl ApexSocketHost for SocketHost {
                             let owner = weak
                                 .upgrade()
                                 .ok_or_else(|| Thrown::error("Error", "Apex host released"))?;
+                            // The eager first poll may synchronously dispose the venue.
+                            // Do not register new work after its cancellation sweep.
+                            if owner.base().is_disposed() {
+                                promise.settle(Ok(Js::Undefined));
+                                return Ok(Js::Promise(promise));
+                            }
                             let result = promise.clone();
                             owner.schedule(
                                 0.,

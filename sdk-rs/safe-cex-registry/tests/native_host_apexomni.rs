@@ -143,6 +143,7 @@ struct HostedApex {
     ws_gate: std::cell::RefCell<Option<tokio::sync::oneshot::Receiver<()>>>,
     ws_mode: std::cell::Cell<u8>,
     reject_http: std::cell::Cell<bool>,
+    dispose_on_ws: std::cell::RefCell<Option<Box<dyn Fn()>>>,
 }
 fn hosted_apex_mac(message: &str) -> String {
     use hmac::{Hmac, Mac};
@@ -229,6 +230,10 @@ impl safe_cex_transport::signing::RemoteSigner for HostedApex {
                     message,
                     format!("{}GET/ws/accounts", extra["timestamp"].as_f64().unwrap())
                 );
+                let dispose = self.dispose_on_ws.borrow_mut().take();
+                if let Some(dispose) = dispose {
+                    dispose();
+                }
                 let gate = self.ws_gate.borrow_mut().take();
                 let mode = self.ws_mode.get();
                 Box::pin(async move {
@@ -454,36 +459,48 @@ fn apexomni_native_hosted_ws_refusal_and_throw_send_no_private_frames() {
 #[test]
 fn apexomni_native_dispose_cancels_pending_hosted_ws_auth() {
     run_local(async {
-        let signer = Rc::new(HostedApex::default());
-        let (release, gate) = tokio::sync::oneshot::channel();
-        *signer.ws_gate.borrow_mut() = Some(gate);
-        let h = venue_harness(
-            ExchangeName::Apexomni,
-            Rc::new(routes),
-            hosted_apex_options(),
-            Some((signer.clone(), Some("hosted-apex".into()))),
-            safe_cex_exchange::native::native_runtime(),
-        )
-        .await;
-        h.exchange.start().await.unwrap();
-        eventually("pending hosted Apex auth", || {
-            signer.calls.borrow().iter().any(|r| r["type"] == "ws-auth")
-        })
-        .await;
-        h.exchange.dispose().unwrap();
-        let weak = Rc::downgrade(&h.exchange);
-        drop(h.exchange);
-        eventually("disposed Apex exchange releases", || {
-            weak.upgrade().is_none()
-        })
-        .await;
-        eventually("hosted WS signing future is canceled", || {
-            release.is_closed()
-        })
-        .await;
-        assert!(
-            !h.received.borrow().iter().any(|f| private_frame(f)),
-            "disposing pending auth sends no private frames"
-        );
+        for reentrant in [false, true] {
+            let signer = Rc::new(HostedApex::default());
+            let (release, gate) = tokio::sync::oneshot::channel();
+            *signer.ws_gate.borrow_mut() = Some(gate);
+            let h = venue_harness(
+                ExchangeName::Apexomni,
+                Rc::new(routes),
+                hosted_apex_options(),
+                Some((signer.clone(), Some("hosted-apex".into()))),
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            if reentrant {
+                let weak = Rc::downgrade(&h.exchange);
+                *signer.dispose_on_ws.borrow_mut() = Some(Box::new(move || {
+                    weak.upgrade().unwrap().dispose().unwrap();
+                }));
+            }
+            h.exchange.start().await.unwrap();
+            eventually("pending hosted Apex auth", || {
+                signer.calls.borrow().iter().any(|r| r["type"] == "ws-auth")
+            })
+            .await;
+            if !reentrant {
+                h.exchange.dispose().unwrap();
+            }
+            // Keep the wrapper alive: dropping it must not hide work that was
+            // registered after a reentrant disposal during the eager first poll.
+            eventually("hosted WS signing future is canceled", || {
+                release.is_closed()
+            })
+            .await;
+            assert!(
+                !h.received.borrow().iter().any(|f| private_frame(f)),
+                "disposing pending auth sends no private frames"
+            );
+            let weak = Rc::downgrade(&h.exchange);
+            drop(h.exchange);
+            eventually("disposed Apex exchange releases", || {
+                weak.upgrade().is_none()
+            })
+            .await;
+        }
     });
 }
