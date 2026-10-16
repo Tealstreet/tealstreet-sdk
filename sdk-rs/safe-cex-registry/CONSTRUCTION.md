@@ -203,4 +203,3 @@ separate from the venue's local-key signing interceptor.
 trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
 server, and checks both network origins, proxy preservation, info bypass, repeat
 query encoding and limiter identity across separate account hosts.
-

@@ -111,4 +111,3 @@ via `hyperliquid_rate_limiter()` and forwards it through `NativeAccountSpec`;
 never create a fresh budget per hosted account. The Hyperliquid adapter preserves
 the transport-resolved baseURL, repeat query serialization, hosted action signing
 and info skip-signing. Its local HTTP proof is `tests/native_host_hyperliquid.rs`.
-
