@@ -10,9 +10,13 @@ use crate::order_placement::OrderPlacementHost;
 use crate::order_preparation::OrderPreparationHost;
 use crate::rest_actions::{RestActionFuture, RestActionsHost};
 use crate::runtime_orchestration::RuntimeOrchestrationHost;
-use crate::{inverse_logic, order_logic, order_placement, order_preparation, rest_actions, runtime_orchestration};
+use crate::{
+    inverse_logic, order_logic, order_placement, order_preparation, rest_actions,
+    runtime_orchestration,
+};
 use safe_cex_types::{
-    Order, OrderSide, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position, PositionMode, PositionSide,
+    Order, OrderSide, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position, PositionMode,
+    PositionSide,
 };
 use std::{
     cell::RefCell,
@@ -68,7 +72,10 @@ fn js_add(a: &Js, b: &Js) -> Result<Js, Thrown> {
 }
 
 fn num_op(args: &[Js], f: fn(f64, f64) -> f64) -> Result<Js, Thrown> {
-    Ok(Js::Number(f(arg(args, 0).to_number()?, arg(args, 1).to_number()?)))
+    Ok(Js::Number(f(
+        arg(args, 0).to_number()?,
+        arg(args, 1).to_number()?,
+    )))
 }
 
 fn property_key(key: &Js) -> Result<Str, Thrown> {
@@ -77,7 +84,11 @@ fn property_key(key: &Js) -> Result<Str, Thrown> {
 
 /// Optional-chaining read: nullish receivers yield undefined.
 fn opt_get(v: &Js, k: &str) -> Result<Js, Thrown> {
-    if v.is_nullish() { Ok(Js::Undefined) } else { v.get(k) }
+    if v.is_nullish() {
+        Ok(Js::Undefined)
+    } else {
+        v.get(k)
+    }
 }
 
 /// `key in value`, walking the prototype chain of ordinary objects.
@@ -96,7 +107,9 @@ fn has_property(v: &Js, key: &str) -> Result<bool, Thrown> {
             Some(proto) => has_property(&proto, key)?,
             None => false,
         },
-        Js::Array(_) => key == "length" || crate::binding::builtins::member(v, &utf16(key)).is_some(),
+        Js::Array(_) => {
+            key == "length" || crate::binding::builtins::member(v, &utf16(key)).is_some()
+        }
         _ => crate::binding::builtins::member(v, &utf16(key)).is_some(),
     })
 }
@@ -120,7 +133,9 @@ fn not_iterable(v: &Js) -> Thrown {
         Js::Function(_) => "function".to_owned(),
         _ => "object".to_owned(),
     };
-    Thrown::type_error(&format!("{what} is not iterable (cannot read property Symbol(Symbol.iterator))"))
+    Thrown::type_error(&format!(
+        "{what} is not iterable (cannot read property Symbol(Symbol.iterator))"
+    ))
 }
 
 /// Live native iterator over the iterable intrinsics.
@@ -200,7 +215,10 @@ fn require_array(member: &Js, array: &Js, name: &str) -> Result<(), Thrown> {
         return Ok(());
     }
     if !member.is_callable() {
-        return Err(Thrown::type_error(&format!("{}.{name} is not a function", array.type_of())));
+        return Err(Thrown::type_error(&format!(
+            "{}.{name} is not a function",
+            array.type_of()
+        )));
     }
     Err(Thrown::type_error(&format!(
         "Bitget binding: {name} over a non-array {} receiver has no native callback form",
@@ -218,7 +236,10 @@ fn bind_callable(owner: Js, member: Js, name: &str) -> Js {
 
 fn invoke_value(f: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
     if !f.is_callable() {
-        return Err(Thrown::type_error(&format!("{} is not a function", f.to_display())));
+        return Err(Thrown::type_error(&format!(
+            "{} is not a function",
+            f.to_display()
+        )));
     }
     f.call(Js::Undefined, args)
 }
@@ -363,9 +384,11 @@ fn operation(name: &str, args: &[Js]) -> Result<Js, Thrown> {
             &lit(" was already absent during cancel"),
         ])?,
         "parentMissing" => template(&[&lit("Parent order not found for "), &a0])?,
-        "strategyPriceRequired" => {
-            template(&[&lit("Bitget UTA "), &a0, &lit(" orders require a trigger price.")])?
-        }
+        "strategyPriceRequired" => template(&[
+            &lit("Bitget UTA "),
+            &a0,
+            &lit(" orders require a trigger price."),
+        ])?,
         "restoredMessage" => template(&[
             &lit("Bitget UTA update failed: "),
             &a0,
@@ -392,9 +415,10 @@ fn operation(name: &str, args: &[Js]) -> Result<Js, Thrown> {
             &lit(". Please check your Testnet setting."),
         ])?,
         "marketsLoadedMessage" => template(&[&lit("Loaded "), &a0, &lit(" Bitget markets")])?,
-        "probeFallbackMessage" => {
-            template(&[&lit("Bitget account type probe failed; assuming Classic: "), &a0])?
-        }
+        "probeFallbackMessage" => template(&[
+            &lit("Bitget account type probe failed; assuming Classic: "),
+            &a0,
+        ])?,
         "newDateISO" => date_iso(&a0)?,
         "incomeWarning" => template(&[
             &lit("Income history for "),
@@ -403,7 +427,9 @@ fn operation(name: &str, args: &[Js]) -> Result<Js, Thrown> {
             &a1,
             &lit(" is INCOMPLETE — "),
             &arg(args, 2),
-            &lit(" chunk(s) could not be walked to completion. Any total derived from it is a lower bound."),
+            &lit(
+                " chunk(s) could not be walked to completion. Any total derived from it is a lower bound.",
+            ),
         ])?,
         "bookTopic" => template(&[&lit("orderBook_"), &a0])?,
         "candleTopic" => template(&[&lit("candle_"), &a0, &lit("_"), &a1])?,
@@ -464,7 +490,9 @@ impl RestActionsHost for Rt {
     }
     fn delete(&self, value: &Js, key: &Js) -> Result<(), Thrown> {
         if value.is_nullish() {
-            return Err(Thrown::type_error("Cannot convert undefined or null to object"));
+            return Err(Thrown::type_error(
+                "Cannot convert undefined or null to object",
+            ));
         }
         value.delete(&property_key(key)?);
         Ok(())
@@ -670,12 +698,20 @@ impl RuntimeOrchestrationHost for Rt {
 // ---------- module imports these bodies read ----------
 
 fn is_bitget_success_code(code: &Js) -> Result<bool, Thrown> {
-    let code = if code.is_nullish() { Js::Number(0.0) } else { code.clone() };
+    let code = if code.is_nullish() {
+        Js::Number(0.0)
+    } else {
+        code.clone()
+    };
     Ok(safe_cex_num::parse_int(&text(&code)?, Some(10)) == 0.0)
 }
 
 fn to_finite_number(value: &Js, fallback: Js) -> Result<Js, Thrown> {
-    let fallback = if fallback.is_undefined() { Js::Number(0.0) } else { fallback };
+    let fallback = if fallback.is_undefined() {
+        Js::Number(0.0)
+    } else {
+        fallback
+    };
     Ok(match value {
         Js::Number(n) if n.is_finite() => value.clone(),
         Js::String(s) => {
@@ -684,7 +720,11 @@ fn to_finite_number(value: &Js, fallback: Js) -> Result<Js, Thrown> {
                 return Ok(fallback);
             }
             let parsed = safe_cex_num::parse_float(&s);
-            if parsed.is_finite() { Js::Number(parsed) } else { fallback }
+            if parsed.is_finite() {
+                Js::Number(parsed)
+            } else {
+                fallback
+            }
         }
         _ => fallback,
     })
@@ -694,7 +734,11 @@ fn lodash_values(collection: &Js) -> Result<Vec<Js>, Thrown> {
     Ok(match collection {
         Js::Array(_) => collection.array_values().unwrap_or_default(),
         Js::Undefined | Js::Null => vec![],
-        Js::String(_) => collection.own_entries()?.into_iter().map(|(_, v)| v).collect(),
+        Js::String(_) => collection
+            .own_entries()?
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect(),
         other if other.is_object() => other.own_entries()?.into_iter().map(|(_, v)| v).collect(),
         _ => vec![],
     })
@@ -735,7 +779,11 @@ fn update_order_book(book: &Js, side: &Js, update: &Js, upsert: &Js) -> Result<J
         } else {
             less_than(&mid_price, &price)? == Some(true)
         };
-        if toward_right { left = mid + 1 } else { right = mid - 1 }
+        if toward_right {
+            left = mid + 1
+        } else {
+            right = mid - 1
+        }
     }
     let zero = update.get("amount")?.strict_equals(&Js::Number(0.0));
     let Js::Array(items) = &levels else {
@@ -786,7 +834,11 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
         let field = |k: &str| -> Result<f64, Thrown> { opts.get(k)?.to_number() };
         let optional = |k: &str| -> Result<Option<f64>, Thrown> {
             let v = opts.get(k)?;
-            if v.is_nullish() { Ok(None) } else { Ok(Some(v.to_number()?)) }
+            if v.is_nullish() {
+                Ok(None)
+            } else {
+                Ok(Some(v.to_number()?))
+            }
         };
         let options = IncomeRangeOptions {
             start_time: field("startTime")?,
@@ -796,7 +848,10 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
             chunk_delay_ms: optional("chunkDelayMs")?,
             max_pages_per_chunk: optional("maxPagesPerChunk")?,
         };
-        let mut page = move |p: IncomePageParams| -> safe_cex_exchange::runtime::ExchangeFuture<'static, Vec<safe_cex_types::IncomeRecord>> {
+        let mut page = move |p: IncomePageParams| -> safe_cex_exchange::runtime::ExchangeFuture<
+            'static,
+            Vec<safe_cex_types::IncomeRecord>,
+        > {
             let fetch = fetch.clone();
             Box::pin(async move {
                 let request = Js::object(vec![
@@ -809,7 +864,13 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
             })
         };
         let runtime = rt.exchange_runtime();
-        let mut delay = move |ms: f64| runtime.sleep(if ms.is_finite() && ms > 0.0 { ms as u64 } else { 0 });
+        let mut delay = move |ms: f64| {
+            runtime.sleep(if ms.is_finite() && ms > 0.0 {
+                ms as u64
+            } else {
+                0
+            })
+        };
         let result =
             safe_cex_exchange::income_paging::paginate_income_range(&mut page, options, &mut delay)
                 .await
@@ -853,7 +914,9 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
         Js::function("inverseObj", |_, a| {
             let source = arg(&a, 0);
             if source.is_nullish() {
-                return Err(Thrown::type_error("Cannot convert undefined or null to object"));
+                return Err(Thrown::type_error(
+                    "Cannot convert undefined or null to object",
+                ));
             }
             let mut acc = Js::object(vec![]);
             for (k, v) in source.own_entries()? {
@@ -906,7 +969,11 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
             let (truthy, falsy) = (Js::array(vec![]), Js::array(vec![]));
             let predicate = arg(&a, 1);
             for v in lodash_values(&arg(&a, 0))? {
-                let target = if lodash_iteratee(&predicate, &v)?.truthy() { &truthy } else { &falsy };
+                let target = if lodash_iteratee(&predicate, &v)?.truthy() {
+                    &truthy
+                } else {
+                    &falsy
+                };
                 target.push(v)?;
             }
             Ok(Js::array(vec![truthy, falsy]))
@@ -937,7 +1004,12 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
             if values.is_empty() || size < 1.0 {
                 return Ok(Js::array(vec![]));
             }
-            Ok(Js::array(values.chunks(size as usize).map(|c| Js::array(c.to_vec())).collect()))
+            Ok(Js::array(
+                values
+                    .chunks(size as usize)
+                    .map(|c| Js::array(c.to_vec()))
+                    .collect(),
+            ))
         }),
     );
     def(
@@ -966,14 +1038,20 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
             let mut out = vec![];
             for i in 0..n.min(4_294_967_295.0) as u64 {
                 let index = Js::Number(i as f64);
-                out.push(if iteratee.is_callable() { iteratee.call(Js::Undefined, vec![index])? } else { index });
+                out.push(if iteratee.is_callable() {
+                    iteratee.call(Js::Undefined, vec![index])?
+                } else {
+                    index
+                });
             }
             Ok(Js::array(out))
         }),
     );
     def(
         "isBitgetSuccessCode",
-        Js::function("isBitgetSuccessCode", |_, a| Ok(Js::Bool(is_bitget_success_code(&arg(&a, 0))?))),
+        Js::function("isBitgetSuccessCode", |_, a| {
+            Ok(Js::Bool(is_bitget_success_code(&arg(&a, 0))?))
+        }),
     );
     def(
         "getBitgetApiErrorMessage",
@@ -988,7 +1066,9 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
             let message = arg(&a, 0);
             Ok(Js::Bool(match &message {
                 Js::Undefined | Js::Null => false,
-                Js::String(s) => String::from_utf16_lossy(s).to_lowercase().contains("environment is incorrect"),
+                Js::String(s) => String::from_utf16_lossy(s)
+                    .to_lowercase()
+                    .contains("environment is incorrect"),
                 _ => return Err(Thrown::type_error("message?.toLowerCase is not a function")),
             }))
         }),
@@ -1006,13 +1086,18 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
     );
     def(
         "toFiniteNumber",
-        Js::function("toFiniteNumber", |_, a| to_finite_number(&arg(&a, 0), arg(&a, 1))),
+        Js::function("toFiniteNumber", |_, a| {
+            to_finite_number(&arg(&a, 0), arg(&a, 1))
+        }),
     );
     let w = weak.clone();
     def(
         "getTickInterval",
         Js::function("getTickInterval", move |_, _| {
-            Ok(shared(&w)?.base().get_tick_interval().map_or(Js::Undefined, Js::Number))
+            Ok(shared(&w)?
+                .base()
+                .get_tick_interval()
+                .map_or(Js::Undefined, Js::Number))
         }),
     );
     let w = weak.clone();
@@ -1024,7 +1109,10 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
                 return Ok(Js::Undefined);
             }
             let typed = place_opts_typed(&opts)?;
-            let id = shared(&w)?.base().resolve_caller_client_order_id(&typed).map_err(exchange_error)?;
+            let id = shared(&w)?
+                .base()
+                .resolve_caller_client_order_id(&typed)
+                .map_err(exchange_error)?;
             Ok(id.map_or(Js::Undefined, |id| Js::str(&id)))
         }),
     );
@@ -1039,7 +1127,10 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
                     typed.push(place_opts_typed(&order)?);
                 }
             }
-            shared(&w)?.base().assert_caller_client_order_ids(&typed).map_err(exchange_error)?;
+            shared(&w)?
+                .base()
+                .assert_caller_client_order_ids(&typed)
+                .map_err(exchange_error)?;
             Ok(Js::Undefined)
         }),
     );
@@ -1051,7 +1142,10 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
             let callback = arg(&a, 0);
             let min = arg(&a, 1);
             if min.strict_equals(&Js::Number(f64::INFINITY)) {
-                return Ok(Js::Promise(Promise::settled(&rt.exchange_runtime(), Ok(Js::Undefined))));
+                return Ok(Js::Promise(Promise::settled(
+                    &rt.exchange_runtime(),
+                    Ok(Js::Undefined),
+                )));
             }
             // The TS fallback also console.warns once per caller; there is no console here.
             let interval = if min.truthy() && less_than(&Js::Number(0.0), &min)? == Some(true) {
@@ -1063,11 +1157,18 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
             Ok(rt.spawn(Box::pin(async move {
                 timer
                     .exchange_runtime()
-                    .sleep(if interval.is_finite() { interval as u64 } else { u64::MAX })
+                    .sleep(if interval.is_finite() {
+                        interval as u64
+                    } else {
+                        u64::MAX
+                    })
                     .await
                     .map_err(exchange_error)?;
                 let callback = callback.clone();
-                timer.set_timeout(Rc::new(move || invoke_value(&callback, vec![]).map(|_| ())), 0.0);
+                timer.set_timeout(
+                    Rc::new(move || invoke_value(&callback, vec![]).map(|_| ())),
+                    0.0,
+                );
                 Ok(Js::Undefined)
             })))
         }),
@@ -1082,7 +1183,9 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
     );
     def(
         "updateOrderBook",
-        Js::function("updateOrderBook", |_, a| update_order_book(&arg(&a, 0), &arg(&a, 1), &arg(&a, 2), &arg(&a, 3))),
+        Js::function("updateOrderBook", |_, a| {
+            update_order_book(&arg(&a, 0), &arg(&a, 1), &arg(&a, 2), &arg(&a, 3))
+        }),
     );
     def(
         "calcOrderBookTotal",
@@ -1096,11 +1199,19 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
 // ---------- typed boundaries of the pure order decisions ----------
 
 fn side_of(v: &Js) -> OrderSide {
-    if v.strict_equals(&Js::str("buy")) { OrderSide::Buy } else { OrderSide::Sell }
+    if v.strict_equals(&Js::str("buy")) {
+        OrderSide::Buy
+    } else {
+        OrderSide::Sell
+    }
 }
 
 fn mode_of(v: &Js) -> PositionMode {
-    if v.strict_equals(&Js::str("hedged")) { PositionMode::Hedged } else { PositionMode::OneWay }
+    if v.strict_equals(&Js::str("hedged")) {
+        PositionMode::Hedged
+    } else {
+        PositionMode::OneWay
+    }
 }
 
 fn enum_js<T: serde::Serialize>(value: &T) -> Result<Js, Thrown> {
@@ -1116,18 +1227,32 @@ fn order_type_of(v: &Js) -> Option<OrderType> {
 
 /// Amount step of `store.marketsBySymbol[symbol]?.precision?.amount`, None when falsy.
 fn amount_step(rt: &Rt, symbol: &Js) -> Result<Option<f64>, Thrown> {
-    let market = rt.path("store.marketsBySymbol")?.get_key(&property_key(symbol)?)?;
+    let market = rt
+        .path("store.marketsBySymbol")?
+        .get_key(&property_key(symbol)?)?;
     let step = opt_get(&opt_get(&market, "precision")?, "amount")?;
-    Ok(if step.truthy() { Some(step.to_number()?) } else { None })
+    Ok(if step.truthy() {
+        Some(step.to_number()?)
+    } else {
+        None
+    })
 }
 
-type AlgoSideBody = fn(OrderType, OrderSide, PositionMode) -> Result<&'static str, safe_cex_exchange::runtime::ExchangeError>;
+type AlgoSideBody = fn(
+    OrderType,
+    OrderSide,
+    PositionMode,
+) -> Result<&'static str, safe_cex_exchange::runtime::ExchangeError>;
 
 fn algo_order_side(opts: &Js, mode: &Js, body: AlgoSideBody) -> Result<Js, Thrown> {
     let kind = opts.get("type")?;
     let side = opts.get("side")?;
-    let typed = order_type_of(&kind)
-        .filter(|t| matches!(t, OrderType::TakeProfit | OrderType::StopLoss | OrderType::TrailingStopLoss));
+    let typed = order_type_of(&kind).filter(|t| {
+        matches!(
+            t,
+            OrderType::TakeProfit | OrderType::StopLoss | OrderType::TrailingStopLoss
+        )
+    });
     let known_side = side.strict_equals(&Js::str("buy")) || side.strict_equals(&Js::str("sell"));
     match typed {
         Some(t) if known_side => Ok(Js::str(
@@ -1135,7 +1260,12 @@ fn algo_order_side(opts: &Js, mode: &Js, body: AlgoSideBody) -> Result<Js, Throw
         )),
         _ => Err(Thrown::new(crate::binding::value::error_object(
             "Error",
-            &text(&template(&[&lit("Unknown algo order side: "), &kind, &lit(" - "), &side])?)?,
+            &text(&template(&[
+                &lit("Unknown algo order side: "),
+                &kind,
+                &lit(" - "),
+                &side,
+            ])?)?,
         ))),
     }
 }
@@ -1145,9 +1275,17 @@ fn selection_opts(opts: &Js, strict: bool) -> Result<(PlaceOrderOpts, Option<Js>
     let kind = opts.get("type")?;
     let typed_kind = order_type_of(&kind);
     let amount = opts.get("amount")?;
-    let amount = if strict { to_typed::<f64>(&amount)? } else { amount.as_f64().unwrap_or(f64::NAN) };
+    let amount = if strict {
+        to_typed::<f64>(&amount)?
+    } else {
+        amount.as_f64().unwrap_or(f64::NAN)
+    };
     let selection = PlaceOrderOpts {
-        symbol: if strict { to_typed(&opts.get("symbol")?)? } else { text(&opts.get("symbol")?)? },
+        symbol: if strict {
+            to_typed(&opts.get("symbol")?)?
+        } else {
+            text(&opts.get("symbol")?)?
+        },
         r#type: typed_kind.unwrap_or(OrderType::Limit),
         side: side_of(&opts.get("side")?),
         price: None,
@@ -1164,7 +1302,14 @@ fn selection_opts(opts: &Js, strict: bool) -> Result<(PlaceOrderOpts, Option<Js>
         max_slippage_pct: None,
         close: None,
     };
-    Ok((selection, if typed_kind.is_none() { Some(kind) } else { None }))
+    Ok((
+        selection,
+        if typed_kind.is_none() {
+            Some(kind)
+        } else {
+            None
+        },
+    ))
 }
 
 /// Runs a typed body with an emitAndLogError callback; the first emit failure wins.
@@ -1197,9 +1342,12 @@ fn select_plan_type_and_amount(rt: &Rt, opts: &Js, positions: &Js) -> Result<Js,
     });
     match (result, raw_kind) {
         (Ok((plan, amount)), _) => Ok(Js::array(vec![Js::str(plan), Js::Number(amount)])),
-        (Err(e), Some(kind)) if e.message().starts_with("Unknown order type: ") => Err(Thrown::new(
-            crate::binding::value::error_object("Error", &text(&template(&[&lit("Unknown order type: "), &kind])?)?),
-        )),
+        (Err(e), Some(kind)) if e.message().starts_with("Unknown order type: ") => {
+            Err(Thrown::new(crate::binding::value::error_object(
+                "Error",
+                &text(&template(&[&lit("Unknown order type: "), &kind])?)?,
+            )))
+        }
         (Err(e), _) => Err(e),
     }
 }
@@ -1208,10 +1356,14 @@ fn cancel_plan_type(rt: &Rt, order: &Js) -> Result<Js, Thrown> {
     let typed: Order = to_typed(order)?;
     let positions: Vec<Position> = to_typed(&rt.path("store.positions")?)?;
     let step = amount_step(rt, &order.get("symbol")?)?;
-    let hit = with_emitter(rt, |emit| order_logic::get_cancel_plan_type(&typed, &positions, step, emit))?;
+    let hit = with_emitter(rt, |emit| {
+        order_logic::get_cancel_plan_type(&typed, &positions, step, emit)
+    })?;
     Ok(match hit {
         safe_cex_num::TableHit::Mapped(plan) => Js::str(plan),
-        safe_cex_num::TableHit::Inherited(safe_cex_num::ProtoMember::Prototype) => Js::object(vec![]),
+        safe_cex_num::TableHit::Inherited(safe_cex_num::ProtoMember::Prototype) => {
+            Js::object(vec![])
+        }
         safe_cex_num::TableHit::Inherited(member) => {
             let name = member
                 .js_string()
@@ -1244,7 +1396,10 @@ async fn order_plan_type_and_amount(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         let symbol = symbol.to_owned();
         let chosen = &chosen;
         async move {
-            let value = rt.call_path("resolvePositionsForPlanType", vec![Js::str(&symbol), enum_js(&side)?])?;
+            let value = rt.call_path(
+                "resolvePositionsForPlanType",
+                vec![Js::str(&symbol), enum_js(&side)?],
+            )?;
             let value = await_js(value).await?;
             *chosen.borrow_mut() = value.clone();
             to_typed::<Vec<Position>>(&value)
@@ -1292,62 +1447,102 @@ macro_rules! sync_member {
     }};
 }
 
-pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
+pub(crate) fn bind(
+    rt: &Rt,
+    owner: &str,
+    name: &str,
+    _targets: &[&str],
+) -> Result<Option<Js>, Thrown> {
     let f = match (owner, name) {
         ("BitgetExchange", "validateAccount") => {
-            async_member!(rt, name, |h, _a| { runtime_orchestration::validate_account(h).await })
+            async_member!(rt, name, |h, _a| {
+                runtime_orchestration::validate_account(h).await
+            })
         }
-        ("BitgetExchange", "start") => async_member!(rt, name, |h, _a| { runtime_orchestration::start(h).await }),
+        ("BitgetExchange", "start") => {
+            async_member!(rt, name, |h, _a| { runtime_orchestration::start(h).await })
+        }
         ("BitgetExchange", "tick") => {
-            async_member!(rt, name, |h, a| { runtime_orchestration::tick(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                runtime_orchestration::tick(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "_detectAccountType") => {
-            async_member!(rt, name, |h, _a| { runtime_orchestration::detect_account_type(h).await })
+            async_member!(rt, name, |h, _a| {
+                runtime_orchestration::detect_account_type(h).await
+            })
         }
         ("BitgetExchange", "ensureAccountTypeDetected") => {
-            async_member!(rt, name, |h, _a| { runtime_orchestration::ensure_account_type_detected(h).await })
+            async_member!(rt, name, |h, _a| {
+                runtime_orchestration::ensure_account_type_detected(h).await
+            })
         }
         ("BitgetExchange", "fetchIncomeHistoryRange") => async_member!(rt, name, |h, a| {
-            runtime_orchestration::fetch_income_history_range(h, arg(&a, 0), arg(&a, 1), arg(&a, 2)).await
+            runtime_orchestration::fetch_income_history_range(h, arg(&a, 0), arg(&a, 1), arg(&a, 2))
+                .await
         }),
         ("BitgetExchange", "cancelUtaStrategyOrders") => async_member!(rt, name, |h, a| {
             order_placement::cancel_uta_strategy_orders(h, arg(&a, 0), arg(&a, 1)).await
         }),
         ("BitgetExchange", "placeOrder") => {
-            async_member!(rt, name, |h, a| { order_placement::place_order(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_placement::place_order(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "placeOrders") => {
-            async_member!(rt, name, |h, a| { order_placement::place_orders(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_placement::place_orders(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "formatCreateOrder") => {
-            async_member!(rt, name, |h, a| { order_preparation::format_create_order(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_preparation::format_create_order(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "formatUtaCreateOrder") => {
-            async_member!(rt, name, |h, a| { order_preparation::format_uta_create_order(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_preparation::format_uta_create_order(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "formatUtaStrategyOrder") => {
-            async_member!(rt, name, |h, a| { order_preparation::format_uta_strategy_order(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_preparation::format_uta_strategy_order(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "formatAlgoOrder") => {
-            async_member!(rt, name, |h, a| { order_preparation::format_algo_order(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_preparation::format_algo_order(h, arg(&a, 0)).await
+            })
         }
         ("BitgetInverseExchange", "formatAlgoOrder") => {
-            async_member!(rt, name, |h, a| { order_preparation::inverse_format_algo_order(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_preparation::inverse_format_algo_order(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "placeOrderBatch") => {
-            async_member!(rt, name, |h, a| { order_placement::place_order_batch(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_placement::place_order_batch(h, arg(&a, 0)).await
+            })
         }
         ("BitgetInverseExchange", "placeOrderBatch") => {
-            async_member!(rt, name, |h, a| { order_placement::inverse_place_order_batch(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_placement::inverse_place_order_batch(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "placeUtaOrders") => {
-            async_member!(rt, name, |h, a| { order_placement::place_uta_orders(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_placement::place_uta_orders(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "placeUtaStrategyOrders") => {
-            async_member!(rt, name, |h, a| { order_placement::place_uta_strategy_orders(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_placement::place_uta_strategy_orders(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "placeAlgoOrders") => {
-            async_member!(rt, name, |h, a| { order_placement::place_algo_orders(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_placement::place_algo_orders(h, arg(&a, 0)).await
+            })
         }
         ("BitgetExchange", "updateVirtualTpSlOrder") => async_member!(rt, name, |h, a| {
             let input = arg(&a, 0);
@@ -1359,7 +1554,10 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
         }),
         ("BitgetExchange", "updateOrder") => async_member!(rt, name, |h, a| {
             let input = arg(&a, 0);
-            let (order, update) = (destructure(&input, "order")?, destructure(&input, "update")?);
+            let (order, update) = (
+                destructure(&input, "order")?,
+                destructure(&input, "update")?,
+            );
             rest_actions::update_order(h, order, update).await
         }),
         ("BitgetExchange", "updateUtaStrategyOrder") => async_member!(rt, name, |h, a| {
@@ -1369,12 +1567,18 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
         }),
         ("BitgetExchange", "updateAlgoOrder") => async_member!(rt, name, |h, a| {
             let input = arg(&a, 0);
-            let (order, update) = (destructure(&input, "order")?, destructure(&input, "update")?);
+            let (order, update) = (
+                destructure(&input, "order")?,
+                destructure(&input, "update")?,
+            );
             rest_actions::update_algo_order(h, order, update).await
         }),
         ("BitgetInverseExchange", "updateAlgoOrder") => async_member!(rt, name, |h, a| {
             let input = arg(&a, 0);
-            let (order, update) = (destructure(&input, "order")?, destructure(&input, "update")?);
+            let (order, update) = (
+                destructure(&input, "order")?,
+                destructure(&input, "update")?,
+            );
             rest_actions::inverse_update_algo_order(h, order, update).await
         }),
         ("BitgetExchange", "setLeverage") => async_member!(rt, name, |h, a| {
@@ -1390,30 +1594,50 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
             rest_actions::inverse_change_margin_type(h, arg(&a, 0), arg(&a, 1)).await
         }),
         ("BitgetExchange", "changePositionMode") => {
-            async_member!(rt, name, |h, a| { rest_actions::change_position_mode(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                rest_actions::change_position_mode(h, arg(&a, 0)).await
+            })
         }
-        ("BitgetExchange", "buildUtaStrategyPlaceOptsFromOrder") => sync_member!(rt, name, |_h, a| {
-            let order: Order = to_typed(&arg(&a, 0))?;
-            from_typed(&order_logic::build_uta_strategy_place_opts_from_order(&order))
-        }),
+        ("BitgetExchange", "buildUtaStrategyPlaceOptsFromOrder") => {
+            sync_member!(rt, name, |_h, a| {
+                let order: Order = to_typed(&arg(&a, 0))?;
+                from_typed(&order_logic::build_uta_strategy_place_opts_from_order(
+                    &order,
+                ))
+            })
+        }
         ("BitgetExchange", "getOrderSideV2") => sync_member!(rt, name, |_h, a| {
             let opts = arg(&a, 0);
             let side = side_of(&opts.get("side")?);
             let mode = mode_of(&arg(&a, 1));
-            let reduce = if mode == PositionMode::Hedged { Some(opts.get("reduceOnly")?.truthy()) } else { None };
+            let reduce = if mode == PositionMode::Hedged {
+                Some(opts.get("reduceOnly")?.truthy())
+            } else {
+                None
+            };
             let (side, trade) = order_logic::get_order_side_v2(side, reduce, mode);
-            Ok(Js::array(vec![enum_js(&side)?, trade.map_or(Js::Undefined, Js::str)]))
+            Ok(Js::array(vec![
+                enum_js(&side)?,
+                trade.map_or(Js::Undefined, Js::str),
+            ]))
         }),
         ("BitgetExchange", "getOrderSideUta") => sync_member!(rt, name, |_h, a| {
             let opts = arg(&a, 0);
             let side = side_of(&opts.get("side")?);
             let mode = mode_of(&arg(&a, 1));
-            let reduce = if mode == PositionMode::Hedged { Some(opts.get("reduceOnly")?.truthy()) } else { None };
+            let reduce = if mode == PositionMode::Hedged {
+                Some(opts.get("reduceOnly")?.truthy())
+            } else {
+                None
+            };
             from_typed(&order_logic::get_order_side_uta(side, reduce, mode))
         }),
         ("BitgetExchange", "getUtaStrategyOrderSide") => sync_member!(rt, name, |_h, a| {
             let side = side_of(&arg(&a, 0).get("side")?);
-            from_typed(&order_logic::get_uta_strategy_order_side(side, mode_of(&arg(&a, 1))))
+            from_typed(&order_logic::get_uta_strategy_order_side(
+                side,
+                mode_of(&arg(&a, 1)),
+            ))
         }),
         ("BitgetExchange", "getUtaStrategyTriggerBy") => sync_member!(rt, name, |_h, a| {
             let trigger = if arg(&a, 0).strict_equals(&Js::str("last_price")) {
@@ -1427,12 +1651,18 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
             algo_order_side(&arg(&a, 0), &arg(&a, 1), order_logic::get_algo_order_side)
         }),
         ("BitgetInverseExchange", "getInverseAlgoOrderSide") => sync_member!(rt, name, |_h, a| {
-            algo_order_side(&arg(&a, 0), &arg(&a, 1), inverse_logic::get_inverse_algo_order_side)
+            algo_order_side(
+                &arg(&a, 0),
+                &arg(&a, 1),
+                inverse_logic::get_inverse_algo_order_side,
+            )
         }),
         ("BitgetExchange", "isVirtualTPSLOrder") => sync_member!(rt, name, |_h, a| {
             let id = arg(&a, 0).get("id")?;
             match &id {
-                Js::String(s) => Ok(Js::Bool(order_logic::is_virtual_tpsl_order(&String::from_utf16_lossy(s)))),
+                Js::String(s) => Ok(Js::Bool(order_logic::is_virtual_tpsl_order(
+                    &String::from_utf16_lossy(s),
+                ))),
                 Js::Undefined | Js::Null => Err(Thrown::type_error(&format!(
                     "Cannot read properties of {} (reading 'endsWith')",
                     id.to_display()
@@ -1444,7 +1674,9 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
             let kind = order_type_of(&arg(&a, 0).get("type")?);
             Ok(Js::Bool(kind.is_some_and(order_logic::is_algo_order)))
         }),
-        ("BitgetExchange", "getCancelPlanType") => sync_member!(rt, name, |h, a| { cancel_plan_type(h, &arg(&a, 0)) }),
+        ("BitgetExchange", "getCancelPlanType") => {
+            sync_member!(rt, name, |h, a| { cancel_plan_type(h, &arg(&a, 0)) })
+        }
         ("BitgetExchange", "resolvePositionsForPlanType") => async_member!(rt, name, |h, a| {
             order_preparation::resolve_positions_for_plan_type(h, arg(&a, 0), arg(&a, 1)).await
         }),
@@ -1454,7 +1686,10 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
             let amount = opts.get("amount")?;
             Ok(match step {
                 None => amount,
-                step => Js::Number(order_logic::plan_type_comparable_amount(amount.to_number()?, step)),
+                step => Js::Number(order_logic::plan_type_comparable_amount(
+                    amount.to_number()?,
+                    step,
+                )),
             })
         }),
         ("BitgetExchange", "floorToLot") => sync_member!(rt, name, |h, a| {
@@ -1466,10 +1701,14 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
             })
         }),
         ("BitgetExchange", "selectPlanTypeAndAmount") => {
-            sync_member!(rt, name, |h, a| { select_plan_type_and_amount(h, &arg(&a, 0), &arg(&a, 1)) })
+            sync_member!(rt, name, |h, a| {
+                select_plan_type_and_amount(h, &arg(&a, 0), &arg(&a, 1))
+            })
         }
         ("BitgetExchange", "getOrderPlanTypeAndAmount") => {
-            async_member!(rt, name, |h, a| { order_plan_type_and_amount(h, arg(&a, 0)).await })
+            async_member!(rt, name, |h, a| {
+                order_plan_type_and_amount(h, arg(&a, 0)).await
+            })
         }
         ("BitgetPublicWebsocket", "listenOHLCV") => sync_member!(rt, name, |h, a| {
             runtime_orchestration::listen_ohlcv(h, arg(&a, 0), arg(&a, 1))

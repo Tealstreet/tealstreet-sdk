@@ -13,7 +13,9 @@ pub(crate) type Shared = ScopeShared<BitgetExtra>;
 pub(crate) type Rt = Scope<BitgetExtra>;
 
 pub type ExternalPublicDataFactory = Rc<
-    dyn Fn(&safe_cex_types::ExchangeOptionsExternalPublicData) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData>,
+    dyn Fn(
+        &safe_cex_types::ExchangeOptionsExternalPublicData,
+    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData>,
 >;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

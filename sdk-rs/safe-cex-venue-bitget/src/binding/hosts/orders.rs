@@ -1,5 +1,11 @@
 //! Concrete host traits and target adapters for this group of ported bodies:
 //! order reads, cancellation, order mappers, private-stream predicates and caches.
+use crate::binding::{
+    globals::arg,
+    promise::{JsFuture, Promise, await_js},
+    rt::{Rt, Shared},
+    value::{Js, Str, Thrown, from_typed, to_json},
+};
 use crate::{
     cancellation::{
         self, CancelArgument, CancelFuture, CancelGroups, CancelKey, CancelOrders, CancelPayload,
@@ -8,12 +14,6 @@ use crate::{
     order_lifecycle::OrderLifecycleCaches,
     order_reads::{self, OrderReadFuture, OrderReadsHost},
     orders, stream_predicates,
-};
-use crate::binding::{
-    globals::arg,
-    promise::{JsFuture, Promise, await_js},
-    rt::{Rt, Shared},
-    value::{Js, Str, Thrown, from_typed, to_json},
 };
 use indexmap::IndexMap;
 use std::{
@@ -29,12 +29,20 @@ fn text(v: &Js) -> Result<String, Thrown> {
 
 /// `value?.key`
 fn optional(value: &Js, key: &str) -> Result<Js, Thrown> {
-    if value.is_nullish() { Ok(Js::Undefined) } else { value.get(key) }
+    if value.is_nullish() {
+        Ok(Js::Undefined)
+    } else {
+        value.get(key)
+    }
 }
 
 /// Optional JSON projection: a missing (undefined) argument stays `None`.
 fn json_arg(value: &Js) -> Result<Option<serde_json::Value>, Thrown> {
-    if value.is_undefined() { Ok(None) } else { to_json(value).map(Some) }
+    if value.is_undefined() {
+        Ok(None)
+    } else {
+        to_json(value).map(Some)
+    }
 }
 
 fn to_orders(value: &Js) -> Result<CancelOrders<Js>, Thrown> {
@@ -123,23 +131,40 @@ impl CancellationHost for Rt {
         let future = call_now(self, "fetchUtaStrategyOrders", vec![])?;
         Ok(Box::pin(async move { to_orders(&future.await?) }))
     }
-    fn cancel_normal(&self, orders: CancelOrders<Js>) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
+    fn cancel_normal(
+        &self,
+        orders: CancelOrders<Js>,
+    ) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
         delegate(self, "cancelNormalOrders", &orders)
     }
-    fn cancel_algo(&self, orders: CancelOrders<Js>) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
+    fn cancel_algo(
+        &self,
+        orders: CancelOrders<Js>,
+    ) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
         delegate(self, "cancelAlgoOrders", &orders)
     }
-    fn cancel_uta_normal(&self, orders: CancelOrders<Js>) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
+    fn cancel_uta_normal(
+        &self,
+        orders: CancelOrders<Js>,
+    ) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
         delegate(self, "cancelUtaNormalOrders", &orders)
     }
-    fn cancel_uta_strategy(&self, orders: CancelOrders<Js>) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
+    fn cancel_uta_strategy(
+        &self,
+        orders: CancelOrders<Js>,
+    ) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
         delegate(self, "cancelUtaStrategyOrders", &orders)
     }
-    fn cancel_orders(&self, orders: CancelOrders<Js>) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
+    fn cancel_orders(
+        &self,
+        orders: CancelOrders<Js>,
+    ) -> Result<CancelFuture<'_, (), Thrown>, Thrown> {
         delegate(self, "cancelOrders", &orders)
     }
     fn virtual_tpsl(&self, order: &Js) -> Result<bool, Thrown> {
-        Ok(self.call_path("isVirtualTPSLOrder", vec![order.clone()])?.truthy())
+        Ok(self
+            .call_path("isVirtualTPSLOrder", vec![order.clone()])?
+            .truthy())
     }
     fn algo(&self, order: &Js) -> Result<bool, Thrown> {
         Ok(self.call_path("isAlgoOrder", vec![order.clone()])?.truthy())
@@ -206,7 +231,9 @@ impl CancellationHost for Rt {
         let (owner, select) = self.owner_and_member("selectPlanTypeAndAmount")?;
         let positions = self.path("store.positions")?;
         if !select.is_callable() {
-            return Err(Thrown::type_error("this.selectPlanTypeAndAmount is not a function"));
+            return Err(Thrown::type_error(
+                "this.selectPlanTypeAndAmount is not a function",
+            ));
         }
         let selected = select.call(owner, vec![order.clone(), positions])?;
         let mut iterator = js_iterator(&selected)?;
@@ -215,7 +242,9 @@ impl CancellationHost for Rt {
     fn market_bases(&self) -> Result<Vec<CancelKey>, Thrown> {
         let markets = self.path("store.markets")?;
         let Some(items) = markets.array_items() else {
-            return Err(Thrown::type_error("this.store.markets.map is not a function"));
+            return Err(Thrown::type_error(
+                "this.store.markets.map is not a function",
+            ));
         };
         items
             .into_iter()
@@ -226,7 +255,9 @@ impl CancellationHost for Rt {
     fn store_orders(&self) -> Result<CancelOrders<Js>, Thrown> {
         let orders = self.path("store.orders")?;
         if !orders.is_array() {
-            return Err(Thrown::type_error("this.store.orders.filter is not a function"));
+            return Err(Thrown::type_error(
+                "this.store.orders.filter is not a function",
+            ));
         }
         to_orders(&orders)
     }
@@ -236,7 +267,10 @@ impl CancellationHost for Rt {
         key: &CancelKey,
     ) -> Result<Js, Thrown> {
         // Inherited Object.prototype members are truthy and have no `push`.
-        if OBJECT_PROTOTYPE_KEYS.iter().any(|k| k.encode_utf16().eq(key.iter().copied())) {
+        if OBJECT_PROTOTYPE_KEYS
+            .iter()
+            .any(|k| k.encode_utf16().eq(key.iter().copied()))
+        {
             return Ok(Js::Undefined);
         }
         if !groups.iter().any(|(k, _)| k == key) {
@@ -280,15 +314,25 @@ impl CancellationHost for Rt {
         }
         let client = self.path("unlimitedXHR")?;
         let response = client.call_method("post", vec![Js::str(endpoint), body])?;
-        Ok(Box::pin(async move { await_js(response).await.map(|_| ()) }))
+        Ok(Box::pin(
+            async move { await_js(response).await.map(|_| ()) },
+        ))
     }
     fn schedule_write_check(&self) -> Result<(), Thrown> {
-        self.call_path("schedulePrivateStreamWriteCheck", vec![]).map(|_| ())
+        self.call_path("schedulePrivateStreamWriteCheck", vec![])
+            .map(|_| ())
     }
     /// `err?.response?.data?.msg || err?.message`
     fn error_message(&self, error: &Thrown) -> Result<Js, Thrown> {
-        let msg = optional(&optional(&optional(&error.value, "response")?, "data")?, "msg")?;
-        if msg.truthy() { Ok(msg) } else { optional(&error.value, "message") }
+        let msg = optional(
+            &optional(&optional(&error.value, "response")?, "data")?,
+            "msg",
+        )?;
+        if msg.truthy() {
+            Ok(msg)
+        } else {
+            optional(&error.value, "message")
+        }
     }
     fn emit_error(&self, message: Js) -> Result<(), Thrown> {
         self.call_path("emitAndLogError", vec![message]).map(|_| ())
@@ -310,7 +354,11 @@ const OBJECT_PROTOTYPE_KEYS: [&str; 12] = [
     "valueOf",
 ];
 
-fn delegate<'a>(rt: &'a Rt, path: &str, orders: &CancelOrders<Js>) -> Result<CancelFuture<'a, (), Thrown>, Thrown> {
+fn delegate<'a>(
+    rt: &'a Rt,
+    path: &str,
+    orders: &CancelOrders<Js>,
+) -> Result<CancelFuture<'a, (), Thrown>, Thrown> {
     let future = call_now(rt, path, vec![orders_value(orders)])?;
     Ok(Box::pin(async move { future.await.map(|_| ()) }))
 }
@@ -336,7 +384,9 @@ impl JsIterator {
             JsIterator::Chars { units, index } => {
                 let first = *units.get(*index)?;
                 let pair = (0xD800..0xDC00).contains(&first)
-                    && units.get(*index + 1).is_some_and(|u| (0xDC00..0xE000).contains(u));
+                    && units
+                        .get(*index + 1)
+                        .is_some_and(|u| (0xDC00..0xE000).contains(u));
                 let width = if pair { 2 } else { 1 };
                 let value = Js::utf16(&units[*index..*index + width]);
                 *index += width;
@@ -348,9 +398,18 @@ impl JsIterator {
 
 fn js_iterator(value: &Js) -> Result<JsIterator, Thrown> {
     match value {
-        Js::Array(_) => Ok(JsIterator::Array { array: value.clone(), index: 0 }),
-        Js::String(s) => Ok(JsIterator::Chars { units: s.clone(), index: 0 }),
-        other => Err(Thrown::type_error(&format!("{} is not iterable", other.to_display()))),
+        Js::Array(_) => Ok(JsIterator::Array {
+            array: value.clone(),
+            index: 0,
+        }),
+        Js::String(s) => Ok(JsIterator::Chars {
+            units: s.clone(),
+            index: 0,
+        }),
+        other => Err(Thrown::type_error(&format!(
+            "{} is not iterable",
+            other.to_display()
+        ))),
     }
 }
 
@@ -418,7 +477,10 @@ impl OrderReadsHost for Rt {
     /// Array.prototype.flatMap(mapper): depth 1, holes skipped, mapper(value, index, array).
     fn flat_map(&self, value: Js, mapper: Js) -> Result<Js, Thrown> {
         let Some(len) = value.array_items().map(|items| items.len()) else {
-            return Err(Thrown::type_error(&format!("{}.flatMap is not a function", value.type_of())));
+            return Err(Thrown::type_error(&format!(
+                "{}.flatMap is not a function",
+                value.type_of()
+            )));
         };
         if !mapper.is_callable() {
             return Err(Thrown::type_error(&format!(
@@ -433,7 +495,10 @@ impl OrderReadsHost for Rt {
                 continue;
             }
             let element = value.get(&key)?;
-            let mapped = mapper.call(Js::Undefined, vec![element, Js::Number(i as f64), value.clone()])?;
+            let mapped = mapper.call(
+                Js::Undefined,
+                vec![element, Js::Number(i as f64), value.clone()],
+            )?;
             match mapped.array_items() {
                 Some(items) => out.extend(items.into_iter().filter(Option::is_some)),
                 None => out.push(Some(mapped)),
@@ -460,7 +525,9 @@ impl OrderReadsHost for Rt {
             return Err(Thrown::type_error("this.xhr.get is not a function"));
         }
         let response = get.call(client, vec![url, Js::object(vec![("params", params)])])?;
-        Ok(Box::pin(async move { await_js(response).await?.get("data") }))
+        Ok(Box::pin(
+            async move { await_js(response).await?.get("data") },
+        ))
     }
     fn promise_function(&self, settled: bool) -> Result<Js, Thrown> {
         promise_member(self, if settled { "allSettled" } else { "all" })
@@ -474,7 +541,10 @@ impl OrderReadsHost for Rt {
         combine(self, function, values)
     }
     fn success(&self, code: &Js) -> Result<bool, Thrown> {
-        Ok(self.global("isBitgetSuccessCode")?.call(Js::Undefined, vec![code.clone()])?.truthy())
+        Ok(self
+            .global("isBitgetSuccessCode")?
+            .call(Js::Undefined, vec![code.clone()])?
+            .truthy())
     }
     fn error_message(&self, value: &Js, fallback: &str) -> Result<Js, Thrown> {
         self.global("getBitgetApiErrorMessage")?
@@ -491,8 +561,14 @@ pub(crate) fn register(globals: &Js, _weak: Weak<Shared>) {
         "isBitgetSuccessCode",
         Js::function("isBitgetSuccessCode", |_, a| {
             let code = arg(&a, 0);
-            let code = if code.is_nullish() { Js::Number(0.0) } else { code };
-            Ok(Js::Bool(safe_cex_num::parse_int(&text(&code)?, Some(10)) == 0.0))
+            let code = if code.is_nullish() {
+                Js::Number(0.0)
+            } else {
+                code
+            };
+            Ok(Js::Bool(
+                safe_cex_num::parse_int(&text(&code)?, Some(10)) == 0.0,
+            ))
         }),
     );
     let _ = globals.define(
@@ -513,18 +589,28 @@ struct Bound {
 
 impl Bound {
     fn new(rt: &Rt) -> Self {
-        Self { shared: Rc::downgrade(&rt.shared), this: rt.this.clone() }
+        Self {
+            shared: Rc::downgrade(&rt.shared),
+            this: rt.this.clone(),
+        }
     }
     fn rt(&self) -> Result<Rt, Thrown> {
         let shared = self
             .shared
             .upgrade()
             .ok_or_else(|| Thrown::error("Error", "Bitget runtime disposed"))?;
-        Ok(Rt { shared, this: self.this.clone() })
+        Ok(Rt {
+            shared,
+            this: self.this.clone(),
+        })
     }
 }
 
-fn sync_member(rt: &Rt, name: &str, body: impl Fn(&Rt, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
+fn sync_member(
+    rt: &Rt,
+    name: &str,
+    body: impl Fn(&Rt, Vec<Js>) -> Result<Js, Thrown> + 'static,
+) -> Js {
     let bound = Bound::new(rt);
     Js::function(name, move |_, args| body(&bound.rt()?, args))
 }
@@ -548,7 +634,9 @@ fn undefined_after(result: Result<(), Thrown>) -> Result<Js, Thrown> {
 fn api_product_type(rt: &Rt) -> Result<String, Thrown> {
     match rt.path("apiProductType")? {
         Js::String(s) => Ok(String::from_utf16_lossy(&s)),
-        _ => Err(Thrown::type_error("this.apiProductType.toUpperCase is not a function")),
+        _ => Err(Thrown::type_error(
+            "this.apiProductType.toUpperCase is not a function",
+        )),
     }
 }
 
@@ -556,7 +644,9 @@ fn map_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     let product = api_product_type(rt)?;
     let input = json_arg(&arg(&args, 0))?;
     let clock = rt.clone();
-    from_typed(&orders::map_order(input.as_ref(), &product, || clock.now())?)
+    from_typed(&orders::map_order(input.as_ref(), &product, || {
+        clock.now()
+    })?)
 }
 
 fn map_inverse_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
@@ -567,7 +657,12 @@ fn map_inverse_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     let mapped = orders::map_inverse_order(
         input.as_ref(),
         &product,
-        |symbol| store.markets_by_symbol().get(symbol).and_then(|m| m.is_inverse),
+        |symbol| {
+            store
+                .markets_by_symbol()
+                .get(symbol)
+                .and_then(|m| m.is_inverse)
+        },
         || clock.now(),
     )?;
     from_typed(&mapped)
@@ -584,34 +679,44 @@ fn with_lifecycle(rt: &Rt, body: impl FnOnce(&mut OrderLifecycleCaches)) -> Resu
                 "Cannot read properties of {} (reading 'set')",
                 nullish.to_display()
             ))),
-            _ => Err(Thrown::type_error(&format!("this.{name}.set is not a function"))),
+            _ => Err(Thrown::type_error(&format!(
+                "this.{name}.set is not a function"
+            ))),
         }
     };
     let tombstones = map("terminalOrderTombstones")?;
     let open = map("recentWsOpenOrders")?;
     let load = |m: &Rc<RefCell<Vec<(Js, Js)>>>| -> Result<IndexMap<String, f64>, Thrown> {
         let entries = m.borrow().clone();
-        entries.iter().map(|(k, v)| Ok((text(k)?, v.to_number()?))).collect()
+        entries
+            .iter()
+            .map(|(k, v)| Ok((text(k)?, v.to_number()?)))
+            .collect()
     };
     let mut caches = OrderLifecycleCaches {
         terminal_order_tombstones: load(&tombstones)?,
         recent_ws_open_orders: load(&open)?,
     };
     body(&mut caches);
-    let store = |m: &Rc<RefCell<Vec<(Js, Js)>>>, next: &IndexMap<String, f64>| -> Result<(), Thrown> {
-        let previous = m.borrow().clone();
-        let mut out = Vec::with_capacity(next.len());
-        for (key, expires) in next {
-            // Unchanged entries keep their original key/value values.
-            let kept = previous.iter().find(|(k, v)| {
-                text(k).is_ok_and(|k| &k == key)
-                    && v.to_number().is_ok_and(|v| v.to_bits() == expires.to_bits())
-            });
-            out.push(kept.cloned().unwrap_or_else(|| (Js::str(key), Js::Number(*expires))));
-        }
-        *m.borrow_mut() = out;
-        Ok(())
-    };
+    let store =
+        |m: &Rc<RefCell<Vec<(Js, Js)>>>, next: &IndexMap<String, f64>| -> Result<(), Thrown> {
+            let previous = m.borrow().clone();
+            let mut out = Vec::with_capacity(next.len());
+            for (key, expires) in next {
+                // Unchanged entries keep their original key/value values.
+                let kept = previous.iter().find(|(k, v)| {
+                    text(k).is_ok_and(|k| &k == key)
+                        && v.to_number()
+                            .is_ok_and(|v| v.to_bits() == expires.to_bits())
+                });
+                out.push(
+                    kept.cloned()
+                        .unwrap_or_else(|| (Js::str(key), Js::Number(*expires))),
+                );
+            }
+            *m.borrow_mut() = out;
+            Ok(())
+        };
     store(&tombstones, &caches.terminal_order_tombstones)?;
     store(&open, &caches.recent_ws_open_orders)
 }
@@ -620,38 +725,51 @@ fn order_id_arg(args: &[Js]) -> Result<String, Thrown> {
     text(&arg(args, 0))
 }
 
-pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
+pub(crate) fn bind(
+    rt: &Rt,
+    owner: &str,
+    name: &str,
+    _targets: &[&str],
+) -> Result<Option<Js>, Thrown> {
     let member = match (owner, name) {
-        ("BitgetExchange", "reconcilePrivateStateFromRest") => async_member(rt, name, |rt, _| async move {
-            undefined_after(order_reads::reconcile_private_state_from_rest(&rt).await)
+        ("BitgetExchange", "reconcilePrivateStateFromRest") => {
+            async_member(rt, name, |rt, _| async move {
+                undefined_after(order_reads::reconcile_private_state_from_rest(&rt).await)
+            })
+        }
+        ("BitgetExchange", "fetchOrders") => async_member(rt, name, |rt, _| async move {
+            order_reads::fetch_orders(&rt).await
         }),
-        ("BitgetExchange", "fetchOrders") => {
-            async_member(rt, name, |rt, _| async move { order_reads::fetch_orders(&rt).await })
-        }
-        ("BitgetExchange", "fetchNormalOrders") => {
-            async_member(rt, name, |rt, _| async move { order_reads::fetch_normal_orders(&rt).await })
-        }
-        ("BitgetExchange", "fetchUtaOrders") => {
-            async_member(rt, name, |rt, _| async move { order_reads::fetch_uta_orders(&rt).await })
-        }
+        ("BitgetExchange", "fetchNormalOrders") => async_member(rt, name, |rt, _| async move {
+            order_reads::fetch_normal_orders(&rt).await
+        }),
+        ("BitgetExchange", "fetchUtaOrders") => async_member(rt, name, |rt, _| async move {
+            order_reads::fetch_uta_orders(&rt).await
+        }),
         ("BitgetExchange", "fetchUtaNormalOrders") => async_member(rt, name, |rt, _| async move {
             order_reads::fetch_uta_normal_orders(&rt).await
         }),
-        ("BitgetExchange", "fetchUtaStrategyOrders") => async_member(rt, name, |rt, _| async move {
-            order_reads::fetch_uta_strategy_orders(&rt).await
-        }),
-        ("BitgetExchange", "fetchAlgoOrders") => {
-            async_member(rt, name, |rt, _| async move { order_reads::fetch_algo_orders(&rt).await })
+        ("BitgetExchange", "fetchUtaStrategyOrders") => {
+            async_member(rt, name, |rt, _| async move {
+                order_reads::fetch_uta_strategy_orders(&rt).await
+            })
         }
-        ("BitgetExchange", "fetchTrailingStopOrders") => async_member(rt, name, |rt, _| async move {
-            order_reads::fetch_trailing_stop_orders(&rt).await
+        ("BitgetExchange", "fetchAlgoOrders") => async_member(rt, name, |rt, _| async move {
+            order_reads::fetch_algo_orders(&rt).await
         }),
+        ("BitgetExchange", "fetchTrailingStopOrders") => {
+            async_member(rt, name, |rt, _| async move {
+                order_reads::fetch_trailing_stop_orders(&rt).await
+            })
+        }
         ("BitgetExchange", "cancelAllOrders") => async_member(rt, name, |rt, _| async move {
             undefined_after(cancellation::cancel_all_orders(&rt).await)
         }),
-        ("BitgetInverseExchange", "cancelAllOrders") => async_member(rt, name, |rt, _| async move {
-            undefined_after(cancellation::inverse_cancel_all_orders(&rt).await)
-        }),
+        ("BitgetInverseExchange", "cancelAllOrders") => {
+            async_member(rt, name, |rt, _| async move {
+                undefined_after(cancellation::inverse_cancel_all_orders(&rt).await)
+            })
+        }
         ("BitgetExchange", "cancelOrders") => async_member(rt, name, |rt, args| async move {
             // lodash partition treats a nullish collection as empty.
             let orders = match arg(&args, 0) {
@@ -664,10 +782,12 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
             let orders = to_orders(&arg(&args, 0))?;
             undefined_after(cancellation::cancel_normal_orders(&rt, orders).await)
         }),
-        ("BitgetExchange", "cancelUtaNormalOrders") => async_member(rt, name, |rt, args| async move {
-            let orders = to_orders(&arg(&args, 0))?;
-            undefined_after(cancellation::cancel_uta_normal_orders(&rt, orders).await)
-        }),
+        ("BitgetExchange", "cancelUtaNormalOrders") => {
+            async_member(rt, name, |rt, args| async move {
+                let orders = to_orders(&arg(&args, 0))?;
+                undefined_after(cancellation::cancel_uta_normal_orders(&rt, orders).await)
+            })
+        }
         ("BitgetExchange", "cancelAlgoOrders") => async_member(rt, name, |rt, args| async move {
             let orders = to_orders(&arg(&args, 0))?;
             undefined_after(cancellation::cancel_algo_orders(&rt, orders).await)
@@ -676,48 +796,66 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Resul
             let symbol = arg(&args, 0).to_js_string()?.to_vec();
             undefined_after(cancellation::cancel_symbol_orders(&rt, symbol).await)
         }),
-        ("BitgetInverseExchange", "cancelNormalOrders") => async_member(rt, name, |rt, args| async move {
-            let orders = to_orders(&arg(&args, 0))?;
-            undefined_after(cancellation::inverse_cancel_normal_orders(&rt, orders).await)
-        }),
-        ("BitgetInverseExchange", "cancelAlgoOrders") => async_member(rt, name, |rt, args| async move {
-            let orders = to_orders(&arg(&args, 0))?;
-            undefined_after(cancellation::inverse_cancel_algo_orders(&rt, orders).await)
-        }),
+        ("BitgetInverseExchange", "cancelNormalOrders") => {
+            async_member(rt, name, |rt, args| async move {
+                let orders = to_orders(&arg(&args, 0))?;
+                undefined_after(cancellation::inverse_cancel_normal_orders(&rt, orders).await)
+            })
+        }
+        ("BitgetInverseExchange", "cancelAlgoOrders") => {
+            async_member(rt, name, |rt, args| async move {
+                let orders = to_orders(&arg(&args, 0))?;
+                undefined_after(cancellation::inverse_cancel_algo_orders(&rt, orders).await)
+            })
+        }
         ("BitgetExchange", "mapOrder") => sync_member(rt, name, map_order),
         ("BitgetInverseExchange", "mapOrder") => sync_member(rt, name, map_inverse_order),
         ("BitgetPrivateWebsocket", "normalizeOrderStatus") => sync_member(rt, name, |_, args| {
             let value = json_arg(&arg(&args, 0))?;
-            Ok(Js::str(&stream_predicates::normalize_order_status(value.as_ref())?))
+            Ok(Js::str(&stream_predicates::normalize_order_status(
+                value.as_ref(),
+            )?))
         }),
         ("BitgetPrivateWebsocket", "getRawOrderStatus") => sync_member(rt, name, |_, args| {
             let order = json_arg(&arg(&args, 0))?;
-            Ok(Js::str(&stream_predicates::get_raw_order_status(order.as_ref())?))
+            Ok(Js::str(&stream_predicates::get_raw_order_status(
+                order.as_ref(),
+            )?))
         }),
         ("BitgetPrivateWebsocket", "normalizeChannel") => sync_member(rt, name, |_, args| {
             let value = json_arg(&arg(&args, 0))?;
-            Ok(Js::str(&stream_predicates::normalize_channel(value.as_ref())?))
+            Ok(Js::str(&stream_predicates::normalize_channel(
+                value.as_ref(),
+            )?))
         }),
         ("BitgetPrivateWebsocket", "isTerminalFillStatus") => sync_member(rt, name, |_, args| {
             // Set.has: only an equal string is a member.
             Ok(Js::Bool(match arg(&args, 0) {
-                Js::String(s) => stream_predicates::is_terminal_fill_status(&String::from_utf16_lossy(&s)),
+                Js::String(s) => {
+                    stream_predicates::is_terminal_fill_status(&String::from_utf16_lossy(&s))
+                }
                 _ => false,
             }))
         }),
-        ("BitgetPrivateWebsocket", "pruneOrderLifecycleCaches") => sync_member(rt, name, |rt, args| {
-            let now = arg(&args, 0).to_number()?;
-            undefined_after(with_lifecycle(rt, |c| c.prune_order_lifecycle_caches(now)))
-        }),
+        ("BitgetPrivateWebsocket", "pruneOrderLifecycleCaches") => {
+            sync_member(rt, name, |rt, args| {
+                let now = arg(&args, 0).to_number()?;
+                undefined_after(with_lifecycle(rt, |c| c.prune_order_lifecycle_caches(now)))
+            })
+        }
         ("BitgetPrivateWebsocket", "markOrderAsTerminal") => sync_member(rt, name, |rt, args| {
             let id = order_id_arg(&args)?;
             let clock = rt.clone();
-            undefined_after(with_lifecycle(rt, |c| c.mark_order_as_terminal(&id, || clock.now().floor())))
+            undefined_after(with_lifecycle(rt, |c| {
+                c.mark_order_as_terminal(&id, || clock.now().floor())
+            }))
         }),
         ("BitgetPrivateWebsocket", "markOrderAsOpenFromWs") => sync_member(rt, name, |rt, args| {
             let id = order_id_arg(&args)?;
             let clock = rt.clone();
-            undefined_after(with_lifecycle(rt, |c| c.mark_order_as_open_from_ws(&id, || clock.now().floor())))
+            undefined_after(with_lifecycle(rt, |c| {
+                c.mark_order_as_open_from_ws(&id, || clock.now().floor())
+            }))
         }),
         _ => return Ok(None),
     };

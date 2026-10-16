@@ -19,6 +19,9 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, targets: &[&str]) -> Result
     }
     Err(Thrown::error(
         "Error",
-        &format!("Bitget binding has no adapter for {owner}.{name} ({})", targets.join(", ")),
+        &format!(
+            "Bitget binding has no adapter for {owner}.{name} ({})",
+            targets.join(", ")
+        ),
     ))
 }

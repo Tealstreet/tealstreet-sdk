@@ -9,7 +9,9 @@ use super::{
 use crate::assembly;
 use safe_cex_exchange::js_runtime::scope::ScopeShared;
 use safe_cex_exchange::{
-    capabilities::{CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding},
+    capabilities::{
+        CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
+    },
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch, ValidatedOrder},
     runtime::{ExchangeError, ExchangeFuture},
     websocket::WsRuntime,
@@ -60,7 +62,10 @@ impl BitgetExchange {
             other => {
                 return Err(ExchangeError::new(format!(
                     "BitgetExchange cannot construct {}",
-                    serde_json::to_value(&other).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+                    serde_json::to_value(&other)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_owned))
+                        .unwrap_or_default()
                 )));
             }
         };
@@ -85,17 +90,30 @@ impl BitgetExchange {
                 },
             )
         });
-        let rt = Rt { shared: shared.clone(), this: Js::Undefined };
+        let rt = Rt {
+            shared: shared.clone(),
+            this: Js::Undefined,
+        };
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
         let js_store = store::facade(store.clone());
         let receiver = match variant {
-            Variant::Classic => assembly::BitgetExchange::new(rt.clone(), js_name, js_options, js_store).map_err(err)?.receiver,
+            Variant::Classic => {
+                assembly::BitgetExchange::new(rt.clone(), js_name, js_options, js_store)
+                    .map_err(err)?
+                    .receiver
+            }
             Variant::Usdc => {
-                assembly::BitgetUSDCExchange::new(rt.clone(), js_name, js_options, js_store).map_err(err)?.inner.receiver
+                assembly::BitgetUSDCExchange::new(rt.clone(), js_name, js_options, js_store)
+                    .map_err(err)?
+                    .inner
+                    .receiver
             }
             Variant::Inverse => {
-                assembly::BitgetInverseExchange::new(rt.clone(), js_name, js_options, js_store).map_err(err)?.inner.receiver
+                assembly::BitgetInverseExchange::new(rt.clone(), js_name, js_options, js_store)
+                    .map_err(err)?
+                    .inner
+                    .receiver
             }
         };
         *shared.exchange.borrow_mut() = receiver.clone();
@@ -110,17 +128,25 @@ impl BitgetExchange {
         Ok(venue)
     }
 
-    fn invoke<T: serde::de::DeserializeOwned + 'static>(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, T> {
+    fn invoke<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        member: &'static str,
+        args: Vec<Js>,
+    ) -> ExchangeFuture<'_, T> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            let value = await_js(this.call_method(member, args).map_err(err)?).await.map_err(err)?;
+            let value = await_js(this.call_method(member, args).map_err(err)?)
+                .await
+                .map_err(err)?;
             to_typed(&value).map_err(err)
         })
     }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            await_js(this.call_method(member, args).map_err(err)?).await.map_err(err)?;
+            await_js(this.call_method(member, args).map_err(err)?)
+                .await
+                .map_err(err)?;
             Ok(())
         })
     }
@@ -139,7 +165,9 @@ fn capabilities() -> ExchangeCapabilities {
         start: CapabilityBinding::implemented(|venue, ()| venue.start()),
         place_order: PlaceOrderBinding::implemented::<BitgetExchange>(Exchange::place_order),
         place_orders: PlaceOrdersBinding::implemented::<BitgetExchange>(Exchange::place_orders),
-        fetch_historical_fills: CapabilityBinding::implemented(|venue, opts| venue.fetch_historical_fills(opts)),
+        fetch_historical_fills: CapabilityBinding::implemented(|venue, opts| {
+            venue.fetch_historical_fills(opts)
+        }),
         ..Default::default()
     }
 }
@@ -162,7 +190,11 @@ impl Exchange for BitgetExchange {
         &self.capabilities
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
-        self.rt.this.call_method("dispose", vec![]).map(|_| ()).map_err(err)
+        self.rt
+            .this
+            .call_method("dispose", vec![])
+            .map(|_| ())
+            .map_err(err)
     }
     // ts: BitgetExchange.placeOrder — the ValidatedOrder carries the client-order-ID
     // contract, already enforced by BaseExchange.place_order before this call.
@@ -171,7 +203,11 @@ impl Exchange for BitgetExchange {
         self.invoke("placeOrder", a)
     }
     fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
-        let list: Vec<PlaceOrderOpts> = orders.orders().iter().map(|o| o.options().clone()).collect();
+        let list: Vec<PlaceOrderOpts> = orders
+            .orders()
+            .iter()
+            .map(|o| o.options().clone())
+            .collect();
         let a = args!(js(&list));
         self.invoke("placeOrders", a)
     }
@@ -202,7 +238,12 @@ impl Exchange for BitgetExchange {
     fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
-    fn set_leverage(&self, symbol: String, leverage: f64, side: Option<PositionSide>) -> ExchangeFuture<'_, ()> {
+    fn set_leverage(
+        &self,
+        symbol: String,
+        leverage: f64,
+        side: Option<PositionSide>,
+    ) -> ExchangeFuture<'_, ()> {
         let a = args!(js(&symbol), js(&leverage), opt_js(side));
         self.invoke_unit("setLeverage", a)
     }
@@ -227,10 +268,17 @@ impl Exchange for BitgetExchange {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
     // ts: base.ts:1138 — BitgetExchange inherits fetchPublicTrades, which rejects.
-    fn fetch_public_trades(&self, _symbol: String, _limit: Option<f64>) -> ExchangeFuture<'_, Vec<PublicTrade>> {
+    fn fetch_public_trades(
+        &self,
+        _symbol: String,
+        _limit: Option<f64>,
+    ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
-    fn fetch_historical_fills(&self, options: ExecutionsOptions) -> ExchangeFuture<'_, Vec<Execution>> {
+    fn fetch_historical_fills(
+        &self,
+        options: ExecutionsOptions,
+    ) -> ExchangeFuture<'_, Vec<Execution>> {
         let a = args!(js(&options));
         self.invoke("fetchHistoricalFills", a)
     }

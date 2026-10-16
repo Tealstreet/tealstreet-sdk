@@ -1,12 +1,12 @@
 //! Module-scope values the TS source imports or reads: protocol constants,
 //! enums, JS builtins. Host modules register their imported helpers here too.
 use super::value::Js;
+use crate::protocol;
 pub(crate) use safe_cex_exchange::js_runtime::{
     globals::{install_builtins, install_enums},
     scope::scope_of as shared,
     value::arg,
 };
-use crate::protocol;
 use std::rc::Weak;
 
 fn enum_object(members: &[(&str, &str)]) -> Js {
@@ -36,8 +36,14 @@ pub(crate) fn build(rt: Weak<super::rt::Shared>) -> Js {
     def("BROKER_ID", Js::str(protocol::BROKER_ID));
     def("BASE_URL", Js::str(protocol::BASE_URL));
     def("BASE_WS_URL", Js::str(protocol::BASE_WS_URL));
-    def("BASE_WS_PRIVATE_URL", Js::str(protocol::BASE_WS_PRIVATE_URL));
-    def("BASE_WS_PRIVATE_UTA_URL", Js::str(protocol::BASE_WS_PRIVATE_UTA_URL));
+    def(
+        "BASE_WS_PRIVATE_URL",
+        Js::str(protocol::BASE_WS_PRIVATE_URL),
+    );
+    def(
+        "BASE_WS_PRIVATE_UTA_URL",
+        Js::str(protocol::BASE_WS_PRIVATE_UTA_URL),
+    );
     def(
         "ENDPOINTS",
         Js::object(
@@ -49,11 +55,21 @@ pub(crate) fn build(rt: Weak<super::rt::Shared>) -> Js {
     );
     def(
         "GRAFANA_ENDPOINTS_EVERY",
-        Js::array(protocol::GRAFANA_ENDPOINTS_EVERY.iter().map(|s| Js::str(s)).collect()),
+        Js::array(
+            protocol::GRAFANA_ENDPOINTS_EVERY
+                .iter()
+                .map(|s| Js::str(s))
+                .collect(),
+        ),
     );
     def(
         "GRAFANA_ENDPOINTS_PERIODIC",
-        Js::array(protocol::GRAFANA_ENDPOINTS_PERIODIC.iter().map(|s| Js::str(s)).collect()),
+        Js::array(
+            protocol::GRAFANA_ENDPOINTS_PERIODIC
+                .iter()
+                .map(|s| Js::str(s))
+                .collect(),
+        ),
     );
     def("INTERVAL", table(protocol::INTERVAL));
     def(
@@ -103,12 +119,18 @@ pub(crate) fn build(rt: Weak<super::rt::Shared>) -> Js {
     );
     // bitget.exchange.ts module constants
     def("BILL_PAGE_LIMIT", Js::Number(100.0));
-    def("BILL_MAX_WINDOW_MS", Js::Number(30.0 * 24.0 * 60.0 * 60.0 * 1000.0));
+    def(
+        "BILL_MAX_WINDOW_MS",
+        Js::Number(30.0 * 24.0 * 60.0 * 60.0 * 1000.0),
+    );
     def(
         "BitgetExchange",
         Js::object(vec![("POSITIONING_CACHE_TTL_MS", Js::Number(5000.0))]),
     );
-    def("BitgetClientOrderIdPattern", Js::str("^[.A-Z:/a-z0-9_-]{1,32}$"));
+    def(
+        "BitgetClientOrderIdPattern",
+        Js::str("^[.A-Z:/a-z0-9_-]{1,32}$"),
+    );
 
     install_enums(&g);
     install_builtins(&g, rt);

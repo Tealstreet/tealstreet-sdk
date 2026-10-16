@@ -30,7 +30,10 @@ pub(crate) fn install(rt: &Rt) {
             Variant::Inverse => crate::profile::inverse_api_margin_coin(),
         }))
     });
-    let category: Getter = Rc::new(|this| this.get("apiProductType")?.call_method("toUpperCase", vec![]));
+    let category: Getter = Rc::new(|this| {
+        this.get("apiProductType")?
+            .call_method("toUpperCase", vec![])
+    });
     let uta: Getter = Rc::new(|this| {
         Ok(Js::Bool(crate::profile::uses_uta_routing(
             this.get("isUta")?.truthy(),
@@ -43,5 +46,9 @@ pub(crate) fn install(rt: &Rt) {
     this.define_accessor("apiMarginCoin", Some(margin), None);
     this.define_accessor("apiUtaCategory", Some(category), None);
     this.define_accessor("usesUtaRouting", Some(uta), None);
-    this.define_accessor("suppressBitgetValidationErrorEmission", Some(suppress), None);
+    this.define_accessor(
+        "suppressBitgetValidationErrorEmission",
+        Some(suppress),
+        None,
+    );
 }

@@ -1,7 +1,6 @@
 //! Concrete AssemblyHost plus the construction-time globals: BaseExchange,
 //! BaseWebSocket, the Axios client and createAPI's imported collaborators.
 use crate::assembly::{AssemblyHost, NativeCallback};
-use safe_cex_exchange::js_runtime::base_exchange::{self, BaseExchangeParts};
 use crate::binding::{
     client,
     globals::{arg, shared},
@@ -10,6 +9,7 @@ use crate::binding::{
     sockets,
     value::{Js, Thrown, error_object, utf16},
 };
+use safe_cex_exchange::js_runtime::base_exchange::{self, BaseExchangeParts};
 use std::rc::{Rc, Weak};
 
 impl AssemblyHost for Rt {
@@ -79,7 +79,13 @@ impl AssemblyHost for Rt {
     fn spread(&self, v: &Js) -> Result<Js, Thrown> {
         v.spread_object()
     }
-    fn bind_mapped(&self, receiver: &Js, owner: &str, name: &str, targets: &[&str]) -> Result<Js, Thrown> {
+    fn bind_mapped(
+        &self,
+        receiver: &Js,
+        owner: &str,
+        name: &str,
+        targets: &[&str],
+    ) -> Result<Js, Thrown> {
         crate::binding::targets::bind(&self.with_this(receiver.clone()), owner, name, targets)
     }
 }
@@ -116,7 +122,9 @@ fn qs_stringify(value: &Js, encode: bool) -> Result<String, Thrown> {
         let mut out = String::new();
         for b in s.as_bytes() {
             match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(*b as char),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    out.push(*b as char)
+                }
                 _ => out.push_str(&format!("%{b:02X}")),
             }
         }
@@ -133,10 +141,19 @@ fn qs_stringify(value: &Js, encode: bool) -> Result<String, Thrown> {
             }
             Js::Object(_) => {
                 for (k, v) in value.own_entries()? {
-                    walk(&format!("{prefix}[{}]", String::from_utf16_lossy(&k)), &v, encode, out)?;
+                    walk(
+                        &format!("{prefix}[{}]", String::from_utf16_lossy(&k)),
+                        &v,
+                        encode,
+                        out,
+                    )?;
                 }
             }
-            other => out.push(format!("{}={}", enc(prefix, encode), enc(&text(other)?, encode))),
+            other => out.push(format!(
+                "{}={}",
+                enc(prefix, encode),
+                enc(&text(other)?, encode)
+            )),
         }
         Ok(())
     }
@@ -184,12 +201,24 @@ fn client_order_id_valid(id: &str) -> bool {
 }
 
 fn is_bitget_signature_rejection(data: &Js) -> Result<bool, Thrown> {
-    let code = if data.is_nullish() { Js::Undefined } else { data.get("code")? };
+    let code = if data.is_nullish() {
+        Js::Undefined
+    } else {
+        data.get("code")?
+    };
     if text(&code)? == "40009" {
         return Ok(true);
     }
-    let msg = if data.is_nullish() { Js::Undefined } else { data.get("msg")? };
-    let msg = if msg.is_nullish() { String::new() } else { text(&msg)? };
+    let msg = if data.is_nullish() {
+        Js::Undefined
+    } else {
+        data.get("msg")?
+    };
+    let msg = if msg.is_nullish() {
+        String::new()
+    } else {
+        text(&msg)?
+    };
     Ok(msg.to_lowercase().contains("sign signature error"))
 }
 
@@ -210,8 +239,12 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
 /// The secondary ticker sockets are already a typed Rust class; the JS facade
 /// creates it once the venue exists and forwards the members the exchange calls.
 fn secondary_socket(rt: &Rt, index: f64) -> Js {
-    let socket = Js::object_with_class("BitgetSecondaryPublicWebsocket", vec![("index", Js::Number(index))]);
-    let cell: Rc<std::cell::OnceCell<Rc<crate::secondary_public::BitgetSecondaryPublicWebsocket>>> = Rc::default();
+    let socket = Js::object_with_class(
+        "BitgetSecondaryPublicWebsocket",
+        vec![("index", Js::Number(index))],
+    );
+    let cell: Rc<std::cell::OnceCell<Rc<crate::secondary_public::BitgetSecondaryPublicWebsocket>>> =
+        Rc::default();
     let typed = {
         let rt = rt.clone();
         let cell = cell.clone();
@@ -262,7 +295,11 @@ fn secondary_socket(rt: &Rt, index: f64) -> Js {
     }
     socket.define_accessor(
         "isConnected",
-        Some(Rc::new(move |_| Ok(Js::Bool(cell.get().is_some_and(|s| s.base().is_connected()))))),
+        Some(Rc::new(move |_| {
+            Ok(Js::Bool(
+                cell.get().is_some_and(|s| s.base().is_connected()),
+            ))
+        })),
         None,
     );
     socket
@@ -275,12 +312,19 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let w = weak.clone();
     def(
         "BaseExchange",
-        Js::constructor("BaseExchange", move |_, a| base_exchange(&shared(&w)?, arg(&a, 0), arg(&a, 1), arg(&a, 2))),
+        Js::constructor("BaseExchange", move |_, a| {
+            base_exchange(&shared(&w)?, arg(&a, 0), arg(&a, 1), arg(&a, 2))
+        }),
     );
     let w = weak.clone();
     def(
         "BaseWebSocket",
-        Js::constructor("BaseWebSocket", move |_, a| Ok(sockets::base_websocket(&shared(&w)?.shared.sockets, arg(&a, 0)))),
+        Js::constructor("BaseWebSocket", move |_, a| {
+            Ok(sockets::base_websocket(
+                &shared(&w)?.shared.sockets,
+                arg(&a, 0),
+            ))
+        }),
     );
     let w = weak.clone();
     def(
@@ -292,11 +336,15 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let w = weak.clone();
     def(
         "safeCexAxiosCreate",
-        Js::function("safeCexAxiosCreate", move |_, a| Ok(client::create(shared(&w)?.shared.http.clone(), arg(&a, 0)))),
+        Js::function("safeCexAxiosCreate", move |_, a| {
+            Ok(client::create(shared(&w)?.shared.http.clone(), arg(&a, 0)))
+        }),
     );
     def(
         "retry",
-        Js::function("retry", |_, a| arg(&a, 0).call_method("__configureRetry", vec![arg(&a, 1)])),
+        Js::function("retry", |_, a| {
+            arg(&a, 0).call_method("__configureRetry", vec![arg(&a, 1)])
+        }),
     );
     def(
         "rateLimit",
@@ -316,13 +364,19 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
                     return Ok(Js::Bool(false));
                 }
                 let method = config.get("method")?;
-                let method = if method.is_nullish() { String::new() } else { text(&method)?.to_lowercase() };
+                let method = if method.is_nullish() {
+                    String::new()
+                } else {
+                    text(&method)?.to_lowercase()
+                };
                 if method != "get" && method != "head" {
                     return Ok(Js::Bool(false));
                 }
                 let code = error.get("code")?;
                 Ok(Js::Bool(
-                    error.get("response")?.is_undefined() && code.truthy() && text(&code)? != "ECONNABORTED",
+                    error.get("response")?.is_undefined()
+                        && code.truthy()
+                        && text(&code)? != "ECONNABORTED",
                 ))
             }))
         }),
@@ -331,7 +385,9 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     // binding performs no signature retry or resend (stated in the PR).
     def(
         "signatureRejectedResponse",
-        Js::function("signatureRejectedResponse", |_, _| Ok(Js::function("", |_, _| Ok(Js::Bool(false))))),
+        Js::function("signatureRejectedResponse", |_, _| {
+            Ok(Js::function("", |_, _| Ok(Js::Bool(false))))
+        }),
     );
     def(
         "resendOnSignatureRejection",
@@ -339,7 +395,9 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     );
     def(
         "isBitgetSignatureRejection",
-        Js::function("isBitgetSignatureRejection", |_, a| Ok(Js::Bool(is_bitget_signature_rejection(&arg(&a, 0))?))),
+        Js::function("isBitgetSignatureRejection", |_, a| {
+            Ok(Js::Bool(is_bitget_signature_rejection(&arg(&a, 0))?))
+        }),
     );
     def(
         "installTransportAdapter",
@@ -354,13 +412,21 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
         "qs.stringify",
         Js::function("stringify", |_, a| {
             let opts = arg(&a, 1);
-            let encode = opts.is_nullish() || opts.get("encode")?.is_undefined() || opts.get("encode")?.truthy();
+            let encode = opts.is_nullish()
+                || opts.get("encode")?.is_undefined()
+                || opts.get("encode")?.truthy();
             Ok(Js::str(&qs_stringify(&arg(&a, 0), encode)?))
         }),
     );
     def(
         "signingQueryTemplate",
-        Js::function("signingQueryTemplate", |_, a| Ok(Js::str(&format!("{}?{}", text(&arg(&a, 0))?, text(&arg(&a, 1))?)))),
+        Js::function("signingQueryTemplate", |_, a| {
+            Ok(Js::str(&format!(
+                "{}?{}",
+                text(&arg(&a, 0))?,
+                text(&arg(&a, 1))?
+            )))
+        }),
     );
     def(
         "signingJoin",
@@ -377,10 +443,12 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     def(
         "toJsonString",
         Js::function("toJsonString", |_, a| {
-            Ok(match crate::api::to_json_string(&to_js_json(&arg(&a, 0))?)? {
-                Some(s) => Js::str(&s),
-                None => Js::Undefined,
-            })
+            Ok(
+                match crate::api::to_json_string(&to_js_json(&arg(&a, 0))?)? {
+                    Some(s) => Js::str(&s),
+                    None => Js::Undefined,
+                },
+            )
         }),
     );
     def(
@@ -417,7 +485,10 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
         "AxiosHeaders",
         Js::constructor("AxiosHeaders", |_, a| arg(&a, 0).spread_object()),
     );
-    def("v", Js::function("v", |_, a| get_key(&arg(&a, 0), &text(&arg(&a, 1))?)));
+    def(
+        "v",
+        Js::function("v", |_, a| get_key(&arg(&a, 0), &text(&arg(&a, 1))?)),
+    );
     def(
         "appendHttpFailure",
         Js::function("appendHttpFailure", |_, a| {
@@ -430,11 +501,19 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
                 text(&message)?
             };
             let response = arg(&a, 1);
-            let status = if response.is_object() && !response.is_array() { response.get("status")? } else { Js::Undefined };
+            let status = if response.is_object() && !response.is_array() {
+                response.get("status")?
+            } else {
+                Js::Undefined
+            };
             Ok(Js::str(&match status.as_f64() {
                 Some(status) if status >= 400.0 => {
                     let tag = format!("HTTP {}", safe_cex_num::js_number_string(status));
-                    if text_message.contains(&tag) { text_message } else { format!("{text_message} ({tag})") }
+                    if text_message.contains(&tag) {
+                        text_message
+                    } else {
+                        format!("{text_message} ({tag})")
+                    }
                 }
                 _ => text_message,
             }))
@@ -443,7 +522,11 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     def(
         "shouldSuppressValidationErrorEmission",
         Js::function("shouldSuppressValidationErrorEmission", |_, a| {
-            Ok(Js::Bool(arg(&a, 0).get("suppressBitgetValidationErrorEmission")?.strict_equals(&Js::Bool(true))))
+            Ok(Js::Bool(
+                arg(&a, 0)
+                    .get("suppressBitgetValidationErrorEmission")?
+                    .strict_equals(&Js::Bool(true)),
+            ))
         }),
     );
     def(
@@ -451,7 +534,11 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
         Js::function("shouldSilenceBitgetResponseError", |_, a| {
             let message = crate::binding::value::to_json(&arg(&a, 1)).ok();
             let url = arg(&a, 2);
-            let url = if url.is_nullish() { None } else { Some(text(&url)?) };
+            let url = if url.is_nullish() {
+                None
+            } else {
+                Some(text(&url)?)
+            };
             Ok(Js::Bool(crate::api::should_silence_bitget_response_error(
                 &text(&arg(&a, 0))?,
                 message.as_ref(),
@@ -469,12 +556,17 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
                 ("requirement", Js::str(&format!("match /{pattern}/"))),
                 (
                     "isValid",
-                    Js::function("isValid", |_, v| Ok(Js::Bool(client_order_id_valid(&text(&arg(&v, 0))?)))),
+                    Js::function("isValid", |_, v| {
+                        Ok(Js::Bool(client_order_id_valid(&text(&arg(&v, 0))?)))
+                    }),
                 ),
             ]))
         }),
     );
-    def("typeof", Js::function("typeof", |_, a| Ok(Js::str(arg(&a, 0).type_of()))));
+    def(
+        "typeof",
+        Js::function("typeof", |_, a| Ok(Js::str(arg(&a, 0).type_of()))),
+    );
     def(
         "WeakSet",
         Js::constructor("WeakSet", |_, _| Ok(Js::new_set())),

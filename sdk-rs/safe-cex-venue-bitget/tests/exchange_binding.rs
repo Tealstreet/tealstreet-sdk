@@ -43,7 +43,11 @@ fn order_row() -> Value {
 
 /// A Classic (non-UTA) account: the v3 settings probe answers 40084.
 fn classic(http: &Http) {
-    http.ok("GET", "/api/v2/spot/account/info", json!({"userId": "123", "inviterId": "9", "parentId": null}));
+    http.ok(
+        "GET",
+        "/api/v2/spot/account/info",
+        json!({"userId": "123", "inviterId": "9", "parentId": null}),
+    );
     http.ok("GET", MARKETS, json!([market_row()]));
     http.ok("GET", TICKERS, json!([ticker_row()]));
     http.ok(
@@ -51,11 +55,31 @@ fn classic(http: &Http) {
         "/api/v2/mix/account/accounts",
         json!([{"marginCoin": "USDT", "available": "100", "accountEquity": "120", "unrealizedPL": "2", "locked": "5"}]),
     );
-    http.ok("GET", "/api/v2/mix/position/all-position", json!([position_row()]));
-    http.ok("GET", "/api/v2/mix/order/orders-pending", json!({"entrustedList": [order_row()], "endId": "o1"}));
-    http.ok("GET", "/api/v2/mix/order/orders-pending", json!({"entrustedList": [], "endId": null}));
-    http.ok("GET", "/api/v2/mix/order/orders-plan-pending", json!({"entrustedList": [], "endId": null}));
-    http.ok("POST", "/api/v2/mix/account/set-position-mode", json!({"posMode": "hedge_mode"}));
+    http.ok(
+        "GET",
+        "/api/v2/mix/position/all-position",
+        json!([position_row()]),
+    );
+    http.ok(
+        "GET",
+        "/api/v2/mix/order/orders-pending",
+        json!({"entrustedList": [order_row()], "endId": "o1"}),
+    );
+    http.ok(
+        "GET",
+        "/api/v2/mix/order/orders-pending",
+        json!({"entrustedList": [], "endId": null}),
+    );
+    http.ok(
+        "GET",
+        "/api/v2/mix/order/orders-plan-pending",
+        json!({"entrustedList": [], "endId": null}),
+    );
+    http.ok(
+        "POST",
+        "/api/v2/mix/account/set-position-mode",
+        json!({"posMode": "hedge_mode"}),
+    );
     http.ok("POST", "/api/v2/mix/account/set-margin-mode", json!({}));
     http.ok("POST", "/api/v2/mix/account/set-leverage", json!({}));
     http.ok(
@@ -63,7 +87,11 @@ fn classic(http: &Http) {
         "/api/v2/mix/order/batch-place-order",
         json!({"successList": [{"orderId": "p1", "clientOid": "cp1"}], "failureList": []}),
     );
-    http.ok("POST", "/api/v2/mix/order/modify-order", json!({"orderId": "o1", "clientOid": "c1"}));
+    http.ok(
+        "POST",
+        "/api/v2/mix/order/modify-order",
+        json!({"orderId": "o1", "clientOid": "c1"}),
+    );
     http.ok(
         "POST",
         "/api/v2/mix/order/batch-cancel-orders",
@@ -79,8 +107,15 @@ fn classic(http: &Http) {
 
 fn loaded(h: &Harness) {
     let markets = h.drive(h.venue().fetch_markets()).expect("markets");
-    Store::update(&*h.store, StoreUpdate { markets: Some(markets), ..Default::default() }, false)
-        .expect("store markets");
+    Store::update(
+        &*h.store,
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .expect("store markets");
 }
 
 #[test]
@@ -91,7 +126,10 @@ fn get_account_signs_and_maps_parent() {
     let calls = h.http.calls("/api/v2/spot/account/info");
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].headers["ACCESS-KEY"], "fixture-key");
-    assert!(calls[0].headers["ACCESS-SIGN"].is_string(), "request interceptor signed the call");
+    assert!(
+        calls[0].headers["ACCESS-SIGN"].is_string(),
+        "request interceptor signed the call"
+    );
 }
 
 #[test]
@@ -101,7 +139,10 @@ fn fetch_markets_maps_contracts() {
     assert_eq!(markets.len(), 1);
     assert_eq!(markets[0].symbol, "BTCUSDT");
     assert_eq!(markets[0].limits.leverage.max, 125.0);
-    assert_eq!(h.http.calls(MARKETS)[0].params["productType"], "usdt-futures");
+    assert_eq!(
+        h.http.calls(MARKETS)[0].params["productType"],
+        "usdt-futures"
+    );
 }
 
 #[test]
@@ -118,39 +159,64 @@ fn fetch_tickers_maps_known_markets() {
 fn inherited_base_methods_reject_like_ts() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     for result in [
-        h.drive(h.venue().fetch_symbol_max_leverage("BTCUSDT".into())).map(|_| ()),
+        h.drive(h.venue().fetch_symbol_max_leverage("BTCUSDT".into()))
+            .map(|_| ()),
         h.drive(h.venue().schedule_cancel(Some(Some(1000.0)))),
-        h.drive(h.venue().fetch_public_trades("BTCUSDT".into(), None)).map(|_| ()),
+        h.drive(h.venue().fetch_public_trades("BTCUSDT".into(), None))
+            .map(|_| ()),
     ] {
-        assert_eq!(result.expect_err("TS base rejects").message, "Not implemented");
+        assert_eq!(
+            result.expect_err("TS base rejects").message,
+            "Not implemented"
+        );
     }
 }
 
 fn with_positions(h: &Harness) {
     loaded(h);
     let positions = h.drive(h.venue().fetch_positions(None)).expect("positions");
-    Store::update(&*h.store, StoreUpdate { positions: Some(positions), ..Default::default() }, false)
-        .expect("store positions");
+    Store::update(
+        &*h.store,
+        StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .expect("store positions");
 }
 
 fn posted(h: &Harness, path: &str) -> Value {
-    h.http.calls(path).last().unwrap_or_else(|| panic!("no POST {path}")).data.clone()
+    h.http
+        .calls(path)
+        .last()
+        .unwrap_or_else(|| panic!("no POST {path}"))
+        .data
+        .clone()
 }
 
 #[test]
 fn validate_account_reads_balance_through_detection() {
     let h = harness(ExchangeName::Bitget, options(), classic);
-    let result = h.drive(h.venue().validate_account()).expect("validateAccount");
+    let result = h
+        .drive(h.venue().validate_account())
+        .expect("validateAccount");
     assert_eq!(serde_json::to_value(&result.error).unwrap(), json!(""));
     assert_eq!(result.balance.expect("balance").free, 100.0);
-    assert_eq!(h.http.calls("/api/v3/account/settings").len(), 1, "account type detected first");
+    assert_eq!(
+        h.http.calls("/api/v3/account/settings").len(),
+        1,
+        "account type detected first"
+    );
 }
 
 #[test]
 fn fetch_positions_maps_classic_rows() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     loaded(&h);
-    let positions = h.drive(h.venue().fetch_positions(None)).expect("fetchPositions");
+    let positions = h
+        .drive(h.venue().fetch_positions(None))
+        .expect("fetchPositions");
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].side, PositionSide::Long);
     assert_eq!(positions[0].contracts, 0.01);
@@ -174,27 +240,43 @@ fn fetch_orders_reads_normal_algo_and_trailing() {
 fn set_leverage_needs_a_stored_position_then_posts_and_refetches() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     loaded(&h);
-    let missing = h.drive(h.venue().set_leverage("BTCUSDT".into(), 20.0, None)).expect_err("TS throws");
+    let missing = h
+        .drive(h.venue().set_leverage("BTCUSDT".into(), 20.0, None))
+        .expect_err("TS throws");
     assert_eq!(missing.message, "Position BTCUSDT not found");
     with_positions(&h);
     let before = h.http.calls("/api/v2/mix/position/all-position").len();
-    h.drive(h.venue().set_leverage("BTCUSDT".into(), 500.0, None)).expect("setLeverage");
-    assert_eq!(posted(&h, "/api/v2/mix/account/set-leverage")["leverage"], json!(125.0), "clamped to market max");
-    assert_eq!(h.http.calls("/api/v2/mix/position/all-position").len(), before + 1, "positions refetched");
+    h.drive(h.venue().set_leverage("BTCUSDT".into(), 500.0, None))
+        .expect("setLeverage");
+    assert_eq!(
+        posted(&h, "/api/v2/mix/account/set-leverage")["leverage"],
+        json!(125.0),
+        "clamped to market max"
+    );
+    assert_eq!(
+        h.http.calls("/api/v2/mix/position/all-position").len(),
+        before + 1,
+        "positions refetched"
+    );
 }
 
 #[test]
 fn change_position_mode_posts_hedge_mode() {
     let h = harness(ExchangeName::Bitget, options(), classic);
-    h.drive(h.venue().change_position_mode(true, None)).expect("changePositionMode");
-    assert_eq!(posted(&h, "/api/v2/mix/account/set-position-mode")["posMode"], "hedge_mode");
+    h.drive(h.venue().change_position_mode(true, None))
+        .expect("changePositionMode");
+    assert_eq!(
+        posted(&h, "/api/v2/mix/account/set-position-mode")["posMode"],
+        "hedge_mode"
+    );
 }
 
 #[test]
 fn change_margin_type_posts_isolated_for_symbol() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     with_positions(&h);
-    h.drive(h.venue().change_margin_type(true, Some("BTCUSDT".into()))).expect("changeMarginType");
+    h.drive(h.venue().change_margin_type(true, Some("BTCUSDT".into())))
+        .expect("changeMarginType");
     let body = posted(&h, "/api/v2/mix/account/set-margin-mode");
     assert_eq!(body["marginMode"], "isolated");
     assert_eq!(body["symbol"], "BTCUSDT");
@@ -209,7 +291,9 @@ fn place_order_through_the_client_order_id_contract() {
     )
     .unwrap();
     let base = safe_cex_exchange::exchange::Exchange::base(h.exchange.as_ref());
-    let ids = h.drive(Box::pin(base.place_order(h.exchange.as_ref(), opts))).expect("placeOrder");
+    let ids = h
+        .drive(Box::pin(base.place_order(h.exchange.as_ref(), opts)))
+        .expect("placeOrder");
     assert_eq!(ids, vec!["p1".to_owned()]);
     let body = posted(&h, "/api/v2/mix/order/batch-place-order");
     assert_eq!(body["orderList"][0]["price"], "49000");
@@ -221,9 +305,15 @@ fn place_order_through_the_client_order_id_contract() {
     }))
     .unwrap();
     let posts = h.http.calls("/api/v2/mix/order/batch-place-order").len();
-    let error = h.drive(Box::pin(base.place_order(h.exchange.as_ref(), invalid))).expect_err("contract rejects");
+    let error = h
+        .drive(Box::pin(base.place_order(h.exchange.as_ref(), invalid)))
+        .expect_err("contract rejects");
     assert!(error.message.contains("clientOrderId"), "{}", error.message);
-    assert_eq!(h.http.calls("/api/v2/mix/order/batch-place-order").len(), posts, "nothing sent");
+    assert_eq!(
+        h.http.calls("/api/v2/mix/order/batch-place-order").len(),
+        posts,
+        "nothing sent"
+    );
 }
 
 #[test]
@@ -231,10 +321,16 @@ fn update_order_posts_modify() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     loaded(&h);
     let orders = h.drive(h.venue().fetch_orders(None)).expect("orders");
-    let update: UpdateOrderOpts = serde_json::from_value(json!({"order": orders[0], "update": {"price": 48000}})).unwrap();
-    let ids = h.drive(h.venue().update_order(update)).expect("updateOrder");
+    let update: UpdateOrderOpts =
+        serde_json::from_value(json!({"order": orders[0], "update": {"price": 48000}})).unwrap();
+    let ids = h
+        .drive(h.venue().update_order(update))
+        .expect("updateOrder");
     assert_eq!(ids, vec!["o1".to_owned()]);
-    assert_eq!(posted(&h, "/api/v2/mix/order/modify-order")["newPrice"], "48000");
+    assert_eq!(
+        posted(&h, "/api/v2/mix/order/modify-order")["newPrice"],
+        "48000"
+    );
 }
 
 #[test]
@@ -242,8 +338,12 @@ fn cancel_orders_posts_batch_cancel() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     loaded(&h);
     let orders = h.drive(h.venue().fetch_orders(None)).expect("orders");
-    h.drive(h.venue().cancel_orders(orders)).expect("cancelOrders");
-    assert_eq!(posted(&h, "/api/v2/mix/order/batch-cancel-orders")["orderIdList"][0]["orderId"], "o1");
+    h.drive(h.venue().cancel_orders(orders))
+        .expect("cancelOrders");
+    assert_eq!(
+        posted(&h, "/api/v2/mix/order/batch-cancel-orders")["orderIdList"][0]["orderId"],
+        "o1"
+    );
 }
 
 #[test]
@@ -251,24 +351,45 @@ fn start_loads_public_data_and_logs_in_before_subscribing() {
     let h = harness(ExchangeName::Bitget, options(), classic);
     h.drive(h.venue().start()).expect("start");
     let loaded = h.store.loaded().clone();
-    assert!(loaded.markets && loaded.tickers, "markets and tickers loaded");
+    assert!(
+        loaded.markets && loaded.tickers,
+        "markets and tickers loaded"
+    );
     let sockets = h.runtime.sockets.borrow();
     let private = sockets
         .iter()
         .find(|(url, _)| url == "wss://ws.bitget.com/v2/ws/private")
         .map(|(_, s)| s.clone())
         .expect("private socket dialed");
-    assert!(sockets.iter().any(|(url, _)| url == "wss://ws.bitget.com/v2/ws/public"), "public socket dialed");
+    assert!(
+        sockets
+            .iter()
+            .any(|(url, _)| url == "wss://ws.bitget.com/v2/ws/public"),
+        "public socket dialed"
+    );
     drop(sockets);
     let sent = private.sent.borrow().clone();
-    assert!(sent[0].contains("\"op\":\"login\""), "login first: {sent:?}");
-    assert!(!sent.iter().any(|m| m.contains("subscribe")), "no subscribe before the login ack: {sent:?}");
-    private.events.borrow_mut().push_back(safe_cex_exchange::websocket::WsEvent::Message(
-        safe_cex_transport::socket::SocketFrame::Text(r#"{"event":"login","code":0}"#.into()),
-    ));
+    assert!(
+        sent[0].contains("\"op\":\"login\""),
+        "login first: {sent:?}"
+    );
+    assert!(
+        !sent.iter().any(|m| m.contains("subscribe")),
+        "no subscribe before the login ack: {sent:?}"
+    );
+    private
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(r#"{"event":"login","code":0}"#.into()),
+        ));
     h.runtime.advance(10.0);
     assert!(
-        private.sent.borrow().iter().any(|m| m.contains("subscribe")),
+        private
+            .sent
+            .borrow()
+            .iter()
+            .any(|m| m.contains("subscribe")),
         "subscribes after login ack: {:?}",
         private.sent.borrow()
     );

@@ -37,7 +37,11 @@ fn text(v: &Js) -> Result<String, Thrown> {
 /// `owner.member` with the owner kept as receiver, read along the dotted path.
 fn capture_path(rt: &Rt, path: &str) -> Result<Js, Thrown> {
     let (owner, member) = rt.owner_and_member(path)?;
-    Ok(bind_owner(owner, member, path.rsplit('.').next().unwrap_or(path)))
+    Ok(bind_owner(
+        owner,
+        member,
+        path.rsplit('.').next().unwrap_or(path),
+    ))
 }
 
 fn bind_owner(owner: Js, value: Js, name: &str) -> Js {
@@ -55,8 +59,14 @@ fn capture_member_of(value: &Js, name: &str) -> Result<Js, Thrown> {
 fn array_cell(value: &Js, method: &str) -> Result<Rc<RefCell<Vec<Option<Js>>>>, Thrown> {
     match value {
         Js::Array(items) => Ok(items.clone()),
-        other if other.is_nullish() => Err(other.get(method).err().unwrap_or_else(|| Thrown::type_error(method))),
-        other => Err(Thrown::type_error(&format!("{}.{method} is not a function", other.to_display()))),
+        other if other.is_nullish() => Err(other
+            .get(method)
+            .err()
+            .unwrap_or_else(|| Thrown::type_error(method))),
+        other => Err(Thrown::type_error(&format!(
+            "{}.{method} is not a function",
+            other.to_display()
+        ))),
     }
 }
 
@@ -136,7 +146,10 @@ fn iterator_of(value: &Js) -> Result<JsIter, Thrown> {
             value: value.clone(),
             index: 0,
         }),
-        other => Err(Thrown::type_error(&format!("{} is not iterable", other.to_display()))),
+        other => Err(Thrown::type_error(&format!(
+            "{} is not iterable",
+            other.to_display()
+        ))),
     }
 }
 
@@ -155,7 +168,8 @@ fn iterator_next(iter: &mut JsIter) -> Result<Option<Js>, Thrown> {
             let Some(&unit) = s.get(i) else {
                 return Ok(None);
             };
-            let pair = (0xD800..0xDC00).contains(&unit) && s.get(i + 1).is_some_and(|n| (0xDC00..0xE000).contains(n));
+            let pair = (0xD800..0xDC00).contains(&unit)
+                && s.get(i + 1).is_some_and(|n| (0xDC00..0xE000).contains(n));
             let width = if pair { 2 } else { 1 };
             iter.index += width;
             Js::utf16(&s[i..i + width])
@@ -189,14 +203,21 @@ fn less_than(a: &Js, b: &Js) -> Result<Option<bool>, Thrown> {
         return Ok(Some(a.as_ref() < b.as_ref()));
     }
     let (a, b) = (a.to_number()?, b.to_number()?);
-    Ok(if a.is_nan() || b.is_nan() { None } else { Some(a < b) })
+    Ok(if a.is_nan() || b.is_nan() {
+        None
+    } else {
+        Some(a < b)
+    })
 }
 
 /// `text.split(/(\d+)/)`: separators are captured, so digit runs stay as items.
 fn split_digits(value: &Js) -> Result<Js, Thrown> {
     let Js::String(s) = value else {
         let split = value.get("split")?;
-        return Err(Thrown::type_error(&format!("{}.split is not a function", split.to_display())));
+        return Err(Thrown::type_error(&format!(
+            "{}.split is not a function",
+            split.to_display()
+        )));
     };
     let digit = |c: u16| (b'0' as u16..=b'9' as u16).contains(&c);
     let mut out = vec![];
@@ -224,11 +245,16 @@ fn new_map(entries: &Js) -> Result<Js, Thrown> {
     if entries.is_nullish() {
         return Ok(map);
     }
-    let Js::Map(cells) = &map else { unreachable!("new_map is a Map") };
+    let Js::Map(cells) = &map else {
+        unreachable!("new_map is a Map")
+    };
     let mut iter = iterator_of(entries)?;
     while let Some(entry) = iterator_next(&mut iter)? {
         if !entry.is_object() {
-            return Err(Thrown::type_error(&format!("Iterator value {} is not an entry object", entry.to_display())));
+            return Err(Thrown::type_error(&format!(
+                "Iterator value {} is not an entry object",
+                entry.to_display()
+            )));
         }
         let (k, v) = (entry.get("0")?, entry.get("1")?);
         let mut cells = cells.borrow_mut();
@@ -245,7 +271,9 @@ fn new_set(values: &Js) -> Result<Js, Thrown> {
     if values.is_nullish() {
         return Ok(set);
     }
-    let Js::Set(cells) = &set else { unreachable!("new_set is a Set") };
+    let Js::Set(cells) = &set else {
+        unreachable!("new_set is a Set")
+    };
     let mut iter = iterator_of(values)?;
     while let Some(v) = iterator_next(&mut iter)? {
         let mut cells = cells.borrow_mut();
@@ -259,7 +287,10 @@ fn new_set(values: &Js) -> Result<Js, Thrown> {
 /// create-hmac: `digest(enc)` returns text, `digest()` a Buffer whose toString(enc) encodes.
 fn create_hmac(algorithm: &Js, secret: &Js) -> Result<Js, Thrown> {
     if text(algorithm)?.to_lowercase() != "sha256" {
-        return Err(Thrown::error("Error", &format!("Digest method not supported: {}", algorithm.to_display())));
+        return Err(Thrown::error(
+            "Error",
+            &format!("Digest method not supported: {}", algorithm.to_display()),
+        ));
     }
     let Js::String(secret) = secret else {
         return Err(Thrown::type_error(
@@ -278,7 +309,9 @@ fn create_hmac(algorithm: &Js, secret: &Js) -> Result<Js, Thrown> {
                 let Js::String(data) = arg(&a, 0) else {
                     return Err(Thrown::type_error("Data must be a string or a buffer"));
                 };
-                payload.borrow_mut().extend(String::from_utf16_lossy(&data).into_bytes());
+                payload
+                    .borrow_mut()
+                    .extend(String::from_utf16_lossy(&data).into_bytes());
                 Ok(receiver.clone())
             }),
         )?;
@@ -292,7 +325,11 @@ fn create_hmac(algorithm: &Js, secret: &Js) -> Result<Js, Thrown> {
                     "hex" => safe_cex_crypto::Encoding::Hex,
                     other => return Err(Thrown::type_error(&format!("Unknown encoding: {other}"))),
                 };
-                Ok(Js::str(&safe_cex_crypto::hmac_sha256(secret.as_bytes(), &payload.borrow(), encoding)))
+                Ok(Js::str(&safe_cex_crypto::hmac_sha256(
+                    secret.as_bytes(),
+                    &payload.borrow(),
+                    encoding,
+                )))
             };
             let encoding = arg(&a, 0);
             if !encoding.is_undefined() {
@@ -467,10 +504,20 @@ impl PublicDataHost for Rt {
     fn operation(&self, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         operation(self, name, args)
     }
-    fn read(&self, client: Js, endpoint: &'static str, params: Js) -> Result<PublicRead<'_, Js, Thrown>, Thrown> {
+    fn read(
+        &self,
+        client: Js,
+        endpoint: &'static str,
+        params: Js,
+    ) -> Result<PublicRead<'_, Js, Thrown>, Thrown> {
         let path = self.global("ENDPOINTS")?.get(endpoint)?;
-        let started = client.call(Js::Undefined, vec![path, Js::object(vec![("params", params)])])?;
-        Ok(Box::pin(async move { await_js(started).await?.get("data") }))
+        let started = client.call(
+            Js::Undefined,
+            vec![path, Js::object(vec![("params", params)])],
+        )?;
+        Ok(Box::pin(
+            async move { await_js(started).await?.get("data") },
+        ))
     }
 }
 
@@ -567,7 +614,11 @@ impl SocketRuntimeHost for Rt {
 const MAX_TIME_MS: f64 = 8.64e15;
 
 fn time_clip(ms: f64) -> f64 {
-    if !ms.is_finite() || ms.abs() > MAX_TIME_MS { f64::NAN } else { ms.trunc() + 0.0 }
+    if !ms.is_finite() || ms.abs() > MAX_TIME_MS {
+        f64::NAN
+    } else {
+        ms.trunc() + 0.0
+    }
 }
 
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
@@ -589,7 +640,15 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (if m <= 2 { yoe + era * 400 + 1 } else { yoe + era * 400 }, m, d)
+    (
+        if m <= 2 {
+            yoe + era * 400 + 1
+        } else {
+            yoe + era * 400
+        },
+        m,
+        d,
+    )
 }
 
 fn days_in_month(y: i64, m: i64) -> i64 {
@@ -599,7 +658,11 @@ fn days_in_month(y: i64, m: i64) -> i64 {
 
 /// dayjs Utils.p unit normalization.
 fn dayjs_unit(unit: &Js) -> Result<String, Thrown> {
-    let raw = if unit.truthy() { text(unit)? } else { String::new() };
+    let raw = if unit.truthy() {
+        text(unit)?
+    } else {
+        String::new()
+    };
     Ok(match raw.as_str() {
         "M" => "month".into(),
         "y" => "year".into(),
@@ -629,7 +692,11 @@ fn dayjs_add(ms: f64, number: f64, unit: &str) -> f64 {
             let days = (ms / day_ms).floor() as i64;
             let tod = ms - days as f64 * day_ms;
             let (y, m, d) = civil_from_days(days);
-            let target = if unit == "month" { (m - 1) as f64 + number } else { y as f64 + number };
+            let target = if unit == "month" {
+                (m - 1) as f64 + number
+            } else {
+                y as f64 + number
+            };
             if !target.is_finite() || target.abs() > 1e9 {
                 return f64::NAN;
             }
@@ -669,18 +736,35 @@ fn parse_date_text(s: &str) -> f64 {
     if nums.first().is_none_or(|y| y.len() != 4) || nums.len() > 3 {
         return f64::NAN;
     }
-    let (Some(y), Some(mo), Some(d)) = (field(nums.first(), 0), field(nums.get(1), 1), field(nums.get(2), 1)) else {
+    let (Some(y), Some(mo), Some(d)) = (
+        field(nums.first(), 0),
+        field(nums.get(1), 1),
+        field(nums.get(2), 1),
+    ) else {
         return f64::NAN;
     };
     let (clock, frac) = time.split_once('.').unwrap_or((time, ""));
-    let parts: Vec<&str> = if clock.is_empty() { vec![] } else { clock.split(':').collect() };
-    let (Some(h), Some(mi), Some(sec)) = (field(parts.first(), 0), field(parts.get(1), 0), field(parts.get(2), 0)) else {
+    let parts: Vec<&str> = if clock.is_empty() {
+        vec![]
+    } else {
+        clock.split(':').collect()
+    };
+    let (Some(h), Some(mi), Some(sec)) = (
+        field(parts.first(), 0),
+        field(parts.get(1), 0),
+        field(parts.get(2), 0),
+    ) else {
         return f64::NAN;
     };
     let millis = if frac.is_empty() {
         0
     } else if frac.bytes().all(|b| b.is_ascii_digit()) {
-        frac.chars().take(3).collect::<String>().parse::<i64>().unwrap_or(0) * 10_i64.pow(3 - frac.len().min(3) as u32)
+        frac.chars()
+            .take(3)
+            .collect::<String>()
+            .parse::<i64>()
+            .unwrap_or(0)
+            * 10_i64.pow(3 - frac.len().min(3) as u32)
     } else {
         return f64::NAN;
     };
@@ -688,21 +772,39 @@ fn parse_date_text(s: &str) -> f64 {
         return f64::NAN;
     }
     let days = days_from_civil(y, mo, 1) + d - 1;
-    time_clip(days as f64 * 86_400_000.0 + (h * 3_600_000 + mi * 60_000 + sec * 1_000 + millis) as f64)
+    time_clip(
+        days as f64 * 86_400_000.0 + (h * 3_600_000 + mi * 60_000 + sec * 1_000 + millis) as f64,
+    )
 }
 
 fn dayjs_value(ms: f64) -> Js {
     let value = Js::object_with_class("Dayjs", vec![]);
-    let _ = value.define("valueOf", Js::function("valueOf", move |_, _| Ok(Js::Number(ms))));
-    let _ = value.define("unix", Js::function("unix", move |_, _| Ok(Js::Number((ms / 1000.0).floor()))));
+    let _ = value.define(
+        "valueOf",
+        Js::function("valueOf", move |_, _| Ok(Js::Number(ms))),
+    );
+    let _ = value.define(
+        "unix",
+        Js::function("unix", move |_, _| Ok(Js::Number((ms / 1000.0).floor()))),
+    );
     let _ = value.define(
         "add",
-        Js::function("add", move |_, a| Ok(dayjs_value(dayjs_add(ms, arg(&a, 0).to_number()?, &dayjs_unit(&arg(&a, 1))?)))),
+        Js::function("add", move |_, a| {
+            Ok(dayjs_value(dayjs_add(
+                ms,
+                arg(&a, 0).to_number()?,
+                &dayjs_unit(&arg(&a, 1))?,
+            )))
+        }),
     );
     let _ = value.define(
         "subtract",
         Js::function("subtract", move |_, a| {
-            Ok(dayjs_value(dayjs_add(ms, -arg(&a, 0).to_number()?, &dayjs_unit(&arg(&a, 1))?)))
+            Ok(dayjs_value(dayjs_add(
+                ms,
+                -arg(&a, 0).to_number()?,
+                &dayjs_unit(&arg(&a, 1))?,
+            )))
         }),
     );
     value
@@ -724,11 +826,15 @@ fn dayjs_construct(rt: &Rt, input: &Js) -> Result<Js, Thrown> {
 fn resolve_transport_routing(name: &Js, options: &Js) -> Result<Js, Thrown> {
     let name: ExchangeName = to_typed(name)?;
     let options: ExchangeOptions = to_typed(options)?;
-    let routing = safe_cex_transport::resolve_exchange_routing(&name, &safe_cex_transport::RoutingOptions::from(&options));
+    let routing = safe_cex_transport::resolve_exchange_routing(
+        &name,
+        &safe_cex_transport::RoutingOptions::from(&options),
+    );
     from_typed(&routing)
 }
 
-const NANOID_ALPHABET: &[u8; 64] = b"useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+const NANOID_ALPHABET: &[u8; 64] =
+    b"useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
 
 pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
     let def = |k: &str, v: Js| {
@@ -738,16 +844,25 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
     def("ENABLE_RECONNECTING_WEBSOCKET", Js::Bool(false));
     def(
         "timeframeToSeconds",
-        Js::object(safe_cex_types::TIMEFRAME_TO_SECONDS.iter().map(|(k, v)| (*k, Js::Number(*v))).collect()),
+        Js::object(
+            safe_cex_types::TIMEFRAME_TO_SECONDS
+                .iter()
+                .map(|(k, v)| (*k, Js::Number(*v)))
+                .collect(),
+        ),
     );
     def(
         "resolveTransportRouting",
-        Js::function("resolveTransportRouting", |_, a| resolve_transport_routing(&arg(&a, 0), &arg(&a, 1))),
+        Js::function("resolveTransportRouting", |_, a| {
+            resolve_transport_routing(&arg(&a, 0), &arg(&a, 1))
+        }),
     );
     def(
         "jsonParse",
         Js::function("jsonParse", |_, a| {
-            Ok(from_json(&safe_cex_transport::how::json_parse(&text(&arg(&a, 0))?)))
+            Ok(from_json(&safe_cex_transport::how::json_parse(&text(
+                &arg(&a, 0),
+            )?)))
         }),
     );
     let w = weak.clone();
@@ -756,18 +871,29 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
         Js::function("nanoid", move |_, _| {
             let rt = shared(&w)?;
             let id: String = (0..21)
-                .map(|_| char::from(NANOID_ALPHABET[(rt.shared.runtime.random() * 64.0) as usize & 63]))
+                .map(|_| {
+                    char::from(NANOID_ALPHABET[(rt.shared.runtime.random() * 64.0) as usize & 63])
+                })
                 .collect();
             Ok(Js::str(&id))
         }),
     );
     let w = weak;
-    def("dayjs", Js::function("dayjs", move |_, a| dayjs_construct(&shared(&w)?, &arg(&a, 0))));
+    def(
+        "dayjs",
+        Js::function("dayjs", move |_, a| {
+            dayjs_construct(&shared(&w)?, &arg(&a, 0))
+        }),
+    );
 }
 
 // --- bindings ---
 
-fn sync_member(name: &str, rt: &Rt, f: impl Fn(&Rt, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
+fn sync_member(
+    name: &str,
+    rt: &Rt,
+    f: impl Fn(&Rt, Vec<Js>) -> Result<Js, Thrown> + 'static,
+) -> Js {
     let rt = rt.clone();
     Js::function(name, move |_, a| f(&rt, a))
 }
@@ -800,10 +926,16 @@ struct JsPublicData {
 
 impl JsPublicData {
     fn base(&self) -> Option<Rc<safe_cex_exchange::websocket::BaseWebSocket>> {
-        sockets::core_of(&self.rt.shared.sockets, &self.socket).and_then(|core| core.base.get().cloned())
+        sockets::core_of(&self.rt.shared.sockets, &self.socket)
+            .and_then(|core| core.base.get().cloned())
     }
     fn cleanup(value: Js) -> ListenerCleanup {
-        Box::new(move || value.call(Js::Undefined, vec![]).map(|_| ()).map_err(exchange_error))
+        Box::new(move || {
+            value
+                .call(Js::Undefined, vec![])
+                .map(|_| ())
+                .map_err(exchange_error)
+        })
     }
 }
 
@@ -827,27 +959,45 @@ impl ExternalPublicData for JsPublicData {
     fn last_message_timestamp(&self) -> Option<f64> {
         self.base().and_then(|b| b.last_message_timestamp())
     }
-    fn listen_ohlcv(&self, options: OHLCVOptions, callback: Rc<dyn Fn(Candle)>) -> Result<ListenerCleanup, ExchangeError> {
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
         let parser = Js::function("callback", move |_, a| {
             callback(to_typed::<Candle>(&arg(&a, 0))?);
             Ok(Js::Undefined)
         });
         let options = from_typed(&options).map_err(exchange_error)?;
-        let cleanup = self.socket.call_method("listenOHLCV", vec![options, parser]).map_err(exchange_error)?;
+        let cleanup = self
+            .socket
+            .call_method("listenOHLCV", vec![options, parser])
+            .map_err(exchange_error)?;
         Ok(Self::cleanup(cleanup))
     }
-    fn listen_order_book(&self, symbol: String, callback: Rc<dyn Fn(OrderBook)>) -> Result<ListenerCleanup, ExchangeError> {
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
         let parser = Js::function("callback", move |_, a| {
             callback(to_typed::<OrderBook>(&arg(&a, 0))?);
             Ok(Js::Undefined)
         });
-        let cleanup = self.socket.call_method("listenOrderBook", vec![Js::str(&symbol), parser]).map_err(exchange_error)?;
+        let cleanup = self
+            .socket
+            .call_method("listenOrderBook", vec![Js::str(&symbol), parser])
+            .map_err(exchange_error)?;
         Ok(Self::cleanup(cleanup))
     }
 }
 
 /// Typed callback over a JS callback; its failure cannot cross `Fn(T)`, so it is reported.
-fn typed_callback<T: serde::Serialize + 'static>(rt: &Rt, callback: Js, source: &'static str) -> Rc<dyn Fn(T)> {
+fn typed_callback<T: serde::Serialize + 'static>(
+    rt: &Rt,
+    callback: Js,
+    source: &'static str,
+) -> Rc<dyn Fn(T)> {
     let rt = rt.clone();
     Rc::new(move |value: T| {
         if let Err(e) = from_typed(&value).and_then(|v| callback.call(Js::Undefined, vec![v])) {
@@ -883,7 +1033,11 @@ fn finite_number_input(value: &Js) -> (Option<f64>, Option<String>) {
 }
 
 fn optional_json(value: &Js) -> Result<Option<serde_json::Value>, Thrown> {
-    if value.is_undefined() { Ok(None) } else { to_json(value).map(Some) }
+    if value.is_undefined() {
+        Ok(None)
+    } else {
+        to_json(value).map(Some)
+    }
 }
 
 /// Socket ping: one performance-clock sample publishes pingAt (JS field and core) before sending.
@@ -893,7 +1047,8 @@ fn ping(rt: &Rt, private: bool) -> Result<Js, Thrown> {
     let base = if disposed {
         None
     } else {
-        let core = sockets::core_of(&rt.shared.sockets, &this).ok_or_else(|| Thrown::error("Error", "Bitget socket has no core"))?;
+        let core = sockets::core_of(&rt.shared.sockets, &this)
+            .ok_or_else(|| Thrown::error("Error", "Bitget socket has no core"))?;
         Some(core.base()?)
     };
     let ping_at = Cell::new(0.0);
@@ -918,20 +1073,27 @@ fn ping(rt: &Rt, private: bool) -> Result<Js, Thrown> {
 
 const PREFIX: &str = "safe-cex-venue-bitget/src/";
 
-pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, targets: &[&str]) -> Result<Option<Js>, Thrown> {
+pub(crate) fn bind(
+    rt: &Rt,
+    owner: &str,
+    name: &str,
+    targets: &[&str],
+) -> Result<Option<Js>, Thrown> {
     let Some(target) = targets.first().and_then(|t| t.strip_prefix(PREFIX)) else {
         return Ok(None);
     };
     let callable = match (owner, target) {
-        ("BitgetExchange", "public_data.rs::fetch_markets") => {
-            async_member(name, rt, |rt, _| Box::pin(async move { public_data::fetch_markets(&rt).await }))
-        }
+        ("BitgetExchange", "public_data.rs::fetch_markets") => async_member(name, rt, |rt, _| {
+            Box::pin(async move { public_data::fetch_markets(&rt).await })
+        }),
         ("BitgetInverseExchange", "public_data.rs::fetch_inverse_markets") => {
-            async_member(name, rt, |rt, _| Box::pin(async move { public_data::fetch_inverse_markets(&rt).await }))
+            async_member(name, rt, |rt, _| {
+                Box::pin(async move { public_data::fetch_inverse_markets(&rt).await })
+            })
         }
-        ("BitgetExchange", "public_data.rs::fetch_tickers") => {
-            async_member(name, rt, |rt, _| Box::pin(async move { public_data::fetch_tickers(&rt).await }))
-        }
+        ("BitgetExchange", "public_data.rs::fetch_tickers") => async_member(name, rt, |rt, _| {
+            Box::pin(async move { public_data::fetch_tickers(&rt).await })
+        }),
         ("BitgetExchange", "public_data.rs::fetch_ohlcv") => async_member(name, rt, |rt, a| {
             Box::pin(async move { public_data::fetch_ohlcv(&rt, arg(&a, 0)).await })
         }),
@@ -939,76 +1101,112 @@ pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, targets: &[&str]) -> Result
             let socket = public_data_of(rt)?;
             let options: OHLCVOptions = to_typed(&arg(&a, 0))?;
             let callback = typed_callback::<Candle>(rt, arg(&a, 1), "Bitget listenOHLCV callback");
-            Ok(cleanup_function(subscriptions::listen_ohlcv(&socket, options, callback)?))
+            Ok(cleanup_function(subscriptions::listen_ohlcv(
+                &socket, options, callback,
+            )?))
         }),
-        ("BitgetExchange", "subscriptions.rs::listen_order_book") => sync_member(name, rt, |rt, a| {
-            let socket = public_data_of(rt)?;
-            let symbol: String = to_typed(&arg(&a, 0))?;
-            let callback = typed_callback::<OrderBook>(rt, arg(&a, 1), "Bitget listenOrderBook callback");
-            Ok(cleanup_function(subscriptions::listen_order_book(&socket, symbol, callback)?))
-        }),
-        ("BitgetPublicWebsocket", "ticker.rs::to_finite_number") => sync_member(name, rt, |_, a| {
-            let (number, string) = finite_number_input(&arg(&a, 0));
-            let input = match (number, &string) {
-                (Some(n), _) => FiniteNumberInput::Number(n),
-                (None, Some(s)) => FiniteNumberInput::String(s),
-                _ => FiniteNumberInput::Other,
-            };
-            Ok(ticker::to_finite_number(input).map_or(Js::Undefined, Js::Number))
-        }),
-        ("BitgetPublicWebsocket", "ticker.rs::build_ticker_update") => sync_member(name, rt, |_, a| {
-            let data = optional_json(&arg(&a, 0))?;
-            let update = Js::object(vec![]);
-            for (field, value) in ticker::build_ticker_update(data.as_ref())? {
-                update.define(field, Js::Number(value))?;
-            }
-            Ok(update)
-        }),
-        ("BitgetPublicWebsocket", "ticker.rs::handle_ticker_topic") => sync_member(name, rt, |rt, a| {
-            let json = optional_json(&arg(&a, 0))?;
-            ticker::handle_ticker_topic(rt.shared.store.as_ref(), json.as_ref()).map_err(ticker_error)?;
-            Ok(Js::Undefined)
-        }),
+        ("BitgetExchange", "subscriptions.rs::listen_order_book") => {
+            sync_member(name, rt, |rt, a| {
+                let socket = public_data_of(rt)?;
+                let symbol: String = to_typed(&arg(&a, 0))?;
+                let callback =
+                    typed_callback::<OrderBook>(rt, arg(&a, 1), "Bitget listenOrderBook callback");
+                Ok(cleanup_function(subscriptions::listen_order_book(
+                    &socket, symbol, callback,
+                )?))
+            })
+        }
+        ("BitgetPublicWebsocket", "ticker.rs::to_finite_number") => {
+            sync_member(name, rt, |_, a| {
+                let (number, string) = finite_number_input(&arg(&a, 0));
+                let input = match (number, &string) {
+                    (Some(n), _) => FiniteNumberInput::Number(n),
+                    (None, Some(s)) => FiniteNumberInput::String(s),
+                    _ => FiniteNumberInput::Other,
+                };
+                Ok(ticker::to_finite_number(input).map_or(Js::Undefined, Js::Number))
+            })
+        }
+        ("BitgetPublicWebsocket", "ticker.rs::build_ticker_update") => {
+            sync_member(name, rt, |_, a| {
+                let data = optional_json(&arg(&a, 0))?;
+                let update = Js::object(vec![]);
+                for (field, value) in ticker::build_ticker_update(data.as_ref())? {
+                    update.define(field, Js::Number(value))?;
+                }
+                Ok(update)
+            })
+        }
+        ("BitgetPublicWebsocket", "ticker.rs::handle_ticker_topic") => {
+            sync_member(name, rt, |rt, a| {
+                let json = optional_json(&arg(&a, 0))?;
+                ticker::handle_ticker_topic(rt.shared.store.as_ref(), json.as_ref())
+                    .map_err(ticker_error)?;
+                Ok(Js::Undefined)
+            })
+        }
         ("BitgetPublicWebsocket", "public_data.rs::connect_and_subscribe") => {
-            sync_member(name, rt, |rt, _| undefined(public_data::connect_and_subscribe(rt)))
+            sync_member(name, rt, |rt, _| {
+                undefined(public_data::connect_and_subscribe(rt))
+            })
         }
         ("BitgetPublicWebsocket", "public_data.rs::on_open") => {
             sync_member(name, rt, |rt, _| undefined(public_data::on_open(rt)))
         }
         // ts: onMarketsChanged = ({ added }) => ...
-        ("BitgetPublicWebsocket", "public_data.rs::on_markets_changed") => sync_member(name, rt, |rt, a| {
-            let added = arg(&a, 0).get("added")?;
-            undefined(public_data::on_markets_changed(rt, added))
-        }),
-        ("BitgetPublicWebsocket", "socket_ping.rs::ping_public") => sync_member(name, rt, |rt, _| ping(rt, false)),
+        ("BitgetPublicWebsocket", "public_data.rs::on_markets_changed") => {
+            sync_member(name, rt, |rt, a| {
+                let added = arg(&a, 0).get("added")?;
+                undefined(public_data::on_markets_changed(rt, added))
+            })
+        }
+        ("BitgetPublicWebsocket", "socket_ping.rs::ping_public") => {
+            sync_member(name, rt, |rt, _| ping(rt, false))
+        }
         ("BitgetPublicWebsocket", "public_data.rs::subscribe") => {
             sync_member(name, rt, |rt, _| undefined(public_data::subscribe(rt)))
         }
         // ts: onMessage = ({ data }: MessageEvent) => ...
-        ("BitgetPublicWebsocket", "socket_runtime.rs::on_public_message") => sync_member(name, rt, |rt, a| {
-            let data = arg(&a, 0).get("data")?;
-            undefined(socket_runtime::on_public_message(rt, data))
-        }),
+        ("BitgetPublicWebsocket", "socket_runtime.rs::on_public_message") => {
+            sync_member(name, rt, |rt, a| {
+                let data = arg(&a, 0).get("data")?;
+                undefined(socket_runtime::on_public_message(rt, data))
+            })
+        }
         ("BitgetPrivateWebsocket", "socket_runtime.rs::connect_and_subscribe") => {
-            sync_member(name, rt, |rt, _| undefined(socket_runtime::connect_and_subscribe(rt)))
+            sync_member(name, rt, |rt, _| {
+                undefined(socket_runtime::connect_and_subscribe(rt))
+            })
         }
-        ("BitgetPrivateWebsocket", "socket_ping.rs::ping_private") => sync_member(name, rt, |rt, _| ping(rt, true)),
-        ("BitgetPrivateWebsocket", "socket_runtime.rs::on_private_message") => sync_member(name, rt, |rt, a| {
-            let data = arg(&a, 0).get("data")?;
-            undefined(socket_runtime::on_private_message(rt, data))
-        }),
-        ("BitgetPrivateWebsocket", "socket_runtime.rs::execute_position_fetch") => async_member(name, rt, |rt, _| {
-            Box::pin(async move { undefined(socket_runtime::execute_position_fetch(&rt).await) })
-        }),
-        ("BitgetPrivateWebsocket", "socket_runtime.rs::execute_balance_fetch") => async_member(name, rt, |rt, _| {
-            Box::pin(async move { undefined(socket_runtime::execute_balance_fetch(&rt).await) })
-        }),
-        ("BitgetPrivateWebsocket", "socket_runtime.rs::execute_orders_fetch") => async_member(name, rt, |rt, _| {
-            Box::pin(async move { undefined(socket_runtime::execute_orders_fetch(&rt).await) })
-        }),
-        ("BitgetPrivateWebsocket", "socket_runtime.rs::auth") => {
-            async_member(name, rt, |rt, _| Box::pin(async move { undefined(socket_runtime::auth(&rt).await) }))
+        ("BitgetPrivateWebsocket", "socket_ping.rs::ping_private") => {
+            sync_member(name, rt, |rt, _| ping(rt, true))
         }
+        ("BitgetPrivateWebsocket", "socket_runtime.rs::on_private_message") => {
+            sync_member(name, rt, |rt, a| {
+                let data = arg(&a, 0).get("data")?;
+                undefined(socket_runtime::on_private_message(rt, data))
+            })
+        }
+        ("BitgetPrivateWebsocket", "socket_runtime.rs::execute_position_fetch") => {
+            async_member(name, rt, |rt, _| {
+                Box::pin(
+                    async move { undefined(socket_runtime::execute_position_fetch(&rt).await) },
+                )
+            })
+        }
+        ("BitgetPrivateWebsocket", "socket_runtime.rs::execute_balance_fetch") => {
+            async_member(name, rt, |rt, _| {
+                Box::pin(async move { undefined(socket_runtime::execute_balance_fetch(&rt).await) })
+            })
+        }
+        ("BitgetPrivateWebsocket", "socket_runtime.rs::execute_orders_fetch") => {
+            async_member(name, rt, |rt, _| {
+                Box::pin(async move { undefined(socket_runtime::execute_orders_fetch(&rt).await) })
+            })
+        }
+        ("BitgetPrivateWebsocket", "socket_runtime.rs::auth") => async_member(name, rt, |rt, _| {
+            Box::pin(async move { undefined(socket_runtime::auth(&rt).await) })
+        }),
         ("BitgetPrivateWebsocket", "socket_runtime.rs::subscribe") => {
             sync_member(name, rt, |rt, _| undefined(socket_runtime::subscribe(rt)))
         }

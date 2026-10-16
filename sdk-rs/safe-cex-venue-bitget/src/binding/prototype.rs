@@ -21,9 +21,18 @@ fn report(this: &Js, message: &str) -> Result<(), ExchangeError> {
 }
 
 /// Resolve `{ positionMode, marginType }` through the receiver's resolveSymbolPositioning.
-async fn positioning_field(this: Js, symbol: String, field: &'static str) -> Result<Option<Js>, ExchangeError> {
-    let resolved = await_js(this.call_method("resolveSymbolPositioning", vec![Js::str(&symbol)])?).await?;
-    let value = if resolved.is_nullish() { Js::Undefined } else { resolved.get(field)? };
+async fn positioning_field(
+    this: Js,
+    symbol: String,
+    field: &'static str,
+) -> Result<Option<Js>, ExchangeError> {
+    let resolved =
+        await_js(this.call_method("resolveSymbolPositioning", vec![Js::str(&symbol)])?).await?;
+    let value = if resolved.is_nullish() {
+        Js::Undefined
+    } else {
+        resolved.get(field)?
+    };
     Ok((!value.is_nullish()).then_some(value))
 }
 
@@ -72,7 +81,10 @@ pub(crate) fn install(rt: &Rt) {
         );
     }
     // ts: BitgetExchange.getOrFetchPositionMode / getOrFetchMarginType
-    for (name, field) in [("getOrFetchPositionMode", "positionMode"), ("getOrFetchMarginType", "marginType")] {
+    for (name, field) in [
+        ("getOrFetchPositionMode", "positionMode"),
+        ("getOrFetchMarginType", "marginType"),
+    ] {
         let rt = rt.clone();
         def(
             name,
@@ -88,7 +100,14 @@ pub(crate) fn install(rt: &Rt) {
                             &symbol,
                             |s| {
                                 let fut = resolve(s);
-                                async move { fut.await?.map(|v| to_typed::<PositionMode>(&v).map_err(ExchangeError::from)).transpose() }
+                                async move {
+                                    fut.await?
+                                        .map(|v| {
+                                            to_typed::<PositionMode>(&v)
+                                                .map_err(ExchangeError::from)
+                                        })
+                                        .transpose()
+                                }
                             },
                             || uses_uta,
                             |m| report(&this, m),
@@ -100,7 +119,13 @@ pub(crate) fn install(rt: &Rt) {
                             &symbol,
                             |s| {
                                 let fut = resolve(s);
-                                async move { fut.await?.map(|v| to_typed::<MarginType>(&v).map_err(ExchangeError::from)).transpose() }
+                                async move {
+                                    fut.await?
+                                        .map(|v| {
+                                            to_typed::<MarginType>(&v).map_err(ExchangeError::from)
+                                        })
+                                        .transpose()
+                                }
                             },
                             || uses_uta,
                             |m| report(&this, m),
@@ -124,7 +149,8 @@ pub(crate) fn install(rt: &Rt) {
                 let store = rt.shared.store.clone();
                 let markets = store.markets();
                 let by_symbol = store.markets_by_symbol();
-                let found = crate::market::resolve_market(&symbol, &margin, &markets, |s| by_symbol.get(s));
+                let found =
+                    crate::market::resolve_market(&symbol, &margin, &markets, |s| by_symbol.get(s));
                 match found {
                     Some(market) => from_typed(market),
                     None => Ok(Js::Undefined),
@@ -141,9 +167,10 @@ pub(crate) fn install(rt: &Rt) {
                 let positions: Vec<safe_cex_types::Position> = to_typed(&arg(&a, 0))?;
                 let store = rt.shared.store.clone();
                 let tickers = store.tickers_by_symbol();
-                Ok(Js::Number(crate::pnl::calculate_upnl_from_last_price(&positions, |s| {
-                    tickers.get(s).map(|t| t.last)
-                })))
+                Ok(Js::Number(crate::pnl::calculate_upnl_from_last_price(
+                    &positions,
+                    |s| tickers.get(s).map(|t| t.last),
+                )))
             }),
         );
     }
@@ -155,7 +182,10 @@ pub(crate) fn install(rt: &Rt) {
             Js::function("getMarginCoinForSymbol", move |_, a| {
                 let symbol = text(&arg(&a, 0))?;
                 let by_symbol = store.markets_by_symbol();
-                Ok(Js::str(&crate::market::get_margin_coin_for_symbol(&symbol, |s| by_symbol.get(s))))
+                Ok(Js::str(&crate::market::get_margin_coin_for_symbol(
+                    &symbol,
+                    |s| by_symbol.get(s),
+                )))
             }),
         );
         // ts: BitgetInverseExchange#generateUuid
@@ -163,7 +193,9 @@ pub(crate) fn install(rt: &Rt) {
         def(
             "generateUuid",
             Js::function("generateUuid", move |_, _| {
-                Ok(Js::str(&crate::inverse_logic::generate_uuid(|| runtime.random())))
+                Ok(Js::str(&crate::inverse_logic::generate_uuid(|| {
+                    runtime.random()
+                })))
             }),
         );
     }

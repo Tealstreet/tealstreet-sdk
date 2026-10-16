@@ -1,4 +1,9 @@
 //! Scripted transport and runtime for driving the production BitgetExchange.
+use safe_cex_exchange::js_runtime::{
+    client::JsHttpHost,
+    promise::JsFuture,
+    value::{Js, Thrown, from_json, to_json},
+};
 use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -6,11 +11,6 @@ use safe_cex_exchange::{
 };
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use safe_cex_exchange::js_runtime::{
-    client::JsHttpHost,
-    promise::JsFuture,
-    value::{Js, Thrown, from_json, to_json},
-};
 use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use serde_json::{Value, json};
 use std::{
@@ -81,7 +81,11 @@ impl ExchangeRuntime for Runtime {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
         Box::pin(std::future::poll_fn(move |_| {
-            if now.get() >= at { Poll::Ready(Ok(())) } else { Poll::Pending }
+            if now.get() >= at {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
         }))
     }
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
@@ -151,7 +155,13 @@ impl WsRuntime for Runtime {
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("Bitget binding E2E never tunnels")
     }
-    fn dial(&self, url: String, _: Vec<String>, _: WebSocketConnectionOptions, _: bool) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+    fn dial(
+        &self,
+        url: String,
+        _: Vec<String>,
+        _: WebSocketConnectionOptions,
+        _: bool,
+    ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
         let socket = Rc::new(Socket::default());
         socket.events.borrow_mut().push_back(WsEvent::Open);
         self.sockets.borrow_mut().push((url, socket.clone()));
@@ -203,10 +213,20 @@ impl Http {
         }
     }
     pub fn ok(&self, method: &str, path: &str, data: Value) {
-        self.route(method, path, 200.0, json!({"code": "00000", "msg": "success", "requestTime": 1, "data": data}));
+        self.route(
+            method,
+            path,
+            200.0,
+            json!({"code": "00000", "msg": "success", "requestTime": 1, "data": data}),
+        );
     }
     pub fn calls(&self, path: &str) -> Vec<Request> {
-        self.requests.borrow().iter().filter(|r| r.url == path).cloned().collect()
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|r| r.url == path)
+            .cloned()
+            .collect()
     }
 }
 impl JsHttpHost for Http {
@@ -214,7 +234,13 @@ impl JsHttpHost for Http {
         self.runtime.borrow().clone().expect("harness runtime")
     }
     fn send(&self, config: Js) -> JsFuture<'static> {
-        let read = |k: &str| config.get(k).ok().map(|v| to_json(&v).unwrap_or(Value::Null)).unwrap_or(Value::Null);
+        let read = |k: &str| {
+            config
+                .get(k)
+                .ok()
+                .map(|v| to_json(&v).unwrap_or(Value::Null))
+                .unwrap_or(Value::Null)
+        };
         let method = read("method").as_str().unwrap_or("get").to_uppercase();
         let url = read("url").as_str().unwrap_or_default().to_owned();
         self.requests.borrow_mut().push(Request {
@@ -226,9 +252,16 @@ impl JsHttpHost for Http {
         });
         let response = {
             let mut routes = self.routes.borrow_mut();
-            routes.iter_mut().find(|(m, p, _)| *m == method && *p == url).map(|(_, _, queue)| {
-                if queue.len() > 1 { queue.pop_front().expect("queued") } else { queue[0].clone() }
-            })
+            routes
+                .iter_mut()
+                .find(|(m, p, _)| *m == method && *p == url)
+                .map(|(_, _, queue)| {
+                    if queue.len() > 1 {
+                        queue.pop_front().expect("queued")
+                    } else {
+                        queue[0].clone()
+                    }
+                })
         };
         let result = match response {
             Some((status, body)) => Ok(Js::object(vec![
@@ -236,7 +269,10 @@ impl JsHttpHost for Http {
                 ("data", from_json(&body)),
                 ("headers", Js::object(vec![])),
             ])),
-            None => Err(Thrown::error("Error", &format!("unscripted request {method} {url}"))),
+            None => Err(Thrown::error(
+                "Error",
+                &format!("unscripted request {method} {url}"),
+            )),
         };
         Box::pin(async move { result })
     }
@@ -250,11 +286,17 @@ pub struct Harness {
 }
 
 pub fn options() -> ExchangeOptions {
-    serde_json::from_value(json!({"key": "fixture-key", "secret": "fixture-secret", "passphrase": "fixture-pass"}))
-        .expect("Bitget options")
+    serde_json::from_value(
+        json!({"key": "fixture-key", "secret": "fixture-secret", "passphrase": "fixture-pass"}),
+    )
+    .expect("Bitget options")
 }
 
-pub fn harness(name: ExchangeName, options: ExchangeOptions, script: impl FnOnce(&Http)) -> Harness {
+pub fn harness(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    script: impl FnOnce(&Http),
+) -> Harness {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
@@ -265,10 +307,19 @@ pub fn harness(name: ExchangeName, options: ExchangeOptions, script: impl FnOnce
         name,
         options,
         store.clone(),
-        BitgetDependencies { runtime: runtime.clone(), http: http.clone(), external_public_data: None },
+        BitgetDependencies {
+            runtime: runtime.clone(),
+            http: http.clone(),
+            external_public_data: None,
+        },
     )
     .expect("BitgetExchange constructs from real options");
-    Harness { runtime, http, store, exchange }
+    Harness {
+        runtime,
+        http,
+        store,
+        exchange,
+    }
 }
 
 impl Harness {
@@ -276,7 +327,10 @@ impl Harness {
     pub fn drive<T>(&self, future: ExchangeFuture<'_, T>) -> Result<T, ExchangeError> {
         let mut future = future;
         for _ in 0..2000 {
-            if let Poll::Ready(v) = future.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            if let Poll::Ready(v) = future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+            {
                 return v;
             }
             self.runtime.pump();
