@@ -137,6 +137,8 @@ struct Base {
     pong: Cell<usize>,
     ping_at: Cell<f64>,
     diagnostic_sends: Cell<usize>,
+    diagnostic_frames: RefCell<Vec<String>>,
+    diagnostic_failure: RefCell<Option<Failure>>,
     send_failure: RefCell<Option<Failure>>,
 }
 impl PrivateBase for Base {
@@ -164,9 +166,10 @@ impl PrivateBase for Base {
         self.ping_at.set(time);
         Ok(())
     }
-    fn diagnostic_send(&self, _: &str) -> Result<(), Failure> {
+    fn diagnostic_send(&self, payload: &str) -> Result<(), Failure> {
         self.diagnostic_sends.set(self.diagnostic_sends.get() + 1);
-        Ok(())
+        self.diagnostic_frames.borrow_mut().push(payload.into());
+        self.diagnostic_failure.borrow().clone().map_or(Ok(()), Err)
     }
     fn pong(&self) -> Result<(), Failure> {
         self.pong.set(self.pong.get() + 1);
@@ -3149,4 +3152,103 @@ fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() 
             );
         }
     }
+}
+
+#[test]
+fn private_base_send_with_log_forwards_outbound_text_and_failures() {
+    let base = Base::default();
+    let receiver: &dyn PrivateBase = &base;
+    for text in ["not JSON {", r#"{ "id" : 42 }"#, "", "\0rocket🚀"] {
+        receiver.send_with_log(text.into()).unwrap();
+        assert_eq!(
+            base.frames.borrow().last().unwrap(),
+            text,
+            "outbound text reaches send without parsing or normalization"
+        );
+        assert_eq!(
+            base.diagnostic_frames.borrow().last().unwrap(),
+            text,
+            "diagnostics receive the same outbound text"
+        );
+    }
+    assert_eq!(base.frames.borrow().len(), 4);
+    assert_eq!(base.diagnostic_sends.get(), 4);
+    let send_error = Rc::new(ExchangeError::new("native send refused"));
+    *base.send_failure.borrow_mut() = Some(send_error.clone());
+    let error = receiver
+        .send_with_log("send fails before diagnostics".into())
+        .unwrap_err();
+    assert!(
+        Rc::ptr_eq(&error, &send_error),
+        "send error identity is forwarded"
+    );
+    assert_eq!(
+        base.diagnostic_sends.get(),
+        4,
+        "send failure skips diagnostics"
+    );
+    assert_eq!(base.frames.borrow().len(), 4);
+    *base.send_failure.borrow_mut() = None;
+    let diagnostic_error = Rc::new(ExchangeError::new("native diagnostic refused"));
+    *base.diagnostic_failure.borrow_mut() = Some(diagnostic_error.clone());
+    let error = receiver
+        .send_with_log("sent before diagnostic failure".into())
+        .unwrap_err();
+    assert!(
+        Rc::ptr_eq(&error, &diagnostic_error),
+        "diagnostic error identity is forwarded"
+    );
+    assert_eq!(
+        base.frames.borrow().last().unwrap(),
+        "sent before diagnostic failure"
+    );
+    assert_eq!(base.diagnostic_sends.get(), 5);
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn native_import_default_weight_property_returns_existing_values() {
+    struct UnusedAdapter;
+    impl safe_cex_transport::RestAdapter for UnusedAdapter {
+        fn execute(
+            &self,
+            _: safe_cex_transport::RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+            panic!("property forwarding must perform no I/O")
+        }
+    }
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        Rc::new(Runtime::default()),
+        std::sync::Arc::new(UnusedAdapter),
+        Rc::new(|_, _| panic!("property forwarding must not construct external data")),
+        None,
+    );
+    let receiver: &dyn ExchangeImports = dependencies.imports.as_ref();
+    let child = record([("id", number(-0.0))]);
+    let response = record([("headers", child.clone()), ("status", number(429.0))]);
+    assert!(
+        receiver
+            .weight_response_property(&response, "headers")
+            .unwrap()
+            .same(&child)
+    );
+    assert!(matches!(
+        receiver
+            .weight_response_property(&response, "status")
+            .unwrap(),
+        EventValue::Number(429.0)
+    ));
+    assert!(matches!(
+        receiver
+            .weight_response_property(&response, "missing")
+            .unwrap(),
+        EventValue::Undefined
+    ));
+    assert_eq!(
+        receiver
+            .weight_response_property(&EventValue::Null, "status")
+            .unwrap_err()
+            .name,
+        "TypeError"
+    );
 }

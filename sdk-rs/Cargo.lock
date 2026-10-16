@@ -3978,6 +3978,7 @@ dependencies = [
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
  "safe-cex-venue-kucoin",
+ "safe-cex-venue-lighter",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
  "safe-cex-venue-phemex",

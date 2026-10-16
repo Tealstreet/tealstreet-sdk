@@ -26,6 +26,7 @@ use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_grvt::binding::exchange::{GrvtDependencies, GrvtExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
+use safe_cex_venue_lighter::binding::exchange::{LighterDependencies, LighterNativeExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
 use safe_cex_venue_woo::{WooDependencies, WooExchange};
@@ -155,6 +156,12 @@ pub trait RustVenueHost {
             "BingX dependencies are unavailable on this host",
         ))
     }
+    /// Lighter and Lighter Robinhood use the same bound class and host services.
+    fn lighter(&self) -> Result<LighterDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Lighter dependencies are unavailable on this host",
+        ))
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
@@ -213,6 +220,8 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Hyperliquidspot, hyperliquidspot_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
+    (ExchangeName::Lighter, lighter_constructor),
+    (ExchangeName::LighterRobinhood, lighter_constructor),
     (ExchangeName::Kucoin, kucoin_constructor),
     (ExchangeName::Kucoinspot, kucoin_constructor),
     (ExchangeName::Mexc, mexc_constructor),
@@ -520,6 +529,17 @@ pub fn kraken_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = KrakenExchange::new(name, options, store, host.kraken()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn lighter_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(LighterNativeExchange::new(
+            name,
+            options,
+            store,
+            host.lighter()?,
+        )?)
     })
 }
 

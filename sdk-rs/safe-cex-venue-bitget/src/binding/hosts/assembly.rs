@@ -232,7 +232,8 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
         settings: crate::binding::exchange::settings(),
         external_public_data: extra.external_public_data.clone(),
     };
-    let (this, base) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
+    let (this, base) =
+        base_exchange::create(&rt.shared.sockets, parts, name, options, store, |_| Ok(()))?;
     let _ = rt.shared.base.set(base);
     Ok(this)
 }
@@ -382,17 +383,53 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
             }))
         }),
     );
-    // Shared signature-rejection util is pending on master; until it lands the
-    // binding performs no signature retry or resend (stated in the PR).
+    // Keep the shared request stamp on the live JS config across both retry
+    // paths; the shared client owns replay, timeout and request interceptors.
     def(
         "signatureRejectedResponse",
-        Js::function("signatureRejectedResponse", |_, _| {
-            Ok(Js::function("", |_, _| Ok(Js::Bool(false))))
+        Js::function("signatureRejectedResponse", |_, a| {
+            let predicate = arg(&a, 0);
+            Ok(Js::function("", move |_, a| {
+                use safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY as KEY;
+                let error = arg(&a, 0);
+                let config = error.get("config")?;
+                if !config.truthy() {
+                    return Ok(Js::Bool(false));
+                }
+                let response = error.get("response")?;
+                if !response.truthy() || config.get(KEY)?.truthy() {
+                    return Ok(Js::Bool(false));
+                }
+                if !predicate
+                    .call(Js::Undefined, vec![response.get("data")?])?
+                    .truthy()
+                {
+                    return Ok(Js::Bool(false));
+                }
+                config.set(KEY, Js::Bool(true))?;
+                Ok(Js::Bool(true))
+            }))
         }),
     );
     def(
         "resendOnSignatureRejection",
-        Js::function("resendOnSignatureRejection", |_, _| Ok(Js::Undefined)),
+        Js::function("resendOnSignatureRejection", |_, a| {
+            use safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY as KEY;
+            let xhr = arg(&a, 0);
+            let response = arg(&a, 1);
+            let predicate = arg(&a, 2);
+            let config = response.get("config")?;
+            if (!config.is_nullish() && config.get(KEY)?.truthy())
+                || !predicate
+                    .call(Js::Undefined, vec![response.get("data")?])?
+                    .truthy()
+            {
+                return Ok(Js::Undefined);
+            }
+            let stamped = config.spread_object()?;
+            stamped.define(KEY, Js::Bool(true))?;
+            xhr.call_method("request", vec![stamped])
+        }),
     );
     def(
         "isBitgetSignatureRejection",
@@ -582,4 +619,119 @@ pub(crate) fn client_order_id_rule() -> safe_cex_exchange::client_order_id::Clie
         Rc::new(client_order_id_valid),
         Default::default(),
     )
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::*;
+    use safe_cex_exchange::js_runtime::value::from_json;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn venue_signature_predicate_source_witness_keeps_shared_coercion_gap_visible() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/signature-rejection-source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        let mut cases = vec![
+            ("undefined", Js::Undefined),
+            ("null", Js::Null),
+            ("bool", Js::Bool(true)),
+            ("number", Js::Number(40009.0)),
+            ("empty", Js::object(vec![])),
+            ("numeric-code", from_json(&json!({"code":40009}))),
+            ("string-code", from_json(&json!({"code":"40009"}))),
+            ("array-code", from_json(&json!({"code":[40009]}))),
+            (
+                "bigint-code",
+                Js::object(vec![("code", Js::BigInt(Rc::new(40009.into())))]),
+            ),
+            ("other-code", from_json(&json!({"code":"400090"}))),
+            (
+                "message",
+                from_json(&json!({"msg":"prefix SIGN SIGNATURE ERROR suffix"})),
+            ),
+            ("numeric-message", from_json(&json!({"msg":40009}))),
+            ("null-message", from_json(&json!({"msg":null}))),
+            (
+                "array-message",
+                from_json(&json!({"msg":["sign signature error"]})),
+            ),
+            ("long-s", from_json(&json!({"msg":"ſign signature error"}))),
+        ];
+        for (label, left, right) in [
+            ("surrogate-positive", "", "sign signature error"),
+            ("surrogate-break", "sign signa", "ture error"),
+        ] {
+            let units: Vec<_> = left
+                .encode_utf16()
+                .chain([0xd800])
+                .chain(right.encode_utf16())
+                .collect();
+            cases.push((label, Js::object(vec![("msg", Js::utf16(&units))])));
+        }
+        for (label, field, result) in [
+            ("coerced-code", "code", "40009"),
+            ("coerced-message", "msg", "sign signature error"),
+        ] {
+            let value = Js::object(vec![(
+                "toString",
+                Js::function("toString", move |_, _| Ok(Js::str(result))),
+            )]);
+            cases.push((label, Js::object(vec![(field, value)])));
+        }
+        for (label, field, message) in [
+            ("short-circuit", "msg", "unreached"),
+            ("code-throws", "code", "code refused"),
+            ("message-throws", "msg", "message refused"),
+        ] {
+            let value = Js::object(if label == "short-circuit" {
+                vec![("code", Js::str("40009"))]
+            } else {
+                vec![]
+            });
+            value.define_accessor(
+                field,
+                Some(Rc::new(move |_| Err(Thrown::error("RangeError", message)))),
+                None,
+            );
+            cases.push((label, value));
+        }
+        assert_eq!(cases.len(), 22);
+        let actual: Vec<_> = cases
+            .into_iter()
+            .map(
+                |(label, value)| match is_bitget_signature_rejection(&value) {
+                    Ok(result) => json!({"label":label,"result":result}),
+                    Err(error) => {
+                        json!({"label":label,"error":error.value.get("name").unwrap().to_display()})
+                    }
+                },
+            )
+            .collect();
+        // The predicate row remains pending: shared String conversion does not
+        // yet run arbitrary object toString hooks. Keep these source-positive
+        // gaps visible instead of treating the open runtime contract as ported.
+        for (native, source) in actual.iter().zip(&expected) {
+            assert_eq!(native["label"], source["label"]);
+            if matches!(
+                native["label"].as_str(),
+                Some("coerced-code" | "coerced-message")
+            ) {
+                assert_eq!(native["result"], false, "pending shared String coercion");
+                assert_eq!(source["result"], true, "actual source custom coercion");
+            } else {
+                assert_eq!(native, source);
+            }
+        }
+    }
 }

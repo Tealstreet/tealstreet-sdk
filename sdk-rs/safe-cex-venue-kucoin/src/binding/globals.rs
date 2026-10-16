@@ -79,8 +79,20 @@ fn base_exchange(weak: &W, a: Vec<Js>) -> Result<Js, Thrown> {
         .borrow_mut()
         .take()
         .ok_or_else(|| Thrown::error("Error", "BaseExchange constructed twice"))?;
-    let (this, base) =
-        base_exchange::create(&scope.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;
+    let (this, base) = base_exchange::create(
+        &scope.sockets,
+        parts,
+        arg(&a, 0),
+        arg(&a, 1),
+        arg(&a, 2),
+        |this| {
+            // kucoinspot.exchange.ts: isSpot = true; Futures inherits false.
+            if scope.extra.api.spot {
+                this.define("isSpot", Js::Bool(true))?;
+            }
+            Ok(())
+        },
+    )?;
     let _ = scope.base.set(base);
     scope.extra.supers.borrow_mut().push((
         this.clone(),
