@@ -18,3 +18,11 @@ txflow sources with a stubbed axios factory and `BaseExchange`;
 `tests/parity.rs` compares constants, factory config for testnet
 true/false/absent, constructor order and the start emission. Scope checks to
 this crate plus strict host and wasm clippy.
+
+The accepted-set census classifies `TxFlowExchange::new` as typed construction.
+Its contract pins the exact compiler API and its assembly of typed options,
+Store/runtime/HTTP handles and the transport registry. The native witness
+`tests/parity.rs::actual_typescript_constants_factory_and_start` executes that
+constructor and observes its identity and eager single Phase-0 refusal, alongside
+actual-source API factory comparisons. Verify the selected native/default census
+owner with `node safe-cex-parity/scripts/accepted-set.mjs --package=safe-cex-venue-txflow --jobs=1` from `sdk-rs`.
