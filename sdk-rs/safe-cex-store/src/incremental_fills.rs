@@ -6,6 +6,38 @@ pub struct IncrementalFill {
     pub value: Option<f64>,
 }
 
+/// ts: cleanFloat. Drops binary noise past the fifteen significant digits a double
+/// holds exactly: 83578.79999999999 -> 83578.8.
+pub fn clean_float(n: f64) -> f64 {
+    if !n.is_finite() {
+        return n;
+    }
+    let text = safe_cex_num::js_to_precision(n, 15.0).expect("15 is a valid precision");
+    text.parse().expect("toPrecision text parses")
+}
+// ts: decimalsOf
+fn decimals_of(n: f64) -> Option<usize> {
+    let text = safe_cex_num::js_number_string(n);
+    if text.contains('e') {
+        return None;
+    }
+    Some(
+        text.split_once('.')
+            .map_or(0, |(_, fraction)| fraction.len()),
+    )
+}
+/// ts: subtractDecimals. A small fill off a large running total keeps noise past
+/// fifteen digits, so round to the inputs' own decimal places.
+fn subtract_decimals(a: f64, b: f64) -> f64 {
+    let (Some(da), Some(db)) = (decimals_of(a), decimals_of(b)) else {
+        return clean_float(a - b);
+    };
+    let digits = da.max(db).min(20) as f64;
+    let text = safe_cex_num::js_to_fixed(a - b, digits).expect("0..=20 digits");
+    // Number(text): Rust's parser reads NaN, Infinity and exponent forms alike.
+    text.parse().expect("toFixed text parses")
+}
+
 pub fn create_incremental_fills(
     max_orders: f64,
 ) -> impl FnMut(&str, f64, Option<f64>) -> IncrementalFill {
@@ -16,7 +48,7 @@ pub fn create_incremental_fills(
             .find(|(id, _, _)| id == order_id)
             .map(|(_, qty, value)| (*qty, *value))
             .unwrap_or((0.0, 0.0));
-        let qty = cumulative_qty - previous.0;
+        let qty = subtract_decimals(cumulative_qty, previous.0);
         if qty.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return IncrementalFill {
                 qty: 0.0,
@@ -36,7 +68,7 @@ pub fn create_incremental_fills(
             seen.pop_front();
         }
         let value = cumulative_value
-            .map(|value| value - previous.1)
+            .map(|value| subtract_decimals(value, previous.1))
             .filter(|value| *value > 0.0);
         IncrementalFill { qty, value }
     }
