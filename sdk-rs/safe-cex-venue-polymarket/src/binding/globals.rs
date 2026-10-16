@@ -118,17 +118,6 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         }),
     );
     def(
-        "throttle",
-        func("throttle", |rt, a| {
-            Ok(super::throttle::new(
-                rt,
-                arg(&a, 0),
-                arg(&a, 1).to_number()?,
-                arg(&a, 2),
-            ))
-        }),
-    );
-    def(
         "buildL2Headers",
         func("buildL2Headers", |rt, a| {
             crate::auth_init::build_l2_headers(
