@@ -181,3 +181,13 @@ That owned-callback boundary is priced on the listenOrderBook manifest row.
 `scripts/binding-precision-controls.py` independently swaps the production amount
 and price precision operands. Fractional wire assertions must fail separately;
 integral placement inputs do not establish this protection.
+
+The HTTP bridge uses shared `client::factory::{create,install_transport_adapter}`
+for fixed20-second timeout, Axios Accept defaults, provider-selected routing and
+proxy authorization. Source createAPI's installTransportAdapter call uses the
+Default variant; raw-text response preservation still protects bigint parsing.
+The selected adapter handles both initial requests and one-shot signature resends.
+`tests/support/binding_factory.rs` checks non-default receive windows, Accept and
+a real custom provider/adapter. `scripts/binding-factory-controls.py` independently
+restores the old timeout, removes Accept and chooses BigInt; each compiled change
+must fail its named E2E and restore to pass. Run this controller serially.
