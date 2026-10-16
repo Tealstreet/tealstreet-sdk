@@ -7220,15 +7220,3 @@ reason = "Rust-only boxed future/result carrier for host asynchronous loader ope
 [[exempt]]
 rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn"
 reason = "Rust-only owned callback carrier for the host loop scheduler's anonymous asynchronous function argument; no standalone TypeScript declaration. Loop behavior remains in its mapped operations. Accepted-set alias identity and raw-construction probes remain mandatory. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
-
-[[exempt]]
-rs = "safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Value"
-reason = "Associated opaque value type of the exempt AssemblyHost capability for the mapped Bitget constructor/API/inverse-read bodies; preserves source value aliases and adds no behavior or TypeScript declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Error"
-reason = "Associated error type of the exempt AssemblyHost capability for the mapped Bitget constructor/API/inverse-read bodies; carries host-thrown values unchanged and adds no behavior or TypeScript declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-kucoin/src/spot_exchange_class.rs::SpotExchangeOps"
-reason = "C3: language/construction/body-view and RegExp capability bundle handed to the mapped KucoinSpotExchange class factory define_spot_exchange_class; the 26 member bodies remain Rust targets on the class row, matching the spot_private_class PrivateClassOps exemption."
