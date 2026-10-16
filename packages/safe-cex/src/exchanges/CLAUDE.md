@@ -1555,10 +1555,11 @@ These drift fast. Prefer:
 `OrderFillEvent.amount` is what that execution filled — never the order's
 running total. Consumers add fills up (the chaser's `addFillAmount`, the web's
 provisional positions), so a running total counts every partial again. Bybit
-(linear, inverse, spot) and Bitrue report running totals and convert through
-`utils/incrementalFills`; Bybit also prices each execution from its traded
-value (`qty / value` on inverse, where value is coin). A replayed frame emits
-nothing, and a worker restart reports an already-part-filled order's total once.
+(linear, inverse, spot), Bitrue and BloFin report running totals and convert
+through `utils/incrementalFills`. Bybit prices each execution from its traded
+value (`qty / value` on inverse, where value is coin); BloFin derives cumulative
+value from `filledSize × averagePrice`. A replayed frame emits nothing, and a
+worker restart reports an already-part-filled order's total once.
 
 **`fillEventUnits.ts` lists the venues whose event is VERIFIED** — one
 execution, in `native` (placement) or `base` units. A venue absent there emits a

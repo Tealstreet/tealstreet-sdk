@@ -9,6 +9,7 @@ import { OrderStatus } from '@tealstreet/safe-cex/src/types';
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveTransportRouting } from '../../transport/registry';
+import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 import { roundUSD } from '../../utils/roundUSD';
 import { multiply, subtract } from '../../utils/safe-math';
 import { virtualClock } from '../../utils/virtualClock';
@@ -24,7 +25,8 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
 
   // Throttled fetch state for orders
   private ordersThrottleTimeout?: ReturnType<typeof setTimeout>;
-  private lastFilledSizeByOrderId = new Map<string, number>();
+  // BloFin reports what an order has filled SO FAR; a fill event reports this execution.
+  private readonly incrementalFills = createIncrementalFills();
 
   get endpoint() {
     return BASE_WS_URL.private[this.parent.options.testnet ? 'testnet' : 'livenet'];
@@ -223,34 +225,29 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
           const market = this.store.marketsById[o.instId];
           const contractSize = market?.contractSize || parseFloat(market?.info?.contractValue || '1');
           const filledSizeNative = parseFloat(o.filledSize || '0');
-          const previousFilledSizeNative = orderId ? this.lastFilledSizeByOrderId.get(orderId) || 0 : 0;
-          const fillDeltaNative = Math.max(filledSizeNative - previousFilledSizeNative, 0);
-          if (orderId && Number.isFinite(filledSizeNative) && filledSizeNative >= previousFilledSizeNative) {
-            this.lastFilledSizeByOrderId.set(orderId, filledSizeNative);
-          }
+          const averagePrice = parseFloat(o.averagePrice);
 
-          if (market) {
-            const price = parseFloat(o.averagePrice);
-            if (Number.isFinite(price) && price > 0 && fillDeltaNative > 0) {
+          if (market && Number.isFinite(filledSizeNative) && Number.isFinite(averagePrice) && averagePrice > 0) {
+            // BloFin sends no per-fill value, but its average is full precision, so
+            // filled x average is the running traded value (in contracts x price).
+            const fill = this.incrementalFills(orderId, filledSizeNative, filledSizeNative * averagePrice);
+            if (fill.qty > 0) {
               const rawTimestamp = Number(o.fillTime || o.uTime || o.cTime || Date.now());
               const timestamp =
                 rawTimestamp > 1_000_000_000_000 ? Math.floor(rawTimestamp / 1000) : Math.floor(rawTimestamp);
               this.emitter.emit('fill', {
-                id: orderId || orders[0].id,
-                orderId: orderId || orders[0].id,
+                id: orderId,
+                orderId,
                 side: orders[0].side,
                 symbol: orders[0].symbol,
-                price,
-                amount: multiply(fillDeltaNative, contractSize),
+                // This execution's own price, not the order's running average.
+                price: fill.value ? cleanFloat(fill.value / fill.qty) : averagePrice,
+                amount: multiply(fill.qty, contractSize),
                 timestamp,
               });
             }
           }
         }
-      }
-
-      if (orderId && (o.state === 'filled' || o.state === 'canceled')) {
-        this.lastFilledSizeByOrderId.delete(orderId);
       }
     }
 

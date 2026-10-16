@@ -497,10 +497,11 @@ account and order lifecycle against demo trading.
 15. **afterMethodCalledInWorker**: Updates local `_accountPositionMode` and `_accountMarginType` cache when `changePositionMode` or `changeMarginType` is called from the worker thread.
 16. **Normal-order TP/SL fallback modeling**: BloFin may echo TP/SL only on `orders` channel records (without `tpslId`). `addInlineTpSlFallbackOrders` (run inside `fetchOrdersWithRetry`) synthesizes virtual protective legs from normal-order trigger fields unless a linked algo leg already exists. `mapOrders` itself does NOT synthesize protective legs from normal records — see the transient WS-only window note under "Attached TP/SL Representation".
 17. **Batch placement for attached TP/SL**: Inline TP/SL on normal orders stays on `/trade/batch-orders` for speed; only reduce-only compatibility mode can force `/trade/order`.
-18. **Bounded fill-delta tracking**: Private order events retain the last
-    cumulative `filledSize` only while an order is active. Filled and canceled
-    terminal events delete the order ID after processing, preventing stale
-    entries from accumulating for the life of the socket.
+18. **Bounded incremental fills**: Private order events pass cumulative
+    `filledSize` and `filledSize × averagePrice` through `utils/incrementalFills`.
+    Each event reports only that execution's base amount and price, without
+    floating-point subtraction noise. The shared tracker retains up to 500
+    orders, including terminal rows, so replayed filled frames emit nothing.
 19. **Opening trigger writes are single-row**: BloFin publishes no batch
     placement/cancellation contract for `/order-algo` and `/cancel-algo`.
     `placeOrders` retains ordinary/TP-SL batching but serializes Conditional
