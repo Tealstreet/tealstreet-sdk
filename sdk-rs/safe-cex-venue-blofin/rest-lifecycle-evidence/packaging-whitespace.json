@@ -1,7 +1,0 @@
-{
-  "measured_sha": "245c107385cf55b1040d7f1c6749599cb44868ea",
-  "all_staged_exit": 2,
-  "non_log_exit": 0,
-  "raw_logs_preserved": true,
-  "note": "Raw Cargo/test output has blank terminal lines. Exact diagnostic output retained in packaging-whitespace.log. These are packaging whitespace findings, not failed Cargo gates."
-}

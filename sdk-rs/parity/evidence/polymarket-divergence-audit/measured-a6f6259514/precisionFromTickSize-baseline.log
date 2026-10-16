@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"precisionFromTickSize","result":2,"scope":"numeric output erases unit; no forced retained-output inference"}]}

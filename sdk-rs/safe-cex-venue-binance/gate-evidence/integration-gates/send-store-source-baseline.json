@@ -1,9 +1,0 @@
-{
-  "gate_sha": "69418891fe2c3ffc28a6d558dd98641a3b94325e",
-  "script": "send-store.mjs",
-  "exit": 0,
-  "expected_cases": 64,
-  "observed_cases": 64,
-  "scope": "source-only exploration, not a native parity gate",
-  "stopped_at_case": 63
-}

@@ -106,6 +106,36 @@ cannot. `mirrors/scripts/mirror-workflow-actions.test.mjs` now fails
 If a third-party action is genuinely needed, the repo setting has to change
 deliberately and the pattern must be recorded in that guard.
 
+## 3c. The import direction re-rooted the whole port, and that is now fixed
+
+The first mirror-side commit — the seed itself — came back into the monorepo as
+**11,280 files at `mirrors/tealstreet-sdk/sdk-rs/`**: a second copy of the entire
+port inside the scaffolding directory, commit `2902d7fdf2`, carrying a normal
+`SdkMirror-RevId` trailer and deleting nothing, so no guard fired.
+
+Cause: `ROOT_SCAFFOLDING` in `mirrors/copy.bara.sky` is the import move's
+`paths=` filter, and its exclude list named only `apps`, `packages` and
+`thirdparty`. Anything else at the mirror's root is treated as scaffolding and
+re-rooted under `mirrors/<slice>/`. `sdk-rs` joined the slice on 2026-10-14 and
+that list was never updated, so the export worked (no `paths=` on that side) and
+only the import was wrong. Fixed by adding `sdk-rs/**` and `infra/**` there and
+in `scaffolding_excluded_roots`; `yarn check:mirror-paths` pins the two
+encodings against each other and now reports 5 roots.
+
+**`.gitleaks.toml` was the same mistake in miniature, made by me.** I added the
+monorepo's root allowlist to the slice so this repo's scan would stop falling
+back to gitleaks' defaults; the import re-rooted it to
+`mirrors/tealstreet-sdk/.gitleaks.toml`, which is exactly where every other
+mirror-root config file already lives (`.gitignore`, `package.json`,
+`turbo.json`). It is now scaffolding, like them, and the slice entry is gone.
+**Config files that belong at this repo's root are authored under
+`mirrors/tealstreet-sdk/` in the monorepo, never added to the slice as root
+paths.**
+
+The lesson for anything added to the slice later: a slice path needs an entry in
+`ROOT_SCAFFOLDING`'s exclude list in the SAME change, or the first import after
+it duplicates the tree.
+
 ## 3b. The first real run found a genuine hole: the SDK reached outside the slice
 
 `sdk-rs/safe-cex-transport/src/lib.rs` declares `mod frames;` with a path

@@ -1,5 +1,0 @@
-{
-  "full_raw_log_exit": 2,
-  "non_log_exit": 0,
-  "note": "Raw logs retain terminal blank lines, original diagnostics and output; non-log files pass whitespace."
-}

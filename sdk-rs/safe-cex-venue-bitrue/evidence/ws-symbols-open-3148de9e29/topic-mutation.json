@@ -1,6 +1,0 @@
-{
-  "base_sha": "3148de9e29d84b2530761637fb09761c78b7e15d",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_symbol_helpers.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_symbol_helpers.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_symbol_helpers.rs\n@@ -30,7 +30,7 @@\n     // Source template evaluation converts the symbol result before the table term.\n     let symbol = convert_symbol_as_template(symbol)?;\n     let interval = interval_as_template(interval)?;\n-    Ok(\"market_\"\n+    Ok(\"markets_\"\n         .encode_utf16()\n         .chain(symbol)\n         .chain(\"_kline_\".encode_utf16())\n",
-  "expected_named_assertion": "BITRUE-WS-SYMBOLS-NATIVE topic case0"
-}

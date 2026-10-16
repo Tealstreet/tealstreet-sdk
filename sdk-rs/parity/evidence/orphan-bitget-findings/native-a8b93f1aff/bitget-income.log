@@ -1,9 +1,0 @@
-   Compiling safe-cex-venue-bitget v0.1.0 (<worktree>/sdk-rs/safe-cex-venue-bitget)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.50s
-     Running tests/fill_helpers.rs (sdk-rs/target/debug/deps/fill_helpers-b12f8307511b0690)
-
-running 1 test
-test live_fill_helpers ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.37s
-

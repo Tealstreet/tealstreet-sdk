@@ -1,9 +1,0 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.34s
-     Running tests/root_services.rs (sdk-rs/target/debug/deps/root_services-3148c2bba6cc9a2b)
-
-running 2 tests
-test factory_cache_native_options_and_store_identity ... ok
-test account_native_forwarding_overrides_and_broker_clear ... ok
-
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
-

@@ -1,6 +1,0 @@
-{
-  "base_sha": "46d08011f1c214801efde108c82bd168da0291f2",
-  "patch": "diff --git a/sdk-rs/safe-cex-venue-cryptocom/src/ws_private.rs b/sdk-rs/safe-cex-venue-cryptocom/src/ws_private.rs\nindex 337654715f..9a33e395e4 100644\n--- a/sdk-rs/safe-cex-venue-cryptocom/src/ws_private.rs\n+++ b/sdk-rs/safe-cex-venue-cryptocom/src/ws_private.rs\n@@ -10,7 +10,7 @@ pub fn get_watchdog_stale_threshold_ms() -> f64 {\n }\n \n pub fn get_watchdog_ping_threshold_ms() -> f64 {\n-    CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS\n+    CRYPTOCOM_WS_IDLE_PING_THRESHOLD_MS + 1.0\n }\n \n pub fn ping() {}\n",
-  "named_assertion": "CRYPTOCOM-WS-NATIVE private/getWatchdogPingThresholdMs independent",
-  "stop_index": 2
-}

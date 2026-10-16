@@ -1,8 +1,0 @@
-{
-  "compared_gate_sha": "5d91da4f5db0a1e42c0b6381d2b39b7d8b8bacd8",
-  "preserved_at_sha": "338577203280223f33954e36d2b6e3630ebeb33c",
-  "integration_parent": "ed7ac407c716cea8b8115aea53e466c9ac69d129",
-  "crate_src_tests_manifests_diff_exit": 0,
-  "seven_dependency_src_cargo_toml_diff_exit": 0,
-  "sdk_cargo_toml_lock_diff_exit": 0
-}

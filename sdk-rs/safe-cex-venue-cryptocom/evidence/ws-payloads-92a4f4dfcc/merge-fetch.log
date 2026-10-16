@@ -1,6 +1,0 @@
-MEASUREMENT HEAD SHA: 87d0afe49fc0ffc212a67736c3dadc3b760882f4
-COMMAND: ["git", "fetch", "origin", "feat/safe-cex-rust"]
-From https://github.com/Tealstreet/tealstreet-next
- * branch                  feat/safe-cex-rust -> FETCH_HEAD
-
-MEASURED EXIT: 0

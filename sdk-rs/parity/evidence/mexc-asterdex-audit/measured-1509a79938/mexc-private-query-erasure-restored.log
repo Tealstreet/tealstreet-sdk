@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"mexc-private-query-erasure","units":[113,61,55296],"scope":"private return only; actual HMAC UTF8 erases it, no forced public-output inference"}]}

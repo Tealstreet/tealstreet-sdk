@@ -1,5 +1,0 @@
-blofin.exchange.ts: 66 declarations, zero drift
-blofin.ws-private.ts: 14 declarations, zero drift
-Blofin census: {'ported': 40, 'divergent': 85} stopped at7 files
-safe-cex-venue-blofin/src/exchange.rs: imported inherent impl owner BlofinExchange cannot be resolved; use a local type declaration
-Scoped existing Rust-parity binary exit 1

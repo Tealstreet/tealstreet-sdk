@@ -1,7 +1,0 @@
-SHA 619460c480f9f8855de8503f4529bf786e79c591
-COMMAND ["/opt/homebrew/opt/rustup/bin/cargo", "check", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-cryptocom", "--all-targets", "--jobs", "2"]
-    Checking safe-cex-crypto v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-crypto)
-    Checking safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-exchange)
-    Checking safe-cex-venue-cryptocom v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-venue-cryptocom)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.61s
-EXIT 0

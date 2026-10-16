@@ -1,9 +1,0 @@
-exit_code=0
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.58s
-     Running tests/submit_errors.rs (sdk-rs/target/debug/deps/submit_errors-ae08279232a9dbb5)
-
-running 1 test
-test mexc_native_batch_access_denial_matches_source ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.33s
-

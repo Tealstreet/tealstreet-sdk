@@ -1,6 +1,0 @@
-SHA b6a3f1879aff2ca2f724d2887c503576c7d464de
-COMMAND ["/opt/homebrew/opt/rustup/bin/cargo", "check", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-cryptocom", "--all-targets", "--jobs", "2"]
-    Blocking waiting for file lock on package cache
-    Checking safe-cex-venue-cryptocom v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-venue-cryptocom)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 22.23s
-EXIT 0

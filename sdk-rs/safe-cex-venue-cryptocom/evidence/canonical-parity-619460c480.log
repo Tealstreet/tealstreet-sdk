@@ -1,6 +1,0 @@
-SHA 619460c480f9f8855de8503f4529bf786e79c591
-COMMAND ["python3.12", "sdk-rs/safe-cex-venue-cryptocom/tests/parity_scope.py"]
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
-parity: invention and status gates passed (137 rows, 43 public Rust items)
-tomllib total: 137 ported/divergent/pending: (14, 18, 105)
-EXIT 0

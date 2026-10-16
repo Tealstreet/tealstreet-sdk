@@ -1,5 +1,0 @@
-error[E0616]: field `order` of struct `ValidatedOrder` is private
-  --> tests/ui/order_private_payload.rs:15:86
-   |
-15 | fn bypass(mut token: ValidatedOrder<A>, raw: safe_cex_types::PlaceOrderOpts) { token.order = raw; }
-   |                                                                                      ^^^^^ private field

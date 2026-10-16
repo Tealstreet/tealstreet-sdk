@@ -1,6 +1,0 @@
-{
-  "base_sha": "3148de9e29d84b2530761637fb09761c78b7e15d",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_symbol_helpers.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_symbol_helpers.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_symbol_helpers.rs\n@@ -18,7 +18,7 @@\n         .filter(|unit| !matches!(unit, 0x2d | 0x5f | 0x2f))\n         .collect();\n     let normalized = lower_case(&normalized)?;\n-    Ok(\"e_\".encode_utf16().chain(normalized).collect())\n+    Ok(\"x_\".encode_utf16().chain(normalized).collect())\n }\n \n pub fn format_kline_topic<I, E>(\n",
-  "expected_named_assertion": "BITRUE-WS-SYMBOLS-NATIVE convert case0"
-}

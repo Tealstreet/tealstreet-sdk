@@ -1,6 +1,0 @@
-{
-  "uncommitted_development": true,
-  "format_exit": 0,
-  "first_test_exit": 101,
-  "finding": "Started focused test after formatting yielded, before confirming formatter completion. Both completions checked; committed gates and all subsequent Cargo calls serial."
-}

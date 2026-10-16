@@ -1,9 +1,0 @@
-   Compiling safe-cex-types v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-types)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.85s
-     Running tests/exchange_metadata.rs (sdk-rs/target/debug/deps/exchange_metadata-24e1870d40101236)
-
-running 1 test
-test full_metadata_native_fields_unified_mobile_and_domains ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
-

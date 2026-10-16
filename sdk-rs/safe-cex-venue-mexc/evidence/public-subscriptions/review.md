@@ -1,3 +1,0 @@
-Static sub-agent review of eight production bodies, native tests, original source/oracle, mutation script and mapping declarations. Reviewer ran no Cargo/oracle/tests/controls.
-
-Found artifact-dependent subscription shape/count expectations; fixed both native/source expectations to declared fixture roles and asserted method before shape/count. Added original cleanup subscription Rc pointer assertion. Follow-up found no remaining actionable issue; all source readers stopped before mutations. Checker separately caught six non-indexed struct-field paths; mapped containing real record types instead, with no gate/exemption change.

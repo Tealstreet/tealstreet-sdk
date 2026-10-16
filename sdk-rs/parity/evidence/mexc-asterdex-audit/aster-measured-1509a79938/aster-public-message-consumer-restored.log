@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"aster-public-message-consumer","units":[55296],"last":7,"scope":"actual onMessage → actual ticker handler/lookup/write/event; recording Store/emitter, native decoder inspected only"}]}

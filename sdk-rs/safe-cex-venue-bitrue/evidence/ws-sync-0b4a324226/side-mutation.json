@@ -1,9 +1,0 @@
-{
-  "base_sha": "0b4a32422659e26f7054b5e50b25cea6a6974e33",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n@@ -57,7 +57,7 @@\n }\n pub fn parse_order_side<T: ParseHost>(host: &T, raw: T::Value) -> Result<T::Value, T::Error> {\n     if let Some(value) = host.number(&raw) {\n-        return Ok(host.order_side(if value == 2.0 {\n+        return Ok(host.order_side(if value == 3.0 {\n             OrderSide::Sell\n         } else {\n             OrderSide::Buy\n",
-  "expected_named_assertion": "BITRUE-SYNC-NATIVE-SIDE side:21",
-  "runtime_proof": true,
-  "stop_case_name": "side:21",
-  "stop_case_index": 53
-}

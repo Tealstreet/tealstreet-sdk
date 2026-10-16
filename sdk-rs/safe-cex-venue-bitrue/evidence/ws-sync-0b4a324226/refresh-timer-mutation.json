@@ -1,9 +1,0 @@
-{
-  "base_sha": "0b4a32422659e26f7054b5e50b25cea6a6974e33",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_sync.rs\n@@ -259,7 +259,7 @@\n     let callback_host = host.clone();\n     let timeout = host.set_timeout(\n         move || callback_host.update_listen_key(key.clone()),\n-        30.0 * 60.0 * 1000.0,\n+        30.0 * 60.0 * 1000.0 + 1.0,\n     )?;\n     host.assign_timeout(timeout)?;\n     Ok(())\n",
-  "expected_named_assertion": "BITRUE-SYNC-NATIVE-REFRESH-DELAY",
-  "runtime_proof": true,
-  "stop_case_name": "schedule:0",
-  "stop_case_index": 134
-}

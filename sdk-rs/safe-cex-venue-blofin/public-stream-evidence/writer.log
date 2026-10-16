@@ -1,5 +1,0 @@
-yarn run v1.22.21
-$ node -e "const p='sdk-rs/parity/extract-ts/src/cli.ts';try{if(!require('node:fs').statSync(p).isFile())throw Error()}catch{console.error('Parity extractor has not landed yet: '+p);process.exit(1)}" && node --import tsx sdk-rs/parity/extract-ts/src/cli.ts
-packages/safe-cex/src/exchanges/blofin/blofin.ws-public.ts: invalid symbol row BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES
-error Command failed with exit code 1.
-info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.

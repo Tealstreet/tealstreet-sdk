@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"kraken-tickers-prefix","verb":"get","endpoint":"/v3/tickers","scope":"source prefix only; native async body inspected"}]}

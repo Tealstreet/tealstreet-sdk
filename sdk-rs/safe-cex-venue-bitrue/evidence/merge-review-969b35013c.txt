@@ -1,4 +1,0 @@
-Subject SHA: 969b35013cf775be5b8b134008f34843f917e881
-Native sub-agent /root/review_auth_witness reviewed committed bytes only.
-No blockers. Retained-balance fix unchanged; timestamp:None fixture adaptation preserves all assertions. copy_ticker directly copies optional timestamp. Merge parents confirmed.
-No Cargo, edits, or gate-result claims from reviewer.

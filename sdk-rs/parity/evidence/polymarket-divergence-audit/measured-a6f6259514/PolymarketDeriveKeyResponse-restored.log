@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"PolymarketDeriveKeyResponse","producer":"deriveApiKey","units":[55296],"scope":"actual returned declared-shape field; native record refusal inspected only"}]}

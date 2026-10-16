@@ -1,6 +1,0 @@
-{
-  "base_sha": "fabc4897d044028134baeb340e47a802f2905595",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/api_envelope_body.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/api_envelope_body.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/api_envelope_body.rs\n@@ -56,7 +56,7 @@\n     string: impl FnOnce(&T) -> Result<Vec<u16>, E>,\n ) -> Result<Option<Vec<u16>>, E> {\n     match body {\n-        ResponseBody::String(body) => Ok(Some(body)),\n+        ResponseBody::String(_body) => Ok(None),\n         ResponseBody::Other(body) => match json_stringify(&body) {\n             Ok(value) => Ok(value),\n             Err(_) => string(&body).map(Some),\n",
-  "expected_named_assertion": "CRYPTOCOM-ENVELOPE-BODY-NATIVE body case0 empty"
-}

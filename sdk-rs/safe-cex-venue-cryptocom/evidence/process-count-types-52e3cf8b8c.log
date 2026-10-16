@@ -1,4 +1,0 @@
-SHA 52e3cf8b8c253eaedc59958ac60856d05eef02d4
-COMMAND ["python3.12", "sdk-rs/safe-cex-venue-cryptocom/tests/process_count.py", "types"]
-one_node_process_per_corpus: 1; 3 tests passed
-EXIT 0

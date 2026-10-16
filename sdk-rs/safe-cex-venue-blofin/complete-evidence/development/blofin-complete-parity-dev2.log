@@ -1,5 +1,0 @@
-blofin.exchange.ts: 66 declarations, zero drift
-blofin.ws-private.ts: 14 declarations, zero drift
-Blofin census: {'ported': 40, 'divergent': 85} stopped at7 files
-dependency safe-cex-crypto: No such file or directory (os error 2)
-Scoped existing Rust-parity binary exit 1

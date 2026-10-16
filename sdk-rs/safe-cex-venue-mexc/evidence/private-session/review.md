@@ -1,3 +1,0 @@
-Static sub-agent review only, existing /root/review_polymarket. No gates executed.
-
-Initial findings: dropped source roots were still awaited; output assertions preceded later native fields; literal setters lacked a discriminating inherited-setter witness. All corrected. Added explicit source/native returned-thenable resolution and two inherited-setter literal controls. Final actionable finding was unused resolver in resolution mutant; consumed before implementation commit. Other twelve anchors and named assertions checked, mappings and scope reviewed. All readers stopped before mutations. Reviewer did not execute the target checker or measure indexed counts.

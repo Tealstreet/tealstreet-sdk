@@ -1,4 +1,0 @@
-Measured review subject: 32b0651c16ea5d586a4a77dfbf21ce2c84ae64bc
-Reviewer: native sub-agent /root/review_auth_witness
-Result: no blockers. ResolveLeg is a transparent callback type alias with the same lifetimes and behavior. Store/Bitrue repair unchanged from reviewed b8811512b4; regression unchanged from1226b95769.
-Static review only; reviewer ran no Cargo and made no claim about running gates.

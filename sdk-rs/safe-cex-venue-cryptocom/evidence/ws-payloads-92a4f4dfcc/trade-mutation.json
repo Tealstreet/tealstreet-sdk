@@ -1,9 +1,0 @@
-{
-  "base_sha": "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n@@ -421,8 +421,8 @@\n impl CryptocomWsTradeData {\n     pub fn from_value(value: &PayloadValue) -> Result<Self, PayloadError> {\n         Ok(Self {\n-            d: (number)(field(value, \"d\")?)?,\n-            t: (number)(field(value, \"t\")?)?,\n+            d: (number)(field(value, \"t\")?)?,\n+            t: (number)(field(value, \"d\")?)?,\n             p: (number)(field(value, \"p\")?)?,\n             q: (number)(field(value, \"q\")?)?,\n             s: (CryptocomWsSide::from_value)(field(value, \"s\")?)?,\n",
-  "expected_named_assertion": "CRYPTOCOM-PAYLOAD-NATIVE-NUMBER CryptocomWsTradeUpdate:rows-1.data.0.d",
-  "runtime_proof": true,
-  "stop_case_name": "CryptocomWsTradeUpdate:rows-1",
-  "stop_case_index": 43
-}

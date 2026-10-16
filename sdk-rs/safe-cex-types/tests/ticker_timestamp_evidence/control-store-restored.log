@@ -1,9 +1,0 @@
-
-running 1 test
-test ticker_timestamp_survives_store_insert_and_numeric_patch ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-   Compiling safe-cex-store v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-store)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.40s
-     Running tests/ticker_timestamp.rs (sdk-rs/target/debug/deps/ticker_timestamp-e2fca06eb972ae8b)

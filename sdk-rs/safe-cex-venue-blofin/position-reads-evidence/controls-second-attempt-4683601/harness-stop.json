@@ -1,9 +1,0 @@
-{
-  "sha": "4683601e4b911baabfd4bb8cc0b3afceb90a103d",
-  "runner_exit": 1,
-  "completed_through": 11,
-  "next_control": 12,
-  "mutation_applied": false,
-  "reason": "Exact mutation pattern included spaces, but production metadata async block has compact field(row,\"instId\"); assertion stopped before source write",
-  "production_bytes_restored": true
-}

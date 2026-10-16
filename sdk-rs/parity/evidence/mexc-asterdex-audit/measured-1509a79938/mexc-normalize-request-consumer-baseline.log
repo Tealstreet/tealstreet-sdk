@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"mexc-normalize-request-consumer","units":[55296],"scope":"actual factory request callback calls private normalizer; actual HMAC/headers with public test bytes, no request sent"}]}

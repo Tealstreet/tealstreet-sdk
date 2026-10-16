@@ -1,5 +1,0 @@
-error[E0277]: the trait bound `RestResponseBody: std::default::Default` is not satisfied
- --> tests/ui/response_body_no_default.rs:3:31
-  |
-3 |     let _: RestResponseBody = Default::default();
-  |                               ^^^^^^^^^^^^^^^^^^ the trait `std::default::Default` is not implemented for `RestResponseBody`

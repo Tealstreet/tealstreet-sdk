@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"aster-private-log-cutoff","lastUnit":55357,"scope":"actual private onMessage → actual BaseExchange.log → recording program emitter, no human-only diagnostic assumption"}]}

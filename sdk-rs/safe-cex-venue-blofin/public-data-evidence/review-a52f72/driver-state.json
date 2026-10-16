@@ -1,8 +1,0 @@
-{
-  "sha": "a52f72871c847adfcd0a5b89f2db51fc1be34db3",
-  "check_exit": 0,
-  "host_clippy_exit": 101,
-  "reason": "Test collapsible nested if; no production warning at this SHA",
-  "tests": "not reached",
-  "fmt": "not reached"
-}

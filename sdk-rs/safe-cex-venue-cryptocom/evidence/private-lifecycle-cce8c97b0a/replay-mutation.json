@@ -1,6 +1,0 @@
-{
-  "base_sha": "cce8c97b0a0c965a25c360d8928827888eaf03a1",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n@@ -161,7 +161,7 @@\n     transport: &T,\n ) -> Ready<Result<(), T::Error>> {\n     ready((|| {\n-        if state.is_authenticated.get() && !values(state).is_empty() {\n+        if !values(state).is_empty() {\n             let prepared = transport.prepare()?;\n             let id = state.channels.message_id.get();\n             state.channels.message_id.set(id + 1.0);\n",
-  "expected_named_assertion": "CRYPTOCOM-LIFECYCLE-NATIVE-NUMBER replay-unauthed before-poll"
-}
