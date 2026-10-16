@@ -454,6 +454,7 @@ impl ApexOmniExchange {
             }
         };
         let order = Order {
+            client_order_id: None,
             id: field_string(raw_id)?,
             status: *status,
             symbol: market.symbol,

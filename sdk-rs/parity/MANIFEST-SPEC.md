@@ -1645,8 +1645,9 @@ message in `requestsLogAtom`; the actual dev/Cypress `__getRequestsLog()`
 returns it unchanged. At the split boundary the returned string has length
 4121 and unit D83D at index 4095. The helper is available in dev/Cypress, not
 plain production without Cypress. The source consumer proof is
-`safe-cex-types/tests/diagnostic_observability.test.cjs`, which executes the
-actual cap, callback and getter with real Jotai storage before serialization.
+tealstreet-next `scripts/sdk-diagnostic-observability.test.cjs`, which executes the
+actual cap, callback and getter with real Jotai storage before serialization. It
+lives in the monorepo because its consumer is apps/web, outside this slice.
 The cap row's FORCED clause must name this observation; do not classify it as
 CHOSEN merely because the event is called diagnostic. Its core owner retains
 responsibility for the native cap witness and row note.
@@ -3329,6 +3330,16 @@ These are adapter choices, not proof that concrete venue module hosts,
 constructors or facade assembly have been supplied. Source/native loader
 witnesses cover the declared finite routes and selected scheduling/value costs;
 they do not establish general JavaScript object or event-loop emulation.
+
+**Scope amendment (2026-10-16).** One exception now applies to the paragraph
+above: the names in `safe-cex-registry/src/rust_venues.rs` (`backpack`,
+`binance`) have concrete, statically linked Rust constructors. A caller reaches
+them only by choosing `ConstructionPath::Rust` for that name. They use the same
+typed `ExchangeConstructor` capability, so none of the three choices above
+changes. The default `ConstructionPath::ModuleHost` keeps every module-host route
+and its price. That is why the `exchangeRegistry.<name>` rows stay divergent and
+claim the Rust route as split members. `Rust` for any other name is a named
+error, never a fallback. The design is in `safe-cex-registry/CONSTRUCTION.md`.
 
 <a id="utility-capability-choice"></a>
 ### Utility capability choices
