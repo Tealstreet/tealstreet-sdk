@@ -1,5 +1,8 @@
 //! Host operations for the existing Spot class, trading and socket bodies.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{IterSource, Kind, PropKey, Value},
+};
 use crate::{
     spot_client::{self, ClientCallback, SpotClientHost},
     spot_json::JsString,
