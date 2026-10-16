@@ -356,7 +356,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.mexc(&options)?;
         let external = external_factory("mexc", deps.external_public_data, &options)?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
@@ -367,6 +367,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                 ..Default::default()
             },
         );
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
         let weak: Rc<
             std::cell::RefCell<std::rc::Weak<safe_cex_venue_mexc::exchange::MexcExchange>>,
         > = Rc::default();
@@ -377,7 +378,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             deps.local_to_utc,
             safe_cex_venue_mexc::sockets::MexcSocketDependencies {
                 runtime: deps.runtime,
-                remote_account_name: None,
+                remote_account_name: host.hosted_signer().and_then(|(_, account)| account),
                 emit_fill: Rc::new(move |fill| {
                     use safe_cex_exchange::exchange::Exchange;
                     if let Some(parent) = fill_parent.borrow().upgrade() {

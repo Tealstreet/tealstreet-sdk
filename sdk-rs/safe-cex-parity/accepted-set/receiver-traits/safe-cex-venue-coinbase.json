@@ -1,0 +1,8 @@
+{
+  "safe_cex_venue_coinbase::portfolios_balances::PortfolioHost::get for alloc::rc::Rc<H>": {
+    "category": "delegated",
+    "file": "safe-cex-venue-coinbase/src/portfolios_balances.rs",
+    "reason": "Reviewed portfolios_balances.rs: the Rc<H> impl forwards every PortfolioHost method to (**self) unchanged, so a retained class host is the same capability rather than a copy. Decoding of PortfolioReply belongs to the concrete H implementation, not this forwarding receiver.",
+    "sourceSha256": "774fa7229b512ec22517c3a85a6d1089981cea82ae43821e42bddac9735762bc"
+  }
+}
