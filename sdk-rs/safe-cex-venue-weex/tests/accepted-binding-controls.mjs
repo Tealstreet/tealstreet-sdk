@@ -1,3 +1,4 @@
+import { loadPolicy } from '../../safe-cex-parity/scripts/accepted-policy-files.mjs';
 // Run alone: the accepted-set sandbox and temporary production mutations are serial.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,8 +24,8 @@ const target = pkg.targets.find(row => row.kind.includes('lib'));
 cargo(['rustdoc', '--locked', '-p', pkg.name, '--lib', '--jobs=1', '--', '-Z', 'unstable-options', '--output-format=json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all']);
 const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'doc', `${target.name}.json`)));
 const found = inventory(doc, {
-  defaultTraits: JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/default-traits.json'))),
-  receiverTraits: JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/receiver-traits.json'))),
+  defaultTraits: loadPolicy('default-traits'),
+  receiverTraits: loadPolicy('receiver-traits'),
   readSource: file => fs.readFileSync(path.join(root, file)),
 });
 const contracts = loadContracts();

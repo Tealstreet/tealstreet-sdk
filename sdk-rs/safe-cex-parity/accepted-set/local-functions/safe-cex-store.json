@@ -1,0 +1,7 @@
+{
+  "safe-cex-store/src/orderbook.rs::LOCAL_FUNCTION:sorted": {
+    "category": "non-decoder",
+    "reason": "Recursive stable merge-sort helper invoked by sort_order_book; it mutates already-decoded order-book levels and does not accept wire values.",
+    "sourceSha256": "4f055d3ccc9a9d32c5a66174eadf93b24c5d8aa2aff2f0567a195490e8b64016"
+  }
+}

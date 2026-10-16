@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import path from 'node:path';
 // These two concrete signatures have no nominal root. Expected types belong
 // to reviewed policy, never to the classification contract. Native invariant
 // equality checks the complete signature, including every borrowed lifetime.
-const specs = JSON.parse(fs.readFileSync(new URL('../accepted-set/function-pointer-aliases.json', import.meta.url), 'utf8'));
+const specs = loadPolicy('function-pointer-aliases');
 const fields = ['expectedType', 'file', 'generics', 'rawTarget', 'roots', 'target'];
 const callerFields = ['instantiation', 'aliasProbeExpected', 'aliasProbeKind', 'aliasProbeSuffix', 'nativeCanonical'];
 

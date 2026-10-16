@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import test from 'node:test';
 import { inventory } from './accepted-inventory.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const specs = Object.values(JSON.parse(fs.readFileSync(new URL('../accepted-set/constant-outputs.json', import.meta.url), 'utf8')));
+const specs = Object.values(loadPolicy('constant-outputs'));
 const ownerName = 'safe_cex_num::numeric_ingress::output::Capture';
 // This is a focused control contract, never a production classification. Every
 // compiler entry remains present. Ordinary typed arguments keep their normal

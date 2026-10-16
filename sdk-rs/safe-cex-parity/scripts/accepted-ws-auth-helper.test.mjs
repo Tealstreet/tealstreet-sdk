@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import { loadContracts } from './accepted-contract-files.mjs';
 import fs from 'node:fs';
@@ -15,7 +16,7 @@ const sourcePath = path.join(root, 'safe-cex-types/src/ws_auth.rs');
 const original = fs.readFileSync(sourcePath, 'utf8');
 const helperLabel = 'safe-cex-types/src/ws_auth.rs::Wire';
 const ownerName = 'safe_cex_types::ws_auth::WsAuthResponse';
-const helpers = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/local-type-helpers.json')));
+const helpers = loadPolicy('local-type-helpers');
 const contracts = loadContracts();
 function cargo(args, extraEnv = {}) {
   const result = spawnSync('cargo', ['--color', 'never', ...args], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, CARGO_BUILD_JOBS: '2', ...extraEnv } });
