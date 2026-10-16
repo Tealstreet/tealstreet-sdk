@@ -252,7 +252,7 @@ test('reviewed direct transport constant pins raw compiler source and native cap
   }
   for (const [label, anchor, raw, file, refusal] of [
     ['direct constant maintained source pin', "    assert.equal(createHash('sha256').update(bytes).digest('hex'), spec.typescript.sha256, `${label}: maintained direct source changed`);", true, spec.typescript.file, 'maintained direct source changed'],
-    ['direct constant indexed raw method pin', "    assert.equal(type.rawEntrypoints?.[index], true, `${label}: actual indexed raw method required`);", false, null, 'actual indexed raw method'],
+    ['direct constant indexed raw method pin', "  assert.equal(type.rawEntrypoints?.[index], true, `${label}: actual indexed raw method required`);", false, null, 'actual indexed raw method'],
   ]) {
     const type = { ...actual, rawEntrypoints: [raw, false] };
     const run = mutant => {
