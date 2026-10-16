@@ -3237,5 +3237,1824 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_bitget::account_predicates::is_bitget_uta_classic_unsupported": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_bitget_uta_classic_unsupported",
+      "signature": {
+        "inputs": [
+          [
+            "code",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_bitget::account_predicates::ApiCode",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean account-routing predicate: formats an already typed string/number code and checks one exact code or two message fragments. It returns a decision rather than admitting a wire record or constructing a decoded owner.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::account_predicates::get_bitget_api_error_message": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_bitget_api_error_message",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fallback",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'a",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Selects and borrows the supplied nonempty typed message or the supplied typed fallback. It parses no text grammar and creates no decoded value.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::account_predicates::is_bitget_environment_mismatch": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_bitget_environment_mismatch",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean substring classifier over a supplied optional typed message; case folding and contains do not admit or construct a wire owner.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::api::is_bitget_uta_strategy_order_not_found": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_bitget_uta_strategy_order_not_found",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean message predicate: reads a string projection from an existing Value and checks the lowercased strategy-id fragment. Other Value kinds return false; there is no decoded output owner.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::api::should_silence_bitget_response_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "should_silence_bitget_response_error",
+      "signature": {
+        "inputs": [
+          [
+            "code",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "url",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Combines already supplied response code/message/URL predicates into an emission decision, preserving exact code membership and the strategy-cancel URL branch. It performs no response deserialization.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::api::should_suppress_validation_error_emission": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "should_suppress_validation_error_emission",
+      "signature": {
+        "inputs": [
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean receiver-property predicate: only an existing exact Value::Bool(true) suppresses the event. It neither coerces the property nor constructs a decoded owner.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::family::is_bitget_like_exchange": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_bitget_like_exchange",
+      "signature": {
+        "inputs": [
+          [
+            "exchange",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean membership check against the three compiled family names, using an already supplied optional string.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::family::is_bitget_virtual_attached_tp_sl_order_id": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_bitget_virtual_attached_tp_sl_order_id",
+      "signature": {
+        "inputs": [
+          [
+            "id",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean suffix classifier over a supplied optional identifier; it recognizes the two virtual attached-order suffixes without decoding an order.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::family::is_bitget_virtual_attached_tp_sl_order": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_bitget_virtual_attached_tp_sl_order",
+      "signature": {
+        "inputs": [
+          [
+            "order_id",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "exchange_name",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Combines the existing family-membership and identifier-suffix decisions over supplied field projections; no order record is deserialized.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained pure/source predicate tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::profile::api_uta_category": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "api_uta_category",
+      "signature": {
+        "inputs": [
+          [
+            "api_product_type",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Uppercases an already supplied product-type label and deliberately retains testnet S-prefixed outputs. This is a profile getter transformation, not admission to the closed wire category enum.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained tests/order.rs profile and Unicode-source tests pin product labels and testnet behavior. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::stream_predicates::is_terminal_fill_status": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_terminal_fill_status",
+      "signature": {
+        "inputs": [
+          [
+            "normalized_status",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean membership check over already normalized status text; only the three compiled spellings match and no input normalization or decoded record is constructed.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained tests/order.rs stream/source tests execute these actual native bodies. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::socket_ping::ping_public": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "ping_public",
+      "signature": {
+        "inputs": [
+          [
+            "is_disposed",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "ping_at",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::Cell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "performance_now",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "send",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&str) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Effectful transport operation on typed disposed state, clock capability and sender: updates the existing timestamp Cell before sending the constant ping text. It interprets no incoming wire input.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained tests/socket_policy.rs native/source tests inspect call order, timestamp bits and original sender errors. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::socket_ping::ping_secondary_public": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "ping_secondary_public",
+      "signature": {
+        "inputs": [
+          [
+            "is_disposed",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "ping_at",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::Cell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "performance_now",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "send",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&str) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Separate secondary-socket effect: reads typed disposal state, samples the supplied clock once, updates the timestamp Cell and sends constant ping through the supplied sender. No data admission occurs.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained tests/socket_policy.rs native/source tests inspect call order, timestamp bits and original sender errors. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::socket_ping::ping_private": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "ping_private",
+      "signature": {
+        "inputs": [
+          [
+            "is_disposed",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "ping_at",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::Cell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "performance_now",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "send_with_log",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&str) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Private-socket effect uses the supplied send-with-log capability after publishing the clock sample, unless disposed. It owns no incoming codec or parser.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained tests/socket_policy.rs native/source tests inspect call order, timestamp bits and original sender errors. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::subscriptions::listen_order_book": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "listen_order_book",
+      "signature": {
+        "inputs": [
+          [
+            "public_websocket",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_exchange::external::ExternalPublicData",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "callback",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::OrderBook",
+                                            "args": null
+                                          }
+                                        }
+                                      ],
+                                      "output": null
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ListenerCleanup",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Forwards an already typed symbol and existing Rc<OrderBook callback> to the supplied ExternalPublicData provider and returns its original cleanup. Provider callback delivery is a typed capability boundary, not deserialization by this delegate.",
+    "evidence": "Reviewed this individual actual function body and its source mapping. The exact compiler signature receives a native classification receipt. The maintained subscriptions native/source tests inspect callback and cleanup identity. This classification does not exempt callees or claim execution by the classification receipt itself."
+  },
+  "safe_cex_venue_bitget::stream_predicates::normalize_order_status": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize_order_status",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed the actual nullish empty-string default, shared fallible String coercion, lowercase and separator replacement. Execute actual native text outputs for distinct strings and both nullish states; no owner serialization or input echo.",
+    "call": "{let input=if $value[\"missing\"]==true{None}else{Some(&$value[\"value\"])};match $type(input){Ok(text)=>serde_json::json!({\"ok\":true,\"text\":text}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "cases": [
+      {
+        "input": {
+          "missing": false,
+          "value": "FULL-FILL"
+        },
+        "output": {
+          "ok": true,
+          "text": "full_fill"
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": "Partially-Filled"
+        },
+        "output": {
+          "ok": true,
+          "text": "partially_filled"
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      },
+      {
+        "input": {
+          "missing": true
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_bitget::stream_predicates::normalize_channel": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize_channel",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed the actual nullish empty-string default, shared fallible String coercion, lowercase and separator replacement. Execute actual native text outputs for distinct strings and both nullish states; no owner serialization or input echo.",
+    "call": "{let input=if $value[\"missing\"]==true{None}else{Some(&$value[\"value\"])};match $type(input){Ok(text)=>serde_json::json!({\"ok\":true,\"text\":text}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "cases": [
+      {
+        "input": {
+          "missing": false,
+          "value": "ORDER-CHANNEL_one"
+        },
+        "output": {
+          "ok": true,
+          "text": "orderchannelone"
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": "MIX_POSITIONS"
+        },
+        "output": {
+          "ok": true,
+          "text": "mixpositions"
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      },
+      {
+        "input": {
+          "missing": true
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_bitget::stream_predicates::get_raw_order_status": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_raw_order_status",
+      "signature": {
+        "inputs": [
+          [
+            "order",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Read the null/undefined parent errors and nullish status/state/planStatus/orderStatus priority before normalization. Actual native function fixtures distinguish empty-string precedence, later aliases and both parent errors; the shared coercion/source oracle remains supplementary.",
+    "call": "{let input=if $value[\"missing\"]==true{None}else{Some(&$value[\"value\"])};match $type(input){Ok(text)=>serde_json::json!({\"ok\":true,\"text\":text}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "cases": [
+      {
+        "input": {
+          "missing": false,
+          "value": {
+            "status": null,
+            "state": "FULL-FILL"
+          }
+        },
+        "output": {
+          "ok": true,
+          "text": "full_fill"
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": {
+            "status": "",
+            "state": "filled"
+          }
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      },
+      {
+        "input": {
+          "missing": true
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'status')"
+        }
+      },
+      {
+        "input": {
+          "missing": false,
+          "value": null
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'status')"
+        }
+      }
+    ]
   }
 }
