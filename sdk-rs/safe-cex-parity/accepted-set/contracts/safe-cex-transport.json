@@ -1,0 +1,5583 @@
+{
+  "safe_cex_transport::frames::Config": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "url": "sample"
+    }
+  },
+  "safe_cex_transport::frames::HttpRequestArgs": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "instantiation": "HttpRequestArgs<serde_json::Map<String, serde_json::Value>>",
+    "sample": {
+      "headers": {},
+      "method": "GET",
+      "url": "sample",
+      "data": null,
+      "params": {}
+    }
+  },
+  "safe_cex_transport::frames::RequestDump": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "method": "sample",
+      "url": "sample",
+      "headers": {},
+      "body": null,
+      "form_data": null,
+      "raw_form_data": null
+    }
+  },
+  "safe_cex_transport::frames::ResponseData": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "config": {
+        "url": "sample"
+      },
+      "data": null,
+      "data_raw": null,
+      "data_encoded": null,
+      "data_encoding": null,
+      "status": 1,
+      "status_text": "sample",
+      "headers": {},
+      "request_dump": null
+    }
+  },
+  "safe_cex_transport::frames::RpcHttpResponse": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "type": "sample",
+      "nonce": "sample",
+      "data": {
+        "config": {
+          "url": "sample"
+        },
+        "data": null,
+        "data_raw": null,
+        "data_encoded": null,
+        "data_encoding": null,
+        "status": 1,
+        "status_text": "sample",
+        "headers": {},
+        "request_dump": null
+      }
+    }
+  },
+  "safe_cex_transport::how_config::HOWRegion": {
+    "shape": "string",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "literals": [
+      "JA",
+      "SG"
+    ]
+  },
+  "safe_cex_transport::how_config::LatencyEntry": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "latencyMs": null,
+      "source": null,
+      "cached": null,
+      "sampleCount": null,
+      "measuredAt": null,
+      "updatedAt": 1
+    }
+  },
+  "safe_cex_transport::routing::HowEgress": {
+    "shape": "string",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_transport::how_config::HOWRegion",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Projects an already typed workspace configuration or routing enum; no raw JSON/string decoder."
+      }
+    ],
+    "literals": [
+      "jp",
+      "sg"
+    ]
+  },
+  "safe_cex_transport::routing::ResolvedRouting": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "restProxyHost": "sample",
+      "howEgress": "jp",
+      "wsPublic": {
+        "tunnelled": false,
+        "host": null,
+        "fallback": null,
+        "relay": null,
+        "readonly": null
+      },
+      "wsPrivate": {
+        "tunnelled": false,
+        "host": null,
+        "fallback": null,
+        "relay": null,
+        "readonly": null
+      },
+      "wsBusiness": {
+        "tunnelled": false,
+        "host": null,
+        "fallback": null,
+        "relay": null,
+        "readonly": null
+      }
+    }
+  },
+  "safe_cex_transport::routing::ResolvedWs": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "tunnelled": false,
+      "host": null,
+      "fallback": null,
+      "relay": null,
+      "readonly": null
+    }
+  },
+  "safe_cex_transport::routing::RoutingOptions": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::ExchangeOptions",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Projects an already typed workspace configuration or routing enum; no raw JSON/string decoder."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::ExchangeOptions",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Projects an already typed workspace configuration or routing enum; no raw JSON/string decoder."
+      }
+    ],
+    "sample": {
+      "tealstreetProxy": false,
+      "tealstreetWsRoute": false,
+      "proxyRegion": null,
+      "bybitSiteId": null
+    }
+  },
+  "safe_cex_transport::signing::RemoteSignerRequest": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "id": "sample",
+      "type": "sample",
+      "exchangeName": "apexomni",
+      "accountName": null,
+      "config": {
+        "method": "sample",
+        "url": "sample",
+        "baseUrl": "sample",
+        "params": null,
+        "data": null,
+        "headers": {}
+      }
+    }
+  },
+  "safe_cex_transport::signing::RemoteSignerResponse": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "id": "sample",
+      "config": null,
+      "error": null
+    }
+  },
+  "safe_cex_transport::signing::SignedConfig": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "url": null,
+      "params": null,
+      "data": null,
+      "headers": {}
+    }
+  },
+  "safe_cex_transport::signing::SigningConfig": {
+    "shape": "map",
+    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "entrypoints": [],
+    "sample": {
+      "method": "sample",
+      "url": "sample",
+      "baseUrl": "sample",
+      "params": null,
+      "data": null,
+      "headers": {}
+    }
+  },
+  "safe_cex_transport::fallback::WsDirectFallback": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "max_silent_connects",
+                {
+                  "primitive": "usize"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::how_context::TradeTunnelTimeoutError": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "message",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "config",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestRequest",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "method",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "trade_tunnel_route",
+                {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::how::HowRestAdapter": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::socket::TunnelHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "region",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_transport::routing::HowEgress",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "raw",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "with_options",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::socket::TunnelHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::how_config::CreateAxiosHttpOverWebsocketAdapterOptions",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::how::HOWWebSocket": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::socket::TunnelHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::rate_limit::RateLimitedAdapter": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "inner",
+                {
+                  "resolved_path": {
+                    "path": "alloc::sync::Arc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::provider::RestAdapter",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "clock",
+                {
+                  "resolved_path": {
+                    "path": "alloc::sync::Arc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::rate_limit::RateLimitClock",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "max_requests",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "per_milliseconds",
+                {
+                  "primitive": "u64"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::relay::RelayWebSocket": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::socket::TunnelHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "with_connection_options",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::socket::TunnelHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "connection_options",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::relay::WebSocketConnectionOptions",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::retry::RetryPolicy": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "with_delay",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "milliseconds",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "primitive": "usize"
+                                }
+                              ],
+                              "output": {
+                                "primitive": "u64"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    },
+                    {
+                      "outlives": "'static"
+                    }
+                  ]
+                }
+              ],
+              [
+                "clock",
+                {
+                  "resolved_path": {
+                    "path": "alloc::sync::Arc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::rate_limit::RateLimitClock",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::signing::SigningRequest": {
+    "shape": "typed",
+    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "config",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signing::SigningConfig",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+      }
+    ]
+  },
+  "safe_cex_transport::codec::to_array_buffer": {
+    "api": {
+      "kind": "function",
+      "name": "to_array_buffer",
+      "signature": {
+        "inputs": [
+          [
+            "bytes",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u8"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u8"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/codec.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Encodes text or returns existing bytes; binary frame and base64 decoders are separately classified."
+  },
+  "safe_cex_transport::how_config::configured_token_expired": {
+    "api": {
+      "kind": "function",
+      "name": "configured_token_expired",
+      "signature": {
+        "inputs": [
+          [
+            "token",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::result::Result",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "bool"
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_transport::provider::TransportError",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_config.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Checks token expiry against a clock; no token payload decoding."
+  },
+  "safe_cex_transport::how_config::is_token_expired": {
+    "api": {
+      "kind": "function",
+      "name": "is_token_expired",
+      "signature": {
+        "inputs": [
+          [
+            "token",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_config.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Compares an expiry value with time; no inbound record construction."
+  },
+  "safe_cex_transport::how_diagnostics::bounded_string": {
+    "api": {
+      "kind": "function",
+      "name": "bounded_string",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Truncates diagnostic text to a length bound; no wire decoding."
+  },
+  "safe_cex_transport::how_diagnostics::format_trade_tunnel_error_message": {
+    "api": {
+      "kind": "function",
+      "name": "format_trade_tunnel_error_message",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Formats a diagnostic from existing error fields; no inbound representation parsing."
+  },
+  "safe_cex_transport::how_diagnostics::has_loggable_content": {
+    "api": {
+      "kind": "function",
+      "name": "has_loggable_content",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Predicate over an existing JSON value; no decoded value is constructed."
+  },
+  "safe_cex_transport::how_diagnostics::sanitize": {
+    "api": {
+      "kind": "function",
+      "name": "sanitize",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "depth",
+            {
+              "primitive": "usize"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Redacts already parsed JSON recursively for logs; no accepted input shape boundary."
+  },
+  "safe_cex_transport::how_diagnostics::sanitize_for_trade_tunnel_log": {
+    "api": {
+      "kind": "function",
+      "name": "sanitize_for_trade_tunnel_log",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Transforms existing JSON for diagnostic output; parsing is not performed here."
+  },
+  "safe_cex_transport::how_diagnostics::sensitive_key": {
+    "api": {
+      "kind": "function",
+      "name": "sensitive_key",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Classifies log field names for redaction; not a parser."
+  },
+  "safe_cex_transport::how_diagnostics::stringify_js": {
+    "api": {
+      "kind": "function",
+      "name": "stringify_js",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Serializes an existing JSON value to diagnostic text; not an inbound decoder."
+  },
+  "safe_cex_transport::how_diagnostics::verbose_enabled": {
+    "api": {
+      "kind": "function",
+      "name": "verbose_enabled",
+      "signature": {
+        "inputs": [
+          [
+            "debug",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "public_log",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "process_available",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Checks diagnostic configuration as a predicate; no wire object is constructed."
+  },
+  "safe_cex_transport::how::get_all_server_latencies": {
+    "api": {
+      "kind": "function",
+      "name": "get_all_server_latencies",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::socket::TunnelHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "indexmap::map::IndexMap",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_transport::how_config::LatencyEntry",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "indexmap::map::IndexMap",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_transport::how_config::LatencyEntry",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Fetches and aggregates typed latency results; no local wire decoder in this function."
+  },
+  "safe_cex_transport::how::get_how_websocket_for_exchange": {
+    "api": {
+      "kind": "function",
+      "name": "get_how_websocket_for_exchange",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::socket::TunnelHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_transport::how::HOWWebSocket",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Chooses routing URLs for an exchange; URL parsing helpers are separately classified."
+  },
+  "safe_cex_transport::how::get_latency_for_domain": {
+    "api": {
+      "kind": "function",
+      "name": "get_latency_for_domain",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::socket::TunnelHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "domain",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_transport::how_config::LatencyEntry",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Looks up a latency measurement by domain key; no decoding."
+  },
+  "safe_cex_transport::how::get_tunnel_latency_for_exchange": {
+    "api": {
+      "kind": "function",
+      "name": "get_tunnel_latency_for_exchange",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::socket::TunnelHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u64"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Selects latency metadata for typed exchange routing; no decoder."
+  },
+  "safe_cex_transport::how::js_truthy": {
+    "api": {
+      "kind": "function",
+      "name": "js_truthy",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Returns JavaScript truthiness of an existing JSON value; not a constructor."
+  },
+  "safe_cex_transport::how::protect_big_integer_tokens": {
+    "api": {
+      "kind": "function",
+      "name": "protect_big_integer_tokens",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Rewrites JSON text before the separately inventoried big_int_as_string_json_parse boundary; not an independently callable JSON decoder."
+  },
+  "safe_cex_transport::polling::get_tick_interval": {
+    "api": {
+      "kind": "function",
+      "name": "get_tick_interval",
+      "signature": {
+        "inputs": [
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "configured",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "auth_failure_streak",
+            {
+              "primitive": "u32"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/polling.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Selects polling duration from typed options and key metadata; no wire decoding."
+  },
+  "safe_cex_transport::polling::get_tick_interval_multiplier": {
+    "api": {
+      "kind": "function",
+      "name": "get_tick_interval_multiplier",
+      "signature": {
+        "inputs": [
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "f64"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/polling.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Selects a numeric polling multiplier; no parsed domain owner."
+  },
+  "safe_cex_transport::relay::relay_error_text": {
+    "api": {
+      "kind": "function",
+      "name": "relay_error_text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/relay.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Formats an already typed error to text; does not parse a representation."
+  },
+  "safe_cex_transport::retry::reads_and_posted": {
+    "api": {
+      "kind": "function",
+      "name": "reads_and_posted",
+      "signature": {
+        "inputs": [
+          [
+            "paths",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_transport::retry::ReadClassification",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/retry.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Classifies HTTP method strings as a retry predicate; not a decoded domain value."
+  },
+  "safe_cex_transport::routing::encode_query": {
+    "api": {
+      "kind": "function",
+      "name": "encode_query",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/routing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Encodes query text for output; decoding is separately inventoried."
+  },
+  "safe_cex_transport::routing::is_tokyo_egress": {
+    "api": {
+      "kind": "function",
+      "name": "is_tokyo_egress",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/routing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Checks a route-key predicate; no wire parsing."
+  },
+  "safe_cex_transport::routing::resolve_exchange_routing": {
+    "api": {
+      "kind": "function",
+      "name": "resolve_exchange_routing",
+      "signature": {
+        "inputs": [
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeName",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::routing::RoutingOptions",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_transport::routing::ResolvedRouting",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/routing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Builds routing configuration from typed exchange/options inputs; no inbound JSON shape."
+  },
+  "safe_cex_transport::routing::resolve_ws": {
+    "api": {
+      "kind": "function",
+      "name": "resolve_ws",
+      "signature": {
+        "inputs": [
+          [
+            "ws",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::routing::StaticWs",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "egress",
+            {
+              "resolved_path": {
+                "path": "safe_cex_transport::routing::HowEgress",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_transport::routing::ResolvedWs",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/routing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Selects a websocket endpoint from typed routing data; endpoint parsing is separately classified."
+  },
+  "safe_cex_transport::secondary::create_api_with_secondary_key": {
+    "api": {
+      "kind": "function",
+      "name": "create_api_with_secondary_key",
+      "signature": {
+        "inputs": [
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "provider",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::TransportProvider",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "proxy_url",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "create",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::Fn",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::ExchangeOptions",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::sync::Arc",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "dyn_trait": {
+                                                      "traits": [
+                                                        {
+                                                          "trait": {
+                                                            "path": "safe_cex_transport::provider::RestAdapter",
+                                                            "args": null
+                                                          },
+                                                          "generic_params": []
+                                                        }
+                                                      ],
+                                                      "lifetime": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_transport::provider::TransportError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "rate_limit",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_transport::secondary::RateLimitWrapper",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "lifetime": "'_"
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "secondary_rate_limit",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_transport::secondary::RateLimitWrapper",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "lifetime": "'_"
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::secondary::SecondaryKeyClients",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Fn(&ExchangeOptions) -> Result<Arc<dyn RestAdapter>, TransportError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::Fn",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "safe_cex_types::ExchangeOptions",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::sync::Arc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "dyn_trait": {
+                                                        "traits": [
+                                                          {
+                                                            "trait": {
+                                                              "path": "safe_cex_transport::provider::RestAdapter",
+                                                              "args": null
+                                                            },
+                                                            "generic_params": []
+                                                          }
+                                                        ],
+                                                        "lifetime": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_transport::provider::TransportError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/secondary.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Constructs a client around typed adapters and signing material; not a wire decoder."
+  },
+  "safe_cex_transport::signing::create_remote_signing_adapter": {
+    "api": {
+      "kind": "function",
+      "name": "create_remote_signing_adapter",
+      "signature": {
+        "inputs": [
+          [
+            "signer",
+            {
+              "resolved_path": {
+                "path": "alloc::sync::Arc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::signing::RemoteSigner",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::ExchangeName",
+                "args": null
+              }
+            }
+          ],
+          [
+            "account_name",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "next_id",
+            {
+              "resolved_path": {
+                "path": "alloc::sync::Arc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [],
+                                      "output": {
+                                        "resolved_path": {
+                                          "path": "alloc::string::String",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "now_ms",
+            {
+              "resolved_path": {
+                "path": "alloc::sync::Arc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [],
+                                      "output": {
+                                        "primitive": "u64"
+                                      }
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "inner",
+            {
+              "resolved_path": {
+                "path": "alloc::sync::Arc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_transport::provider::RestAdapter",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_transport::signing::RemoteSigningAdapter",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/signing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Builds an adapter closure around typed signing configuration; parsing helper is separately inventoried."
+  },
+  "safe_cex_transport::signing::header": {
+    "api": {
+      "kind": "function",
+      "name": "header",
+      "signature": {
+        "inputs": [
+          [
+            "headers",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "indexmap::map::IndexMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/signing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Looks up an existing HTTP header value; does not decode a domain owner."
+  },
+  "safe_cex_transport::signing::serialize_headers": {
+    "api": {
+      "kind": "function",
+      "name": "serialize_headers",
+      "signature": {
+        "inputs": [
+          [
+            "headers",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "indexmap::map::IndexMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "indexmap::map::IndexMap",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/signing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Serializes a typed header collection; opposite direction from decoding."
+  },
+  "safe_cex_transport::signing::usable": {
+    "api": {
+      "kind": "function",
+      "name": "usable",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/signing.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Checks an existing value for usable signing input as a predicate."
+  },
+  "safe_cex_transport::socket::token_expired": {
+    "api": {
+      "kind": "function",
+      "name": "token_expired",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::socket::TunnelHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "token",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/socket.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Checks expiry metadata against time, not an inbound message decoder."
+  },
+  "safe_cex_transport::tunnel_endpoints::build_relay_url": {
+    "api": {
+      "kind": "function",
+      "name": "build_relay_url",
+      "signature": {
+        "inputs": [
+          [
+            "egress",
+            {
+              "resolved_path": {
+                "path": "safe_cex_transport::routing::HowEgress",
+                "args": null
+              }
+            }
+          ],
+          [
+            "upstream",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/tunnel_endpoints.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Encodes an upstream URL into a relay URL; inverse parse is separately classified."
+  },
+  "safe_cex_transport::tunnel_endpoints::is_relay_url": {
+    "api": {
+      "kind": "function",
+      "name": "is_relay_url",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/tunnel_endpoints.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Boolean URL classification; does not return a parsed domain owner."
+  },
+  "safe_cex_transport::how::json_parse": {
+    "api": {
+      "kind": "function",
+      "name": "json_parse",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness.",
+    "call": "$type($value.as_str().expect(\"text witness\"))",
+    "cases": [
+      {
+        "input": "{}",
+        "output": {}
+      },
+      {
+        "input": "[1,true]",
+        "output": [
+          1,
+          true
+        ]
+      },
+      {
+        "input": "null",
+        "output": null
+      },
+      {
+        "input": "false",
+        "output": false
+      },
+      {
+        "input": "\"x\"",
+        "output": "x"
+      },
+      {
+        "input": "invalid",
+        "output": null
+      },
+      {
+        "input": "",
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_transport::how::big_int_as_string_json_parse": {
+    "api": {
+      "kind": "function",
+      "name": "big_int_as_string_json_parse",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior.",
+    "call": "$type($value.as_str().expect(\"text witness\"))",
+    "cases": [
+      {
+        "input": "{}",
+        "output": {}
+      },
+      {
+        "input": "[1,true]",
+        "output": [
+          1,
+          true
+        ]
+      },
+      {
+        "input": "null",
+        "output": null
+      },
+      {
+        "input": "false",
+        "output": false
+      },
+      {
+        "input": "\"x\"",
+        "output": "x"
+      },
+      {
+        "input": "invalid",
+        "output": null
+      },
+      {
+        "input": "",
+        "output": null
+      },
+      {
+        "input": "9007199254740993",
+        "output": 9007199254740992
+      },
+      {
+        "input": "[9007199254740993]",
+        "output": [
+          "9007199254740993"
+        ]
+      },
+      {
+        "input": "{\"x\":9007199254740993}",
+        "output": {
+          "x": "9007199254740993"
+        }
+      },
+      {
+        "input": "\"x:9007199254740993!\"",
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_transport::signing::try_parse_json": {
+    "api": {
+      "kind": "function",
+      "name": "try_parse_json",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Signing only parses object/array strings and returns every other input unchanged.",
+    "call": "$type($value.clone())",
+    "cases": [
+      {
+        "input": "{}",
+        "output": {}
+      },
+      {
+        "input": "[1]",
+        "output": [
+          1
+        ]
+      },
+      {
+        "input": "1",
+        "output": "1"
+      },
+      {
+        "input": "null",
+        "output": "null"
+      },
+      {
+        "input": "\"x\"",
+        "output": "\"x\""
+      },
+      {
+        "input": "bad",
+        "output": "bad"
+      },
+      {
+        "input": 12,
+        "output": 12
+      },
+      {
+        "input": {},
+        "output": {}
+      }
+    ]
+  },
+  "safe_cex_transport::how::parse_fallback_data": {
+    "api": {
+      "kind": "function",
+      "name": "parse_fallback_data",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "HOW form fallback requires nonempty key/value pairs and no extra equals; duplicate keys retain the last value, otherwise preserve the complete text.",
+    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "cases": [
+      {
+        "input": "a=1&b=two",
+        "output": {
+          "ok": {
+            "a": "1",
+            "b": "two"
+          }
+        }
+      },
+      {
+        "input": "a=1&a=2",
+        "output": {
+          "ok": {
+            "a": "2"
+          }
+        }
+      },
+      {
+        "input": "a=hello+world",
+        "output": {
+          "ok": {
+            "a": "hello world"
+          }
+        }
+      },
+      {
+        "input": "a=",
+        "output": {
+          "ok": "a="
+        }
+      },
+      {
+        "input": "a=b=c",
+        "output": {
+          "ok": "a=b=c"
+        }
+      },
+      {
+        "input": "plain",
+        "output": {
+          "ok": "plain"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "ok": ""
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::how::parse_data": {
+    "api": {
+      "kind": "function",
+      "name": "parse_data",
+      "signature": {
+        "inputs": [
+          [
+            "bytes",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u8"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "raw",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "HOW byte parser distinguishes raw big-integer JSON, ordinary JSON/form/text fallback and UTF-8 rejection. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior.",
+    "call": "match $type(&$value[\"bytes\"].as_array().expect(\"bytes\").iter().map(|v| v.as_u64().expect(\"byte\") as u8).collect::<Vec<_>>(), $value[\"raw\"].as_bool().expect(\"raw flag\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "cases": [
+      {
+        "input": {
+          "bytes": [
+            123,
+            125
+          ],
+          "raw": false
+        },
+        "output": {
+          "ok": {}
+        }
+      },
+      {
+        "input": {
+          "bytes": [
+            97,
+            61,
+            49
+          ],
+          "raw": false
+        },
+        "output": {
+          "ok": {
+            "a": "1"
+          }
+        }
+      },
+      {
+        "input": {
+          "bytes": [
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100
+          ],
+          "raw": false
+        },
+        "output": {
+          "ok": "invalid"
+        }
+      },
+      {
+        "input": {
+          "bytes": [
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100
+          ],
+          "raw": true
+        },
+        "output": {
+          "ok": null
+        }
+      },
+      {
+        "input": {
+          "bytes": [
+            57,
+            48,
+            48,
+            55,
+            49,
+            57,
+            57,
+            50,
+            53,
+            52,
+            55,
+            52,
+            48,
+            57,
+            57,
+            51
+          ],
+          "raw": true
+        },
+        "output": {
+          "ok": 9007199254740992
+        }
+      },
+      {
+        "input": {
+          "bytes": [
+            255
+          ],
+          "raw": false
+        },
+        "output": {
+          "error": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::relay::decode_query": {
+    "api": {
+      "kind": "function",
+      "name": "decode_query",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Percent decoding preserves malformed percent text, decodes plus as space and replaces invalid UTF-8.",
+    "call": "serde_json::json!($type($value.as_str().expect(\"text witness\")))",
+    "cases": [
+      {
+        "input": "a+b",
+        "output": "a b"
+      },
+      {
+        "input": "%2B",
+        "output": "+"
+      },
+      {
+        "input": "%ZZ",
+        "output": "%ZZ"
+      },
+      {
+        "input": "%FF",
+        "output": "�"
+      },
+      {
+        "input": "%E2%82%AC",
+        "output": "€"
+      }
+    ]
+  },
+  "safe_cex_transport::relay::parse_relay_url": {
+    "api": {
+      "kind": "function",
+      "name": "parse_relay_url",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Relay parser requires a nonempty first ts-relay parameter and removes it while preserving other query keys and fragments.",
+    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "cases": [
+      {
+        "input": "wss://tunnel.test/a?v=2&ts-relay=wss%3A%2F%2Fvenue#frag",
+        "output": {
+          "ok": [
+            "wss://tunnel.test/a?v=2#frag",
+            "wss://venue"
+          ]
+        }
+      },
+      {
+        "input": "wss://tunnel.test/a",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "relative",
+        "output": {
+          "error": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::tunnel_endpoints::parse_relay_url": {
+    "api": {
+      "kind": "function",
+      "name": "parse_relay_url",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Relay parser requires a nonempty first ts-relay parameter and removes it while preserving other query keys and fragments.",
+    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "cases": [
+      {
+        "input": "wss://tunnel.test/a?v=2&ts-relay=wss%3A%2F%2Fvenue#frag",
+        "output": {
+          "ok": [
+            "wss://tunnel.test/a?v=2#frag",
+            "wss://venue"
+          ]
+        }
+      },
+      {
+        "input": "wss://tunnel.test/a",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "relative",
+        "output": {
+          "error": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::tunnel_endpoints::extract_domain_from_url": {
+    "api": {
+      "kind": "function",
+      "name": "extract_domain_from_url",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "URL parser distinguishes invalid relative text and a valid hostless URL.",
+    "call": "serde_json::json!($type($value.as_str().expect(\"text witness\")))",
+    "cases": [
+      {
+        "input": "https://EXAMPLE.com/a",
+        "output": "example.com"
+      },
+      {
+        "input": "relative",
+        "output": null
+      },
+      {
+        "input": "file:///tmp/x",
+        "output": ""
+      }
+    ]
+  },
+  "safe_cex_transport::how_diagnostics::summarize_trade_tunnel_url": {
+    "api": {
+      "kind": "function",
+      "name": "summarize_trade_tunnel_url",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "URL diagnostic projection retains normalized origin/path and unique query names, never query values; malformed input uses the bounded fallback.",
+    "call": "$type($value.as_str().expect(\"text witness\"))",
+    "cases": [
+      {
+        "input": "https://EXAMPLE.com:443/a?secret=hidden&x=1&secret=other",
+        "output": {
+          "origin": "https://example.com",
+          "pathname": "/a",
+          "queryKeys": [
+            "secret",
+            "x"
+          ]
+        }
+      },
+      {
+        "input": "relative?token=hidden",
+        "output": {
+          "value": "relative",
+          "hasQuery": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::codec::decode_base64": {
+    "api": {
+      "kind": "function",
+      "name": "decode_base64",
+      "signature": {
+        "inputs": [
+          [
+            "encoded",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u8"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "TradeTunnel base64 alphabet/padding/ASCII-whitespace contract; output bytes are asserted.",
+    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "cases": [
+      {
+        "input": "",
+        "output": {
+          "ok": []
+        }
+      },
+      {
+        "input": "Zg==",
+        "output": {
+          "ok": [
+            102
+          ]
+        }
+      },
+      {
+        "input": "Zg",
+        "output": {
+          "ok": [
+            102
+          ]
+        }
+      },
+      {
+        "input": "Zh==",
+        "output": {
+          "ok": [
+            102
+          ]
+        }
+      },
+      {
+        "input": " Z\tg\n==\r",
+        "output": {
+          "ok": [
+            102
+          ]
+        }
+      },
+      {
+        "input": "Z",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "Z===",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "Zg=",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "Zg_",
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": "Zg\u000b==",
+        "output": {
+          "error": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::codec::decode_trade_tunnel_message": {
+    "api": {
+      "kind": "function",
+      "name": "decode_trade_tunnel_message",
+      "signature": {
+        "inputs": [
+          [
+            "frame",
+            {
+              "resolved_path": {
+                "path": "safe_cex_transport::socket::SocketFrame",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::vec::Vec",
+                                        "args": {
+                                          "angle_bracketed": {
+                                            "args": [
+                                              {
+                                                "type": {
+                                                  "primitive": "u8"
+                                                }
+                                              }
+                                            ],
+                                            "constraints": []
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "TradeTunnel text fallback and TSB1 binary header/payload split are observed directly; malformed magic, length and missing payload reject.",
+    "call": "match $type(if let Some(text) = $value.as_str() { crate::socket::SocketFrame::Text(text.to_owned()) } else { crate::socket::SocketFrame::Binary($value.as_array().expect(\"binary witness\").iter().map(|v| v.as_u64().expect(\"byte\") as u8).collect()) }) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "cases": [
+      {
+        "input": "{}",
+        "output": {
+          "ok": [
+            {},
+            null
+          ]
+        }
+      },
+      {
+        "input": "invalid",
+        "output": {
+          "ok": [
+            null,
+            null
+          ]
+        }
+      },
+      {
+        "input": [
+          84,
+          83,
+          66,
+          49,
+          0,
+          0,
+          0,
+          63,
+          123,
+          34,
+          116,
+          121,
+          112,
+          101,
+          34,
+          58,
+          34,
+          114,
+          112,
+          99,
+          46,
+          104,
+          116,
+          116,
+          112,
+          34,
+          44,
+          34,
+          110,
+          111,
+          110,
+          99,
+          101,
+          34,
+          58,
+          34,
+          110,
+          34,
+          44,
+          34,
+          100,
+          97,
+          116,
+          97,
+          34,
+          58,
+          123,
+          34,
+          100,
+          97,
+          116,
+          97,
+          95,
+          101,
+          110,
+          99,
+          111,
+          100,
+          105,
+          110,
+          103,
+          34,
+          58,
+          34,
+          103,
+          122,
+          105,
+          112,
+          34,
+          125,
+          125,
+          97,
+          98,
+          99
+        ],
+        "output": {
+          "ok": [
+            {
+              "type": "rpc.http",
+              "nonce": "n",
+              "data": {
+                "data_encoding": "gzip"
+              }
+            },
+            [
+              97,
+              98,
+              99
+            ]
+          ]
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": [
+          84,
+          83,
+          66,
+          49,
+          0,
+          0,
+          0,
+          63,
+          123,
+          34,
+          116,
+          121,
+          112,
+          101,
+          34,
+          58,
+          34,
+          114,
+          112,
+          99,
+          46,
+          104,
+          116,
+          116,
+          112,
+          34,
+          44,
+          34,
+          110,
+          111,
+          110,
+          99,
+          101,
+          34,
+          58,
+          34,
+          110,
+          34,
+          44,
+          34,
+          100,
+          97,
+          116,
+          97,
+          34,
+          58,
+          123,
+          34,
+          100,
+          97,
+          116,
+          97,
+          95,
+          101,
+          110,
+          99,
+          111,
+          100,
+          105,
+          110,
+          103,
+          34,
+          58,
+          34,
+          103,
+          122,
+          105,
+          112,
+          34,
+          125,
+          125
+        ],
+        "output": {
+          "error": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::codec::decode_raw_body": {
+    "api": {
+      "kind": "function",
+      "name": "decode_raw_body",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::frames::ResponseData",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "binary",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "primitive": "u8"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "u8"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Raw response decoding observes plain text, gzip and base64-gzip bytes and rejects corrupt or trailing compressed bytes.",
+    "call": "match $type(&serde_json::from_value::<crate::frames::ResponseData>($value[\"data\"].clone()).expect(\"response fixture\"), $value[\"binary\"].as_array().map(|bytes| bytes.iter().map(|v| v.as_u64().expect(\"byte\") as u8).collect())) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "config": {
+              "url": "https://example.test"
+            },
+            "status": 200,
+            "status_text": "OK",
+            "headers": {}
+          },
+          "binary": null
+        },
+        "output": {
+          "ok": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "config": {
+              "url": "https://example.test"
+            },
+            "status": 200,
+            "status_text": "OK",
+            "headers": {},
+            "data_raw": "raw"
+          },
+          "binary": null
+        },
+        "output": {
+          "ok": [
+            114,
+            97,
+            119
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "config": {
+              "url": "https://example.test"
+            },
+            "status": 200,
+            "status_text": "OK",
+            "headers": {},
+            "data_encoding": "gzip"
+          },
+          "binary": [
+            31,
+            139,
+            8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            255,
+            203,
+            72,
+            205,
+            201,
+            201,
+            7,
+            0,
+            134,
+            166,
+            16,
+            54,
+            5,
+            0,
+            0,
+            0
+          ]
+        },
+        "output": {
+          "ok": [
+            104,
+            101,
+            108,
+            108,
+            111
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "config": {
+              "url": "https://example.test"
+            },
+            "status": 200,
+            "status_text": "OK",
+            "headers": {},
+            "data_encoding": "gzip+base64",
+            "data_encoded": "H4sIAAAAAAAC/8tIzcnJBwCGphA2BQAAAA=="
+          },
+          "binary": null
+        },
+        "output": {
+          "ok": [
+            104,
+            101,
+            108,
+            108,
+            111
+          ]
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "config": {
+              "url": "https://example.test"
+            },
+            "status": 200,
+            "status_text": "OK",
+            "headers": {},
+            "data_encoding": "gzip"
+          },
+          "binary": [
+            0,
+            1
+          ]
+        },
+        "output": {
+          "error": true
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "config": {
+              "url": "https://example.test"
+            },
+            "status": 200,
+            "status_text": "OK",
+            "headers": {},
+            "data_encoding": "gzip"
+          },
+          "binary": [
+            31,
+            139,
+            8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            255,
+            203,
+            72,
+            205,
+            201,
+            201,
+            7,
+            0,
+            134,
+            166,
+            16,
+            54,
+            5,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        "output": {
+          "error": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::direct::DirectTransport": {
+    "shape": "typed",
+    "evidence": "Typed cache backend service operations; each wire parser is separately classified.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_transport::provider::TransportProvider",
+          "name": "ws_connection",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::WsConnection",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Typed transport/cache operation on an existing service instance. String keys select storage or routing, not a serialized representation of the service owner; backend decoding is separately inventoried."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_transport::provider::TransportProvider",
+          "name": "ws_routing",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "exchange",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeName",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::routing::RoutingOptions",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_transport::routing::ResolvedRouting",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Typed transport/cache operation on an existing service instance. String keys select storage or routing, not a serialized representation of the service owner; backend decoding is separately inventoried."
+      }
+    ]
+  },
+  "safe_cex_transport::direct::emit_warning": {
+    "api": {
+      "kind": "function",
+      "name": "emit_warning",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/direct.rs",
+    "reason": "Emits a diagnostic string through a typed observer."
+  },
+  "safe_cex_transport::how_diagnostics::log_trade_tunnel_request": {
+    "api": {
+      "kind": "function",
+      "name": "log_trade_tunnel_request",
+      "signature": {
+        "inputs": [
+          [
+            "request",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "route",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs",
+    "reason": "Logs a sanitized typed request, not an inbound decoder."
+  },
+  "safe_cex_transport::how_diagnostics::log_trade_tunnel_response": {
+    "api": {
+      "kind": "function",
+      "name": "log_trade_tunnel_response",
+      "signature": {
+        "inputs": [
+          [
+            "request",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "response",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "route",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs",
+    "reason": "Logs a sanitized typed response, not an inbound decoder."
+  },
+  "safe_cex_transport::how_diagnostics::log_trade_tunnel_verbose": {
+    "api": {
+      "kind": "function",
+      "name": "log_trade_tunnel_verbose",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how_diagnostics.rs",
+    "reason": "Emits sanitized diagnostic data; no inbound shape acceptance."
+  },
+  "safe_cex_transport::how::normalize_json_numbers": {
+    "api": {
+      "kind": "function",
+      "name": "normalize_json_numbers",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "raw",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "nested",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "In-place numeric normalization observes the mutated output; nested raw integers preserve spelling while top-level or ordinary parsing round through binary64.",
+    "call": "{ let mut decoded = serde_json::from_str::<serde_json::Value>($value[\"text\"].as_str().expect(\"raw JSON witness\")).expect(\"valid JSON\"); $type(&mut decoded, $value[\"raw\"].as_bool().expect(\"raw flag\"), false); decoded }",
+    "cases": [
+      {
+        "input": {
+          "raw": true,
+          "text": "[9007199254740993]"
+        },
+        "output": [
+          "9007199254740993"
+        ]
+      },
+      {
+        "input": {
+          "raw": false,
+          "text": "[9007199254740993]"
+        },
+        "output": [
+          9007199254740992
+        ]
+      },
+      {
+        "input": {
+          "raw": true,
+          "text": "9007199254740993"
+        },
+        "output": 9007199254740992
+      }
+    ]
+  },
+  "safe_cex_transport::how::normalize_object_order": {
+    "api": {
+      "kind": "function",
+      "name": "normalize_object_order",
+      "signature": {
+        "inputs": [
+          [
+            "values",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/how.rs",
+    "reason": "Reorders an already decoded JSON map to ECMAScript property enumeration order; no acceptance or parsing boundary."
+  },
+  "safe_cex_transport::polling::set_tick_interval_multipliers": {
+    "api": {
+      "kind": "function",
+      "name": "set_tick_interval_multipliers",
+      "signature": {
+        "inputs": [
+          [
+            "next",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::collections::btree::map::BTreeMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "primitive": "f64"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/polling.rs",
+    "reason": "Updates typed polling configuration from already parsed numeric values."
+  },
+  "safe_cex_transport::direct::console_warn": {
+    "api": {
+      "kind": "function",
+      "name": "console_warn",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-transport/src/direct.rs wasm-bindgen console.warn import, present only in the wasm compiler inventory.",
+    "reason": "Host diagnostic output import; it receives text for logging and does not decode or construct a domain value. The gate does not invoke host logging."
+  }
+}
