@@ -25150,8 +25150,151 @@
   "safe_cex_types::retained_json::Capture": {
     "shape": "observed",
     "category": "decoder",
-    "evidence": "Actual private compiler-owned decoder helper; direct UFCS execution on this owner with independently authored native outputs. Bounded cases, not universal generic proof.",
+    "evidence": "Actual private compiler-owned decoder helper; direct UFCS execution on this owner with independently authored native outputs. Bounded cases, not universal generic proof. Stock F64Deserializer may emit a native numeric event directly for the raw-token newtype hint. The concrete float visitor retains its bits, with NaN refused only during JSON projection; raw-token map validation remains independently exercised.",
     "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_f64",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "v",
+                {
+                  "primitive": "f64"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "generic": "E"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "E",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::Error",
+                            "args": null
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct actual Capture floating-point visitor returns the native Float variant and exact IEEE bits; finite, signed zero, infinities and a NaN payload are distinct captured numeric events. JSON NaN refusal is checked at the public projection seam.",
+        "call": "{ let number=f64::from_bits(u64::from_str_radix($value.as_str().unwrap(),16).unwrap()); let decoded=serde::de::Visitor::visit_f64::<serde_json::Error>({ let capture: $type = super::Capture; capture },number); match decoded { Ok(super::RetainedJsonInput::Float(value))=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),Ok(_)=>serde_json::json!({\"kind\":\"wrong\"}),Err(_)=>serde_json::json!({\"kind\":\"error\"}) } }",
+        "cases": [
+          {
+            "input": "0000000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "0000000000000000"
+            }
+          },
+          {
+            "input": "8000000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "8000000000000000"
+            }
+          },
+          {
+            "input": "3ff4000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "3ff4000000000000"
+            }
+          },
+          {
+            "input": "0000000000000001",
+            "output": {
+              "kind": "float",
+              "bits": "0000000000000001"
+            }
+          },
+          {
+            "input": "7fefffffffffffff",
+            "output": {
+              "kind": "float",
+              "bits": "7fefffffffffffff"
+            }
+          },
+          {
+            "input": "7ff0000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "7ff0000000000000"
+            }
+          },
+          {
+            "input": "fff0000000000000",
+            "output": {
+              "kind": "float",
+              "bits": "fff0000000000000"
+            }
+          },
+          {
+            "input": "7ff800000000002a",
+            "output": {
+              "kind": "float",
+              "bits": "7ff800000000002a"
+            }
+          }
+        ]
+      },
       {
         "api": {
           "kind": "trait",
