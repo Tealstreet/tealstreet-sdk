@@ -205,6 +205,7 @@ fn capabilities() -> ExchangeCapabilities {
         fetch_historical_orders: CapabilityBinding::implemented(|venue, opts| {
             venue.fetch_historical_orders(opts)
         }),
+        ..Default::default()
     }
 }
 
