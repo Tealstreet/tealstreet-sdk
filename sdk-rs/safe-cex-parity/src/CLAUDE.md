@@ -194,3 +194,14 @@ actual decoders, not callback exemptions. Fields<bool> preserves its original
 static borrowed string keys: its reviewed type identity does not grant
 DeserializeOwned or bypass the existing borrowed-alias refusal. Decoder
 classifications and borrowed production-path coverage remain separate obligations.
+
+
+The transport provider's `TransportFuture<'static,bool>` and
+`RestFuture<'static,bool>` have separate finite identities in
+`../accepted-set/generic-aliases.json`. Their exact raw/expanded compiler ASTs
+retain `Result<bool,TransportError>` and `Result<bool,RestFailure>` respectively,
+including the original lifetime/type parameters. The existing reviewed alias
+path emits invariant equality against independently authored native Rust types
+and runs ordinary Serde/conversion checks. This establishes the selected
+capability identities, not future polling, transport execution, other generic
+arguments or a decoder exemption; ordinary contract review remains required.
