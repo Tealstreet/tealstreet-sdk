@@ -32,7 +32,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::on_open"
 status = "ported"
-note = "Body port: disposal guard, category/quote filter and fresh ticker topics; subscribe/ping/timer arming precede off/on markets:changed and optional reconnect event. Deferred assignment and emitter-operation factories preserve receiver capture before reentrant category/handler getters. Source oracle asserts sequence, allocation contents and old/new receiver effects. Subscription starter owns eager work; async subscription settlement and full constructor composition remain separate rows."
+note = "Body port: disposal guard, category/quote filter and fresh ticker topics; subscribe/ping/timer arming precede off/on markets:changed and optional reconnect event. Deferred assignment and emitter-operation factories preserve receiver capture before reentrant category/handler getters. Source oracle asserts sequence, allocation contents and old/new receiver effects. Subscription starter owns eager work; async subscription settlement and full constructor composition remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::on_open."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#clearOhlcvNoDataTimeout"
@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::clear_ohlcv_no_data_timeout"
 status = "ported"
-note = "Body port with explicit cancellable timer host: skip falsy timer IDs, otherwise clear the exact native handle before deleting the current map entry. Oracle covers absent/null/zero/false/empty IDs and clear/delete throws. This is the method body, not core task cancellation wiring; no generation-guarded sleeper substitute is claimed."
+note = "Body port with explicit cancellable timer host: skip falsy timer IDs, otherwise clear the exact native handle before deleting the current map entry. Oracle covers absent/null/zero/false/empty IDs and clear/delete throws. This is the method body, not core task cancellation wiring; no generation-guarded sleeper substitute is claimed. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::clear_ohlcv_no_data_timeout."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#armOhlcvNoDataTimeout"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::arm_ohlcv_no_data_timeout"
 status = "ported"
-note = "Body port with explicit timer host: clear first, require handlers, capture assignment receiver before setTimeout(25000), then store handle. Callback deletes current entry before disposal/handler guards, recovery reason and recursive rearm. Source oracle fires retained callbacks, checks reentrant timer-map replacement and stopping on recovery failure; runtime timer registration/cancellation composition remains separate."
+note = "Body port with explicit timer host: clear first, require handlers, capture assignment receiver before setTimeout(25000), then store handle. Callback deletes current entry before disposal/handler guards, recovery reason and recursive rearm. Source oracle fires retained callbacks, checks reentrant timer-map replacement and stopping on recovery failure; runtime timer registration/cancellation composition remains separate. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::arm_ohlcv_no_data_timeout."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#armExistingOhlcvNoDataTimeouts"
@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::arm_existing_ohlcv_no_data_timeouts"
 status = "ported"
-note = "Body port: iterate supplied Object.keys snapshot, require kline prefix and live nonempty handlers, derive publicTrade suffix after last dot, arm in source key order. Source oracle includes dotted symbols, empty handlers, callback removal of a later handler and arm failure. Host supplies ordinary object-key iteration order."
+note = "Body port: iterate supplied Object.keys snapshot, require kline prefix and live nonempty handlers, derive publicTrade suffix after last dot, arm in source key order. Source oracle includes dotted symbols, empty handlers, callback removal of a later handler and arm failure. Host supplies ordinary object-key iteration order. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::arm_existing_ohlcv_no_data_timeouts."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.maybeRecoverOhlcvStream"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::maybe_recover_ohlcv_stream"
 status = "ported"
-note = "Body port: maintained interval mapping and primary topic, deferred recovery method resolution, secondary topic from reread mutable symbol, default reason only when absent. Source oracle includes empty/custom reasons, unmapped interval and a method getter mutating the symbol after primary-topic construction."
+note = "Body port: maintained interval mapping and primary topic, deferred recovery method resolution, secondary topic from reread mutable symbol, default reason only when absent. Source oracle includes empty/custom reasons, unmapped interval and a method getter mutating the symbol after primary-topic construction. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::maybe_recover_ohlcv_stream."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#maybeRecoverOhlcvStreamFromTopics"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::maybe_recover_ohlcv_stream_from_topics"
 status = "ported"
-note = "Body port: handler guard, clock/last-or-zero and strict 10000ms cooldown, timestamp write before secondary inspection, active-topic assignments before connection branch. Warning/reconnect or unsubscribe then subscribe use distinct native payload objects sharing the same mutable args allocation. Source oracle asserts 9999/10000 boundaries, NaN, failures and first-send argument mutation. Diagnostic serialization/transport remains the explicit host dependency."
+note = "Body port: handler guard, clock/last-or-zero and strict 10000ms cooldown, timestamp write before secondary inspection, active-topic assignments before connection branch. Warning/reconnect or unsubscribe then subscribe use distinct native payload objects sharing the same mutable args allocation. Source oracle asserts 9999/10000 boundaries, NaN, failures and first-send argument mutation. Diagnostic serialization/transport remains the explicit host dependency. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::maybe_recover_ohlcv_stream_from_topics."
 
 [[symbol]]
 ts = "BybitPublicWebsocket#sendOhlcvDiagnosticPayload"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::on_markets_changed"
 status = "ported"
-note = "Body port: empty/ws/disposal guards, category filter, fresh spread ticker array and snapshot chunks of 10; first send and sleep(5) factory execute before future polling, subsequent chunks await in sequence without disposal recheck. Deferred setter preserves receiver before ticker getter replacement. Source oracle covers Unicode string spread, 21 topics, failure and mid-send disposal; decoded native frame fields precede wire assertions."
+note = "Body port: empty/ws/disposal guards, category filter, fresh spread ticker array and snapshot chunks of 10; first send and sleep(5) factory execute before future polling, subsequent chunks await in sequence without disposal recheck. Deferred setter preserves receiver before ticker getter replacement. Source oracle covers Unicode string spread, 21 topics, failure and mid-send disposal; decoded native frame fields precede wire assertions. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::on_markets_changed."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.ping"
