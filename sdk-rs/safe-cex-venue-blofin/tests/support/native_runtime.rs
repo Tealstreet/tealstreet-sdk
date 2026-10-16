@@ -193,7 +193,7 @@ pub fn fixture() -> (
             Ok(adapter.clone() as Rc<dyn RestAdapter>)
         },
         runtime.clone(),
-        |_| panic!("fixture has no external public data"),
+        Rc::new(|_, _| panic!("fixture has no external public data")),
         None,
     )
     .unwrap();

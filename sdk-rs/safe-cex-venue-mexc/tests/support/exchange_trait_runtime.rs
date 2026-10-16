@@ -32,6 +32,7 @@ pub struct Runtime {
     pub console: RefCell<Vec<String>>,
     pub errors: RefCell<Vec<String>>,
     pub sent: Rc<RefCell<Vec<String>>>,
+    pub random_values: RefCell<VecDeque<f64>>,
 }
 
 struct Task(Rc<Cell<bool>>);
@@ -91,7 +92,7 @@ impl ExchangeRuntime for Runtime {
         false
     }
     fn random(&self) -> f64 {
-        0.375
+        self.random_values.borrow_mut().pop_front().unwrap_or(0.375)
     }
     fn report_raw_exception(&self, _: &Value, _: &Value) {
         panic!("unexpected raw exception report in this test runtime");
@@ -243,6 +244,7 @@ pub fn fixture_with_settings(
         console: RefCell::default(),
         errors: RefCell::default(),
         sent: Rc::default(),
+        random_values: RefCell::default(),
     });
     let store = Rc::new(DefaultStore::new());
     let options: ExchangeOptions = serde_json::from_value(options).unwrap();
