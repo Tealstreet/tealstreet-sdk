@@ -726,6 +726,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitget,
             ExchangeName::Bitgetinverse,
             ExchangeName::Bitgetusdc,
+            ExchangeName::Bitrue,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
             ExchangeName::Bybit,

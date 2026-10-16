@@ -155,3 +155,33 @@ all other JS values are strictly comparison-equivalent false without coercion.
 These are field-body ports; WebSocket construction, transport and callers remain
 pending. ws_primitives.rs executes actual source initializers and asserts native
 booleans/unit before inventory checks; one runtime discriminator per row is required.
+
+`binding::BitrueExchange` now assembles those existing field bodies on the shared
+JS runtime with production Store, signed HTTP client and both BaseWebSocket
+cores. Its Exchange implementation forwards all sixteen required methods; the
+five methods absent from the source class retain `base.ts`'s exact inherited
+`Not implemented` rejection (getAccount, fetchTickers, changePositionMode,
+scheduleCancel, fetchPublicTrades). changeMarginType keeps Bitrue's explicit
+source refusal. Batch placement receives a ValidatedBatch; single placement
+receives a ValidatedOrder, enforcing the shared client-ID gate before dispatch.
+
+The binding keeps the existing typed/JSON helper boundaries and their recorded
+divergences. The native Exchange boundary also converts declared typed inputs
+and results through JSON; executable callbacks and socket/class handles stay in
+shared JS values internally. HTTP creation uses the shared source factory and runtime provider. The source
+tealstreetTunnel branch installs its BigInt adapter through the shared factory;
+proxy authorization follows venue signing. No venue-local adapter refusal remains.
+Public jsonParse performs ordinary Number parsing, while the private big-int
+parser retains its source non-string passthrough. Browser compressed Blob input
+uses the existing Store read_blob helper with its byte-to-character projection.
+
+`tests/exchange_binding.rs` covers all sixteen methods, caller-ID fail-closed
+behavior before any single/batch write, private listen-key failure without a
+private dial/subscription, and the native Buffer/plain-JSON public frame path.
+`scripts/binding-controls.py` sequentially breaks each trait dispatch and requires
+its named assertion, then a restored pass. Do not compile concurrently with it.
+The registry's native_host_bitrue test verifies the HMAC at a local HTTP server.
+
+`routing-controls.py` compiles disconnected factory and adapter bindings; both
+must fail the constructed venue routing assertion, then pass after restoration.
+Run these controls sequentially without another compiler.
