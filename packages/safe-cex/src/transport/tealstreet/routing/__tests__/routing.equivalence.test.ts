@@ -59,6 +59,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   polymarket: 'https://clob.polymarket.com',
   salsadex: 'https://api-evm.orderly.org',
   'tealstreet-dex': 'https://api-evm.orderly.org',
+  txflow: 'https://rpc.txflow.com',
   weex: 'https://api-contract.weex.com',
   what: 'https://api-evm.orderly.org',
   woo: 'https://api.woox.io',
