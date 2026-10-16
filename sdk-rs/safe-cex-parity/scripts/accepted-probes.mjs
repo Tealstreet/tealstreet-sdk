@@ -38,6 +38,8 @@ function offset(source, [line, column]) {
   return Buffer.byteLength(lines.slice(0, line - 1).join('\n')) + (line > 1 ? 1 : 0) + column - 1;
 }
 export function runProbes(root, metadata, packages, contracts, configuration = { target: 'native', features: [] }) {
+  const jobs = String(configuration.jobs ?? 2);
+  assert.match(jobs, /^[12]$/, 'accepted-set: probe jobs must be 1 or 2');
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
   const workspaceRelative = path.relative(repo, root);
   assert.ok(!workspaceRelative.startsWith('..'), 'accepted-set: workspace must be inside this repository');
@@ -187,10 +189,10 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
     }
     fs.writeFileSync(manifest, text);
     const features = configuration.features.length ? ['--features', configuration.features.join(',')] : [];
-    const command = wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', '2', ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', '2', '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
+    const command = wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
     const result = spawnSync('cargo', command, {
       cwd: path.join(sandbox, workspaceRelative), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, CARGO_BUILD_JOBS: '2', CARGO_TARGET_DIR: path.join(metadata.target_directory, 'accepted-set-build') },
+      env: { ...process.env, CARGO_BUILD_JOBS: jobs, CARGO_TARGET_DIR: path.join(metadata.target_directory, 'accepted-set-build') },
     });
     const log = `${result.stdout}\n${result.stderr}`;
     fs.writeFileSync(path.join(metadata.target_directory, `accepted-set-${pkg.package}.log`), log);

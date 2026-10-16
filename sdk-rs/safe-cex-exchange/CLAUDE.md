@@ -1062,6 +1062,13 @@ including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
 
+Venue overrides whose source calls only `this.ws.close()` use
+`BaseWebSocket::close_current_websocket`. It forwards current native/relay close
+without superclass disposal or force-close metadata/task changes, and releases
+state borrows before invoking host close callbacks. Native and managed-relay
+state-retention witnesses cover this primitive; Backpack's bound disposal tests
+compare the source-specific cleanup and order independently.
+
 The shared utility import table also installs Lodash `throttle`. Its scheduler
 uses the existing Scope clock and cancellable timers, preserving leading and
 trailing options, the latest receiver/arguments, maxWait, cached returns and
@@ -1075,6 +1082,14 @@ of leading, trailing and maxWait; all three must compile and fail the source
 comparison, then pass after exact restoration. A fourth fault removes the shared
 import and must fail Polymarket construction, then restore all 15 concrete tests.
 
+The hosted HTTP bridge retains a JavaScript string as typed data until the
+remote signing adapter applies Axios transformation and tryParseJson. A form
+string cannot become opaque Encoded bytes before signing: that loses its origin
+and the transport correctly refuses it. Direct terminal requests keep their
+existing byte representation. `hosted_signing_accepts_source_string_data_before_wire_encoding`
+compares four form/empty/JSON-looking/scalar strings against the actual source
+remote adapter with installed Axios on both sides of the relay, including
+signer inputs and final transmitted text.
 
 The single `js_runtime::base_exchange::create` factory takes a synchronous source
 field initializer as its sixth argument. It initializes the JS receiver, reads
