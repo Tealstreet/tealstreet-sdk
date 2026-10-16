@@ -28,7 +28,7 @@ fn store_payload_preparation_matches_live_full_snapshots_and_incremental_transit
     let data: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         data["fieldIdentity"].as_array().unwrap().len(),
-        26,
+        36,
         "SNAPSHOT-IDENTITY case inventory"
     );
     for case in data["fieldIdentity"].as_array().unwrap() {

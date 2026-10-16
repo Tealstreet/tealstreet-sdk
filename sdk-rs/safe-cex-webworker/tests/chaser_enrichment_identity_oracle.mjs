@@ -11,7 +11,7 @@ const types=ts.createSourceFile('types.ts',fs.readFileSync(new URL('types.ts',ro
 const order=types.statements.find(n=>ts.isTypeAliasDeclaration(n)&&n.name.text==='Order');
 assert.ok(order&&ts.isTypeLiteralNode(order.type),'ENRICHMENT-IDENTITY explicit Order shape');
 function keys(type){return type.members.map(n=>{assert.ok(ts.isPropertySignature(n)&&n.name&&ts.isIdentifier(n.name),'ENRICHMENT-IDENTITY property shape');return n.name.text;}).sort();}
-assert.deepEqual(keys(order.type),['id','parentId','status','symbol','type','side','price','amount','filled','remaining','reduceOnly','close','info','timeInForce','lastUpdate','triggerType','tpTriggerType','slTriggerType','takeProfit','stopLoss','extra'].sort(),'ENRICHMENT-IDENTITY Order field census');
+assert.deepEqual(keys(order.type),['id','parentId','status','symbol','type','side','price','amount','filled','remaining','reduceOnly','close','info','clientOrderId','timeInForce','lastUpdate','triggerType','tpTriggerType','slTriggerType','takeProfit','stopLoss','extra'].sort(),'ENRICHMENT-IDENTITY Order field census');
 const extra=order.type.members.find(n=>n.name.text==='extra').type;
 assert.ok(ts.isTypeLiteralNode(extra),'ENRICHMENT-IDENTITY explicit extra shape');
 assert.deepEqual(keys(extra),['remainingNative','filledInPlacementUnits','remainingNotional','conditionalOrderPrice','rejectReason','isFromChaser','chaserId','chaserAttempts','chaserMaxAttempts'].sort(),'ENRICHMENT-IDENTITY extra field census');
@@ -25,7 +25,7 @@ vm.runInContext(ts.transpileModule(source+'\nglobalThis.Processor=ChaserOrderEnr
 const rows=[];
 for(let i=0;i<12;i++){
  const input={activeChasers:[{id:'owner',symbol:'CHASER',size:31,side:'buy',maxAttempts:37,attempts:41,isStopped:false,stopReason:'',currentOrderIds:['owned']}],orders:['owned','unowned'].map((id,j)=>({
-  id,parentId:'parent-'+i+'-'+j,status:status[i%status.length],symbol:'SYMBOL-'+i+'-'+j,type:kind[i%kind.length],side:side[i%side.length],
+  id,parentId:'parent-'+i+'-'+j,clientOrderId:'client-'+i+'-'+j,status:status[i%status.length],symbol:'SYMBOL-'+i+'-'+j,type:kind[i%kind.length],side:side[i%side.length],
   price:101.25,amount:102.5,filled:103.75,remaining:104.125,reduceOnly:i%2===0,close:i%2!==0,info:{identity:'info-'+i+'-'+j},timeInForce:tif[i%tif.length],lastUpdate:105.25,
   triggerType:trigger[i%trigger.length],tpTriggerType:trigger[(i+1)%trigger.length],slTriggerType:trigger[(i+2)%trigger.length],takeProfit:106.5,stopLoss:107.75,
   extra:{remainingNative:108.125,filledInPlacementUnits:109.25,remainingNotional:110.5,conditionalOrderPrice:111.75,rejectReason:reject[i%reject.length],isFromChaser:false,chaserId:'old-owner',chaserAttempts:112.125,chaserMaxAttempts:113.25}
@@ -53,5 +53,5 @@ for(const [field,allowed,seen] of [
  ['rejectReason',reject,records.map(r=>r.extra.rejectReason)]
 ])assert.deepEqual([...new Set(seen)].sort(),[...allowed].sort(),'ENRICHMENT-IDENTITY enum coverage '+field);
 const pairCounts=[pairs(order.type,records),pairs(extra,records.map(r=>r.extra))];
-assert.deepEqual(pairCounts,[28,15],'ENRICHMENT-IDENTITY compatible pair census');
+assert.deepEqual(pairCounts,[31,15],'ENRICHMENT-IDENTITY compatible pair census');
 process.stdout.write(JSON.stringify({label:'chaser-enrichment-field-identity',pairCounts,rows}));
