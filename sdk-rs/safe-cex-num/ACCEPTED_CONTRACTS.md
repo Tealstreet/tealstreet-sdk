@@ -12,6 +12,13 @@ provide behavioral evidence separately. The full Num suite, including ignored
 source oracles, passed 93 tests under measured Node 24.20.0 before this batch;
 the later stock-F64 and output-invariant supplements passed independently.
 
+The selected run is the delivery boundary for this batch. The full package gate
+currently stops before runtime at the separate source scanner's
+`UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export` marker on the canonical
+`js_number_output` definition. Its existing compiler/source/recipe verification
+and macro API remain intact; the shared policy owner is handling that exact
+definition's attribute seam. This batch does not claim a full-package pass.
+
 The full source scan also requires an explicit root re-export list for the
 finite `prototype_realm` module. Fresh rustdoc before and after the change
 confirms all eight public names, target identities and full nominal definitions
