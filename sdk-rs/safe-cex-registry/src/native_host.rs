@@ -328,23 +328,19 @@ impl RustVenueHost for NativeVenueHost {
     fn asterdex(
         &self,
     ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for asterdex on the native host",
-            ));
-        }
         let runtime = self.runtime.clone();
         let adapter = self.adapter.clone();
+        let remote = self.remote.clone();
         Ok(
             safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies {
                 runtime: self.runtime.clone(),
                 http: Rc::new(move |options| {
-                    if options.remote_signer.is_some() {
+                    if remote.is_none() && options.remote_signer.is_some() {
                         return Err(ExchangeError::new(
-                            "remoteSigner is not wired for asterdex on the native host",
+                            "AsterDEX remoteSigner requires a native hosted signer capability",
                         ));
                     }
-                    Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
+                    let http = safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                         runtime.clone(),
                         Arc::new(SourceApiRest {
                             name: safe_cex_types::ExchangeName::Asterdex,
@@ -352,7 +348,11 @@ impl RustVenueHost for NativeVenueHost {
                             adapter: adapter.clone(),
                             options: options.clone(),
                         }),
-                    ))
+                        remote.clone(),
+                    );
+                    http.configure_exchange(safe_cex_types::ExchangeName::Asterdex)
+                        .map_err(|error| error.to_exchange_error())?;
+                    Ok(http)
                 }),
                 external_public_data: Some(gateway_factory(self.runtime.clone())),
             },

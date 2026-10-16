@@ -62,3 +62,13 @@ Use the maintained boundary decisions when reviewing
 After manually editing reviewed contracts, run their scoped native probes and
 the accepted-set gates required for the change. Proposal generation is not a
 passing gate or permission to accept a missing contract.
+
+
+Reviewed classifications live in `contracts/<compiler-crate>.json`, using the
+compiler namespace with underscores replaced by hyphens. For example,
+`safe_cex_venue_okx::types::RegionWire` belongs in
+`contracts/safe-cex-venue-okx.json`. Edit only your crate file; retain the existing
+flat owner-to-contract JSON shape. The former shared `contracts.json` is removed.
+The gate and this helper load the complete directory through
+`../scripts/accepted-contract-files.mjs`; native proof and all validation rules
+are unchanged. Custom fixture files still work with `--contracts=<file.json>`.
