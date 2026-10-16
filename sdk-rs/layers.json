@@ -229,6 +229,7 @@
       "safe-cex-venue-bybit",
       "safe-cex-venue-coinbase",
       "safe-cex-venue-cryptocom",
+      "safe-cex-venue-orderly",
       "safe-cex-venue-phemex",
       "safe-cex-venue-okx",
       "safe-cex-venue-kraken",
@@ -240,11 +241,7 @@
       "safe-cex-venue-lighter",
       "safe-cex-venue-woo",
       "safe-cex-venue-weex",
-<<<<<<< HEAD
-      "safe-cex-venue-orderly"
-=======
       "safe-cex-venue-txflow"
->>>>>>> origin/master
     ],
     "reason": "The registry's Rust constructor table (safe-cex-registry/CONSTRUCTION.md). Each bound venue is listed by its own follow-up; an unlisted registry -> venue edge fails, and a listed venue without a live edge is stale."
   },
