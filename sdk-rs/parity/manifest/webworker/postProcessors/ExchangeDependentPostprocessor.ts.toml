@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-webworker/src/postprocessor_context.rs" ]
 ts = "ExchangeDependentPostprocessor"
 kind = "class"
 layer = "adapted"
-rs = [ "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor", "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessorContext" ]
+rs = [ "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor", "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessorContext", "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor::context" ]
 status = "ported"
-note = "Abstract class represented by a required process trait plus stored-input context. Generic opaque slots preserve constructor values and shared-reference identity without coercion or cloning; concrete implementors provide process. No abstract runtime body exists in the source. Rename target: `safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessorContext`."
+note = "Abstract class represented by a required process trait plus stored-input context. Generic opaque slots preserve constructor values and shared-reference identity without coercion or cloning; concrete implementors provide process. No abstract runtime body exists in the source. Rename target: `safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessorContext`. Split member `safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor::context`; the read of the protected fields retained by the constructor, through the stored-input context."
 
 [[symbol]]
 ts = "ExchangeDependentPostprocessor.constructor"

@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-webworker/src/postprocessor_context.rs" ]
 ts = "BasePostprocessor"
 kind = "class"
 layer = "adapted"
-rs = [ "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor", "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessorContext" ]
+rs = [ "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor", "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessorContext", "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor::context" ]
 status = "ported"
-note = "Abstract class represented by a required process trait plus stored-input context. Generic opaque slots preserve constructor values and shared-reference identity without coercion or cloning; concrete implementors provide process. No abstract runtime body exists in the source. Rename target: `safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessorContext`."
+note = "Abstract class represented by a required process trait plus stored-input context. Generic opaque slots preserve constructor values and shared-reference identity without coercion or cloning; concrete implementors provide process. No abstract runtime body exists in the source. Rename target: `safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessorContext`. Split member `safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor::context`; the read of the protected fields retained by the constructor, through the stored-input context."
 
 [[symbol]]
 ts = "BasePostprocessor.constructor"

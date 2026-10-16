@@ -6,17 +6,17 @@ rust_files = [ "safe-cex-webworker/src/twap.rs", "safe-cex-webworker/src/twap_in
 ts = "TwapInstance"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-webworker/src/twap_instance.rs::TwapInstance"
+rs = [ "safe-cex-webworker/src/twap_instance.rs::TwapInstance", "safe-cex-webworker/src/twap_instance.rs::TwapInstance::id", "safe-cex-webworker/src/twap_instance.rs::TwapInstance::options", "safe-cex-webworker/src/twap_instance.rs::TwapInstance::state" ]
 status = "divergent"
-note = "MIXED: FORCED shared TwapOptions/TwapState/Market and Exchange/Chaser String contracts cannot retain non-USV source strings (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN explicit native host binds worker postMessage, binary64 wall-clock/timer primitives, placement construction/futures and pending chaser-manager operations instead of JS globals, promises and arbitrary thrown values. It reuses existing Exchange/Chaser/Manager contracts rather than a second dynamic JS event loop. Host methods release borrows before reentrant callbacks, timer clones preserve identity, and host teardown must release callback cycles; automatic worker/network/chaser-manager wiring or full JS microtask/GC equivalence is not claimed. Actual lifecycle shares its ManagedTwap record with TwapManager and constructs actual native ChaserOrderInstance values. Typed state replacement retains the declared owned nested-field boundary; the manager and three existing helper rows keep their independent declared boundaries. Eleven formerly pending rows are implemented, not placeholder startup facades."
+note = "MIXED: FORCED shared TwapOptions/TwapState/Market and Exchange/Chaser String contracts cannot retain non-USV source strings (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN explicit native host binds worker postMessage, binary64 wall-clock/timer primitives, placement construction/futures and pending chaser-manager operations instead of JS globals, promises and arbitrary thrown values. It reuses existing Exchange/Chaser/Manager contracts rather than a second dynamic JS event loop. Host methods release borrows before reentrant callbacks, timer clones preserve identity, and host teardown must release callback cycles; automatic worker/network/chaser-manager wiring or full JS microtask/GC equivalence is not claimed. Actual lifecycle shares its ManagedTwap record with TwapManager and constructs actual native ChaserOrderInstance values. Typed state replacement retains the declared owned nested-field boundary; the manager and three existing helper rows keep their independent declared boundaries. Eleven formerly pending rows are implemented, not placeholder startup facades. Split members `safe-cex-webworker/src/twap_instance.rs::TwapInstance::id`, `safe-cex-webworker/src/twap_instance.rs::TwapInstance::options`, `safe-cex-webworker/src/twap_instance.rs::TwapInstance::state`; reads of the public id, options and state fields, returning the live shared records."
 
 [[symbol]]
 ts = "TwapInstance#updateStateCallback"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-webworker/src/twap_instance.rs::TwapInstance"
+rs = [ "safe-cex-webworker/src/twap_instance.rs::TwapInstance", "safe-cex-webworker/src/twap_instance.rs::UpdateStateCallback" ]
 status = "ported"
-note = "Retains the supplied Rc callable object without wrapping or invoking it during construction. Explicit instance receiver models source ordinary-function this; callback receives the current state Rc. Native stored callable/state/receiver identity and exact invocation counts precede source profiles. Runtime Result/host handling is documented in the lifecycle rows separately. `safe_cex_webworker::twap_instance::TwapInstance::update_state_callback` is a struct field, which the parity index treats as structural, so the row maps its owning item `safe-cex-webworker/src/twap_instance.rs::TwapInstance`."
+note = "Retains the supplied Rc callable object without wrapping or invoking it during construction. Explicit instance receiver models source ordinary-function this; callback receives the current state Rc. Native stored callable/state/receiver identity and exact invocation counts precede source profiles. Runtime Result/host handling is documented in the lifecycle rows separately. `safe_cex_webworker::twap_instance::TwapInstance::update_state_callback` is a struct field, which the parity index treats as structural, so the row maps its owning item `safe-cex-webworker/src/twap_instance.rs::TwapInstance`. Split member `safe-cex-webworker/src/twap_instance.rs::UpdateStateCallback`; the callable type of this field."
 
 [[symbol]]
 ts = "TwapInstance.constructor"
@@ -30,9 +30,9 @@ note = "MIXED: FORCED shared TwapOptions/TwapState/Market and Exchange/Chaser St
 ts = "TwapInstance#updateState"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-webworker/src/twap_instance.rs::TwapInstance::update_state"
+rs = [ "safe-cex-webworker/src/twap_instance.rs::TwapInstance::update_state", "safe-cex-webworker/src/twap_instance.rs::TwapStateUpdate" ]
 status = "divergent"
-note = "CHOSEN: typed five-field lifecycle patch (status, ordersExecuted, nextOrderAt, startedAt, markForCleanup) replaces arbitrary Partial<TwapState>/unknown own-property spread and explicit undefined writes. Existing state is cloned into a new Rc: nested Vec/Market snapshots diverge from shallow source array/object aliases (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias), with both native independence and source retained-array alias witnessed. Receiver-aware callback runs before current manager serialization and host twap:stateUpdate; callback replacement/removal and callback/post errors commit state and preserve throw order through canonical Result. Keeping shared typed state avoids a parallel dynamic state/property model."
+note = "CHOSEN: typed five-field lifecycle patch (status, ordersExecuted, nextOrderAt, startedAt, markForCleanup) replaces arbitrary Partial<TwapState>/unknown own-property spread and explicit undefined writes. Existing state is cloned into a new Rc: nested Vec/Market snapshots diverge from shallow source array/object aliases (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias), with both native independence and source retained-array alias witnessed. Receiver-aware callback runs before current manager serialization and host twap:stateUpdate; callback replacement/removal and callback/post errors commit state and preserve throw order through canonical Result. Keeping shared typed state avoids a parallel dynamic state/property model. Split member `safe-cex-webworker/src/twap_instance.rs::TwapStateUpdate`; the partial state-update argument this method merges."
 
 [[symbol]]
 ts = "TwapInstance.createNewState"

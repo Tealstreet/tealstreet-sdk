@@ -7652,3 +7652,487 @@ reason = "Explicit imported capability (location origin, configured time origin,
 [[exempt]]
 rs = "safe-cex-transport/src/query.rs::QueryKeyOrder"
 reason = "Host-side external Axios/qs configuration carrier (key-order selector of QueryProfile: preserve insertion order or JS root-object order). It belongs to the shared request ABI like QueryProfile; consumer rows own their selected profile. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost"
+reason = "Host capability trait binding venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership for the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::console_error"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::construct_cancel"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::construct_lookup"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::construct_place"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::construct_sleep"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::emit_completion"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::error_properties"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::fill_lookup"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::ChaserHost::spawn"
+reason = "Required member of the ChaserHost host capability (venue placement/lookup/cancel construction, sleep, console, completion emission, error materialisation and task ownership) used by the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_engine.rs::FillLookup"
+reason = "Type alias for the optional venue fill-lookup callable read by property from the exchange in the mapped ChaserOrderManager processInstance, tryPlaceOrders, findLostPlacement, cleanupInstance and emitComplete rows; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_manager.rs::ChaserSupervisor"
+reason = "Host capability trait binding construction of the processInstance supervision, cleanupInstance and completion futures plus detached task ownership for the mapped ChaserOrderManager add, handleSupervisorError, cleanupExchange, remove and removeKeepOrder rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_manager.rs::ChaserSupervisor::construct_cleanup"
+reason = "Required member of the ChaserSupervisor host capability (construction of the processInstance supervision, cleanupInstance and completion futures plus detached task ownership) used by the mapped ChaserOrderManager add, handleSupervisorError, cleanupExchange, remove and removeKeepOrder rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_manager.rs::ChaserSupervisor::construct_completion"
+reason = "Required member of the ChaserSupervisor host capability (construction of the processInstance supervision, cleanupInstance and completion futures plus detached task ownership) used by the mapped ChaserOrderManager add, handleSupervisorError, cleanupExchange, remove and removeKeepOrder rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_manager.rs::ChaserSupervisor::construct_supervision"
+reason = "Required member of the ChaserSupervisor host capability (construction of the processInstance supervision, cleanupInstance and completion futures plus detached task ownership) used by the mapped ChaserOrderManager add, handleSupervisorError, cleanupExchange, remove and removeKeepOrder rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/chaser_manager.rs::ChaserSupervisor::spawn"
+reason = "Required member of the ChaserSupervisor host capability (construction of the processInstance supervision, cleanupInstance and completion futures plus detached task ownership) used by the mapped ChaserOrderManager add, handleSupervisorError, cleanupExchange, remove and removeKeepOrder rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/command_handlers.rs::CommandHandlerHost"
+reason = "Host capability trait binding worker postMessage, chaser-manager exchange cleanup and TWAP-manager add/get for the mapped ChaserOrderHandler.handle, TwapHandler.handle and UiStateHandler.handle rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/command_handlers.rs::CommandHandlerHost::add_twap"
+reason = "Required member of the CommandHandlerHost host capability (worker postMessage, chaser-manager exchange cleanup and TWAP-manager add/get) used by the mapped ChaserOrderHandler.handle, TwapHandler.handle and UiStateHandler.handle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/command_handlers.rs::CommandHandlerHost::cleanup_chaser_exchange"
+reason = "Required member of the CommandHandlerHost host capability (worker postMessage, chaser-manager exchange cleanup and TWAP-manager add/get) used by the mapped ChaserOrderHandler.handle, TwapHandler.handle and UiStateHandler.handle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/command_handlers.rs::CommandHandlerHost::get_twap"
+reason = "Required member of the CommandHandlerHost host capability (worker postMessage, chaser-manager exchange cleanup and TWAP-manager add/get) used by the mapped ChaserOrderHandler.handle, TwapHandler.handle and UiStateHandler.handle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/command_handlers.rs::CommandHandlerHost::post_payload"
+reason = "Required member of the CommandHandlerHost host capability (worker postMessage, chaser-manager exchange cleanup and TWAP-manager add/get) used by the mapped ChaserOrderHandler.handle, TwapHandler.handle and UiStateHandler.handle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::StoreFrame"
+reason = "Rust-only shared mutable store-data frame carrier passed through the throttle, postprocessors and store delivery of the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::ProcessorList"
+reason = "Type alias for the live _processors array field read by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows; no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::HandlerList"
+reason = "Type alias for the live _handlers array field read by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows; no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::WorkerStoreMessage"
+reason = "Typed {op, data} store postMessage envelope that keeps native non-finite numbers out of JSON, posted by the mapped ExchangeWorker _storeUpdate and sendSnapshot rows; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::WorkerPostprocessor"
+reason = "Dispatch interface through which the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows call each constructed postprocessor process(data); the BasePostprocessor/ExchangeDependentPostprocessor rows own the bodies. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::WorkerPostprocessor::process"
+reason = "Required member of the postprocessor dispatch interface used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::WorkerHandler"
+reason = "Dispatch interface through which the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows dispose each constructed handler; the BaseHandler rows own the bodies. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::WorkerHandler::dispose"
+reason = "Required member of the handler dispatch interface used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorkerHost"
+reason = "Host capability trait binding store postMessage, the shared chaser manager and supervisor bindings and timer-error reporting for the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorkerHost::chaser_manager"
+reason = "Required member of the ExchangeWorkerHost host capability (store postMessage, the shared chaser manager and supervisor bindings and timer-error reporting) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorkerHost::chaser_supervisor"
+reason = "Required member of the ExchangeWorkerHost host capability (store postMessage, the shared chaser manager and supervisor bindings and timer-error reporting) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorkerHost::post_store"
+reason = "Required member of the ExchangeWorkerHost host capability (store postMessage, the shared chaser manager and supervisor bindings and timer-error reporting) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorkerHost::report_timer_error"
+reason = "Required member of the ExchangeWorkerHost host capability (store postMessage, the shared chaser manager and supervisor bindings and timer-error reporting) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost"
+reason = "Host capability trait binding dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation for the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::console_error_fallback"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::console_suppressed_start_error"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::construct_clock_start"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::construct_exchange_start"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::construct_handler"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::error_properties"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::invoke_handler"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::load_exchange"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::materialize_error"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::post_payload"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::processor_registry"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerBootstrapHost::spawn_start_task"
+reason = "Required member of the WorkerBootstrapHost host capability (dynamic venue import, clock and exchange start construction, handler construction/invocation, postprocessor registry, postMessage, console and error materialisation) used by the mapped ExchangeWorker start, handlePayload, _storeUpdate, _initializeProcessorsAndHandlers, _setupExchangeEventListeners and dispose rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::ProcessorArguments"
+reason = "Constructor-argument record (store, account, exchange name, options, exchange) passed to each heterogeneous postprocessor constructor by the mapped ExchangeWorker#_initializeProcessorsAndHandlers row; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::ProcessorConstructor"
+reason = "Callable-constructor capability for an imported postprocessor class (new Processor(...)) used by the mapped ExchangeWorker#_initializeProcessorsAndHandlers row; adds no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::ProcessorConstructor::construct"
+reason = "Required member of the postprocessor constructor capability (actual JS Construct with original throws) used by the mapped ExchangeWorker#_initializeProcessorsAndHandlers row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerProcessorRegistry"
+reason = "Type alias for the host-supplied postprocessor registry (independent and exchange-dependent constructor lists) read by the mapped ExchangeWorker#_initializeProcessorsAndHandlers row; no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerExchangeConstructor"
+reason = "Callable-constructor capability for the dynamically imported venue class (new Exchange(options, store)) used by the mapped ExchangeWorker.start row; adds no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::WorkerExchangeConstructor::construct"
+reason = "Required member of the venue constructor capability (actual JS Construct with original throws) used by the mapped ExchangeWorker.start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::decode_update"
+reason = "Serde JSON boundary decoder for the StoreUpdate carried by a worker store payload, used by the mapped ExchangeWorker and store.webworker start rows; no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::exchange_text"
+reason = "ExchangeName to wire-string projection (the string value of the source exchange-name union) used in log messages and worker-table keys by the mapped ExchangeWorker.start and store.webworker start rows. No independent algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/order_book_post.rs::OrderBookPostData::fields"
+reason = "Accessor (ordered field iteration) over the posted order-book data record of the mapped OrderBookSubscriptionsHandler#_sendOrderBookUpdate row, used by hosts and tests to inspect it before structured clone. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/order_book_post.rs::OrderBookPostData::get"
+reason = "Accessor (field read) over the posted order-book data record of the mapped OrderBookSubscriptionsHandler#_sendOrderBookUpdate row, used by hosts and tests to inspect it before structured clone. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/order_book_post.rs::OrderBookPostData::get_mut"
+reason = "Accessor (mutable field read) over the posted order-book data record of the mapped OrderBookSubscriptionsHandler#_sendOrderBookUpdate row, used by hosts and tests to inspect it before structured clone. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/order_book_post.rs::OrderBookPostData::book"
+reason = "Accessor (shared book read) over the posted order-book data record of the mapped OrderBookSubscriptionsHandler#_sendOrderBookUpdate row, used by hosts and tests to inspect it before structured clone. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/order_book_post.rs::OrderBookPostData::book_mut"
+reason = "Accessor (mutable book read) over the posted order-book data record of the mapped OrderBookSubscriptionsHandler#_sendOrderBookUpdate row, used by hosts and tests to inspect it before structured clone. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/order_book_post.rs::OrderBookUpdateError"
+reason = "Error carrier preserving the original Store variant and subscriber cause for failures in the mapped OrderBookSubscriptionsHandler#_sendOrderBookUpdate row; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor::AccountName"
+reason = "Associated carrier type for the opaque AccountName constructor input retained by the mapped BasePostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor::ExchangeName"
+reason = "Associated carrier type for the opaque ExchangeName constructor input retained by the mapped BasePostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor::Options"
+reason = "Associated carrier type for the opaque Options constructor input retained by the mapped BasePostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::BasePostprocessor::Store"
+reason = "Associated carrier type for the opaque Store constructor input retained by the mapped BasePostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor::AccountName"
+reason = "Associated carrier type for the opaque AccountName constructor input retained by the mapped ExchangeDependentPostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor::Exchange"
+reason = "Associated carrier type for the opaque Exchange constructor input retained by the mapped ExchangeDependentPostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor::ExchangeName"
+reason = "Associated carrier type for the opaque ExchangeName constructor input retained by the mapped ExchangeDependentPostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor::Options"
+reason = "Associated carrier type for the opaque Options constructor input retained by the mapped ExchangeDependentPostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/postprocessor_context.rs::ExchangeDependentPostprocessor::Store"
+reason = "Associated carrier type for the opaque Store constructor input retained by the mapped ExchangeDependentPostprocessor.constructor row (callers choose a shared reference to keep source aliasing). No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramExecutor"
+reason = "Type alias for the injected command-executor callable invoked by the mapped TelegramWorker.processMessages row; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramHost"
+reason = "Host capability trait binding the runtime, command executor and the Axios getUpdates/sendMessage operations for the mapped TelegramWorker start, processMessages and tick rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramHost::command_executor"
+reason = "Required member of the TelegramHost host capability (the runtime, command executor and the Axios getUpdates/sendMessage operations) used by the mapped TelegramWorker start, processMessages and tick rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramHost::get_updates"
+reason = "Required member of the TelegramHost host capability (the runtime, command executor and the Axios getUpdates/sendMessage operations) used by the mapped TelegramWorker start, processMessages and tick rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramHost::post_message"
+reason = "Required member of the TelegramHost host capability (the runtime, command executor and the Axios getUpdates/sendMessage operations) used by the mapped TelegramWorker start, processMessages and tick rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramHost::runtime"
+reason = "Required member of the TelegramHost host capability (the runtime, command executor and the Axios getUpdates/sendMessage operations) used by the mapped TelegramWorker start, processMessages and tick rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramWorker::seen_count"
+reason = "Observation accessor for the size of the private seen-message-ID set maintained by the mapped TelegramWorker.tick row, used by tests. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/telegram.rs::TelegramWorker::has_seen"
+reason = "Observation accessor (SameValueZero membership) for the private seen-message-ID set maintained by the mapped TelegramWorker.tick row, used by tests. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost"
+reason = "Host capability trait binding the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership for the mapped TwapInstance lifecycle rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::add_chaser"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::emit_log"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::find_chaser"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::manager"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::place_order"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::post_state"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::remove_chaser"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::runtime"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::same_timer"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/twap_instance.rs::TwapHost::spawn"
+reason = "Required member of the TwapHost host capability (the runtime, TWAP manager, state postMessage, venue placement, log emission, chaser add/find/remove, timer identity and task ownership) used by the mapped TwapInstance lifecycle rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPorts"
+reason = "Explicit module context for store.webworker.ts module-private ports, portsBySubId and portStates tables, serving the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPorts::new"
+reason = "Module-context constructor (empty port tables) serving the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPorts::state"
+reason = "portStates.get read (port object identity) shared by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows; exposed for their tests. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::PortList"
+reason = "Type alias for a shared live port group array of the module-private ports table used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::SharedPortState"
+reason = "Type alias for a shared PortState record held in the module-private portStates map used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerMessage"
+reason = "Opaque message capability (pure JS truthiness) for the posted values handled by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows; adds no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerMessage::is_truthy"
+reason = "Required member of the opaque message capability (ToBoolean without running message code) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPort"
+reason = "Host capability trait binding MessagePort | Worker postMessage with its thrown value for the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPort::Error"
+reason = "Required member of the WorkerPort host capability (MessagePort | Worker postMessage with its thrown value) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPort::post_message"
+reason = "Required member of the WorkerPort host capability (MessagePort | Worker postMessage with its thrown value) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPortTimers"
+reason = "Host capability trait binding Date.now, setTimeout/clearTimeout and timer-handle truthiness for the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows and the worker throttles; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPortTimers::Timer"
+reason = "Required member of the WorkerPortTimers host capability (Date.now, setTimeout/clearTimeout and timer-handle truthiness) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows and the worker throttles. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPortTimers::clear_timeout"
+reason = "Required member of the WorkerPortTimers host capability (Date.now, setTimeout/clearTimeout and timer-handle truthiness) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows and the worker throttles. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPortTimers::now_ms"
+reason = "Required member of the WorkerPortTimers host capability (Date.now, setTimeout/clearTimeout and timer-handle truthiness) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows and the worker throttles. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPortTimers::set_timeout"
+reason = "Required member of the WorkerPortTimers host capability (Date.now, setTimeout/clearTimeout and timer-handle truthiness) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows and the worker throttles. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_ports.rs::WorkerPortTimers::timer_is_truthy"
+reason = "Required member of the WorkerPortTimers host capability (Date.now, setTimeout/clearTimeout and timer-handle truthiness) used by the mapped store.webworker cleanupPortEverywhere, deliverToPortWithThrottle, broadcastWithThrottle and cleanupPortState rows and the worker throttles. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerModule"
+reason = "Explicit module context for store.webworker.ts module-level worker tables and config-handler list, serving the mapped anonymousExchangeWorkers, exchangeWorkers and start rows. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerModule::new"
+reason = "Module-context constructor (fresh worker tables) serving the mapped anonymousExchangeWorkers, exchangeWorkers and start rows. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost"
+reason = "Host capability trait binding message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host for the mapped store.webworker start row; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::config_handlers"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::configure_perf_fixture"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::console"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::install_message_listener"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::invoke_config_handler"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::is_replaying_perf_fixture"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::set_tick_interval_multipliers"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::set_ws_diagnostics_enabled"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::start_replay"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::sync_server_time"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::take_perf_fixture"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::telegram_host"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
+
+[[exempt]]
+rs = "safe-cex-webworker/src/worker_session.rs::WorkerSessionHost::worker_context"
+reason = "Required member of the WorkerSessionHost host capability (message-listener installation, the recording worker-context proxy, perf-fixture replay/configure/take, tick multipliers, WS diagnostics, config handlers, server-time sync, console and the Telegram host) used by the mapped store.webworker start row. No independent worker algorithm."
