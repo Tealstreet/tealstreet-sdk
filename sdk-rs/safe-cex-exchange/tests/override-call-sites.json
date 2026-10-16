@@ -4345,13 +4345,13 @@
   },
   {
     "function": "base_exchange_class",
-    "body": "775186cf3d335ac4",
+    "body": "f16535160061e222",
     "call": "b . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
   {
     "function": "base_exchange_class",
-    "body": "775186cf3d335ac4",
+    "body": "f16535160061e222",
     "call": "b . name ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },

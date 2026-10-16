@@ -1344,3 +1344,20 @@ Native all-target and wasm library strict clippy cover the venue and registry.
 No manifests or fixture corpora were regenerated. The inherited seed oracle
 hash failure was resolved by merging landed #198, including its one-row
 provenance check, before the passing oracle run.
+
+### Override inventory review after external-data and journal assembly
+
+Reviewed the two `realm/facade_exchange.rs::base_exchange_class` inventory rows.
+`b.dispose()` is the inherited BaseExchange implementation reached by the source
+class's explicit super-dispose path; source override dispatch happens in the
+realm first. `b.name()` serves the inherited name getter over the native account
+name. Neither call newly bypasses a venue override. The external-data hydration/
+disposal test observes the provider released exactly once, and construction/
+native registry tests retain the venue name.
+
+The stale inventory compiled and failed
+`production_callers_do_not_bypass_exchange_override_hooks` before the repair.
+After reviewing the final combined journal/external-data body, only those two
+fingerprints changed to `f16535160061e222`; the same test passes (1/1). No inventory
+regeneration or blanket delegation was used. This final body differs from the
+external-data-only master body's fingerprint because it also binds journal folding.
