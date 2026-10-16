@@ -329,9 +329,14 @@ pub struct Harness {
     pub store: Rc<dyn Store>,
     pub seen: Rc<RefCell<Vec<Seen>>>,
     pub peers: Rc<RefCell<Vec<WsPeer>>>,
+    /// Text frames every local socket received from the exchange.
+    pub received: Rc<RefCell<Vec<String>>>,
 }
 /// Binance built through the registry's Rust constructor on the native host. Call inside a LocalSet.
 pub async fn binance_harness(extra: Handler) -> Harness {
+    binance_harness_with(extra, json!({"key":"native-key","secret":SECRET})).await
+}
+pub async fn binance_harness_with(extra: Handler, options: Value) -> Harness {
     let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ws = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let http_origin = format!("http://{}", http.local_addr().unwrap());
@@ -339,7 +344,8 @@ pub async fn binance_harness(extra: Handler) -> Harness {
     let seen = Rc::new(RefCell::new(vec![]));
     let peers = Rc::new(RefCell::new(vec![]));
     tokio::task::spawn_local(serve_http(http, handler(extra), seen.clone()));
-    tokio::task::spawn_local(serve_ws(ws, peers.clone(), Rc::new(RefCell::new(vec![]))));
+    let received = Rc::new(RefCell::new(vec![]));
+    tokio::task::spawn_local(serve_ws(ws, peers.clone(), received.clone()));
     let host = Rc::new(LocalDial {
         inner: safe_cex_exchange::native::native_runtime(),
         origin: ws_origin,
@@ -357,7 +363,7 @@ pub async fn binance_harness(extra: Handler) -> Harness {
         native_venue_host_with(host, adapters),
     )
     .expect("binance is a Rust-constructed venue");
-    let options = serde_json::from_value(json!({"key":"native-key","secret":SECRET})).unwrap();
+    let options = serde_json::from_value(options).unwrap();
     let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
     let exchange = constructor
         .construct(ExchangeName::Binance, options, store.clone())
@@ -367,6 +373,7 @@ pub async fn binance_harness(extra: Handler) -> Harness {
         store,
         seen,
         peers,
+        received,
     }
 }
 pub fn run_local(future: impl std::future::Future<Output = ()>) {

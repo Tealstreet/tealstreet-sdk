@@ -65,13 +65,16 @@ fn to_json(value: &EventValue) -> Result<Value, Failure> {
 }
 
 /// Production Binance dependencies over a native runtime and terminal HTTP adapter.
+/// `external` builds the externalPublicData provider for an exchange's base; the
+/// registry supplies it, since the providers live above the venue layer.
 pub fn native_dependencies(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
+    external: ExternalFactory,
 ) -> ExchangeDependencies {
     ExchangeDependencies {
         runtime: runtime.clone(),
-        imports: native_imports(runtime, adapter),
+        imports: native_imports(runtime, adapter, external),
         signers: Default::default(),
         remote_signer_token: None,
         payload_signer_token: None,
@@ -85,14 +88,26 @@ struct NativeImports {
     registry: TransportRegistry,
     clients: RefCell<Vec<Rc<NativeClient>>>,
     timers: Rc<NativeTimers>,
-    /// The exchange's emitAndLogError, bound during construction.
+    /// The exchange, bound weakly during construction.
     owner: Rc<RefCell<Weak<ExchangeState>>>,
+    external: ExternalFactory,
     /// publicXhr (Futures/PM) or xhr (Spot): the order-book snapshot client.
     public_client: RefCell<Option<Rc<NativeClient>>>,
     this: Weak<NativeImports>,
 }
-fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<NativeImports> {
+type ExternalFactory = Rc<
+    dyn Fn(
+        &safe_cex_types::ExchangeOptionsExternalPublicData,
+        Rc<safe_cex_exchange::exchange::BaseExchange>,
+    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData>,
+>;
+fn native_imports(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: Arc<dyn RestAdapter>,
+    external: ExternalFactory,
+) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
+        external,
         timers: native_timers(runtime.clone()),
         runtime,
         owner: Rc::new(RefCell::new(Weak::new())),
@@ -805,9 +820,12 @@ impl ExchangeImports for NativeImports {
     }
     fn external_provider(
         &self,
-        _options: &safe_cex_types::ExchangeOptionsExternalPublicData,
+        options: &safe_cex_types::ExchangeOptionsExternalPublicData,
     ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData> {
-        Rc::new(UnavailableExternalData(self.runtime.clone()))
+        match self.owner.borrow().upgrade() {
+            Some(owner) => (self.external)(options, owner.base.clone()),
+            None => Rc::new(UnavailableExternalData(self.runtime.clone())),
+        }
     }
     fn private_base(&self, parent: Rc<dyn PrivateParent>) -> Result<Rc<dyn PrivateBase>, Failure> {
         let ws_parent = parent
@@ -1460,7 +1478,7 @@ fn iso_string(ms: f64) -> Result<String, Failure> {
 
 /// externalPublicData on a host with no provider: every use fails visibly.
 struct UnavailableExternalData(Rc<dyn WsRuntime>);
-const NO_EXTERNAL: &str = "externalPublicData is not available on the native direct host";
+const NO_EXTERNAL: &str = "externalPublicData requested with no live exchange bound";
 impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData {
     fn connect(&self) {
         self.0.report_exception(

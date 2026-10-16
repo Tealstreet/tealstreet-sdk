@@ -67,3 +67,11 @@ enabled for this crate's own tests without a lateral self-edge; wasm builds do
 not. `tests/native_host_binance.rs` constructs Binance through
 `rust_constructor` against local HTTP/WS servers and verifies the HMAC
 server-side; `native_host_backpack.rs` reads markets through the real adapter.
+
+The native host builds `externalPublicData` providers for venues, which cannot
+reach this crate: the websocket gateway runs `ExternalPublicDataProvider` over a
+native `GatewayHost` (runtime dials and timers) with the exchange Store as parent;
+the gateway always delivers whole batches, so the owned Store copy is current.
+The in-process variant cannot be named in native options (its capability type is
+uninhabited) and fails visibly until a host-registered source exists.
+`tests/native_host_external_data.rs` starts Binance on a local gateway socket.
