@@ -237,6 +237,13 @@ fn with_params_serializer(
         serialize: serializer.cloned(),
     })
 }
+/// The shared wire codec for a hosted signer's already-transformed output.
+pub(crate) fn remote_output_adapter(
+    inner: Arc<dyn RestAdapter>,
+    serializer: Option<&ParamsSerializer>,
+) -> Arc<dyn RestAdapter> {
+    with_params_serializer(inner, serializer, AdapterInput::RemoteOutput)
+}
 /// Factory-selected response transform, before shared response/error hooks.
 pub type ResponseTransform =
     Rc<dyn Fn(RestResponse, &RestRequest) -> Result<RestResponse, HttpFailure>>;
@@ -423,6 +430,10 @@ impl RestAdapter for HttpClient {
     }
 }
 impl HttpClient {
+    /// Whether this request is dispatched only to capture its signed config.
+    pub fn is_signing_capture(&self, request: &RestRequest) -> bool {
+        self.host.signing_capture(request)
+    }
     /// Signer/preflight refusal precedes common request statistics; serializers
     /// call the same failure constructor inside the adapter after those stats.
     pub fn refuse_before_transmit(

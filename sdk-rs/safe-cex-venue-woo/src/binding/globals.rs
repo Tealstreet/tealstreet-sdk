@@ -4,7 +4,7 @@
 use super::{
     client,
     rt::{Rt, Shared},
-    value::{Js, Thrown, arg, from_json, from_typed, to_json, to_typed},
+    value::{Js, Thrown, arg, from_json, from_typed, to_json},
 };
 use crate::constants;
 use safe_cex_exchange::js_runtime::{
@@ -63,7 +63,7 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
 // ts: createAPI (woo.api.ts) — the request interceptor signs through the ported
 // factory step: public skip, broker injection, remote/keyless bypass, V1/V3 signing.
 fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
-    let typed: ExchangeOptions = to_typed(&options)?;
+    let typed: ExchangeOptions = base_exchange::exchange_options(&options)?;
     if typed.tealstreet_tunnel == Some(true) {
         return Err(Thrown::error(
             "Error",
@@ -217,8 +217,14 @@ fn get_transport(rt: &Rt) -> Js {
     Js::object(vec![(
         "requireProxy",
         Js::function("requireProxy", move |_, a| {
-            let options: ExchangeOptions = to_typed(&arg(&a, 0))?;
-            from_typed(&provider.require_proxy(options))
+            let original = arg(&a, 0);
+            let options: ExchangeOptions = base_exchange::exchange_options(&original)?;
+            let structural = from_typed(&provider.require_proxy(options))?;
+            let result = original.spread_object()?;
+            for (key, value) in structural.own_entries()? {
+                result.define_key(&key, value)?;
+            }
+            Ok(result)
         }),
     )])
 }

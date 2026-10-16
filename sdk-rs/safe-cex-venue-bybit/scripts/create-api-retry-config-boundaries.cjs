@@ -50,7 +50,7 @@ for (const statement of apiSource.statements) {
 }
 assert.deepEqual(moduleFunctions, [
   'isSignedRequest', 'isPublicEndpoint', 'isInstrumentsInfoRequest', 'isBybitClockSyncRetMsg',
-  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitEnvProbeRequest',
+  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitSignRejection', 'isBybitEnvProbeRequest',
   'shouldRetryBybitRequest', 'createAPI',
 ], 'independent module function inventory');
 assert.ok(factory);
@@ -85,6 +85,7 @@ const types = load('assembled-bybit-api-constants.ts', {}, typesProgram);
 assert.deepEqual(Object.keys(types).sort(), [...typeNames].sort());
 const response = load('packages/safe-cex/src/exchanges/bybit/bybit.response.ts');
 const retryReads = load('packages/safe-cex/src/utils/retryReadsOnly.ts', { 'axios-retry': retry });
+const signatureRejection = load('packages/safe-cex/src/utils/signatureRejection.ts');
 
 const remotePath = 'packages/safe-cex/src/remoteSigningAdapter.ts';
 const remoteSource = parse(remotePath);
@@ -129,7 +130,7 @@ function observeOptionalConfigHelpers(api) {
     data: { ret_msg: 'error sign!' } };
   const helperInputs = [
     ['network-absent-config', new axios.AxiosError('network', 'ERR_NETWORK'), false],
-    ['signature-absent-config', new axios.AxiosError('signature', 'ERR_BAD_RESPONSE', undefined, undefined, signatureResponse), true],
+    ['signature-absent-config', new axios.AxiosError('signature', 'ERR_BAD_RESPONSE', undefined, undefined, signatureResponse), false],
     ['network-omitted-method', new axios.AxiosError('network', 'ERR_NETWORK', { url: '/private', headers: new axios.AxiosHeaders() }), false],
     ['network-empty-method', new axios.AxiosError('network', 'ERR_NETWORK', { method: '', url: '/private', headers: new axios.AxiosHeaders() }), false],
   ];
@@ -145,7 +146,7 @@ function observeOptionalConfigHelpers(api) {
     assert.equal(predicate, expected, `optional-config helper expected predicate ${id}`);
     return { id, predicate };
   });
-  assert.deepEqual(result.map(value => value.predicate), [false, true, false, false]);
+  assert.deepEqual(result.map(value => value.predicate), [false, false, false, false]);
   return result;
 }
 
@@ -226,7 +227,7 @@ async function run(input, expected) {
     './bybit.response': response,
     './bybit.site': { getBybitSiteHeaders: () => ({}) },
     './bybit.types': types,
-    '../../utils/retryReadsOnly': retryReads,
+    '../../utils/retryReadsOnly': retryReads, '../../utils/signatureRejection': signatureRejection,
   }, apiSource.text, { error: (...args) => logs.push(args) });
   if (!optionalConfigHelpers) optionalConfigHelpers = observeOptionalConfigHelpers(api);
   const freshPredicateConfig = {
@@ -256,7 +257,11 @@ async function run(input, expected) {
   assert.equal(physical.length, expected.attempts, 'source physical attempt count');
   assert.equal(nextId, expected.attempts, 'source fresh request IDs');
   assert.equal(!!result, expected.resolved, 'source resolution');
-  assert.equal(api.shouldRetryBybitRequest(sourceError), expected.retryCondition, 'source condition reads failure config');
+  // The actual retry stamped this config; the pure condition is read on an unstamped copy.
+  const unstamped = { ...sourceError.config };
+  delete unstamped.safeCexSignatureRetry;
+  const fresh = Object.assign(Object.create(Object.getPrototypeOf(sourceError)), sourceError, { config: unstamped });
+  assert.equal(api.shouldRetryBybitRequest(fresh), expected.retryCondition, 'source condition reads failure config');
   assert.equal(authSuccesses, expected.successes, 'source retry-chain success unwind');
   assert.equal(authFailures, 0);
   assert.deepEqual(logs, []);

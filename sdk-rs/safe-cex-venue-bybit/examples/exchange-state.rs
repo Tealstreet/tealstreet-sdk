@@ -7,6 +7,8 @@ use std::io::{self, Read};
 struct TickerCase {
     #[serde(default)]
     spot: bool,
+    #[serde(default, rename = "inverseClass")]
+    inverse_class: bool,
     raw: Option<Vec<Value>>,
     markets: Vec<Market>,
     cached: Vec<Ticker>,
@@ -174,6 +176,8 @@ fn main() {
         .map(|case| {
             let parser = if case.spot {
                 parse_spot_tickers
+            } else if case.inverse_class {
+                parse_inverse_class_tickers
             } else {
                 parse_tickers
             };

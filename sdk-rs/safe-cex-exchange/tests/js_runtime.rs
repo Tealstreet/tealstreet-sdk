@@ -110,6 +110,50 @@ fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
 }
 
 #[test]
+fn client_retry_preserves_the_failed_config_and_retry_stamp() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    xhr.call_method(
+        "__configureRetry",
+        vec![Js::object(vec![
+            ("retries", Js::Number(3.0)),
+            (
+                "retryCondition",
+                Js::function("retryCondition", |_, a| {
+                    let config = arg(&a, 0).get("config")?;
+                    if config.get("signatureRetried")?.truthy() {
+                        return Ok(Js::Bool(false));
+                    }
+                    config.set("signatureRetried", Js::Bool(true))?;
+                    config.set("data", Js::str("replayed body"))?;
+                    Ok(Js::Bool(true))
+                }),
+            ),
+        ])],
+    )
+    .unwrap();
+    let result = settle(
+        &runtime,
+        xhr.call_method("post", vec![Js::str("/fail"), Js::str("original body")])
+            .unwrap(),
+    );
+    assert!(result.is_err());
+    let sent = http.sent.borrow();
+    assert_eq!(
+        sent.len(),
+        2,
+        "retry predicate stamp survives the next attempt"
+    );
+    assert_eq!(sent[0]["data"], "original body");
+    assert_eq!(sent[1]["data"], "replayed body");
+    assert_eq!(sent[1]["signatureRetried"], true);
+}
+
+#[test]
 fn client_runs_request_interceptors_lifo_and_response_interceptors_fifo() {
     let runtime = Rc::new(Runtime::default());
     let http = Rc::new(Http {
@@ -1211,6 +1255,129 @@ fn rest_http_host_lets_the_venue_serialize_its_query() {
     let seen = terminal.seen.lock().unwrap();
     assert_eq!(seen[0].url, "/ok?a=1&b=2");
     assert_eq!(seen[0].params, None);
+}
+
+/// A dropped awaiter releases its waker at once; the promise still settles for the
+/// awaiters that remain.
+#[test]
+fn dropped_promise_wait_releases_its_waker() {
+    #[derive(Default)]
+    struct Count(std::sync::atomic::AtomicBool);
+    impl std::task::Wake for Count {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let runtime: Rc<dyn ExchangeRuntime> = Rc::new(Runtime::default());
+    let promise = Promise::pending(&runtime);
+    let (dropped, kept) = (
+        std::sync::Arc::<Count>::default(),
+        std::sync::Arc::<Count>::default(),
+    );
+    let mut first = Box::pin(promise.wait());
+    let mut second = Box::pin(promise.wait());
+    for (wait, waker) in [(&mut first, &dropped), (&mut second, &kept)] {
+        let waker = Waker::from(waker.clone());
+        assert!(
+            wait.as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+    }
+    assert_eq!(
+        std::sync::Arc::strong_count(&dropped),
+        2,
+        "registered while pending"
+    );
+    drop(first);
+    assert_eq!(
+        std::sync::Arc::strong_count(&dropped),
+        1,
+        "WAITER drop releases the waker"
+    );
+    assert_eq!(
+        std::sync::Arc::strong_count(&kept),
+        2,
+        "the other awaiter stays registered"
+    );
+    promise.settle(Ok(Js::Bool(true)));
+    assert_eq!(
+        std::sync::Arc::strong_count(&kept),
+        1,
+        "settlement wakes and releases"
+    );
+    assert!(
+        kept.0.load(std::sync::atomic::Ordering::SeqCst),
+        "the kept awaiter is woken"
+    );
+    assert!(
+        !dropped.0.load(std::sync::atomic::Ordering::SeqCst),
+        "the dropped one is not"
+    );
+    let waker = Waker::from(kept.clone());
+    assert!(matches!(
+        second.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Ready(Ok(Js::Bool(true)))
+    ));
+}
+
+/// clearTimeout cancels the host task, and a fired timer leaves the timer list.
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[test]
+fn clear_timeout_cancels_and_fired_timers_are_released() {
+    use safe_cex_exchange::js_runtime::scope::{Scope, ScopeShared};
+    let tokio = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&tokio, async {
+        let runtime = safe_cex_exchange::native::native_runtime();
+        let http = Rc::new(Http {
+            runtime: Rc::new(Runtime::default()),
+            sent: RefCell::default(),
+        });
+        let store: Rc<dyn safe_cex_store::Store> =
+            Rc::new(safe_cex_store::store::DefaultStore::new());
+        let scope = Scope {
+            shared: Rc::new(ScopeShared::new(
+                runtime.clone(),
+                http,
+                store,
+                Js::Undefined,
+                (),
+            )),
+            this: Js::Undefined,
+        };
+        let ran = Rc::new(std::cell::Cell::new(0));
+        let (cleared, kept) = (ran.clone(), ran.clone());
+        let timer = scope.set_timeout(
+            Rc::new(move || {
+                cleared.set(cleared.get() + 10);
+                Ok(())
+            }),
+            20.0,
+        );
+        scope.set_timeout(
+            Rc::new(move || {
+                kept.set(kept.get() + 1);
+                Ok(())
+            }),
+            20.0,
+        );
+        assert_eq!(scope.shared.timers.borrow().len(), 2);
+        scope.clear_timeout(&timer);
+        assert_eq!(scope.shared.timers.borrow().len(), 1);
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        assert_eq!(
+            ran.get(),
+            1,
+            "the cleared timer never fires; the other fires once"
+        );
+        assert!(
+            scope.shared.timers.borrow().is_empty(),
+            "a fired timer is released"
+        );
+    });
 }
 
 #[test]

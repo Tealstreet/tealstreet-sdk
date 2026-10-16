@@ -13,18 +13,18 @@ note = "Preserves substring matching and absent URL; this is the remote-signing 
 [[symbol]]
 ts = "isOkxSignatureRejection"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-okx/src/api.rs::is_okx_signature_rejection"
+status = "ported"
+note = "Renamed target `safe-cex-venue-okx/src/api.rs::is_okx_signature_rejection`. Decoded-JSON code/message predicate; tests/history_stream_api.rs compares actual-source predicate outcomes before the factory resend cases."
 
 [[symbol]]
 ts = "formatOkxApiErrorMessage"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-okx/src/api.rs::format_okx_api_error_message"
+status = "ported"
+note = "Renamed target `safe-cex-venue-okx/src/api.rs::format_okx_api_error_message`. Selects the first relevant nested row error, trims string messages, retains its sCode and falls back to outer message/code. Both native check_response and the host-shaped factory consume this helper. Witnesses: tests/history_stream_api.rs and tests/rest_operations.rs against actual source; admitted decoded-JSON strings use sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
 
 [[symbol]]
 ts = "createAPI"

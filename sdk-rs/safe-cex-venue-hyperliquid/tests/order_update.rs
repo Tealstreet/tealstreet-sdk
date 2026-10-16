@@ -238,10 +238,37 @@ fn case(scene: &'static str) -> N {
         "UPDATE native dead-add count {scene}"
     );
     assert_eq!(
-        count(&h, "placeOrder"),
+        count(&h, "placeOrderWithCloid"),
         usize::from(place),
         "UPDATE native place count {scene}"
     );
+    assert_eq!(
+        count(&h, "mintHyperliquidCloid"),
+        usize::from(place),
+        "UPDATE native one replacement cloid minted {scene}"
+    );
+    if place {
+        let placed = effects(&h, "placeOrderWithCloid");
+        assert!(
+            eq(&get(&placed[0], "2"), &s("0xmint")),
+            "UPDATE native minted cloid passed to placement {scene}"
+        );
+    }
+    let replaced = place && scene != "place-error";
+    assert_eq!(
+        h.st.borrow().replacement_client_order_id.is_some(),
+        replaced,
+        "UPDATE native replacement cloid attached {scene}"
+    );
+    if replaced {
+        assert!(
+            eq(
+                h.st.borrow().replacement_client_order_id.as_ref().unwrap(),
+                &s("0xmint")
+            ),
+            "UPDATE native result carries the placement cloid {scene}"
+        );
+    }
     if cancel {
         assert!(
             eq(h.st.borrow().cancel_seen.as_ref().unwrap(), &s("old-id")),

@@ -4,7 +4,10 @@
 //! Object.keys/entries retain ordinary string-key/entry-pair result domains;
 //! reflective String/Array/Object intrinsic replacements yielding other types,
 //! full owner/runtime construction and resource-allocation parity are unproved.
-use crate::{sdk_account_api::AccountValue, transaction_signing::SigningResult};
+use crate::{
+    sdk_account_api::{AccountValue, type_error},
+    transaction_signing::SigningResult,
+};
 use std::rc::Rc;
 const BOOK_DELAY: f64 = 90_000.0;
 const CANDLE_DELAY: f64 = 120_000.0;
@@ -101,27 +104,40 @@ fn handlers_length(host: &dyn PublicWatchdogHost, topic: &[u16]) -> SigningResul
         host.property(&handlers, "length")
     }
 }
+struct ArmPlan {
+    kind: WatchdogRecord,
+    clear: &'static str,
+    recover: &'static str,
+    delay: f64,
+    reason: &'static str,
+}
+const BOOK_STALE_ARM: ArmPlan = ArmPlan {
+    kind: WatchdogRecord::BookStale,
+    clear: "clearOrderBookStaleTimeout",
+    recover: "attemptOrderBookRecovery",
+    delay: BOOK_DELAY,
+    reason: "no order book messages after 90000ms",
+};
+const CANDLE_NO_DATA_ARM: ArmPlan = ArmPlan {
+    kind: WatchdogRecord::CandleNoData,
+    clear: "clearOhlcvNoDataTimeout",
+    recover: "attemptOhlcvRecovery",
+    delay: CANDLE_DELAY,
+    reason: "no OHLCV messages after 120000ms",
+};
 fn arm(
     host: Rc<dyn PublicWatchdogHost>,
-    kind: WatchdogRecord,
+    plan: &'static ArmPlan,
     topic: &[u16],
     channel: Option<AccountValue>,
 ) -> SigningResult<()> {
-    let (clear, recover, delay, reason) = match kind {
-        WatchdogRecord::BookStale => (
-            "clearOrderBookStaleTimeout",
-            "attemptOrderBookRecovery",
-            BOOK_DELAY,
-            "no order book messages after 90000ms",
-        ),
-        WatchdogRecord::CandleNoData => (
-            "clearOhlcvNoDataTimeout",
-            "attemptOhlcvRecovery",
-            CANDLE_DELAY,
-            "no OHLCV messages after 120000ms",
-        ),
-        _ => unreachable!(),
-    };
+    let ArmPlan {
+        kind,
+        clear,
+        recover,
+        delay,
+        reason,
+    } = *plan;
     call(host.as_ref(), clear, &[text(topic)])?;
     // Source assignment LHS owner record is captured before setTimeout lookup.
     let lhs = host.record(kind)?;
@@ -149,7 +165,7 @@ pub fn arm_order_book_stale_timeout(
     topic: &[u16],
     channel: AccountValue,
 ) -> SigningResult<()> {
-    arm(host, WatchdogRecord::BookStale, topic, Some(channel))
+    arm(host, &BOOK_STALE_ARM, topic, Some(channel))
 }
 // ts: LighterPublicWebsocket#isOrderBookTopic
 pub fn is_order_book_topic(topic: &[u16]) -> bool {
@@ -180,15 +196,16 @@ pub fn arm_ohlcv_no_data_timeout(
     host: Rc<dyn PublicWatchdogHost>,
     topic: &[u16],
 ) -> SigningResult<()> {
-    arm(host, WatchdogRecord::CandleNoData, topic, None)
+    arm(host, &CANDLE_NO_DATA_ARM, topic, None)
 }
 // ts: LighterPublicWebsocket#armExistingOhlcvNoDataTimeouts
 pub fn arm_existing_ohlcv_no_data_timeouts(host: &dyn PublicWatchdogHost) -> SigningResult<()> {
     let keys = host.capture_values("Object.keys")?;
     let topics = host.record(WatchdogRecord::Topics)?;
     keys.for_of(topics, &mut |topic| {
+        // `topic.startsWith(...)`: only a String key has the method here.
         let AccountValue::String(topic) = topic else {
-            unreachable!("ordinary Object.keys yields strings")
+            return Err(type_error("topic.startsWith is not a function"));
         };
         if !topic.starts_with(&"candle/".encode_utf16().collect::<Vec<_>>())
             || !handlers_length(host, &topic)?.truthy()

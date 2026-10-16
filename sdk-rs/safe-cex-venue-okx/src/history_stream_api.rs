@@ -747,6 +747,83 @@ fn book_level<V, E>(
     Ok((h.value.object)(fields))
 }
 
+// ts: formatOkxApiErrorMessage. A row-level failure names its own message and code.
+fn format_okx_api_error_message<V: Clone + 'static, E: 'static>(
+    h: &Rc<RuntimeOps<V, E>>,
+    data: V,
+) -> Result<V, E> {
+    let v = &h.value;
+    let trimmed = |value: V| -> Result<V, E> {
+        if (v.truthy)(&(v.intrinsic)("typeof-string", vec![value.clone()])?) {
+            let trim = (v.member)(value, "trim")?;
+            (v.invoke)(trim, vec![])
+        } else {
+            Ok((v.literal)(""))
+        }
+    };
+    let rows = optional(h, &data, "data")?;
+    let first = if (v.truthy)(&(v.intrinsic)("is-array", vec![rows.clone()])?) {
+        let ops = h.clone();
+        let failed = (h.callback)(Rc::new(move |args| {
+            let row = args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| (ops.value.undefined)());
+            if !(ops.value.truthy)(&row) {
+                return Ok((ops.value.boolean)(false));
+            }
+            let code = (ops.value.get)(&row, "sCode")?;
+            let failed =
+                (ops.value.truthy)(&code) && !(ops.value.equal)(&code, &(ops.value.literal)("0"));
+            Ok(if failed {
+                (ops.value.boolean)(true)
+            } else {
+                (ops.value.get)(&row, "sMsg")?
+            })
+        }));
+        let find = (v.member)(rows, "find")?;
+        (v.invoke)(find, vec![failed])?
+    } else {
+        (v.undefined)()
+    };
+    let row_message = trimmed(optional(h, &first, "sMsg")?)?;
+    let row_code = optional(h, &first, "sCode")?;
+    let row_code = if (v.equal)(&row_code, &(v.undefined)()) {
+        (v.literal)("")
+    } else {
+        (v.intrinsic)("string", vec![row_code])?
+    };
+    if (v.truthy)(&row_message) {
+        return if (v.truthy)(&row_code) && !(v.equal)(&row_code, &(v.literal)("0")) {
+            (v.intrinsic)(
+                "template-concat",
+                vec![
+                    row_message,
+                    (v.literal)(" (code "),
+                    row_code,
+                    (v.literal)(")"),
+                ],
+            )
+        } else {
+            Ok(row_message)
+        };
+    }
+    let message = trimmed(optional(h, &data, "msg")?)?;
+    if (v.truthy)(&message) {
+        return Ok(message);
+    }
+    let code = optional(h, &data, "code")?;
+    let code = if (v.equal)(&code, &(v.undefined)()) {
+        (v.literal)("unknown")
+    } else {
+        (v.intrinsic)("string", vec![code])?
+    };
+    (v.intrinsic)(
+        "template-concat",
+        vec![(v.literal)("OKX API error (code "), code, (v.literal)(")")],
+    )
+}
+
 pub fn create_api<V: Clone + 'static, E: 'static>(
     h: Rc<RuntimeOps<V, E>>,
     options: V,
@@ -798,28 +875,50 @@ pub fn create_api<V: Clone + 'static, E: 'static>(
             exchange.clone(),
         ])
     })?;
+    // ts: (error) => networkErrorOnRead()(error) ||
+    //     signatureRejectedResponse(isOkxSignatureRejection)(error), evaluated per error.
+    let ops = h.clone();
+    let retry_condition = (h.callback)(Rc::new(move |args| {
+        let error = args
+            .first()
+            .cloned()
+            .unwrap_or_else(|| (ops.value.undefined)());
+        let network = call(&ops, "networkErrorOnRead", || Ok(vec![]))?;
+        let read = (ops.value.invoke)(network, vec![error.clone()])?;
+        if (ops.value.truthy)(&read) {
+            return Ok(read);
+        }
+        let signature = call(&ops, "signatureRejectedResponse", || {
+            Ok(vec![(ops.value.capture)("isOkxSignatureRejection")?])
+        })?;
+        (ops.value.invoke)(signature, vec![error])
+    }));
     call(&h, "retry", || {
         Ok(vec![
             xhr.clone(),
             (h.value.object)(vec![
                 ("retries", (h.value.number)(3.)),
-                (
-                    "retryCondition",
-                    call(&h, "networkErrorOnRead", || Ok(vec![]))?,
-                ),
+                ("retryCondition", retry_condition),
             ]),
         ])
     })?;
     let ops = h.clone();
+    let client = xhr.clone();
     let response_callback = (h.callback)(Rc::new(move |args| {
         let response = args[0].clone();
+        let resend = call(&ops, "resendOnSignatureRejection", || {
+            Ok(vec![
+                client.clone(),
+                response.clone(),
+                (ops.value.capture)("isOkxSignatureRejection")?,
+            ])
+        })?;
+        if (ops.value.truthy)(&resend) {
+            return Ok(resend);
+        }
         let code = optional(&ops, &(ops.value.get)(&response, "data")?, "code")?;
         if (ops.value.truthy)(&code) && !(ops.value.equal)(&code, &(ops.value.literal)("0")) {
-            let message = or(
-                &ops,
-                (ops.value.get)(&(ops.value.get)(&response, "data")?, "msg")?,
-                || (ops.value.intrinsic)("api-error-message", vec![code]),
-            )?;
+            let message = format_okx_api_error_message(&ops, (ops.value.get)(&response, "data")?)?;
             let error = (ops.value.new_error)((ops.value.capture)("Error")?, message)?;
             (ops.value.set)(&(ops.value.error_value)(&error), "response", response)?;
             return Err(error);

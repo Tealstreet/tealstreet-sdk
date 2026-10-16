@@ -5,6 +5,7 @@
     "fetchHistoricalPositions",
     "xhr",
     "infoXhr",
+    "clientOrderIdRule",
     "unlimitedXHR",
     "publicWebsocket",
     "privateWebsocket",
@@ -99,6 +100,8 @@
     "runRetryChainStep",
     "endRetryChain",
     "parseOpenOrders",
+    "mapOpenOrderRow",
+    "findOrderByClientOrderId",
     "fetchIncomeHistory",
     "closedPositionsShareLedgerSource",
     "resolveCoinToSymbol",
@@ -117,6 +120,7 @@
     "resolveReduceOnly",
     "signActionOrDefer",
     "placeOrder",
+    "placeOrderWithCloid",
     "cancelOrders",
     "scheduleCancel",
     "_deadOrders",
@@ -171,12 +175,37 @@
     },
     {
       "name": "addToPrePlacementCache",
-      "length": 5,
+      "length": 6,
+      "kind": "method"
+    },
+    {
+      "name": "forgetPrePlacement",
+      "length": 3,
+      "kind": "method"
+    },
+    {
+      "name": "recordPlacement",
+      "length": 2,
+      "kind": "method"
+    },
+    {
+      "name": "getPlacementRecord",
+      "length": 1,
+      "kind": "method"
+    },
+    {
+      "name": "forgetPlacementRecord",
+      "length": 1,
       "kind": "method"
     },
     {
       "name": "matchPrePlacement",
       "length": 4,
+      "kind": "method"
+    },
+    {
+      "name": "matchPrePlacementTrigger",
+      "length": 3,
       "kind": "method"
     },
     {
@@ -500,6 +529,16 @@
       "kind": "arrow"
     },
     {
+      "name": "mapOpenOrderRow",
+      "length": 2,
+      "kind": "arrow"
+    },
+    {
+      "name": "findOrderByClientOrderId",
+      "length": 2,
+      "kind": "arrow"
+    },
+    {
       "name": "fetchIncomeHistory",
       "length": 1,
       "kind": "arrow"
@@ -582,6 +621,11 @@
     {
       "name": "placeOrder",
       "length": 1,
+      "kind": "arrow"
+    },
+    {
+      "name": "placeOrderWithCloid",
+      "length": 2,
       "kind": "arrow"
     },
     {

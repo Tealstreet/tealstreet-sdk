@@ -81,19 +81,55 @@ pub fn fetch_tickers<E, F: Future<Output = Result<TickerValue, E>>>(
     }
 }
 
+// Array spread of an awaited value: arrays copy rows, strings split into code points.
+fn spread_into<E>(
+    tickers: &mut Vec<TickerValue>,
+    set: TickerValue,
+    not_iterable: &str,
+    type_error: &impl Fn(&str) -> E,
+) -> Result<(), E> {
+    match set {
+        TickerValue::Array(rows) => tickers.extend(rows.borrow().iter().cloned()),
+        TickerValue::String(text) => {
+            tickers.extend(text.chars().map(|c| TickerValue::String(c.to_string())))
+        }
+        _ => return Err(type_error(not_iterable)),
+    }
+    Ok(())
+}
+
+/// Linear rows, then inverse rows when enabled; the inverse request starts only
+/// after the linear one resolves and spreads, and the result is always a fresh array.
 pub fn fetch_tickers_raw<E, F: Future<Output = Result<TickerValue, E>>>(
-    helper: impl FnOnce(&str) -> Result<F, E>,
+    mut helper: impl FnMut(&str) -> Result<F, E>,
+    inverse_enabled: impl FnOnce() -> Result<bool, E>,
     emit: impl FnOnce(TickerValue) -> Result<(), E>,
     type_error: impl Fn(&str) -> E,
 ) -> impl Future<Output = Result<TickerValue, E>> {
     let request = helper("linear");
     async move {
-        let tickers = request?.await?;
-        if tickers.has_null(&type_error)? {
+        let mut tickers = Vec::new();
+        let linear = request?.await?;
+        spread_into(
+            &mut tickers,
+            linear,
+            "(intermediate value) is not iterable",
+            &type_error,
+        )?;
+        if inverse_enabled()? {
+            let inverse = helper("inverse")?.await?;
+            spread_into(
+                &mut tickers,
+                inverse,
+                "(intermediate value)(intermediate value)(intermediate value) is not iterable",
+                &type_error,
+            )?;
+        }
+        if tickers.iter().any(|row| matches!(row, TickerValue::Null)) {
             emit(TickerValue::String("Failed to fetch tickers".into()))?;
             Ok(TickerValue::Null)
         } else {
-            Ok(tickers)
+            Ok(TickerValue::Array(Rc::new(RefCell::new(tickers))))
         }
     }
 }

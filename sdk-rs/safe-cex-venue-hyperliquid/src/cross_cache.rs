@@ -208,6 +208,42 @@ pub fn write_pending_orders_cache<H: CrossCacheHost>(
 ) -> Result<(), H::Error> {
     write_cache(h, cache, value, "tealstreet_hip3_pendingOrders")
 }
+/// ts: PLACEMENT_RECORD_TTL_MS. A record is read on the order's first frame;
+/// the 30 minutes only let a slow or reconnecting socket still find it.
+pub const PLACEMENT_RECORD_TTL_MS: f64 = 30.0 * 60.0 * 1000.0;
+const PLACEMENT_RECORDS_STORAGE_KEY: &str = "tealstreet_hl_placementRecords";
+/// ts: HyperliquidCrossCache#readPlacementRecordStorage. Unlike the order caches
+/// there is no in-memory fallback: no storage, no data or a parse error is `{}`.
+pub fn read_placement_record_storage<H: CrossCacheHost>(
+    h: &mut H,
+    cache: &H::Value,
+) -> Result<H::Value, H::Error> {
+    let storage = method(h, cache, "getSessionStorage", &[])?;
+    if !h.truthy(&storage) {
+        return h.object();
+    }
+    let result: Result<H::Value, H::Error> = (|| {
+        let key = h.literal(&text(PLACEMENT_RECORDS_STORAGE_KEY));
+        let data = method(h, &storage, "getItem", &[key])?;
+        if h.truthy(&data) {
+            h.parse_json_value(&data)
+        } else {
+            h.object()
+        }
+    })();
+    match result {
+        Ok(value) => Ok(value),
+        Err(_) => h.object(),
+    }
+}
+/// ts: HyperliquidCrossCache#writePlacementRecordStorage; storage errors are ignored.
+pub fn write_placement_record_storage<H: CrossCacheHost>(
+    h: &mut H,
+    cache: &H::Value,
+    records: &H::Value,
+) -> Result<(), H::Error> {
+    write_cache(h, cache, records, PLACEMENT_RECORDS_STORAGE_KEY)
+}
 pub fn has_seen_fill<H: CrossCacheHost>(
     h: &mut H,
     cache: &H::Value,

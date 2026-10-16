@@ -35,6 +35,21 @@ fn api_helpers_match_typescript() {
         String::from_utf8_lossy(&output.stderr)
     );
     let data: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let unsigned = data["unsigned"].as_array().unwrap();
+    assert_eq!(unsigned.len(), 8, "withoutSigningFields case floor");
+    for case in unsigned {
+        let native = safe_cex_venue_asterdex::api_helpers::without_signing_fields(&case["input"]);
+        assert_eq!(
+            Value::Object(native.clone()),
+            case["output"],
+            "withoutSigningFields {case}"
+        );
+        assert_eq!(
+            json!(native.keys().collect::<Vec<_>>()),
+            case["keys"],
+            "withoutSigningFields key order {case}"
+        );
+    }
     for case in data["chains"].as_array().unwrap() {
         let testnet = case["input"].as_bool().unwrap();
         assert_eq!(json!(get_aster_dex_code_chain_id(testnet)), case["id"]);

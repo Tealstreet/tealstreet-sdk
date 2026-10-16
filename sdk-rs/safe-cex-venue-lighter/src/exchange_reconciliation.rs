@@ -3,10 +3,10 @@
 //! construct an exchange, HTTP client, signer, websocket or JS/timer runtime.
 //! The inherited global host must capture actual superclass dispose lookup
 //! with the owner receiver for super.dispose.
-//! Clock/update fields use ordinary Number-or-undefined source domains.
+//! Clock/update fields take JS ToNumber; objects throw TypeError.
 use crate::{
     exchange_account_access::ExchangeAccountAccessHost,
-    sdk_account_api::AccountValue,
+    sdk_account_api::{AccountValue, primitive_to_number},
     transaction_promise::{NativePromise, PromiseResolver},
     transaction_signing::{SigningResult, TransactionSigningError},
 };
@@ -64,12 +64,8 @@ fn call(
 fn store(h: &dyn ReconciliationHost) -> SigningResult<AccountValue> {
     h.get(&h.owner(), "store")
 }
-fn number(v: AccountValue) -> f64 {
-    match v {
-        AccountValue::Number(n) => n,
-        AccountValue::Undefined => f64::NAN,
-        _ => unreachable!("source ordinary Number-or-undefined clock/update field"),
-    }
+fn number(v: AccountValue) -> SigningResult<f64> {
+    primitive_to_number(&v)
 }
 fn undefined() -> SigningResult<Step> {
     Ok(Step::Done(AccountValue::Undefined))
@@ -193,8 +189,8 @@ pub fn fetch_and_set_private_snapshot_helper(
                     live.get(&live.owner(), "lastWebsocketPositionsUpdate")?,
                     AccountValue::Undefined
                 ) {
-                    let now = number(live.global("virtualClock.getCurrentTimeMs")?.call(&[])?);
-                    let last = number(live.get(&live.owner(), "lastWebsocketPositionsUpdate")?);
+                    let now = number(live.global("virtualClock.getCurrentTimeMs")?.call(&[])?)?;
+                    let last = number(live.get(&live.owner(), "lastWebsocketPositionsUpdate")?)?;
                     if now - last < 1_000.0 {
                         let merge = live.global("mergeUpdatesUsingLastUpdate")?;
                         let current = live.get(&store(live.as_ref())?, "positions")?;

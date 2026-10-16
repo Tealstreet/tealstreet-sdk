@@ -8,6 +8,52 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-hyperliquid/src/binding.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-hyperliquid/src/binding.rs",
+          "contains": "Err(_) => self.base.dispose(),"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-hyperliquid/src/binding.rs",
+          "contains": ".call_method(&instance, \"dispose\", &[])"
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {"file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts", "contains": "super.dispose();"},
+        {"file": "sdk-rs/safe-cex-venue-bybit/src/binding/exchange.rs", "contains": "|| self.base.dispose(),"}
+      ]
+    },
+    {
+      "file": "safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs",
+      "finding": "invoke bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {"file": "packages/safe-cex/src/exchanges/woo/woo.exchange.ts", "contains": "super.dispose();"},
+        {"file": "sdk-rs/safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs", "contains": "Prepared::BaseDispose => {\n                self.rt()?.base().dispose()?;"}
+      ]
+    },
+    {
+      "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
+      "finding": "dispose_base bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {"file": "packages/safe-cex/src/exchanges/kraken/kraken.exchange.ts", "contains": "super.dispose();"},
+        {"file": "sdk-rs/safe-cex-venue-kraken/src/binding/host_typed.rs", "contains": "fn dispose_base(&self) -> Result<(), ExchangeError> {\n        self.base().dispose()\n    }"}
+      ]
+    },
+    {
       "file": "safe-cex-venue-apexomni/src/exchange.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
@@ -142,12 +188,6 @@
       "finding": "create bypasses dynamic hook dispose through base",
       "kind": "source-super",
       "evidence": [{"file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts", "contains": "super.dispose();"}]
-    },
-    {
-      "file": "safe-cex-exchange/src/js_runtime/sockets.rs",
-      "finding": "base_websocket bypasses dynamic hook dispose through base",
-      "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-exchange/src/js_runtime/sockets.rs", "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"}]
     },
     {
       "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
