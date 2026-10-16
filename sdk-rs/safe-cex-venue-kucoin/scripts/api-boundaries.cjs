@@ -19,7 +19,11 @@ const {capture}=require('./api-retry-capture.cjs');
    const result=await capture(venue,'post','/api/v1/orders',value,'network',0,{failures:0,extended:true});
    result.data=null; // retain lone UTF-16 surrogates only in the double-escaped witness
    // The signed string body reaches the preimage; Node hashes it as its well-formed (U+FFFD) form.
-   for(const hash of result.hashes) hash.preimage=hash.preimage.toWellFormed();
+   for(const hash of result.hashes) {
+    hash.rawPreimage=JSON.stringify(hash.preimage);
+    hash.preimageUtf16=Array.from({length:hash.preimage.length},(_,i)=>hash.preimage.charCodeAt(i));
+    hash.preimage=hash.preimage.toWellFormed();
+   }
    rows.push({kind:'string',rawData:JSON.stringify(value),refused:value==='\ud800'||value==='\udfff',case:result});
   }
  }

@@ -511,7 +511,48 @@ fn factory_string_header_and_option_alias_boundaries() {
             }
             "string" => {
                 let value = serde_json::from_str::<Value>(row["rawData"].as_str().unwrap());
+                let hashes = case["hashes"].as_array().unwrap();
+                assert_eq!(hashes.len(), 2, "passphrase and request HMACs are captured");
+                for hash in hashes {
+                    let units: Vec<u16> =
+                        serde_json::from_value(hash["preimageUtf16"].clone()).unwrap();
+                    let hashed = String::from_utf16_lossy(&units);
+                    assert_eq!(hash["preimage"], hashed, "Node hashes well-formed UTF-8");
+                    assert_eq!(
+                        hash["digest"],
+                        safe_cex_crypto::hmac_sha256(
+                            b"fixture-secret",
+                            hashed.as_bytes(),
+                            safe_cex_crypto::Encoding::Base64,
+                        ),
+                        "retained preimage produces the actual source digest"
+                    );
+                }
                 if row["refused"] == true {
+                    let surrogate = match row["rawData"].as_str().unwrap() {
+                        "\"\\ud800\"" => 0xd800_u16,
+                        "\"\\udfff\"" => 0xdfff_u16,
+                        other => panic!("unexpected refused source string {other}"),
+                    };
+                    let query = if case["venue"] == "kucoinspot" {
+                        "a%20b"
+                    } else {
+                        "a b"
+                    };
+                    let prefix = format!("1700000000000POST/api/v1/orders?q={query}");
+                    let mut expected_units: Vec<u16> = prefix.encode_utf16().collect();
+                    expected_units.push(surrogate);
+                    let request_hash = &hashes[1];
+                    assert_eq!(
+                        request_hash["preimageUtf16"],
+                        json!(expected_units),
+                        "original HMAC input retains the exact lone UTF-16 unit"
+                    );
+                    assert_eq!(
+                        request_hash["rawPreimage"],
+                        format!("\"{prefix}\\u{surrogate:04x}\""),
+                        "double-escaped witness retains the original preimage"
+                    );
                     assert!(
                         value.is_err(),
                         "UTF-8 representation refusal for accepted source string"
