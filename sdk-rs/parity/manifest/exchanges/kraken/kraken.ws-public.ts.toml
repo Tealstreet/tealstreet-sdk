@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-kraken/src/book_listeners.rs", "safe-cex-venue-kr
 ts = "KrakenPublicWebsocket"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-kraken/src/classes.rs::futures_public"
+rs = [ "safe-cex-venue-kraken/src/classes.rs::futures_public", "safe-cex-venue-kraken/src/classes.rs::definitions", "safe-cex-venue-kraken/src/classes.rs::initialize" ]
 status = "divergent"
-note = "CHOSEN: source KrakenPublicWebsocket fixes its own 12 arrow bodies and constructs with ordinary arguments; this executable native factory requires complete external callable member bindings (mapTimeframe prototype is the first missing-binding rejection). Paired actual-source construction and native rejection/complete-instance behavior: tests/composition.rs::futures_public_class_native. Explicit assembly preserves field order, fresh receiver-bound arrows and containers while reusing separately mapped heterogeneous member interfaces; it does not ship fixed production body adapters. Canonical contract: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Existing member divergences remain in their own rows; scripts/composition-controls.py discriminates source-order construction."
+note = "CHOSEN: source KrakenPublicWebsocket fixes its own 12 arrow bodies and constructs with ordinary arguments; this executable native factory requires complete external callable member bindings (mapTimeframe prototype is the first missing-binding rejection). Paired actual-source construction and native rejection/complete-instance behavior: tests/composition.rs::futures_public_class_native. Explicit assembly preserves field order, fresh receiver-bound arrows and containers while reusing separately mapped heterogeneous member interfaces; it does not ship fixed production body adapters. Canonical contract: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Existing member divergences remain in their own rows; scripts/composition-controls.py discriminates source-order construction. Rename target: `safe-cex-venue-kraken/src/classes.rs::futures_public`. Split member `safe-cex-venue-kraken/src/classes.rs::definitions`. Source-ordered instance-field and member definition table for each class kind, consumed by initialize. Split member `safe-cex-venue-kraken/src/classes.rs::initialize`. Class instance-field initialization in source order (undefined, boolean, Map, object and imported initializers) for each class kind."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#getTickerProductIds"
@@ -16,7 +16,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/ws_helpers.rs::get_ticker_product_ids"
 status = "ported"
-note = "Actual-source native witness: tests/ws_helpers.rs. Product IDs preserve market order, duplicates, empty/no-overlap fallback and pre-callback snapshot timing; timeframe lookup uses shared TableHit to retain inherited identities and UTF-16 unknown-key fallback. Source helper body only; websocket lifecycle remains pending."
+note = "Actual-source native witness: tests/ws_helpers.rs. Product IDs preserve market order, duplicates, empty/no-overlap fallback and pre-callback snapshot timing; timeframe lookup uses shared TableHit to retain inherited identities and UTF-16 unknown-key fallback. Source helper body only; websocket lifecycle remains pending. Rename target: `safe-cex-venue-kraken/src/ws_helpers.rs::get_ticker_product_ids`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket.connectAndSubscribe"
@@ -24,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/lifecycle.rs::futures_public_connect"
 status = "ported"
-note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-lifecycle-hosts. tests/lifecycle.rs::futures_public_connect_live_source executes the actual TypeScript body and asserts native ordering, original identity and reentrant state. scripts/lifecycle-controls.py proves a named native failure and restoration. Concrete classes, socket factories, event-loop bindings and live Map storage remain separate rows."
+note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-lifecycle-hosts. tests/lifecycle.rs::futures_public_connect_live_source executes the actual TypeScript body and asserts native ordering, original identity and reentrant state. scripts/lifecycle-controls.py proves a named native failure and restoration. Concrete classes, socket factories, event-loop bindings and live Map storage remain separate rows. Rename target: `safe-cex-venue-kraken/src/lifecycle.rs::futures_public_connect`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket.onOpen"
@@ -32,7 +32,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/public_subscriptions.rs::futures_on_open"
 status = "ported"
-note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-public-subscription-and-spot-dispatch-hosts. tests/public_subscriptions.rs::futures_on_open_live_source executes the actual TypeScript body and asserts native prepared fields, original identities and operation order. scripts/public-subscription-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Concrete classes, handler maps, JSON.stringify/send and parent fetch/parser bindings remain separately mapped."
+note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-public-subscription-and-spot-dispatch-hosts. tests/public_subscriptions.rs::futures_on_open_live_source executes the actual TypeScript body and asserts native prepared fields, original identities and operation order. scripts/public-subscription-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Concrete classes, handler maps, JSON.stringify/send and parent fetch/parser bindings remain separately mapped. Rename target: `safe-cex-venue-kraken/src/public_subscriptions.rs::futures_on_open`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket.onMessage"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/stream_updates.rs::futures_handle_ticker"
 status = "ported"
-note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-numeric-stream-update-hosts. tests/stream_updates.rs::futures_handle_ticker_live_source executes actual TypeScript and asserts native numeric fields/presence/order, original targets, UTF-16 keys, callback graph and errors. scripts/stream-update-controls.py proves a named compiled production failure and restored pass. Property/get-key/numeric/date intrinsics, current maps and array iteration remain bound dependencies; no complete runtime, Store or class claim."
+note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-numeric-stream-update-hosts. tests/stream_updates.rs::futures_handle_ticker_live_source executes actual TypeScript and asserts native numeric fields/presence/order, original targets, UTF-16 keys, callback graph and errors. scripts/stream-update-controls.py proves a named compiled production failure and restored pass. Property/get-key/numeric/date intrinsics, current maps and array iteration remain bound dependencies; no complete runtime, Store or class claim. Rename target: `safe-cex-venue-kraken/src/stream_updates.rs::futures_handle_ticker`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket.listenOHLCV"
@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/stream_adapters.rs::futures_listen_ohlcv"
 status = "ported"
-note = "Source intentionally has no Futures WS candles: returns a fresh no-op disposer per call, without reading options or calling the callback. Native ignored arguments stay opaque; repeated disposer calls complete without effects. Actual-source native witness: tests/stream_adapters.rs. REST polling is a separate pending exchange method."
+note = "Source intentionally has no Futures WS candles: returns a fresh no-op disposer per call, without reading options or calling the callback. Native ignored arguments stay opaque; repeated disposer calls complete without effects. Actual-source native witness: tests/stream_adapters.rs. REST polling is a separate pending exchange method. Rename target: `safe-cex-venue-kraken/src/stream_adapters.rs::futures_listen_ohlcv`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#handleOHLC"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/stream_adapters.rs::futures_handle_ohlc"
 status = "ported"
-note = "Source intentionally ignores every incoming Futures OHLC message. Opaque borrowed native input is untouched and the method completes without effects. Actual-source native completion/input witness: tests/stream_adapters.rs; no frame parser or REST poller is inferred."
+note = "Source intentionally ignores every incoming Futures OHLC message. Opaque borrowed native input is untouched and the method completes without effects. Actual-source native completion/input witness: tests/stream_adapters.rs; no frame parser or REST poller is inferred. Rename target: `safe-cex-venue-kraken/src/stream_adapters.rs::futures_handle_ohlc`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#clearFeedStatsIfIdle"
@@ -72,15 +72,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/feed_stats.rs::futures_clear_feed_stats_if_idle"
 status = "ported"
-note = "Source idle-feed body over a lazy host enumeration of declared handler-array lengths, including enumerable inherited entries. Returns at the first nonempty array, skips later getter failures and otherwise forwards the original opaque feed to cleanup. Original enumeration/cleanup errors propagate. UTF-16 feed and ordering witness: tests/feed_stats.rs; concrete handler dictionary remains a pending class dependency."
+note = "Source idle-feed body over a lazy host enumeration of declared handler-array lengths, including enumerable inherited entries. Returns at the first nonempty array, skips later getter failures and otherwise forwards the original opaque feed to cleanup. Original enumeration/cleanup errors propagate. UTF-16 feed and ordering witness: tests/feed_stats.rs; concrete handler dictionary remains a pending class dependency. Rename target: `safe-cex-venue-kraken/src/feed_stats.rs::futures_clear_feed_stats_if_idle`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-kraken/src/book_listeners.rs::futures_listen_book"
+rs = [ "safe-cex-venue-kraken/src/book_listeners.rs::futures_listen_book", "safe-cex-venue-kraken/src/book_listeners.rs::Listener::dispose", "safe-cex-venue-kraken/src/book_listeners.rs::Listener::poll" ]
 status = "ported"
-note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_listener_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts."
+note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_listener_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts. Rename target: `safe-cex-venue-kraken/src/book_listeners.rs::futures_listen_book`. Split member `safe-cex-venue-kraken/src/book_listeners.rs::Listener::dispose`. Returned dispose closure: filters the callback, clears idle state and unsubscribes the last spot listener. Split member `safe-cex-venue-kraken/src/book_listeners.rs::Listener::poll`. Listener body: subscribe now when connected, else reschedule the 100ms poll, as the source listen loop does."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#handleBookSnapshot"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/orderbooks.rs::futures_snapshot"
 status = "ported"
-note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_snapshot_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts."
+note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_snapshot_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts. Rename target: `safe-cex-venue-kraken/src/orderbooks.rs::futures_snapshot`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#handleBookDelta"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/orderbooks.rs::futures_delta"
 status = "ported"
-note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_delta_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts."
+note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_delta_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts. Rename target: `safe-cex-venue-kraken/src/orderbooks.rs::futures_delta`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#emitOrderBook"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/orderbooks.rs::futures_emit"
 status = "ported"
-note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_emit_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts."
+note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-order-book-and-listener-hosts. tests/orderbooks.rs::futures_emit_live_source executes the actual TypeScript method and asserts native values, current cache/callback/options identity and finite iteration timing before wire checks. scripts/orderbook-controls.py requires a named compiled mutation failure and restoration for each selected venue/body. Concrete websocket classes, Map/sort/coercion/array intrinsics, handler storage, JSON serializer and timer engine remain declared host contracts. Rename target: `safe-cex-venue-kraken/src/orderbooks.rs::futures_emit`."
 
 [[symbol]]
 ts = "KrakenPublicWebsocket#mapTimeframe"
@@ -112,4 +112,4 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-kraken/src/ws_helpers.rs::map_timeframe"
 status = "ported"
-note = "Actual-source native witness: tests/ws_helpers.rs. Product IDs preserve market order, duplicates, empty/no-overlap fallback and pre-callback snapshot timing; timeframe lookup uses shared TableHit to retain inherited identities and UTF-16 unknown-key fallback. Source helper body only; websocket lifecycle remains pending."
+note = "Actual-source native witness: tests/ws_helpers.rs. Product IDs preserve market order, duplicates, empty/no-overlap fallback and pre-callback snapshot timing; timeframe lookup uses shared TableHit to retain inherited identities and UTF-16 unknown-key fallback. Source helper body only; websocket lifecycle remains pending. Rename target: `safe-cex-venue-kraken/src/ws_helpers.rs::map_timeframe`."
