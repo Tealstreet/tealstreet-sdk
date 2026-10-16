@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const providerNames = ['typescript', 'tsx', 'smol-toml'];
 const extractorRelative = 'sdk-rs/parity/extract-ts';
-const guardRelative = 'scripts/check-parity-extractor-dependency.mjs';
+const guardRelative = 'sdk-rs/parity/extract-ts/scripts/check-dependency.mjs';
 const fixtureText = 'export function installedControl(value: number): number { return value + 7; }\n';
 
 function contained(root, target) {
