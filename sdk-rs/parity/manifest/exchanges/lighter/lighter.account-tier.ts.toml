@@ -40,7 +40,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/account_tier.rs::normalize_lighter_account_tier"
 status = "ported"
-note = "Shared fallible String(any); preserves nullish fallback, TypeError name/message and evaluation order."
+note = "Native Js input retains nonfinite values, UTF-16 and coercion errors; preserves nullish fallback and live evaluation order."
 
 [[symbol]]
 ts = "asRecord"
@@ -56,7 +56,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/account_tier.rs::extract_lighter_account_tier_from_payload"
 status = "ported"
-note = "Shared fallible String(any); preserves nullish fallback, TypeError name/message and evaluation order."
+note = "Native Js input retains nonfinite values, UTF-16 and coercion errors; preserves nullish fallback and live evaluation order."
 
 [[symbol]]
 ts = "isLighterAccountTierEligibleForPartnerAttribution"
