@@ -63,6 +63,7 @@ reset performed by disposal is suppressed. The Rust `native_account_deactivation
 suite and Node `tests/native-account-deactivation.test.mjs` drive an actual
 Orderly-family account through a loopback expired-key response. The Rust suite
 also verifies that signer waits resolve as disposed.
+
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
 
 Streaming uses the same command channel: call `listenOHLCV([options])`,

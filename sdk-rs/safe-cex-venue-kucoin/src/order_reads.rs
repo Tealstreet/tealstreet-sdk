@@ -36,7 +36,9 @@ pub async fn fetch_orders(
     let is_stop = |order: &&Order| {
         matches!(
             order.r#type,
-            OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+            safe_cex_types::ModelField::Value(OrderType::StopLoss)
+                | safe_cex_types::ModelField::Value(OrderType::TakeProfit)
+                | safe_cex_types::ModelField::Value(OrderType::TrailingStopLoss)
         )
     };
     let normal = normal.unwrap_or_else(|| {
