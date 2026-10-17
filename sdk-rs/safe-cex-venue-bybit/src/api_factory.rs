@@ -12,7 +12,8 @@ use safe_cex_exchange::{
 use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestExecution, RestFailure, RestFuture, RestRequest, RestResponse,
-    RestResponseBody, TransportError, TransportErrorOrigin, TransportRegistry,
+    RestResponseBody, TransportError, TransportRegistry,
+    provider::TransportErrorOrigin,
     rate_limit::RateLimitClock,
     retry::{ClassifiedRequest, ReadClassification},
 };
