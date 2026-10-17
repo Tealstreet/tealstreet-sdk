@@ -205,6 +205,19 @@ impl Exchange for GrvtExchange {
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
         self.invoke("fetchMarkets", vec![])
     }
+    // ts: GrvtExchange.refreshMarkets always replaces metadata, even for unchanged IDs.
+    fn refresh_markets(&self) -> ExchangeFuture<'_, safe_cex_exchange::snapshots::MarketChanges> {
+        let this = self.rt.0.this.clone();
+        Box::pin(async move {
+            let changes = await_js(this.call_method("refreshMarkets", vec![]).map_err(err)?)
+                .await
+                .map_err(err)?;
+            Ok(safe_cex_exchange::snapshots::MarketChanges {
+                added: to_typed(&changes.get("added").map_err(err)?).map_err(err)?,
+                removed: to_typed(&changes.get("removed").map_err(err)?).map_err(err)?,
+            })
+        })
+    }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
         self.invoke("fetchTickers", vec![])
     }
