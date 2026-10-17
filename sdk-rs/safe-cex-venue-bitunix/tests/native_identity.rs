@@ -150,3 +150,175 @@ fn null_batch_rows_match_actual_source_errors_prefix_and_next_chunk() {
         venue.dispose().unwrap();
     }
 }
+
+#[test]
+fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-operations-oracle.cjs"
+        ))
+        .arg("nativePlacementNumbers")
+        .arg(support::MARKET)
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let rows = source["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    for ((amount, source_qty), source) in [
+        (f64::NAN, Some("NaN")),
+        (f64::INFINITY, None),
+        (f64::NEG_INFINITY, Some("-Infinity")),
+    ]
+    .into_iter()
+    .zip(rows)
+    {
+        // Source behavior is retained as evidence of the accepted strict-input difference.
+        let payloads = source["result"]["ok"].as_array().unwrap();
+        assert_eq!(payloads.len(), usize::from(source_qty.is_some()));
+        if let Some(qty) = source_qty {
+            let observed = &payloads[0]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|pair| pair[0] == "qty")
+                .unwrap()[1];
+            assert_eq!(
+                observed["units"],
+                json!(qty.encode_utf16().collect::<Vec<_>>())
+            );
+        }
+        for batch in [false, true] {
+            let (venue, rt, _, wire) = support::fixture_with(false);
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let captured = errors.clone();
+            venue.base().on(
+                "error",
+                Rc::new(move |_, value: &Value| {
+                    captured.borrow_mut().push(value.clone());
+                    Ok(())
+                }),
+            );
+            let mut opts = order();
+            opts.amount = amount;
+            let result = if batch {
+                drive(
+                    &rt,
+                    venue
+                        .base()
+                        .place_orders(venue.as_ref(), vec![order(), opts]),
+                )
+            } else {
+                drive(&rt, venue.base().place_order(venue.as_ref(), opts))
+            };
+            let error = result.expect_err("strict nonfinite placement amount must be refused");
+            let message = format!(
+                "Bitunix placement amount must be finite (received {})",
+                safe_cex_num::js_number_string(amount)
+            );
+            assert_eq!(
+                error.name, "TypeError",
+                "field refusal must not leak a JSON decode error: amount={amount}, batch={batch}, {error:?}"
+            );
+            assert_eq!(error.message, message);
+            assert_eq!(
+                errors.borrow().len(),
+                1,
+                "one visible field refusal per call"
+            );
+            assert!(errors.borrow()[0].as_str().unwrap().contains(&message));
+            assert!(
+                wire.requests.lock().unwrap().is_empty(),
+                "batch preflight must refuse before any hydration or order HTTP"
+            );
+            venue.dispose().unwrap();
+        }
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitunix");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 80);
+    let (venue, rt, store, _) = support::fixture();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            tickers: Some(ticker_coercion::seed("bitunix")),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    rt.dial.set(true);
+    venue
+        .base()
+        .get_socket(SocketSlot::Public)
+        .unwrap()
+        .connect_and_subscribe(false)
+        .unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    let primary = rt.dialed.borrow().first().unwrap().1.clone();
+    venue
+        .base()
+        .get_socket(SocketSlot::PublicSecondary)
+        .unwrap()
+        .connect_and_subscribe(false)
+        .unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    let secondary = rt.dialed.borrow().get(1).unwrap().1.clone();
+    assert!(!Rc::ptr_eq(&primary, &secondary));
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("bitunix")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if case["channel"] == "price" {
+            &secondary
+        } else {
+            &primary
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            for _ in 0..8 {
+                rt.pump();
+            }
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    assert!(
+        !rt.console
+            .borrow()
+            .iter()
+            .any(|(level, _)| level == "error"),
+        "{:?}",
+        rt.console.borrow()
+    );
+    venue.dispose().unwrap();
+}

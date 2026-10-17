@@ -15,7 +15,10 @@ Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
 native body; batch capability registration invokes the source batch algorithm.
 The trading runtime's `updateStoredOrder` capability binds the real Store's
 `updateOrder` with its Store receiver. Accepted single/batch PostOnly placements
-and TP/SL amendments then apply the source patch and return IDs. Constructed
+and TP/SL amendments then apply the source patch and return IDs.
+Successful batch replies require a positive ASCII decimal order ID, exactly like
+the source regex. Every result is validated before any PostOnly Store patch;
+leading zeroes, signs, whitespace and nondecimal strings visibly refuse the batch. Constructed
 regressions check existing and absent rows, batch-result reordering and both
 protective order types; an absent row remains absent.
 
@@ -48,6 +51,16 @@ warning subscriber failures also propagate. Both the public utility and the
 binding use one normalization pipeline; standalone utility error names/messages
 remain unchanged. This intentionally differs from TS retaining malformed rows.
 Mixed-page and all-refused-page regressions use the constructed exchange.
+
+Market snapshots apply the same strict-field policy per row. Source coercions
+finish before required-string admission; a malformed symbol or base is reported
+with its field and received value, then only that row is omitted. An all-refused
+page returns an empty snapshot. Source coercion/capture failures still use the
+existing error/cached-market catch. The utility and binding share one normalizer;
+the utility's prior error messages stay unchanged. Constructed tests cover twelve
+mixed-page refusals, an all-refused page and source-error precedence. An actual
+maintained-method probe separately pins TS retaining all raw fields; this is an
+intentional typed-output difference, not arbitrary malformed-input parity.
 
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual

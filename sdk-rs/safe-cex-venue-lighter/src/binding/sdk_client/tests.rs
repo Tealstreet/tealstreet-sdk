@@ -822,3 +822,351 @@ fn transaction_client_retains_native_flags_while_signing_their_truthiness() {
         source
     );
 }
+
+fn poison_unread_helper_fields(value: &Js) {
+    if !value.is_object() {
+        return;
+    }
+    if let Some(values) = value.array_values() {
+        for child in values {
+            poison_unread_helper_fields(&child);
+        }
+    } else {
+        for (_, child) in value.own_entries().unwrap() {
+            poison_unread_helper_fields(&child);
+        }
+    }
+    value.define_accessor(
+        "unused",
+        Some(Rc::new(|_| Err(Thrown::error("Error", "unread field")))),
+        None,
+    );
+}
+
+#[test]
+fn production_lighter_helpers_read_only_sparse_source_fields() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/sparse-helper-inputs-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 23);
+    let world = World::new();
+    let mut actual = vec![];
+    for case in source.as_array().unwrap() {
+        let helper = case["helper"].as_str().unwrap();
+        let args = case["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(from_json)
+            .collect::<Vec<_>>();
+        for value in &args {
+            poison_unread_helper_fields(value);
+        }
+        match case["mode"].as_str().unwrap() {
+            "early-decimal" => {
+                args[0].define_accessor(
+                    "precision",
+                    Some(Rc::new(|_| Err(Thrown::error("Error", "unread precision")))),
+                    None,
+                );
+                args[0].get("info").unwrap().define_accessor(
+                    "quantityDecimals",
+                    Some(Rc::new(|_| Err(Thrown::error("Error", "unread alias")))),
+                    None,
+                );
+            }
+            "utf16-id" => args[0]
+                .get("0")
+                .unwrap()
+                .set("id", Js::utf16(&[0xd800]))
+                .unwrap(),
+            "precision-coercion" => args[0]
+                .get("precision")
+                .unwrap()
+                .set(
+                    "amount",
+                    Js::object(vec![
+                        (
+                            "valueOf",
+                            Js::function("valueOf", |_, _| Ok(Js::Number(7.))),
+                        ),
+                        (
+                            "toString",
+                            Js::function("toString", |_, _| Ok(Js::str("not.012"))),
+                        ),
+                    ]),
+                )
+                .unwrap(),
+            "symbol-minimum" => args[0]
+                .get("info")
+                .unwrap()
+                .set("minBaseAmount", Js::SymbolIterator)
+                .unwrap(),
+            "skip-id" => args[0].get("0").unwrap().define_accessor(
+                "id",
+                Some(Rc::new(|_| Err(Thrown::error("Error", "unread order id")))),
+                None,
+            ),
+            "throw-read" => args[0].get("info").unwrap().define_accessor(
+                if helper == "getLighterAmountDecimals" {
+                    "amountDecimals"
+                } else {
+                    "minBaseAmount"
+                },
+                Some(Rc::new(|_| Err(Thrown::error("Error", "used getter")))),
+                None,
+            ),
+            _ => {}
+        }
+        let result = world
+            .realm
+            .global(helper)
+            .unwrap()
+            .call(Js::Undefined, args.clone());
+        let observed = match result {
+            Ok(result) => {
+                if helper == "resolveLighterCancelTargets" {
+                    let orders = args[0].array_values().unwrap();
+                    let mut rows = vec![];
+                    let mut retained = vec![];
+                    let mut id_units = vec![];
+                    for row in result.array_values().unwrap() {
+                        let id = row.get("orderId").unwrap();
+                        let index = orders
+                            .iter()
+                            .position(|order| order.get("id").unwrap().strict_equals(&id));
+                        retained.push(index.is_some());
+                        id_units.push(id.as_str().map(|units| units.to_vec()));
+                        let mut fields = json!({"marketId":serde_json::from_str::<Value>(&world.json(&row.get("marketId").unwrap())).unwrap()});
+                        if !id.is_undefined() {
+                            fields["orderId"] = case["args"][0][index.unwrap()]["id"].clone();
+                        }
+                        rows.push(fields);
+                    }
+                    json!({"ok":rows,"retained":retained,"idUnits":id_units})
+                } else {
+                    json!({"ok":serde_json::from_str::<Value>(&world.json(&result)).unwrap()})
+                }
+            }
+            Err(error) => {
+                json!({"error":{"name":error.value.get("name").unwrap().to_display(),"message":error.message()}})
+            }
+        };
+        actual.push(
+            json!({"helper":helper,"args":case["args"],"mode":case["mode"],"expected":observed}),
+        );
+    }
+    assert_eq!(actual, source.as_array().unwrap().clone());
+}
+
+#[test]
+fn transaction_client_preserves_source_nullish_and_unknown_enum_defaults() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/signer-parameters-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained TransactionClient parameter defaults");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 31);
+    let w = World::new();
+    let init = w
+        .realm
+        .global("initWasm")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    w.settle(init).unwrap();
+    let crypto = w
+        .realm
+        .global("getCryptoApi")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    let client = w.realm.global("TransactionClient").unwrap().call(Js::Undefined,vec![Js::object(vec![
+        ("chainId",Js::Number(304.)),("accountIndex",big(42)),("apiKeyIndex",Js::Number(3.)),
+        ("privateKey",Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+        ("httpClient",w.client.clone()),("crypto",crypto),
+    ])]).unwrap();
+    w.reply(json!({"code":200,"nonce":7}));
+    let mut actual = vec![];
+    for case in cases {
+        let params = Js::object(vec![
+            ("orderId", big(1)),
+            ("marketId", Js::Number(1.)),
+            ("isBuy", Js::Bool(true)),
+            ("price", big(100)),
+            ("amount", big(1)),
+        ]);
+        params
+            .set(case["field"].as_str().unwrap(), from_json(&case["value"]))
+            .unwrap();
+        let result = w.settle(
+            client
+                .call_method("getCreateOrderTransaction", vec![params])
+                .unwrap(),
+        );
+        let observation = match result {
+            Ok(tx) => {
+                assert!(!tx.get("signature").unwrap().as_str().unwrap().is_empty());
+                let details = tx.get("orderDetails").unwrap();
+                let text = |value: Js| String::from_utf16(&value.to_js_string().unwrap()).unwrap();
+                json!({"data":text(tx.get("data").unwrap()),"expiredAt":text(tx.get("expiredAt").unwrap()),
+                    "orderTypeValue":text(details.get("orderTypeValue").unwrap()),"timeInForceValue":text(details.get("timeInForceValue").unwrap()),
+                    "triggerPrice":text(details.get("triggerPrice").unwrap()),"orderExpiry":text(details.get("orderExpiry").unwrap())})
+            }
+            Err(error) => json!({"error":error.message()}),
+        };
+        actual.push(observation);
+    }
+    let sent = w.sent();
+    assert_eq!(sent.len(), 1, "source nonce cache serves later builds");
+    assert_eq!(sent[0]["url"], "/api/v1/nextNonce");
+    assert_eq!(sent[0]["params"]["account_index"], "42");
+    assert_eq!(sent[0]["params"]["api_key_index"], 3.);
+    assert_eq!(
+        actual,
+        cases
+            .iter()
+            .map(|case| case["expected"].clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+fn signature_input(label: &str) -> Js {
+    match label {
+        "undefined" => Js::Undefined,
+        "null" => Js::Null,
+        "false" => Js::Bool(false),
+        "true" => Js::Bool(true),
+        "zero" => Js::Number(0.),
+        "one" => Js::Number(1.),
+        "empty" => Js::str(""),
+        "text" => Js::str("yes"),
+        "array" => Js::array(vec![]),
+        "object" => Js::object(vec![]),
+        "nan" => Js::Number(f64::NAN),
+        "infinity" => Js::Number(f64::INFINITY),
+        "negative-zero" => Js::Number(-0.),
+        "big-zero" => big(0),
+        "big-one" => big(1),
+        "symbol" => Js::SymbolIterator,
+        "function" => Js::function("input", |_, _| panic!("flags are never coerced")),
+        _ => panic!("unknown flag input {label}"),
+    }
+}
+
+#[test]
+fn transaction_client_preserves_raw_l1_signature_metadata_and_wire_truthiness() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/signer-l1-signature-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained SDK with real WASM crypto");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 17);
+    let w = World::new();
+    let init = w
+        .realm
+        .global("initWasm")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    w.settle(init).unwrap();
+    let crypto = w
+        .realm
+        .global("getCryptoApi")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    let client=w.realm.global("TransactionClient").unwrap().call(Js::Undefined,vec![Js::object(vec![
+        ("chainId",Js::Number(304.)),("accountIndex",big(42)),("apiKeyIndex",Js::Number(3.)),
+        ("privateKey",Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+        ("httpClient",w.client.clone()),("crypto",crypto),
+    ])]).unwrap();
+    w.reply(json!({"code":200,"nonce":7}));
+
+    let mut results = vec![];
+    for case in source.as_array().unwrap() {
+        let label = case["label"].as_str().unwrap();
+        let raw = signature_input(label);
+        let params = Js::object(vec![
+            ("integratorAccountIndex", big(8)),
+            ("maxPerpsTakerFee", Js::Number(250.)),
+            ("maxPerpsMakerFee", Js::Number(0.)),
+            ("maxSpotTakerFee", Js::Number(300.)),
+            ("maxSpotMakerFee", Js::Number(0.)),
+            ("approvalExpiry", big(1000000)),
+            ("l1Signature", raw.clone()),
+        ]);
+        let result = w.settle(
+            client
+                .call_method("getApproveIntegratorTransaction", vec![params])
+                .unwrap(),
+        );
+        let observed = match result {
+            Ok(tx) => {
+                assert!(!tx.get("signature").unwrap().as_str().unwrap().is_empty());
+                let value = tx
+                    .get("approveIntegratorDetails")
+                    .unwrap()
+                    .get("l1Signature")
+                    .unwrap();
+                let nan = matches!(value,Js::Number(n) if n.is_nan());
+                let retained =
+                    value.strict_equals(&raw) || (nan && matches!(raw,Js::Number(n) if n.is_nan()));
+                if !raw.truthy() {
+                    w.reply(json!({"code":200,"tx_hash":"proof"}));
+                    assert_eq!(
+                        w.call("sendRawTx", vec![tx.clone()]).unwrap().to_display(),
+                        "proof"
+                    );
+                    let sent = w.sent();
+                    let body = form(&sent.last().unwrap()["data"]);
+                    let wire: Value =
+                        serde_json::from_str(&body.iter().find(|(k, _)| k == "tx_info").unwrap().1)
+                            .unwrap();
+                    assert!(
+                        wire.get("L1Sig").is_none(),
+                        "falsey {label} omitted from actual request"
+                    );
+                }
+                json!({"label":label,"data":tx.get("data").unwrap().to_display(),"retained":retained,
+                    "type":value.type_of(),"negativeZero":matches!(value,Js::Number(n) if n.to_bits()==(-0_f64).to_bits()),"nan":nan})
+            }
+            Err(error) => json!({"label":label,"error":error.message()}),
+        };
+        results.push(observed);
+    }
+    assert_eq!(results.len(), 17);
+    assert_eq!(
+        w.sent().len(),
+        9,
+        "one nonce GET plus eight falsey-signature POSTs"
+    );
+    assert_eq!(results, source.as_array().unwrap().clone());
+}

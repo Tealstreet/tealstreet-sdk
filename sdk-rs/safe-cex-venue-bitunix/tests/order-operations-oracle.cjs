@@ -80,4 +80,12 @@ async function batchRun(f){
  let result;try{result={ok:obs(await owner.method(payloads))};}catch(e){result={error:obs(e)};}
  rows.push({name:'placeOrderBatch',fixture:f,events,result});
 }
-(async()=>{const selected=process.argv[2];for(const [name,specs]of Object.entries(modelSpecs)){if(selected&&selected!==name)continue;for(const f of specs)await modelRun(name,f);}if(!selected||selected==='placeOrder')for(const f of placeSpecs)await placeRun(f);if(!selected||selected==='placeOrderBatch')for(const f of batchSpecs)await batchRun(f);process.stdout.write(JSON.stringify({rows}));})().catch(e=>{console.error(e);process.exit(1);});
+(async()=>{const selected=process.argv[2];
+if(selected==='nativePlacementNumbers') {
+ const activeMarket=JSON.parse(process.argv[3]);
+ for(const bits of ['7ff8000000000000','7ff0000000000000','fff0000000000000']) {
+  await modelRun('formatCreateOrder',{market:activeMarket,options:{amount:{$bits:bits},price:100}});
+ }
+ process.stdout.write(JSON.stringify({rows}));return;
+}
+for(const [name,specs]of Object.entries(modelSpecs)){if(selected&&selected!==name)continue;for(const f of specs)await modelRun(name,f);}if(!selected||selected==='placeOrder')for(const f of placeSpecs)await placeRun(f);if(!selected||selected==='placeOrderBatch')for(const f of batchSpecs)await batchRun(f);process.stdout.write(JSON.stringify({rows}));})().catch(e=>{console.error(e);process.exit(1);});

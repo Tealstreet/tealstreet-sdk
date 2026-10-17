@@ -74,6 +74,7 @@ impl WsRuntime for clock::Runtime {
 struct Wire {
     runtime: Rc<clock::Runtime>,
     requests: RefCell<Vec<Value>>,
+    native_requests: RefCell<Vec<Js>>,
     faults: RefCell<VecDeque<(String, u16, Value)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
     candle_response: RefCell<Option<Value>>,
@@ -100,6 +101,7 @@ impl JsHttpHost for Wire {
             .to_display()
             .to_ascii_uppercase();
         self.requests.borrow_mut().push(observed);
+        self.native_requests.borrow_mut().push(config.clone());
         if self
             .errors
             .borrow()
@@ -123,7 +125,7 @@ impl JsHttpHost for Wire {
         } else {
             match (method.as_str(), url.as_str()) {
                 ("POST", "/login") => json!({"sessionToken":"token","timeout":"1:00:00"}),
-                ("GET", "/users/k") => {
+                ("GET", "/users/k" | "/users/Infinity") => {
                     json!({"userDetails":[{"login":"k","domain":"default","version":1,"fullName":"Trader","username":"k","accounts":[{"owner":"k","account":"default:A","version":1,"baseCurrency":"USD","registrationTime":"2026-01-01T00:00:00Z","accountStatus":"FULL_TRADING","pricingStream":"quote","positionBased":false}]}]})
                 }
                 ("GET", "instruments/query") => json!({"instruments":[instrument()]}),
@@ -1515,5 +1517,210 @@ fn portfolio_balance_and_filtered_positions_accept_native_intermediate_scalars()
         assert_eq!(f.store.positions()[0].symbol, "BTCUSD");
         assert_eq!(f.store.positions()[0].contracts, 0.0);
         f.exchange.dispose().unwrap();
+    }
+}
+
+fn auth_request() -> safe_cex_transport::RestRequest {
+    safe_cex_transport::RestRequest {
+        method: "GET".into(),
+        url: "/users/k".into(),
+        ..Default::default()
+    }
+}
+fn pump_pending<T>(f: &Fixture, future: &mut std::pin::Pin<Box<impl Future<Output = T>>>) {
+    for _ in 0..32 {
+        assert!(
+            future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        f.runtime.advance(f.runtime.now.get());
+    }
+}
+#[test]
+fn auth_pipeline_checks_session_after_rate_limit_dequeue() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    f.run(client.request(auth_request())).unwrap();
+    let mut queued = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut queued);
+    f.exchange.invalidate_session();
+    let error = f.run(queued).unwrap_err();
+    assert_eq!(error.message, "No session token");
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+}
+#[test]
+fn auth_pipeline_reads_replacement_token_after_dequeue() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    f.run(client.request(auth_request())).unwrap();
+    let mut queued = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut queued);
+    *f.exchange.session_token.borrow_mut() = Some("replacement".into());
+    f.run(queued).unwrap();
+    assert_eq!(
+        f.request("GET", "/users/k")["headers"]["Coinbase-Authorization"],
+        "DXAPI replacement"
+    );
+}
+#[test]
+fn auth_pipeline_reauthenticates_network_retry() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    let error = safe_cex_exchange::js_runtime::value::error_object("Error", "Network Error");
+    error.define("code", Js::str("ERR_NETWORK")).unwrap();
+    f.wire
+        .errors
+        .borrow_mut()
+        .push_back(("/users/k".into(), error));
+    let mut retrying = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut retrying);
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+    *f.exchange.session_token.borrow_mut() = Some("replacement".into());
+    f.run(retrying).unwrap();
+    assert_eq!(
+        f.request("GET", "/users/k")["headers"]["Coinbase-Authorization"],
+        "DXAPI replacement"
+    );
+}
+
+#[test]
+fn auth_pipeline_preserves_overflow_url_params() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    let mut request = auth_request();
+    request.url = "/users/{username}".into();
+    request.params = Some(serde_json::from_str(r#"{"username":1e400,"untouched":1e400}"#).unwrap());
+    f.run(client.request(request)).unwrap();
+    let sent = f.request("GET", "/users/Infinity");
+    assert_eq!(sent["params"]["untouched"], Value::Null);
+    let requests = f.wire.native_requests.borrow();
+    let native = requests.last().unwrap();
+    assert_eq!(
+        native
+            .get("params")
+            .unwrap()
+            .get("untouched")
+            .unwrap()
+            .as_f64(),
+        Some(f64::INFINITY)
+    );
+    assert!(sent["params"].get("username").is_none());
+}
+
+#[test]
+fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/final_runtime_oracle.mjs"
+        ))
+        .arg("amendmentCallerId")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let cases = source["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 4, "actual source caller-ID presence floor");
+    for case in cases {
+        let label = case["label"].as_str().unwrap();
+        let f = fixture();
+        f.fetch_markets();
+        f.wire.requests.borrow_mut().clear();
+        let emitted = Rc::new(RefCell::new(Vec::new()));
+        let seen = emitted.clone();
+        f.exchange.base.on_args(
+            "error",
+            Rc::new(move |_, args| {
+                seen.borrow_mut().push(args.to_vec());
+                Ok(())
+            }),
+        );
+        let mut order = order();
+        order.client_order_id = match label {
+            "absent" => ModelField::Absent,
+            "undefined" => ModelField::Undefined,
+            "value" => ModelField::Value("caller-id".into()),
+            "empty" => ModelField::Value(String::new()),
+            _ => panic!("unexpected source case"),
+        };
+        let result = f.run(f.exchange.update_order(UpdateOrderOpts {
+            order,
+            update: serde_json::from_value(json!({"amount":2.345,"price":102.16})).unwrap(),
+        }));
+        let refused = case["result"].get("error").is_some();
+        assert_eq!(
+            result.is_err(),
+            refused,
+            "replacement refusal {label}: {result:?}"
+        );
+        if refused {
+            assert_eq!(
+                result.unwrap_err().message,
+                case["result"]["error"].as_str().unwrap(),
+                "original preflight error {label}"
+            );
+            let emitted = emitted.borrow();
+            assert_eq!(emitted.len(), 1, "one visible refusal {label}");
+            assert!(
+                emitted[0][0]
+                    .as_str()
+                    .unwrap()
+                    .contains(case["result"]["error"].as_str().unwrap()),
+                "visible caller-ID refusal {label}: {emitted:?}"
+            );
+        } else {
+            assert_eq!(result.unwrap(), ["placed"], "accepted replacement {label}");
+            assert!(emitted.borrow().is_empty());
+        }
+        let requests = f.wire.requests.borrow();
+        let money_methods: Vec<_> = requests
+            .iter()
+            .filter(|r| {
+                r["url"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("accounts/default:A/orders")
+            })
+            .map(|r| r["method"].as_str().unwrap())
+            .collect();
+        let expected: Vec<_> = case["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            money_methods, expected,
+            "cancel then guarded replacement {label}"
+        );
     }
 }
