@@ -84,7 +84,7 @@ async function batchRun(f){
 if(selected==='nativePlacementNumbers') {
  const activeMarket=JSON.parse(process.argv[3]);
  for(const bits of ['7ff8000000000000','7ff0000000000000','fff0000000000000']) {
-  await modelRun('formatCreateOrder',{caller:'caller1',market:activeMarket,options:{amount:{$bits:bits},price:100}});
+  await modelRun('formatCreateOrder',{market:activeMarket,options:{amount:{$bits:bits},price:100}});
  }
  process.stdout.write(JSON.stringify({rows}));return;
 }

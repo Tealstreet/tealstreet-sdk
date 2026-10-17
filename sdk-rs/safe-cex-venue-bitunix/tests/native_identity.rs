@@ -206,7 +206,6 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
             );
             let mut opts = order();
             opts.amount = amount;
-            opts.client_order_id = Some("caller1".into());
             let result = if batch {
                 drive(
                     &rt,
@@ -224,7 +223,7 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
             );
             assert_eq!(
                 error.name, "TypeError",
-                "field refusal must not leak a JSON decode error"
+                "field refusal must not leak a JSON decode error: amount={amount}, batch={batch}, {error:?}"
             );
             assert_eq!(error.message, message);
             assert_eq!(

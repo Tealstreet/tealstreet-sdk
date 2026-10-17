@@ -167,3 +167,11 @@ client over the existing scripted wire and compares its signatures to the
 maintained TypeScript createAPI interceptor with real qs and SHA primitives.
 Its source oracle mode leaves the original factory/request/response corpus
 unchanged. Primitive IO/clock fixtures do not replace the native client or signer.
+
+The public placement preflight refuses nonfinite amount inputs before hydration
+or HTTP, for both single orders and whole batches. It reports the amount and
+original NaN/Infinity value through the existing error path and returns TypeError.
+This is the explicit strict placement-input ruling; TS may format a NaN/-Infinity
+quantity or produce no payload. It does not justify coercing an input to zero,
+leaking a JSON decode error, or widening the placement carrier. The real native
+identity test keeps the maintained-source observations alongside all6 refusals.
