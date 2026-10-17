@@ -4,22 +4,22 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '../../..');
 const { DefaultStore } = require(path.join(root, 'packages/safe-cex/src/store/store.base.ts'));
 const venue = process.argv[2];
-assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'blofin', 'cryptocom', 'coinbase', 'binance', 'binancepm', 'binancespot'].includes(venue), `unsupported ticker corpus ${venue}`);
-const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', blofin: 'BlofinExchange', cryptocom: 'CryptocomExchange', coinbase: 'CoinbaseExchange', binance: 'BinanceExchange', binancepm: 'BinancePMExchange', binancespot: 'BinanceSpotExchange' }[venue];
-const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid', binancepm: 'binance', binancespot: 'binance' }[venue] || venue;
-const Exchange = require(path.join(root, `packages/safe-cex/src/exchanges/${directory}/${venue}.exchange.ts`))[name];
+assert(['bitunix', 'bitrue', 'apexomni', 'weex', 'phemex', 'kucoin', 'kucoinspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'blofin', 'cryptocom', 'coinbase', 'binance', 'binancepm', 'binancespot', 'bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'].includes(venue), `unsupported ticker corpus ${venue}`);
+const name = { bitunix: 'BitunixExchange', bitrue: 'BitrueExchange', apexomni: 'ApexOmniExchange', weex: 'WeexExchange', phemex: 'PhemexExchange', kucoin: 'KucoinExchange', kucoinspot: 'KucoinSpotExchange', hyperliquid: 'HyperliquidExchange', hyperliquidspot: 'HyperliquidSpotExchange', lighter: 'LighterExchange', blofin: 'BlofinExchange', cryptocom: 'CryptocomExchange', coinbase: 'CoinbaseExchange', binance: 'BinanceExchange', binancepm: 'BinancePMExchange', binancespot: 'BinanceSpotExchange', bybit: 'BybitExchange', bybitdemo: 'BybitExchange', bybitinverse: 'BybitInverseExchange', bybitspot: 'BybitSpotExchange', hyrotrader: 'HyrotraderExchange' }[venue];
+const directory = { kucoinspot: 'kucoin', hyperliquidspot: 'hyperliquid', binancepm: 'binance', binancespot: 'binance', bybitdemo: 'bybit', bybitinverse: 'bybit', bybitspot: 'bybit', hyrotrader: 'bybit' }[venue] || venue;
+const Exchange = require(path.join(root, `packages/safe-cex/src/exchanges/${directory}/${venue === 'bybitdemo' ? 'bybit' : venue}.exchange.ts`))[name];
 const fields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'volume', 'quoteVolume', 'fundingRate', 'fundingTime', 'openInterest'];
 if (venue.startsWith('hyperliquid')) fields.push('midPrice');
 const store = new DefaultStore();
 const symbols = ['BTC', 'ETH', 'ADA'];
 const tickers = symbols.map(asset => ({
-  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), blofin: `${asset}-USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT` }[venue],
-  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, blofin: `${asset}USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT` }[venue],
+  id: { bitunix: `${asset}/USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}-USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset === 'BTC' ? 'XBT' : asset}USDTM`, kucoinspot: `${asset}-USDT`, hyperliquid: asset, hyperliquidspot: `@${symbols.indexOf(asset)}`, lighter: String(symbols.indexOf(asset) + 1), blofin: `${asset}-USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT` }[venue],
+  symbol: { bitunix: `${asset}USDT`, bitrue: `E-${asset}-USDT`, apexomni: `${asset}USDC`, weex: `${asset}USDT`, phemex: `${asset}USDT`, kucoin: `${asset}USDT`, kucoinspot: `${asset}-USDT`, hyperliquid: `${asset}/USDC`, hyperliquidspot: `${asset}/USDC`, lighter: asset, blofin: `${asset}USDT`, cryptocom: `${asset}USD-PERP`, coinbase: `${asset}-USDC`, binance: `${asset}USDT`, binancepm: `${asset}USDT`, binancespot: `${asset}USDT`, bybit: `${asset}USDT`, bybitdemo: `${asset}USDT`, bybitinverse: `${asset}USD`, bybitspot: `${asset}USDT`, hyrotrader: `${asset}USDT` }[venue],
   ...Object.fromEntries(fields.map((field, index) => [field, 101 + index])),
 }));
 store.update({ tickers: structuredClone(tickers), markets: tickers.map(t => ({ id: t.id, symbol: t.symbol, ...(venue === 'cryptocom' ? { info: { underlyingSymbol: t.id.split('-')[0] } } : {}) })) });
-const exchange = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture' }, store);
-const socket = exchange.publicWebsocket;
+const exchange = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture', enableInverseMarkets: ['bybit', 'bybitdemo'].includes(venue) }, store);
+const socket = venue === 'bybitinverse' ? exchange.publicInverseWebsocket : exchange.publicWebsocket;
 if (venue === 'bitrue') for (const row of tickers) socket.ensureTickerSubscription(row.symbol);
 const samples = [
   ['null', null], ['numeric-string', '12.5'], ['prefix-string', '12.5tail'],
@@ -52,7 +52,10 @@ function putInput(data, key, value) {
   if (member === undefined) data[name] = value;
   else data[name] = member === '0' ? [value, '2'] : { [member]: value };
 }
-const channels = venue.startsWith('binance') ? { '24hrTicker': ['c', 'P', 'v', 'q'], ...(venue === 'binancespot' ? {} : { markPriceUpdate: ['p', 'i', 'r', 'T'] }), bookTicker: ['b', 'a'] }
+const bybitInputs = ['bid1Price', 'ask1Price', 'lastPrice', 'markPrice', 'indexPrice', 'price24hPcnt', 'openInterest', 'fundingRate', 'nextFundingTime', 'volume24h', 'turnover24h'];
+const channels = ['bybit', 'bybitdemo'].includes(venue) ? { linear: bybitInputs, inverse: bybitInputs }
+  : ['bybitinverse', 'bybitspot', 'hyrotrader'].includes(venue) ? { tickers: bybitInputs }
+  : venue.startsWith('binance') ? { '24hrTicker': ['c', 'P', 'v', 'q'], ...(venue === 'binancespot' ? {} : { markPriceUpdate: ['p', 'i', 'r', 'T'] }), bookTicker: ['b', 'a'] }
   : venue === 'blofin' ? { tickers: ['open24h', 'last', 'bidPrice', 'askPrice', 'volCurrency24h', 'vol24h'], 'funding-rate': ['fundingRate', 'fundingTime'] }
   : venue === 'cryptocom' ? { ticker: ['b', 'k', 'a', 'c', 'v', 'vv', 'oi'], mark: ['v'], index: ['v'], funding: ['v'], book: ['bid', 'ask'] }
   : venue === 'coinbase' ? { ticker_batch: ['price', 'price_percent_chg_24_h', 'volume_24_h', 'best_bid', 'best_ask', 'high_24_h', 'low_24_h'] }
@@ -71,9 +74,15 @@ const channels = venue.startsWith('binance') ? { '24hrTicker': ['c', 'P', 'v', '
   const cases = [];
   try {
     for (const [channel, keys] of Object.entries(channels)) for (const key of keys) for (const [label, value] of samples) {
-      store.update({ tickers: structuredClone(tickers) });
-      let frames = tickers.map((ticker, index) => {
+      const caseTickers = ['bybit', 'bybitdemo'].includes(venue) && channel === 'inverse' ? tickers.map(t => ({ ...t, id: t.id.replace('USDT', 'USD'), symbol: t.symbol.replace('USDT', 'USD') })) : tickers;
+      store.update({ tickers: structuredClone(caseTickers) });
+      let frames = caseTickers.map((ticker, index) => {
         const offset = index * 11;
+        if (['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'].includes(venue)) {
+          const data = { symbol: ticker.symbol, bid1Price: String(29.5 + offset), ask1Price: String(33.75 + offset), lastPrice: String(31.5 + offset), markPrice: String(37.75 + offset), indexPrice: String(38.25 + offset), price24hPcnt: String(.125 + index), openInterest: String(91.25 + offset), fundingRate: String(.0025 + index), nextFundingTime: String(1700000000 + offset), volume24h: String(53.25 + offset), turnover24h: String(1091.75 + offset) };
+          if (index === 0) data[key] = value;
+          return JSON.stringify({ topic: `tickers.${ticker.symbol}`, type: 'delta', data });
+        }
         if (venue.startsWith('binance')) {
           const data = { e: channel, s: ticker.symbol, c: String(31.5 + offset), P: String(.125 + index), v: String(53.25 + offset), q: String(1091.75 + offset), p: String(37.75 + offset), i: String(38.25 + offset), r: String(.0025 + index), T: String(1700000000 + offset), b: String(29.5 + offset), a: String(33.75 + offset) };
           if (index === 0) data[key] = value;
@@ -173,10 +182,11 @@ const channels = venue.startsWith('binance') ? { '24hrTicker': ['c', 'P', 'v', '
       if (venue === 'phemex') frames = [JSON.stringify({ method: 'perp_market24h_pack_p.update', data: [frames[1], frames[0], frames[2]] })];
       if (venue === 'apexomni') frames = [JSON.stringify({ topic: 'instrumentInfo.all', data: [frames[1], frames[0], frames[2]] })];
       for (const frame of frames) {
-        const receiver = venue === 'bitunix' && channel === 'price' ? exchange.publicWebsocketSecondary
+        const receiver = ['bybit', 'bybitdemo'].includes(venue) && channel === 'inverse' ? exchange.publicWebsocketSecondary
+          : venue === 'bitunix' && channel === 'price' ? exchange.publicWebsocketSecondary
           : venue.startsWith('binance') && venue !== 'binancespot' && channel !== 'bookTicker' ? socket.marketWebsocket : socket;
         if (venue === 'cryptocom') {
-          const fresh = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture' }, store);
+          const fresh = new Exchange(venue, { publicDataOnly: true, applicationId: 'fixture', enableInverseMarkets: ['bybit', 'bybitdemo'].includes(venue) }, store);
           try { await fresh.publicWebsocket.onMessage({ data: frame }); } finally { fresh.dispose(); }
         } else await receiver.onMessage({ data: frame });
       }
