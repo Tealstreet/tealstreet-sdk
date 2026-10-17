@@ -16,7 +16,7 @@
   },
   "safe-cex-exchange/src/runtime.rs::LOCAL_FUNCTION:utf8_view": {
     "category": "non-decoder",
-    "reason": "Explicit lossy legacy Error JSON output view; normalizes native string units only for the legacy view while the original RestFailure retains the authoritative native body. The real error origin regression asserts both profiles and origin identity.",
-    "sourceSha256": "8baffb2e068ded31be5d17500d23da5c957e4c71af2581e6a4d9a5b9e3ca596e"
+    "reason": "Explicit lossy legacy Error JSON output view; normalizes native string units only for the legacy view while the original RestFailure retains the authoritative native body. The real error origin regression asserts both profiles and origin identity. Physical response bytes receive the existing JSON.parse view before string-unit normalization; native string responses are not parsed a second time. The encoded error-origin witness preserves invalid bytes and checks parsed valid JSON.",
+    "sourceSha256": "2adddfb18bc735cf339f50e9a3b98ee20c9e5693f9414affff5eed1019373aae"
   }
 }

@@ -699,6 +699,65 @@ fn retry_config_cases() -> Vec<Value> {
     assert_eq!(results.len(), 6, "factory_retry_config_native_inventory");
     results
 }
+// JSON.parse produces binary64 values; serde Number lexemes are fixture storage,
+// not the source result. Check native bits before comparing source wire spelling.
+fn assert_native_json(
+    actual: &safe_cex_types::retained_json::RetainedJsonInput,
+    expected: &Value,
+    context: &str,
+) {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    match (actual, expected) {
+        (Input::Float(actual), Value::Number(expected)) => {
+            let expected = safe_cex_num::number_from_string(&expected.to_string());
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{context}: number bits"
+            );
+        }
+        (Input::Lexeme(actual), Value::Number(expected)) => {
+            let actual = safe_cex_num::number_from_string(actual);
+            let expected = safe_cex_num::number_from_string(&expected.to_string());
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{context}: number bits"
+            );
+        }
+        (Input::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{context}: array length");
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert_native_json(actual, expected, context);
+            }
+        }
+        (Input::Object(actual), Value::Object(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{context}: own keys");
+            for (key, value) in actual {
+                let key = String::from_utf16(key).unwrap();
+                assert_native_json(value, expected.get(&key).expect("source own key"), context);
+            }
+        }
+        _ => assert_eq!(
+            actual,
+            &Input::from_value(expected.clone()).unwrap(),
+            "{context}: native value"
+        ),
+    }
+    let expected = Input::from_value(expected.clone()).unwrap();
+    assert_eq!(
+        safe_cex_num::js_retained_json_stringify(actual).unwrap(),
+        safe_cex_num::js_retained_json_stringify(&expected).unwrap(),
+        "{context}: exact source JSON spelling"
+    );
+}
+fn assert_json_numbers(actual: &Value, expected: &Value, context: &str) {
+    assert_native_json(
+        &safe_cex_types::retained_json::RetainedJsonInput::from_value(actual.clone()).unwrap(),
+        expected,
+        context,
+    );
+}
 fn observe(value: &Value) -> Value {
     match value {
         Value::String(text) => {
@@ -712,7 +771,15 @@ fn observe(value: &Value) -> Value {
         }
         Value::Null => json!({"kind":"null","value":null}),
         Value::Bool(value) => json!({"kind":"boolean","value":value}),
-        _ => json!({"kind":"object","value":value}),
+        _ => {
+            // This report crosses the source oracle's JSON.stringify boundary.
+            let input = safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                .unwrap();
+            let wire = safe_cex_num::js_retained_json_stringify(&input)
+                .unwrap()
+                .unwrap();
+            json!({"kind":"object","value":serde_json::from_str::<Value>(&wire).unwrap()})
+        }
     }
 }
 fn transform_cases() -> Vec<Value> {
@@ -890,7 +957,11 @@ fn transform_cases() -> Vec<Value> {
                     json!({"retCode":10001,"retMsg":"request rejected","raw_response":serde_json::from_str::<Value>(raw_for_id(id)).unwrap()})
                 }
             };
-            assert_eq!(value, expected, "factory_transform_native_value {id}");
+            assert_json_numbers(
+                &value,
+                &expected,
+                &format!("factory_transform_native_value {id}"),
+            );
             observe(&value)
         };
         let successful_auth = matches!(
@@ -1357,16 +1428,10 @@ fn retry_condition_cases() -> Vec<Value> {
             "retry" => {
                 totals[0] += 1;
                 let result = result.unwrap();
-                assert_eq!(
-                    result
-                        .response
-                        .body
-                        .clone()
-                        .into_data()
-                        .into_value()
-                        .unwrap()["retCode"],
-                    0,
-                    "factory_condition_native_result {id}"
+                assert_native_json(
+                    &result.response.body.clone().into_data(),
+                    &json!({"retCode":0,"retMsg":"OK"}),
+                    &format!("factory_condition_native_result {id}"),
                 );
                 assert_eq!(
                     f.owner.accesses.borrow().len(),
