@@ -598,10 +598,12 @@ pub(crate) fn bind(
                 let symbol = |v: Option<&Value>| normalize_symbol(rt, v);
                 let mapped = if uta {
                     crate::positions::map_uta_position(raw.as_ref(), symbol, &positions, || {
-                        rt.now()
+                        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
                     })?
                 } else {
-                    crate::positions::map_position(raw.as_ref(), symbol, &positions, || rt.now())?
+                    crate::positions::map_position(raw.as_ref(), symbol, &positions, || {
+                        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+                    })?
                 };
                 drop(positions);
                 position_object(&mapped, p, invalid)
