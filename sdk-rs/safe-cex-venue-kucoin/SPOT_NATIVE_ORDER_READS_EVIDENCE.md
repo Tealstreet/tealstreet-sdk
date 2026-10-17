@@ -110,3 +110,19 @@ Not run: full venue/workspace/monorepo suites, host or wasm clippy, wasm builds,
 live requests/transports, CI reruns, or a full JavaScript engine conformance
 suite. Old socket-class targets were not rerun: their production/fixture inputs
 are unchanged by this slice.
+
+
+## Production Spot I/O cleanup (2026-10-18 SGT)
+
+The parallel typed spot_reads/spot_writes implementations, their four test
+targets and exclusive source oracles are retired. Earlier measurements of those
+copies are historical. Production already installs spot_native_order_reads
+through spot_exchange_class; its native/source component cases remain. New
+tests/spot_io_binding.rs drives the actual constructed Exchange, HTTP factory
+and Store for market precision, distinct ticker prices and fallback, active
+symbol discovery/paging and three cancellation routes with exact params. Three
+compiled mutations independently change the live ticker bid field, discovery
+endpoint and cancel-all endpoint. Each leaves its corresponding retired-copy
+tests passing but fails the constructed witness. Exact restoration passes all
+three constructed tests. This is deletion of unused code, not an algorithm
+cutover or a resolution of shared typed projection/identity policy.
