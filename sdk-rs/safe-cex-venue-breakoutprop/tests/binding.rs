@@ -744,6 +744,89 @@ pub fn accepted_typed_refusal(
     observe_refusal(&f, || f.run(invoke(f.exchange.clone())))
 }
 
+fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
+    let f = fixture();
+    f.fetch_markets();
+    let cached = f.store.markets().to_vec();
+    let mut row = detail();
+    row[field] = value;
+    f.wire.faults.borrow_mut().push_back((
+        "accounts/default:A/instruments/query".into(),
+        200,
+        json!({"instrumentDetails":[detail(),row]}),
+    ));
+    let errors = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let result = f.run(f.exchange.fetch_markets());
+    assert!(
+        result.is_ok(),
+        "production malformed mapping must return cached markets: {result:?}"
+    );
+    assert_eq!(
+        result.unwrap(),
+        cached,
+        "a valid prefix must not replace the cached markets"
+    );
+    assert_eq!(&*f.store.markets(), cached.as_slice());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0].to_string().contains(cause),
+        "source mapping failure cause is visible: {:?}",
+        errors.borrow()
+    );
+}
+#[test]
+fn markets_null_margin_rate_reports_and_preserves_cache() {
+    malformed_market_mapping(
+        "marginRate",
+        Value::Null,
+        "Cannot read properties of null (reading 'tiers')",
+    );
+}
+#[test]
+fn markets_null_tiers_reports_and_preserves_cache() {
+    malformed_market_mapping(
+        "marginRate",
+        json!({"tiers":null}),
+        "Cannot read properties of null (reading '0')",
+    );
+}
+#[test]
+fn markets_null_maximum_reports_and_preserves_cache() {
+    malformed_market_mapping(
+        "maxOrderSize",
+        Value::Null,
+        "Cannot read properties of null (reading 'value')",
+    );
+}
+#[test]
+fn markets_ignore_unused_instrument_fields() {
+    let f = fixture();
+    let mut row = instrument();
+    row.as_object_mut().unwrap().remove("description");
+    row["priceIncrement"] = json!(0.25);
+    f.wire.faults.borrow_mut().push_back((
+        "instruments/query".into(),
+        200,
+        json!({"instruments":[row]}),
+    ));
+    let result = f.run(f.exchange.fetch_markets());
+    assert!(
+        result.is_ok(),
+        "production market mapping must only read source fields: {result:?}"
+    );
+    let markets = result.unwrap();
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].precision.price, 0.25);
+}
+
 fn unknown_enum_portfolio(field: &str) -> Value {
     let mut data = portfolio();
     data["portfolios"][0]["orders"] = json!([{
