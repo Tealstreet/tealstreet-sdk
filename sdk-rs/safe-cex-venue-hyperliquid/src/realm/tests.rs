@@ -850,3 +850,34 @@ fn production_order_wire_import_keeps_native_nonfinite_fields() {
         );
     }
 }
+
+#[test]
+fn production_order_wire_import_retains_undefined_and_limit_alias() {
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("orderRequestToOrderWire").unwrap();
+    let limit = r.object_from(vec![("tif", Value::str("Gtc"))]);
+    let order_type = r.object_from(vec![("limit", limit.clone())]);
+    let order = r.object_from(vec![
+        ("limit_px", Value::Number(11.25)),
+        ("sz", Value::Number(3.5)),
+        ("order_type", order_type),
+        ("cloid", Value::Null),
+    ]);
+    let wire = r
+        .call(&imported, &Value::Undefined, &[order, Value::Undefined])
+        .unwrap();
+    assert_eq!(r.own_entries(&wire).unwrap().len(), 7);
+    for key in ["a", "b", "r"] {
+        assert!(
+            matches!(r.get_str(&wire, key).unwrap(), Value::Undefined),
+            "native own-undefined {key}"
+        );
+    }
+    assert!(matches!(r.get_str(&wire, "c").unwrap(), Value::Null));
+    let order_type = r.get_str(&wire, "t").unwrap();
+    let retained = r.get_str(&order_type, "limit").unwrap();
+    assert!(retained.strict_equal(&limit));
+    r.set_str(&limit, "tif", Value::str("Alo")).unwrap();
+    let observed = r.get_str(&retained, "tif").unwrap();
+    assert_eq!(text(&mut r, &observed), "Alo");
+}
