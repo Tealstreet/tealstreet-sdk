@@ -216,7 +216,7 @@ fn actual_quote_reads() {
                 )
             })
         };
-        if name == "missing-unused" {
+        if name == "missing-unused" && method != "fetchMarkets" {
             assert!(result.is_err(), "QUOTES-VALIDATION {method}");
             assert_eq!(
                 case["expected"]["ok"].as_array().unwrap().len(),

@@ -66,6 +66,7 @@ pub struct BybitExchange {
     pub(crate) snapshot_refresh: std::cell::OnceCell<
         Rc<crate::private_snapshot_refresh::PrivateSnapshotRefresh<crate::binding::rt::Rt>>,
     >,
+    stream_topics: RefCell<std::collections::HashMap<String, crate::ws_public::streams::Topics>>,
     // fetchMarginAccountInfos assigns this wire field without coercion. Keep
     // absence and nonnumeric values: only the numeric value 1 means CONTRACT.
     pub(crate) unified_margin_status: RefCell<Option<serde_json::Value>>,
@@ -95,6 +96,13 @@ pub struct BybitExchange {
     expect(dead_code, reason = "wired as the remaining receiver members land")
 )]
 impl BybitExchange {
+    pub(crate) fn subscription_topics(&self, category: &str) -> crate::ws_public::streams::Topics {
+        self.stream_topics
+            .borrow_mut()
+            .entry(category.into())
+            .or_default()
+            .clone()
+    }
     pub(crate) fn xhr(&self) -> &Rc<SecondaryKeyClients> {
         self.xhr
             .get()
@@ -397,6 +405,7 @@ impl BybitExchange {
             js: std::cell::OnceCell::new(),
             order_state: Default::default(),
             snapshot_refresh: std::cell::OnceCell::new(),
+            stream_topics: RefCell::new(Default::default()),
             unified_margin_status: RefCell::new(Some(serde_json::json!(6))),
             margin_type: Cell::new(safe_cex_types::MarginType::Cross),
             needs_reinit: Cell::new(false),

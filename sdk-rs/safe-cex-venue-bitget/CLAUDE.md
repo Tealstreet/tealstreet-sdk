@@ -1,5 +1,16 @@
 # Bitget venue family
 
+The private-topic host consumes the shared iterator protocol instead of indexing
+Map/Set storage. It admits native iterator objects, caches the next method, keeps
+live insertion positions and propagates iterator errors with their original value.
+Private-topic loops close on body errors, preserving that throw over close errors;
+step/value errors do not close.
+The constructed-host `private_host_*` tests reproduce both iterator-object refusal
+and deletion skipping on master. Native references, signed zero, Unicode code
+points and permanent exhaustion stay in the runtime. Maintained wire frames remain
+JSON arrays; iterator-object cases cover the reachable host boundary, not a claimed
+current venue payload. `private_binding_frames` retains the four private topics.
+
 The typed `Exchange::cancel_all_orders` routes to the family's assembled override.
 Classic accounts send venue-wide cancellation even with an empty local order store;
 UTA sweeps venue normal and strategy orders before cancellation; inverse uses each
@@ -334,3 +345,23 @@ Classic and USDC retain both the inner cancellation emission and the outer symbo
 catch emission before propagating the original refusal; inverse retains its inner
 swallowing behavior. The cancellation binding tests assert that distinction and
 the selected symbol/order IDs through the actual signed client.
+
+The shared ModelField cutover (#465) preserves missed mapOrder table lookups as
+own Undefined when the source assigns them. Missing raw side is Undefined;
+a present unsupported raw side and unreplaced inherited table members retain
+the explicit closed-model refusal. Algo frames still evaluate the mapper before
+branching on status. Do not skip mapping merely because status is unmapped.
+
+The order oracle checks native own-Undefined fields before JSON projection. It
+walks every output and checks native row counts before pairing with source rows:
+1,327 linear cases (1,263 source successes, 78 accepted own-Undefined cases) and
+1,166 inverse cases (1,095 source successes, 100 accepted own-Undefined cases).
+Representability checks visit every source row without short-circuiting.
+The actual socket/Store and authenticated REST witnesses additionally distinguish
+missing-side Undefined from absence across all three families, while unsupported
+raw side still refuses. `scripts/map-order-undefined-controls.py` compiles the old
+throw, absent-property and unsupported-side faults against both the real binding
+and frozen oracle, then requires exact restored passes. Run it exclusively.
+All three representation controls compile and fail named tests in both the
+constructed binding and frozen oracle; each exact restoration passes both.
+The actual TypeScript order oracle also passes without changing its fixture.

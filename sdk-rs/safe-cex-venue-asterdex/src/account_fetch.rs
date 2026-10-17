@@ -374,12 +374,14 @@ impl AccountFetch {
             self.owner.log(&message, severity.as_str())?;
             let mut brackets = BTreeMap::new();
             for (key, value) in entries {
-                let key = key.as_ref().and_then(Value::as_str).ok_or_else(|| {
-                    mapper_error((
-                        "RepresentationError",
-                        "Leverage bracket symbol must be a string".into(),
-                    ))
-                })?;
+                // A non-string Map key cannot match the source market.symbol string.
+                let Some(key) = key.as_ref().and_then(Value::as_str) else {
+                    continue;
+                };
+                // transformMarket applies `leverageMap.get(symbol) || 10`.
+                if !js_truthy(value.as_ref()) {
+                    continue;
+                }
                 let value = value.as_ref().and_then(Value::as_f64).ok_or_else(|| {
                     mapper_error((
                         "RepresentationError",

@@ -148,29 +148,21 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             .collect::<Result<Vec<_>, _>>()?;
         rows.push((criteria, index, value));
     }
-    let mut failure = None;
-    rows.sort_by(|(a, ai, _), (b, bi, _)| {
+    super::sorting::stable_sort(&mut rows, |(a, ai, _), (b, bi, _)| {
         for (i, (x, y)) in a.iter().zip(b).enumerate() {
-            match compare_ascending(x, y) {
-                Ok(Ordering::Equal) => continue,
-                Ok(o) => {
-                    return if descending.get(i) == Some(&true) {
-                        o.reverse()
+            match compare_ascending(x, y)? {
+                Ordering::Equal => continue,
+                order => {
+                    return Ok(if descending.get(i) == Some(&true) {
+                        order.reverse()
                     } else {
-                        o
-                    };
-                }
-                Err(e) => {
-                    failure.get_or_insert(e);
-                    return Ordering::Equal;
+                        order
+                    });
                 }
             }
         }
-        ai.cmp(bi)
-    });
-    if let Some(e) = failure {
-        return Err(e);
-    }
+        Ok(ai.cmp(bi))
+    })?;
     Ok(Js::array(rows.into_iter().map(|(_, _, v)| v).collect()))
 }
 

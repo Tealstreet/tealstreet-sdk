@@ -11,6 +11,10 @@ gate executes every generator with `--check`; CI runs all targets with
 `--include-ignored`, including the in-memory derived gate. See DERIVED_PARITY
 for dependency injection, corpus pins, and JSON float-roundtrip requirements.
 
+Order upserts overlay every carried ModelField, including own Undefined, while
+Absent retains the old property. The production Store facade compares all 15
+fields against the live source; numeric retention is checked before JSON output.
+
 The derived live oracle compares object key sets and recursively checks values;
 key iteration order depended on serde_json Map's backing store and is not part
 of these domain results. Array order and exact float-bit comparisons remain
