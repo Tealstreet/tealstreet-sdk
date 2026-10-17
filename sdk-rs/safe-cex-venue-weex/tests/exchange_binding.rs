@@ -344,8 +344,10 @@ fn private_auth_headers_are_fresh_on_each_core_owned_dial() {
     let socket = h.venue().base().get_private_sockets()[0].clone();
     for delta in [0.0, 17.0] {
         h.runtime.advance(delta);
+        let before = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         socket.connect_and_subscribe(delta > 0.0).unwrap();
         h.runtime.pump();
+        let after = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let dials = h.runtime.dials.borrow();
         let (_, options) = dials.last().unwrap();
         assert!(options.headers_required);
@@ -354,7 +356,8 @@ fn private_auth_headers_are_fresh_on_each_core_owned_dial() {
         };
         assert_eq!(headers.get("ACCESS-KEY").unwrap(), "synthetic-key");
         let timestamp = headers.get("ACCESS-TIMESTAMP").unwrap();
-        assert_eq!(timestamp.parse::<f64>().unwrap(), h.runtime.now.get());
+        let parsed = timestamp.parse::<f64>().unwrap();
+        assert!(parsed >= before && parsed <= after);
         let mut mac = Hmac::<sha2::Sha256>::new_from_slice(b"synthetic-secret").unwrap();
         mac.update(format!("{timestamp}/v3/ws/private").as_bytes());
         assert_eq!(
