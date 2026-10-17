@@ -924,3 +924,202 @@ fn constructed_private_balance_frame_updates_store() {
         (1250.0, 1100.0, 150.0, 9.0)
     );
 }
+
+fn spot_private_fixture() -> Harness {
+    let h = harness(ExchangeName::Krakenspot, options(), |http| {
+        http.ok(
+            "GET",
+            "/0/public/AssetPairs",
+            json!({"error":[],"result":{"XXBTZUSD":{
+                "wsname":"XBT/USD","pair_decimals":1,"lot_decimals":8,
+                "ordermin":"0.0001","status":"online","altname":"XBTUSD"
+            }}}),
+        );
+        http.ok("GET", "/0/public/Ticker", json!({"error":[],"result":{}}));
+        http.ok(
+            "POST",
+            "/0/private/OpenOrders",
+            json!({"error":[],"result":{"open":{}}}),
+        );
+        http.ok(
+            "POST",
+            "/0/private/Balance",
+            json!({"error":[],"result":{"ZUSD":"100"}}),
+        );
+        http.ok(
+            "POST",
+            "/0/private/GetWebSocketsToken",
+            json!({"error":[],"result":{"token":"private-token"}}),
+        );
+    });
+    h.drive(h.venue().start()).expect("Spot production startup");
+    h.runtime.pump();
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url == "wss://ws-auth.kraken.com/v2")
+        .expect("Spot private WS v2")
+        .1
+        .clone();
+    let subscriptions: Vec<Value> = socket
+        .sent
+        .borrow()
+        .iter()
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    assert!(
+        subscriptions.contains(&json!({"method":"subscribe","params":{
+            "channel":"executions","token":"private-token","snap_orders":true,
+            "snap_trades":false,"order_status":true
+        }}))
+    );
+    assert!(
+        subscriptions.contains(&json!({"method":"subscribe","params":{
+            "channel":"balances","token":"private-token","snapshot":true
+        }}))
+    );
+    assert_eq!(h.http.calls("/0/private/GetWebSocketsToken").len(), 1);
+    assert_eq!(h.store.balance().total, 100.0);
+    assert_eq!(h.store.positions().len(), 2);
+    h
+}
+
+fn spot_private_order_frame() -> Value {
+    json!({"channel":"executions","type":"snapshot","data":[{
+        "order_id":"spot-frame-order","symbol":"XBT/USD","side":"buy",
+        "order_type":"limit","limit_price":"29100","order_qty":"3",
+        "cum_qty":"0.5","exec_type":"new","timestamp":"2023-11-14T22:13:20Z"
+    }]})
+}
+
+#[test]
+fn constructed_spot_private_orders_frame_updates_real_store() {
+    let h = spot_private_fixture();
+    private_frame(&h, spot_private_order_frame());
+    let orders = h.store.orders().to_vec();
+    assert_eq!(orders.len(), 1);
+    let order = &orders[0];
+    assert_eq!(
+        (order.id.as_str(), order.symbol.as_str()),
+        ("spot-frame-order", "XBT/USD")
+    );
+    assert_eq!(order.status, OrderStatus::Open);
+    assert_eq!(order.side, OrderSide::Buy);
+    assert_eq!(order.r#type, OrderType::Limit);
+    assert_eq!(
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
+        (29100.0, 3.0, 0.5, 2.5)
+    );
+    private_frame(
+        &h,
+        json!({"channel":"executions","type":"update","data":[{
+            "order_id":"spot-frame-order","exec_type":"canceled"
+        }]}),
+    );
+    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+}
+
+#[test]
+fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
+    let h = spot_private_fixture();
+    let fills = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let saved = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, data| {
+            saved.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    private_frame(&h, spot_private_order_frame());
+    assert!(fills.borrow().is_empty(), "snapshot has no trade emission");
+    private_frame(
+        &h,
+        json!({"channel":"executions","type":"update","data":[{
+            "order_id":"spot-frame-order","symbol":"XBT/USD","exec_type":"trade",
+            "side":"buy","order_qty":"3","cum_qty":"0.75","last_qty":"0.25",
+            "avg_price":"30002"
+        }]}),
+    );
+    assert_eq!(
+        (h.store.orders()[0].filled, h.store.orders()[0].remaining),
+        (0.75, 2.25)
+    );
+    assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
+    assert_eq!(
+        &*fills.borrow(),
+        &[json!({"side":"buy","symbol":"XBT/USD","price":30002.0,"amount":0.25})]
+    );
+}
+
+#[test]
+fn constructed_spot_private_balance_frame_refreshes_authoritative_rest_store() {
+    let h = spot_private_fixture();
+    let before = h.http.calls("/0/private/Balance").len();
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/0/private/Balance");
+    h.http.ok(
+        "POST",
+        "/0/private/Balance",
+        json!({"error":[],"result":{"ZUSD":"125","USDT":"7"}}),
+    );
+    private_frame(
+        &h,
+        json!({"channel":"balances","type":"update","data":[{
+            "asset":"USD","balance":"999999"
+        }]}),
+    );
+    h.runtime.advance(1000.0);
+    assert_eq!(h.http.calls("/0/private/Balance").len(), before + 1);
+    let b = h.store.balance();
+    assert_eq!((b.free, b.used, b.total, b.upnl), (132.0, 0.0, 132.0, 0.0));
+    let currencies = b.currencies.as_ref().unwrap();
+    assert_eq!(currencies["USD"].as_balance().unwrap().total, 125.0);
+    assert_eq!(currencies["USDT"].as_balance().unwrap().total, 7.0);
+}
+
+#[test]
+fn constructed_spot_private_position_topic_preserves_rest_owned_store() {
+    let h = spot_private_fixture();
+    private_frame(&h, spot_private_order_frame());
+    let orders = h.store.orders().to_vec();
+    assert_eq!(
+        orders.len(),
+        1,
+        "ignored-topic witness starts with a real WS order"
+    );
+    let positions = h.store.positions().to_vec();
+    let balance = h.store.balance().clone();
+    let fills = std::rc::Rc::new(std::cell::Cell::new(0));
+    let saved = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, _| {
+            saved.set(saved.get() + 1);
+            Ok(())
+        }),
+    );
+    private_frame(
+        &h,
+        json!({"channel":"positions","type":"update","data":[{
+            "symbol":"XBT/USD","contracts":99,"unrealizedPnl":123
+        }]}),
+    );
+    assert_eq!(&*h.store.orders(), orders.as_slice());
+    assert_eq!(&*h.store.positions(), positions.as_slice());
+    assert_eq!(&*h.store.balance(), &balance);
+    assert_eq!(
+        fills.get(),
+        0,
+        "Spot has no private positions/fill route for this channel"
+    );
+}
