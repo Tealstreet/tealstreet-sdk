@@ -636,11 +636,8 @@ impl PrivateStreamHost for SocketHost {
                         .emit_args(
                             "warning",
                             &[
-                                safe_cex_exchange::js_runtime::value::Js::str(message),
-                                safe_cex_exchange::js_runtime::value::Js::object(vec![(
-                                    "forceToast",
-                                    safe_cex_exchange::js_runtime::value::Js::Bool(true),
-                                )]),
+                                Js::str(message),
+                                Js::object(vec![("forceToast", Js::Bool(true))]),
                             ],
                         )
                         .map_err(failure)

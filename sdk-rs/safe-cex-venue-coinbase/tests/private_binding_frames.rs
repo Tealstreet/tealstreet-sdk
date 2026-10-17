@@ -318,9 +318,9 @@ fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str)
             "log",
             Rc::new(move |_, message| {
                 if fault == "log"
-                    && message
-                        .as_str()
-                        .is_some_and(|m| m.contains("Coinbase private WS is not receiving"))
+                    && message.as_str().is_some_and(|m| {
+                        String::from_utf16_lossy(m).contains("Coinbase private WS is not receiving")
+                    })
                 {
                     Err(log_error.clone())
                 } else {
@@ -373,10 +373,10 @@ fn real_auth_failure_log_callback_reaches_socket_host() {
         h.venue().base().on(
             "log",
             Rc::new(move |_, message| {
-                if message
-                    .as_str()
-                    .is_some_and(|m| m.contains("Coinbase private WS authentication failed"))
-                {
+                if message.as_str().is_some_and(|m| {
+                    String::from_utf16_lossy(m)
+                        .contains("Coinbase private WS authentication failed")
+                }) {
                     Err(injected.clone())
                 } else {
                     Ok(())
