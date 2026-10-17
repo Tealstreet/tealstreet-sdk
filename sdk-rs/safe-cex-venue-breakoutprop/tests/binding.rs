@@ -1189,3 +1189,331 @@ fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
     );
     f.exchange.dispose().unwrap();
 }
+
+#[test]
+fn ticker_reads_ignore_missing_unused_declaration_fields() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = json!({"symbol":"BTCUSD","bid":91.25,"ask":94.5});
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[row.clone()]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].bid, rows[0].ask, rows[0].last),
+        (91.25, 94.5, 91.25)
+    );
+    assert_eq!(rows[0].info, Some(row));
+}
+
+#[test]
+fn ticker_reads_ignore_malformed_unused_declaration_fields() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = json!({"symbol":"BTCUSD","bid":81.25,"ask":84.5,"type":{},"time":null});
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[row.clone()]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].bid, rows[0].ask, rows[0].mark),
+        (81.25, 84.5, 81.25)
+    );
+    assert_eq!(rows[0].info, Some(row));
+}
+
+fn malformed_ticker_fallback(prefix: Value) {
+    let f = fixture();
+    f.fetch_markets();
+    let cached = f.run(f.exchange.fetch_tickers()).unwrap();
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            tickers: Some(cached.clone()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let cached = f.store.tickers().to_vec();
+    let errors = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[
+        prefix,null
+    ]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows, cached);
+    assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("Cannot read properties of null (reading 'symbol')")
+    );
+}
+
+#[test]
+fn account_lookup_reads_only_selected_account_fields() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "/users/k".into(),
+        200,
+        json!({"userDetails":[{"accounts":[
+            {"accountStatus":"DISABLED"},
+            {"account":"default:A","accountStatus":"FULL_TRADING"}
+        ]}]}),
+    ));
+    f.run(f.exchange.start()).unwrap();
+    assert_eq!(
+        f.exchange.account_code.borrow().as_deref(),
+        Some("default:A")
+    );
+    assert!(f.store.loaded().orders && f.store.loaded().positions && f.store.loaded().balance);
+    f.request("GET", "accounts/default:A/portfolio");
+    f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn account_lookup_ignores_unused_metadata_and_later_users() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "/users/k".into(),
+        200,
+        json!({"userDetails":[{
+            "login":null,"domain":[],"version":{},"fullName":false,"username":12,
+            "accounts":[{"account":"default:A","accountStatus":"FULL_TRADING",
+                "owner":[],"version":null,"baseCurrency":{},"registrationTime":false,
+                "pricingStream":12,"positionBased":"unused"}]
+        },null,{"accounts":"ignored"}]}),
+    ));
+    f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(
+        f.exchange.account_code.borrow().as_deref(),
+        Some("default:A")
+    );
+    f.request("GET", "accounts/default:A/portfolio");
+}
+
+fn source_only_portfolio() -> Value {
+    json!({"portfolios":[{
+        "balances":[{"currency":"USD","value":50.25}],
+        "positions":[{"symbol":"BTCUSD","side":"BUY","openPrice":100.0,
+            "quantity":2.0,"quantityNotional":200.0,"marginRate":0.05,
+            "lastUpdateTime":"2026-01-01T00:00:00Z"}],
+        "orders":[{"orderCode":"source-order","status":"WORKING","instrument":"BTCUSD",
+            "type":"LIMIT","transactionTime":"2026-01-01T00:00:00Z",
+            "legs":[{"side":"BUY","price":101.25,"quantity":3.0,"filledQuantity":1.0,
+                "remainingQuantity":2.0,"positionEffect":"OPEN"}]}]
+    }]})
+}
+fn queue_portfolio(f: &Fixture, value: Value) {
+    f.wire
+        .faults
+        .borrow_mut()
+        .push_back(("accounts/default:A/portfolio".into(), 200, value));
+}
+#[test]
+fn portfolio_orders_ignore_unused_declaration_fields_and_unread_collections() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["balances"] = json!([null]);
+    data["portfolios"][0]["positions"] = json!([null]);
+    queue_portfolio(&f, data.clone());
+    let orders = f
+        .run(f.exchange.fetch_orders(None))
+        .expect("TS reads only orders here");
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, "source-order");
+    assert_eq!(orders[0].amount, 3.0);
+    assert_eq!(orders[0].price.value(), Some(&101.25));
+    assert_eq!(
+        orders[0].info.value(),
+        Some(&data["portfolios"][0]["orders"][0])
+    );
+}
+#[test]
+fn portfolio_positions_ignore_unused_declaration_fields_and_unread_collections() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["balances"] = json!([null]);
+    data["portfolios"][0]["orders"] = json!([null]);
+    queue_portfolio(&f, data.clone());
+    let positions = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .expect("TS reads only positions here");
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].symbol, "BTCUSD");
+    assert_eq!(positions[0].contracts, 2.0);
+    assert_eq!(positions[0].margin_size.value(), Some(&10.0));
+    assert_eq!(
+        positions[0].info.value(),
+        Some(&data["portfolios"][0]["positions"][0])
+    );
+}
+#[test]
+fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["orders"] = json!([null]);
+    queue_portfolio(&f, data.clone());
+    queue_portfolio(&f, data.clone());
+    f.run(f.exchange.start())
+        .expect("TS balance ignores order rows");
+    let balance = f.store.balance().clone();
+    assert_eq!(balance.total, 48.25);
+    assert_eq!(balance.upnl, -2.0);
+    assert_eq!(balance.used, 10.0);
+    assert_eq!(balance.free, 38.25);
+    assert_eq!(balance.info, Some(data));
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn portfolio_array_like_root_retains_order_and_position_info() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    let portfolio = data["portfolios"][0].clone();
+    data["portfolios"] = json!({"0":portfolio});
+    queue_portfolio(&f, data.clone());
+    let orders = f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(
+        orders[0].info.value(),
+        Some(&data["portfolios"]["0"]["orders"][0])
+    );
+    queue_portfolio(&f, data.clone());
+    let positions = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .unwrap();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(
+        positions[0].info.value(),
+        Some(&data["portfolios"]["0"]["positions"][0])
+    );
+}
+
+#[test]
+fn portfolio_absent_open_positions_retains_filter_type_error() {
+    let f = fixture();
+    queue_portfolio(&f, json!({"portfolios":[]}));
+    let error = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    assert_eq!(
+        error.message,
+        "Cannot read properties of undefined (reading 'filter')"
+    );
+}
+
+#[test]
+fn ticker_reads_report_consumed_field_failure_and_return_cached_tickers() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":1,"ask":2}),
+    );
+}
+
+#[test]
+fn ticker_reads_defer_scalar_projection_until_source_mapping_completes() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":"13","ask":14}),
+    );
+}
+
+fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    errors
+}
+
+#[test]
+fn portfolio_orders_defer_projection_until_source_mapping_completes() {
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["orders"][0]["legs"][0]["price"] = json!("13");
+    data["portfolios"][0]["orders"]
+        .as_array_mut()
+        .unwrap()
+        .push(Value::Null);
+    queue_portfolio(&f, data);
+    let rows = f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert!(rows.is_empty());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("Cannot read properties of null (reading 'orderCode')")
+    );
+}
+
+#[test]
+fn portfolio_positions_defer_projection_until_source_mapping_completes() {
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["positions"][0]["openPrice"] = json!("100");
+    data["portfolios"][0]["positions"]
+        .as_array_mut()
+        .unwrap()
+        .push(Value::Null);
+    queue_portfolio(&f, data);
+    let rows = f.run(f.exchange.fetch_positions(Some(vec![]))).unwrap();
+    assert!(rows.is_empty());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("Cannot read properties of null (reading 'side')")
+    );
+}
+
+#[test]
+fn portfolio_balance_and_filtered_positions_accept_native_intermediate_scalars() {
+    for side in ["BUY", "constructor"] {
+        let f = fixture();
+        let mut data = source_only_portfolio();
+        let position = &mut data["portfolios"][0]["positions"][0];
+        position["symbol"] = json!("EXCLUDED");
+        position["openPrice"] = json!("100");
+        position["quantity"] = json!("2");
+        position["side"] = json!(side);
+        queue_portfolio(&f, data.clone());
+        queue_portfolio(&f, data);
+        f.run(f.exchange.start()).unwrap();
+        assert_eq!(
+            (
+                f.store.balance().total,
+                f.store.balance().used,
+                f.store.balance().free
+            ),
+            (50.25, 10.0, 40.25)
+        );
+        assert_eq!(f.store.positions().len(), 1);
+        assert_eq!(f.store.positions()[0].symbol, "BTCUSD");
+        assert_eq!(f.store.positions()[0].contracts, 0.0);
+        f.exchange.dispose().unwrap();
+    }
+}
