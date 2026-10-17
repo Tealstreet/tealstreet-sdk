@@ -53,17 +53,23 @@ fn number(object: &Js, key: &str) -> Result<f64, Thrown> {
     as_number(key, object.get(key)?)
 }
 
-fn literal<T: Copy>(key: &str, value: Js, table: &[(&str, T)]) -> Result<T, Thrown> {
+fn literal<T: Copy>(value: Js, table: &[(&str, T)], default_value: T) -> T {
     if let Js::String(text) = &value {
-        let text = String::from_utf16_lossy(text);
-        if let Some((_, kind)) = table.iter().find(|(name, _)| *name == text) {
-            return Ok(*kind);
+        if let Some((_, kind)) = table
+            .iter()
+            .find(|(name, _)| text.as_ref().iter().copied().eq(name.encode_utf16()))
+        {
+            return *kind;
         }
     }
-    Err(Thrown::type_error(&format!(
-        "{key} is not one of the declared literals: {}",
-        value.to_display()
-    )))
+    default_value
+}
+
+fn nullish_bigint(object: &Js, key: &str) -> Result<Option<BigInt>, Thrown> {
+    match object.get(key)? {
+        Js::Undefined | Js::Null => Ok(None),
+        value => as_big(key, value).map(Some),
+    }
 }
 
 const ORDER_KINDS: [(&str, CreateOrderKind); 6] = [
@@ -113,11 +119,19 @@ pub(super) fn create_order(params: &Js) -> Result<(CreateOrderParams, OrderFlagV
             amount,
             post_only: (!flags.post_only.is_undefined()).then(|| flags.post_only.truthy()),
             reduce_only: (!flags.reduce_only.is_undefined()).then(|| flags.reduce_only.truthy()),
-            order_type: optional(params, "orderType", |k, v| literal(k, v, &ORDER_KINDS))?,
-            trigger_price: optional(params, "triggerPrice", as_big)?,
-            order_expiry: optional(params, "orderExpiry", as_big)?,
-            expired_at: optional(params, "expiredAt", as_big)?,
-            time_in_force: optional(params, "timeInForce", |k, v| literal(k, v, &TIME_IN_FORCE))?,
+            order_type: optional(params, "orderType", |_, value| {
+                Ok(literal(value, &ORDER_KINDS, CreateOrderKind::Limit))
+            })?,
+            trigger_price: nullish_bigint(params, "triggerPrice")?,
+            order_expiry: nullish_bigint(params, "orderExpiry")?,
+            expired_at: nullish_bigint(params, "expiredAt")?,
+            time_in_force: optional(params, "timeInForce", |_, value| {
+                Ok(literal(
+                    value,
+                    &TIME_IN_FORCE,
+                    CreateOrderTimeInForce::GoodTillCancel,
+                ))
+            })?,
             integrator_account_index: optional(params, "integratorAccountIndex", as_big)?,
             integrator_maker_fee: optional(params, "integratorMakerFee", as_number)?,
             integrator_taker_fee: optional(params, "integratorTakerFee", as_number)?,
