@@ -867,3 +867,29 @@ fn real_trait_candle_listener_polls_deduplicates_and_cleans_up() {
     assert_eq!(seen.borrow().len(), 1);
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
+    let h = harness(ExchangeName::Lighter, options(), |_| {});
+    let sockets = h.venue().base().get_all_sockets();
+    assert_eq!(sockets.len(), 2, "both real source sockets are registered");
+    for socket in &sockets {
+        assert!(
+            !socket.recover_after_offline(true).unwrap(),
+            "the source socket requests an account reload"
+        );
+    }
+    assert!(
+        !h.venue().recover_after_offline().unwrap(),
+        "the production Exchange must expose the reload policy"
+    );
+    assert!(
+        h.runtime.sockets.borrow().is_empty(),
+        "recovery must not dial a second retry chain"
+    );
+    h.venue().dispose().unwrap();
+    assert!(
+        h.venue().recover_after_offline().unwrap(),
+        "disposed accounts do not request another reload"
+    );
+}

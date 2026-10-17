@@ -3753,6 +3753,9 @@ fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_iden
     assert_eq!(owner.store.request_stats().unwrap().other, 0.0);
 }
 
+#[path = "support/js_socket_receive.rs"]
+mod socket_receive;
+
 #[test]
 fn promise_combinators_consume_live_iterables_and_reject_iterator_failures() {
     use safe_cex_exchange::js_runtime::value::from_json;
