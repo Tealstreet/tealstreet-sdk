@@ -3,7 +3,7 @@
 #[allow(dead_code)]
 mod harness;
 use harness::{Harness, Http, Socket, harness, options};
-use safe_cex_exchange::websocket::WsEvent;
+use safe_cex_exchange::{exchange::Exchange, websocket::WsEvent};
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -180,4 +180,57 @@ fn real_private_position_frame_preserves_source_noop() {
 #[test]
 fn real_private_balance_frame_preserves_source_noop() {
     ignored_topic("balances");
+}
+
+#[test]
+fn real_private_write_timeout_emits_forced_toast_once_until_recovery() {
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let (h, socket, _) = connected(name);
+        h.http.ok("POST", "/api/v3/brokerage/orders", json!({"success":true,"success_response":{"order_id":"posted-order","product_id":"BTC-USDC","side":"BUY","client_order_id":"toast-check"}}));
+        let warnings = Rc::new(RefCell::new(Vec::new()));
+        let seen = warnings.clone();
+        h.venue().base().on_args(
+            "warning",
+            Rc::new(move |_, args| {
+                seen.borrow_mut().push(args.to_vec());
+                Ok(())
+            }),
+        );
+        let place = || {
+            let opts: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":2.5,"price":123.45,"clientOrderId":"toast-check"})).unwrap();
+            h.drive(Box::pin(
+                h.exchange.base().place_order(h.exchange.as_ref(), opts),
+            ))
+            .unwrap();
+            h.runtime.advance(8000.0);
+        };
+        place();
+        let reason = h.store.socket_health()["privateDegradedReason"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            warnings.borrow().as_slice(),
+            [vec![json!(reason), json!({"forceToast":true})]],
+            "production warning must retain the second emitter argument"
+        );
+        place();
+        assert_eq!(
+            warnings.borrow().len(),
+            1,
+            "repeat quiet writes warn only once"
+        );
+        send(&h, &socket, json!({"channel":"user","events":[]}));
+        place();
+        assert_eq!(
+            warnings.borrow().len(),
+            2,
+            "a received user frame resets the warning latch"
+        );
+        assert_eq!(
+            warnings.borrow()[1],
+            vec![json!(reason), json!({"forceToast":true})]
+        );
+        h.venue().dispose().unwrap();
+    }
 }

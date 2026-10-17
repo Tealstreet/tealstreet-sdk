@@ -695,6 +695,15 @@ impl safe_cex_transport::signing::RemoteSigner for TransportSigner {
     {
         self.0.sign(request)
     }
+    fn sign_query(
+        &self,
+        request: safe_cex_transport::query_signing::HttpSigningRequest,
+    ) -> safe_cex_transport::TransportFuture<
+        '_,
+        safe_cex_transport::query_signing::HttpSigningResponse,
+    > {
+        self.0.sign_query(request)
+    }
 }
 
 /// Adapt the local availability-aware signer to the transport's Arc capability.

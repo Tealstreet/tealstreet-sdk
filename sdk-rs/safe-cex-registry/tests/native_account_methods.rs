@@ -145,3 +145,71 @@ fn sets_and_reads_normalized_active_ticker_symbols() {
         call(&account, "dispose", json!([])).await;
     });
 }
+
+// ts: createRemoteSigningAdapter signs every config, so hosted MEXC order-deals
+// (native query params) is signed through the production HostSigner and sent.
+#[test]
+fn hosted_signer_signs_native_query_requests() {
+    run_local(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Rc::new(RefCell::new(vec![]));
+        tokio::task::spawn_local(serve_http(
+            listener,
+            Rc::new(|request: &Seen| {
+                assert!(
+                    request
+                        .path
+                        .ends_with("/api/v1/private/order/list/order_deals"),
+                    "{request:?}"
+                );
+                Some(json!({"success":true,"code":0,"data":[]}))
+            }),
+            seen.clone(),
+        ));
+        let signed = Rc::new(RefCell::new(vec![]));
+        let captured = signed.clone();
+        let account = open_native_account(NativeAccountSpec {
+            hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+            exchange: "mexc".into(),
+            options: json!({"key":"hosted-key","secret":"","overrideProxyUrl":origin}),
+            account_name: Some("mexc-hosted".into()),
+            sign: Some(Rc::new(move |wire: Value| {
+                captured.borrow_mut().push(wire.clone());
+                let mut headers = wire["config"]["headers"].clone();
+                headers["X-Hosted-Signature"] = json!("host-signed");
+                let response = json!({"id":wire["id"],"config":{
+                    "params":wire["config"]["params"],"headers":headers}});
+                Box::pin(async move { Ok(response) })
+            })),
+            proxy_token: None,
+        })
+        .unwrap();
+        assert_eq!(
+            call(
+                &account,
+                "fetchHistoricalFills",
+                json!([{"symbol":"BTCUSDT"}])
+            )
+            .await,
+            json!([])
+        );
+        let wire = signed.borrow()[0].clone();
+        assert_eq!(wire["type"], "http");
+        assert_eq!(wire["exchangeName"], "mexc");
+        assert_eq!(wire["accountName"], "mexc-hosted");
+        assert_eq!(
+            wire["config"]["params"],
+            json!({"symbol":"BTC_USDT","page_num":1,"page_size":100})
+        );
+        let seen = seen.take();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].headers["x-hosted-signature"], "host-signed");
+        assert!(
+            seen[0].query.contains("symbol=BTC_USDT"),
+            "{}",
+            seen[0].query
+        );
+        call(&account, "dispose", json!([])).await;
+    });
+}

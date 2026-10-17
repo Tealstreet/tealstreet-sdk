@@ -109,6 +109,9 @@ order removal accepts `{id}` objects; socket logs and active ticker selection us
 the shared BaseExchange methods. `tests/native_account_methods.rs` exercises the
 public JSON entrypoints on real native registry accounts over loopback HTTP;
 the FFI crate's Node tests cover the same calls through the actual napi addon.
+The hosted `HostSigner` and js_runtime `TransportSigner` forward `sign_query`; the
+transport default refuses, so a wrapper that drops it breaks hosted MEXC/Bybit GETs.
+
 Native `listenOHLCV`, `listenOHLCVs` and `listenOrderBook` calls retain their real
 venue callbacks and return a registration handle; `unlisten` runs the returned
 venue cleanup, and disposal closes all registrations. Stream notifications carry

@@ -293,6 +293,13 @@ scripted transport. TS backpack overrides neither `fetchSymbolMaxLeverage`,
 `scheduleCancel` nor `fetchPublicTrades`, so their Rust overrides return the
 inherited `base.ts` 'Not implemented' rejection; do not invent venue bodies.
 
+The SDK market projection retains `limits.price.min` from the source price
+filters, so the portable `assertMinimumPrice` guard can refuse prices below the
+venue minimum. Only `isSpot` is present in the source SDK flags; CCXT's separate
+`swap`, `future` and `inverse` fields do not create SDK `isPerpetual`, `isExpiring`
+or `isInverse` fields. `tests/market_projection.rs` drives the real HTTP binding
+and executes the actual TypeScript price guard on its serialized market output.
+
 The adapter's `native_value::Value` is an alias of the shared `js_runtime::Js`,
 so HTTP/socket frames and runtime callers share the same object/array references.
 `NativeValue` retains the existing prepared-data/checked UTF-8 projection profile;
