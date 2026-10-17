@@ -5929,14 +5929,20 @@
       {
         "receiver": "dynamic",
         "kind": "call",
-        "hook": "fetch_closed_pnl",
+        "hook": "fetch_account_greeks",
         "count": 1
       },
       {
         "receiver": "dynamic",
         "kind": "call",
+        "hook": "fetch_closed_pnl",
+        "count": 2
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
         "hook": "fetch_historical_fills",
-        "count": 1
+        "count": 2
       },
       {
         "receiver": "dynamic",
@@ -5954,6 +5960,18 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "fetch_income_history_range",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_option_chain",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_option_expiries",
         "count": 1
       },
       {
@@ -5996,6 +6014,42 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+    "function": "fetch_account_greeks",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_account_greeks",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+    "function": "fetch_option_chain",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_option_chain",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+    "function": "fetch_option_expiries",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_option_expiries",
         "count": 1
       }
     ]
@@ -6159,6 +6213,61 @@
     ]
   },
   {
+    "file": "safe-cex-venue-bybit/src/binding/members/hyro.rs",
+    "function": "install",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "change_margin_type",
+        "callee": "capabilities :: change_margin_type",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "change_position_mode",
+        "callee": "capabilities :: change_position_mode",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "dispose",
+        "callee": "crate :: hyro_order_publication :: dispose",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_and_set_private_snapshot",
+        "callee": "snapshots :: fetch_and_set_private_snapshot",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_markets",
+        "callee": "snapshots :: fetch_markets",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_orders",
+        "callee": "reads :: fetch_orders",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "get_account",
+        "callee": "capabilities :: get_account",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-venue-bybit/src/binding/members/inverse.rs",
     "function": "install",
     "edges": [
@@ -6306,6 +6415,13 @@
       {
         "receiver": "path",
         "kind": "reference",
+        "hook": "fetch_account_greeks",
+        "callee": "members :: options :: fetch_account_greeks",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
         "hook": "fetch_and_set_private_snapshot",
         "callee": "snapshot :: fetch_and_set_private_snapshot",
         "count": 1
@@ -6364,6 +6480,20 @@
         "kind": "reference",
         "hook": "fetch_ohlcv",
         "callee": "members :: ohlcv :: fetch_ohlcv",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_option_chain",
+        "callee": "members :: options :: fetch_option_chain",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_option_expiries",
+        "callee": "members :: options :: fetch_option_expiries",
         "count": 1
       },
       {
