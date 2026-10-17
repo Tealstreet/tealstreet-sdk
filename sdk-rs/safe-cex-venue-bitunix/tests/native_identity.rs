@@ -200,7 +200,7 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
             let captured = errors.clone();
             venue.base().on(
                 "error",
-                Rc::new(move |_, value: &Value| {
+                Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
                     captured.borrow_mut().push(value.clone());
                     Ok(())
                 }),
@@ -232,7 +232,11 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
                 1,
                 "one visible field refusal per call"
             );
-            assert!(errors.borrow()[0].as_str().unwrap().contains(&message));
+            assert!(
+                String::from_utf16(errors.borrow()[0].as_str().unwrap().as_ref())
+                    .unwrap()
+                    .contains(&message)
+            );
             assert!(
                 wire.requests.lock().unwrap().is_empty(),
                 "batch preflight must refuse before any hydration or order HTTP"
