@@ -941,3 +941,184 @@ fn historical_fills_use_host_local_time_conversion() {
         done(&h);
     }
 }
+
+fn asset_market(symbol: &str, base: &str) -> Value {
+    json!({"symbol":symbol,"asset":base,"currency":"USDT","status":1,"quantityPrecision":"3","pricePrecision":"2","tradeMinLimit":"0.01","maxLongLeverage":75})
+}
+
+#[test]
+fn mixed_market_asset_refusals_keep_fresh_siblings() {
+    use std::{cell::RefCell, rc::Rc};
+    for (field, wire_field) in [("base", "asset"), ("quote", "currency")] {
+        for value in [
+            Some(json!({"asset":"wrong"})),
+            Some(json!(false)),
+            Some(Value::Null),
+            Some(json!(17)),
+            None,
+        ] {
+            let h = fixture();
+            h.http
+                .routes
+                .borrow_mut()
+                .retain(|(method, path, _)| method != "GET" || path != MARKET);
+            let mut bad = asset_market("BAD-USDT", "BAD");
+            if let Some(value) = &value {
+                bad[wire_field] = value.clone();
+            } else {
+                bad.as_object_mut().unwrap().remove(wire_field);
+            }
+            h.http.ok(
+                "GET",
+                MARKET,
+                json!([
+                    asset_market("BTC-USDT", "BTC"),
+                    bad,
+                    asset_market("ETH-USDT", "ETH")
+                ]),
+            );
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let capture = errors.clone();
+            h.exchange.base().on(
+                "error",
+                Rc::new(move |_, error| {
+                    capture.borrow_mut().push(error.clone());
+                    Ok(())
+                }),
+            );
+            let markets = h.drive(h.venue().fetch_markets()).unwrap();
+            assert_eq!(
+                markets
+                    .iter()
+                    .map(|m| m.symbol.as_str())
+                    .collect::<Vec<_>>(),
+                ["BTCUSDT", "ETHUSDT"],
+                "bad {field} must not discard fresh siblings"
+            );
+            let expected = value
+                .as_ref()
+                .map_or_else(|| "undefined".into(), Value::to_string);
+            let reports = errors.borrow();
+            assert_eq!(reports.len(), 1, "one visible refusal per bad row");
+            let report = String::from_utf16(reports[0].as_str().unwrap())
+                .expect("market refusal is a scalar Unicode message");
+            assert!(
+                report.contains("BAD-USDT") && report.contains(&format!("{field}={expected}")),
+                "{report}"
+            );
+            drop(reports);
+            assert_eq!(h.runtime.reports.borrow().len(), 1);
+            h.runtime.reports.borrow_mut().clear();
+            done(&h);
+        }
+    }
+}
+
+#[test]
+fn refresh_markets_commits_valid_rows_around_bad_assets() {
+    let h = fixture();
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(method, path, _)| method != "GET" || path != MARKET);
+    let mut bad = asset_market("BAD-USDT", "BAD");
+    bad["asset"] = json!(false);
+    bad["maxLongLeverage"] = json!({"toString":null});
+    h.http.ok(
+        "GET",
+        MARKET,
+        json!([
+            asset_market("BTC-USDT", "BTC"),
+            bad,
+            asset_market("ETH-USDT", "ETH")
+        ]),
+    );
+    h.drive(h.venue().refresh_markets()).unwrap();
+    assert_eq!(
+        h.store
+            .markets()
+            .iter()
+            .map(|m| m.symbol.as_str())
+            .collect::<Vec<_>>(),
+        ["BTCUSDT", "ETHUSDT"]
+    );
+    assert!(
+        h.runtime
+            .reports
+            .borrow()
+            .iter()
+            .any(|line| line.contains("base=false"))
+    );
+    h.runtime.reports.borrow_mut().clear();
+    done(&h);
+}
+
+fn market_leverage_refusal_case(refresh: bool) {
+    use std::{cell::RefCell, rc::Rc};
+    for value in [
+        json!("75"),
+        json!({"leverage":75}),
+        json!([75]),
+        json!(true),
+    ] {
+        let h = fixture();
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(method, path, _)| method != "GET" || path != MARKET);
+        let mut bad = asset_market("BAD-USDT", "BAD");
+        bad["maxLongLeverage"] = value.clone();
+        h.http.ok(
+            "GET",
+            MARKET,
+            json!([
+                asset_market("BTC-USDT", "BTC"),
+                bad,
+                asset_market("ETH-USDT", "ETH")
+            ]),
+        );
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let capture = errors.clone();
+        h.exchange.base().on(
+            "error",
+            Rc::new(move |_, error| {
+                capture.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        let markets = if refresh {
+            h.drive(h.venue().refresh_markets()).unwrap();
+            h.store.markets().to_vec()
+        } else {
+            h.drive(h.venue().fetch_markets()).unwrap()
+        };
+        assert_eq!(
+            markets
+                .iter()
+                .map(|m| m.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["BTCUSDT", "ETHUSDT"]
+        );
+        assert_eq!(markets[0].limits.leverage.max, 75.0);
+        assert_eq!(markets[1].limits.leverage.max, 75.0);
+        let errors = errors.borrow();
+        assert_eq!(errors.len(), 1);
+        let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
+        assert!(
+            message.contains("BAD-USDT")
+                && message.contains(&format!("limits.leverage.max={value}")),
+            "{message}"
+        );
+        drop(errors);
+        h.runtime.reports.borrow_mut().clear();
+        done(&h);
+    }
+}
+#[test]
+fn fetch_market_leverage_refusals_keep_siblings() {
+    market_leverage_refusal_case(false);
+}
+#[test]
+fn refresh_market_leverage_refusals_keep_siblings() {
+    market_leverage_refusal_case(true);
+}

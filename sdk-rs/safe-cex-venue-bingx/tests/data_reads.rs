@@ -200,6 +200,25 @@ fn fixture(input: Value) -> (BingxDataReads, Rc<DefaultStore>, Rc<Transport>, Rc
 }
 #[test]
 fn data_reads_match_actual_typescript() {
+    let asset_rows = corpus()["assetRows"].as_array().unwrap();
+    assert_eq!(asset_rows.len(), 10, "independent source asset cases");
+    for (index, row) in asset_rows.iter().enumerate() {
+        assert_eq!(row["field"], if index < 5 { "base" } else { "quote" });
+        assert_eq!(
+            row["type"],
+            ["object", "boolean", "null", "number", "undefined"][index % 5]
+        );
+        let markets = row["result"].as_array().unwrap();
+        assert_eq!(markets.len(), 3);
+        assert_eq!(markets[0]["base"], "BTC");
+        assert_eq!(markets[1]["symbol"], "BADUSDT");
+        assert_eq!(markets[2]["base"], "ETH");
+    }
+    let leverage_rows = corpus()["leverageRows"].as_array().unwrap();
+    assert_eq!(leverage_rows.len(), 4, "source raw market leverage cases");
+    for row in leverage_rows {
+        assert_eq!(row.as_array().unwrap().len(), 3);
+    }
     let names = [
         "validateAccount",
         "fetchBalance",
@@ -415,12 +434,18 @@ fn typed_market_and_leverage_fields_refuse_source_dynamic_values() {
     let (venue, _, _, host) = fixture(input);
     let markets = ready(venue.fetch_markets()).unwrap();
     assert_eq!(
-        markets[0].limits.leverage.max, 50.0,
-        "BINGX-DATA typed market fallback"
+        markets
+            .iter()
+            .map(|m| m.symbol.as_str())
+            .collect::<Vec<_>>(),
+        ["XAUUSDUSDT"],
+        "BINGX-DATA valid fresh sibling survives typed leverage refusal"
     );
     assert_eq!(
         *host.logs.borrow(),
-        vec!["typed max leverage requires a number"],
+        vec![
+            r#"Refused BingX market row 0 symbol=BTC-USDT: limits.leverage.max="75": typed max leverage requires a number"#
+        ],
         "BINGX-DATA typed market refusal report"
     );
     let mut input = corpus()["cases"][24]["input"].clone();

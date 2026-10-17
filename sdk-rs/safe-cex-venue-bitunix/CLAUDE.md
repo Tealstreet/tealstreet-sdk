@@ -151,8 +151,8 @@ Optional response-envelope reads remain distinct from direct batch-row reads.
 `tests/native_audit_controls.py` compiles each fault independently and retains
 logs under `target/venue-audit-controls`.
 
-Concrete market reads omit only eligible rows with a non-string base and warn
-with the row, symbol, field and value. Valid siblings remain fresh; all refused
+Concrete market reads omit eligible rows with non-string base/symbol or a
+refused maximum conversion and warn with the row, field and original value. Valid siblings remain fresh; all refused
 rows produce an empty result. Quote filtering remains source-strict USDT.
 Source/transport failures still log their cause before returning cached markets.
 `tests/native_market_refusal.rs` exercises production fetch and refresh paths.

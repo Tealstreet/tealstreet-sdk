@@ -497,8 +497,9 @@ fn runtime(h: H) -> Rc<s::LighterSignerRuntime<H, V>> {
             if h.borrow().row["mode"] == "classifier-throw" {
                 return Err(plain_error(h, "classifier"));
             }
-            signer_helpers::is_lighter_invalid_nonce_error(Some(&json(&thrown(error))))
-                .map_err(|e| super_error(&e.message))
+            let value = safe_cex_exchange::js_runtime::value::from_json(&json(&thrown(error)));
+            signer_helpers::is_lighter_invalid_nonce_error(Some(&value))
+                .map_err(|e| super_error(&e.message()))
         },
         delay: |h, milliseconds| {
             let result = step(h, "delay", vec![V::Num(milliseconds as f64)]).map(|_| V::U);
