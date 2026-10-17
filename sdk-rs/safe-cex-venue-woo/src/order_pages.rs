@@ -23,10 +23,13 @@ pub async fn fetch_orders_recursively(
     loop {
         let params = RetainedJsonInput::Object(vec![
             (
-                "status".into(),
-                RetainedJsonInput::Text("INCOMPLETE".into()),
+                "status".encode_utf16().collect(),
+                RetainedJsonInput::Text("INCOMPLETE".encode_utf16().collect()),
             ),
-            ("page".into(), RetainedJsonInput::Float(page)),
+            (
+                "page".encode_utf16().collect(),
+                RetainedJsonInput::Float(page),
+            ),
         ])
         .into_value()?;
         let response = adapter
