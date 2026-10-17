@@ -15,6 +15,15 @@ venue signing. `installTransportAdapter` installs the provider's default adapter
 `create_api_routes_through_the_provider_and_tunnel_adapter` covers both, and two
 `scripts/binding-controls.py` controls disconnect each.
 
+Private data coverage in `tests/exchange_binding.rs` drives code-zero frames
+through the authenticated production `/user` socket: batched regular/advanced
+orders, partial/full fills and cancellations, hedged positions and zero-quantity
+closure, and balance/currency replacement plus empty-update handling. Expected
+values follow `cryptocom.ws-private.ts`; the order handler updates Store orders.
+`scripts/private-frame-controls.py` disconnects each production topic handler,
+requires its named test to fail at runtime, then restores exact bytes and requires
+a pass. Run these controls alone because they temporarily edit production source.
+
 Disposal follows the source flag write and public/private socket teardown.
 The shared writable `isDisposed` accessor updates the typed base flag without
 calling full BaseExchange.dispose, preserving the source's inherited listeners. `tests/exchange_binding.rs`
