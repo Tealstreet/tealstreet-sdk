@@ -4691,7 +4691,7 @@
       }
     },
     "category": "decoder",
-    "evidence": "Numeric text decoder for the actual typed &str API. Source parseFloat prefixes, finite-input refusal and Math.round scaling determine admitted output; native results are observed by IEEE754 bits before JSON can normalize negative zero or infinity. These independently authored inputs include parse-prefix zero, signed zero, a half-unit and multiplication overflow after a finite parse. Live source builder-helpers tests supply the wider source comparison. Selected production observations pass on native and wasm; whole-crate source/alias discovery remains separate.",
+    "evidence": "Numeric text decoder for the actual typed &str API. Source parseFloat prefixes, finite-input refusal and Math.round scaling determine admitted output; native results are observed by IEEE754 bits before JSON can normalize negative zero or infinity. These independently authored inputs include parse-prefix zero, signed zero, positive and negative half-units and multiplication overflow after a finite parse. Live source builder-helpers tests supply the wider source comparison. Selected production observations pass on native and wasm; whole-crate source/alias discovery remains separate.",
     "call": "{match $type($value.as_str().expect(\"reviewed text input\")){Ok(d)=>serde_json::json!({\"bits\":format!(\"{:016x}\",d.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})}}",
     "cases": [
       {
@@ -4704,6 +4704,24 @@
         "input": "-0",
         "output": {
           "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "-0.00015",
+        "output": {
+          "bits": "bff0000000000000"
+        }
+      },
+      {
+        "input": "-0.00005",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "-0.00025",
+        "output": {
+          "bits": "c000000000000000"
         }
       },
       {
