@@ -1576,15 +1576,17 @@ production JavaScript/transport/Store assembly.
 
 ### WEEX reporting and continuation ownership
 
+`fetchOrders` discards rejected normal/algo legs without reporting, matching the
+maintained Promise.allSettled body. Its constructed HTTP regression observes
+successful orders and zero error events after an algo endpoint rejection.
 The three private refresh callbacks silently catch fetch and Store-update failures,
-matching the maintained source. A constructed account frame with a rejected REST
-balance refresh retains the old balance without reporting a host exception.
-`fetchOrders` reporting is corrected separately; public depth-gap recovery still
-reports failures discarded by source, an open porting finding.
+matching source. A constructed account frame with a rejected REST balance refresh
+retains the old balance without reporting a host exception. Public depth-gap
+recovery still reports failures discarded by source, a separate open finding.
 
 The returned `fetchOrders` future owns its aggregation/dedup continuation;
-refresh futures own update
-continuations. Dropping one can omit those outcomes, even when host-started
+refresh futures own update continuations. Dropping one can omit those outcomes,
+even when host-started
 requests survive. This bounds abandoned native work instead of requiring every
 borrowed host context to survive an unobserved Promise. Public snapshot observers
 are different: `observe_snapshot` must retain its callbacks and receiver until
