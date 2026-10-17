@@ -57,15 +57,27 @@ fn market(v: &Js) -> Result<Option<Market>, Thrown> {
     to_typed(v).map(Some)
 }
 
-fn number_callback(f: &Js, args: Vec<Js>) -> f64 {
-    f.call(Js::Undefined, args)
-        .and_then(|v| v.to_number())
-        .unwrap_or(f64::NAN)
+// Keep callback throws opaque while converting the typed mappers' coercion errors.
+struct MapperFailure(Thrown);
+impl From<safe_cex_types::js_coercion::JsCoercionError> for MapperFailure {
+    fn from(error: safe_cex_types::js_coercion::JsCoercionError) -> Self {
+        Self(coercion(error))
+    }
 }
 
-fn optional_text(f: &Js, args: Vec<Js>) -> Option<String> {
-    let v = f.call(Js::Undefined, args).ok()?;
-    if v.is_nullish() { None } else { text(&v).ok() }
+fn number_callback(f: &Js, args: Vec<Js>) -> Result<f64, MapperFailure> {
+    f.call(Js::Undefined, args)
+        .and_then(|v| v.to_number())
+        .map_err(MapperFailure)
+}
+
+fn optional_text(f: &Js, args: Vec<Js>) -> Result<Option<String>, MapperFailure> {
+    let v = f.call(Js::Undefined, args).map_err(MapperFailure)?;
+    if v.is_nullish() {
+        Ok(None)
+    } else {
+        text(&v).map(Some).map_err(MapperFailure)
+    }
 }
 
 // The installed is-retry-allowed Set membership is strict: no code coercion.
@@ -305,7 +317,7 @@ fn mappers(g: &Js) {
                     )
                 },
             )
-            .map_err(coercion)?;
+            .map_err(|error| error.0)?;
             order.map_or(Ok(Js::Null), |o| from_typed(&o))
         }),
     );
@@ -325,7 +337,7 @@ fn mappers(g: &Js) {
                 },
                 &text(&arg(&a, 3))?,
             )
-            .map_err(coercion)?;
+            .map_err(|error| error.0)?;
             entry.map_or(Ok(Js::Null), |e| from_typed(&e))
         }),
     );
@@ -336,7 +348,7 @@ fn mappers(g: &Js) {
             let records = income::map_okx_bill_to_income_records(&record(&arg(&a, 0))?, |inst| {
                 optional_text(&resolve, vec![Js::str(inst)])
             })
-            .map_err(coercion)?;
+            .map_err(|error| error.0)?;
             from_typed(&records)
         }),
     );
@@ -368,7 +380,7 @@ fn mappers(g: &Js) {
                     resolve_settle_currency: &resolve_settle,
                 },
             )
-            .map_err(coercion)?;
+            .map_err(|error| error.0)?;
             Ok(record.map_or(Js::Null, |r| {
                 js_json(safe_cex_num::JsJsonValue::Object(r.into_iter().collect()))
             }))
