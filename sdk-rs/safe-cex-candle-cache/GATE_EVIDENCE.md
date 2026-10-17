@@ -748,7 +748,10 @@ records() previously caught a cursor callback failure and returned before the wr
 
 The browser probe now has a separate cursor_rollback_probe: two stored chunks, failure on the second real IDBCursor.continue after deletion begins, then exact original-chunk equality and one report. Removing the abort should allow partial deletion and fail that assertion, but this mutation has NOT been executed. The probe is prepared, compiled and wasm-linted only. No browser launch was retried. LoadedChunks and this new rollback execution coverage remain OPEN, not inferred from the earlier Chrome run and not closed by wasm clippy.
 
-## Malformed persisted Candle residual
+## Malformed persisted Candle residual (superseded numeric-null policy)
+
+The later NaN codec decision below supersedes this section for null OHLC/volume.
+Its historical 48-case result is not the current structural-case count.
 
 The delegated shared-type decision keeps the six numeric Candle fields strict.
 `malformed_cached_candle_is_a_miss_and_refetches_without_error` exercises the real
@@ -768,3 +771,45 @@ it does not execute a browser database. No null-to-NaN substitution is made.
 `scripts/malformed-cache-control.py` changes only the real KV Candle-decoder
 failure branch to return an error. It requires compilation and a named request
 failure, restores exact source bytes, then requires all 48 cases to pass.
+
+
+## Persistent NaN codec: real backends, compiled RED/GREEN
+
+The final codec decision keeps Candle typed f64, keeps KV's existing JSON-null
+write representation, restores null OHLC/volume to NaN on read, and preserves
+native numeric fields through IndexedDB structured clone. Timestamp null,
+missing required fields and wrong kinds remain structural misses.
+
+Test-only commit `1737642256` ran against the unchanged production bodies.
+`filesystem_nan_candles_reload_as_cache_hits_without_a_venue_fetch` compiled and
+failed at `NAN-ROUNDTRIP open`: one venue request instead of zero. The existing
+reopen test and new structural-miss control passed. Logs:
+`/tmp/port-txflow-candle-kv-red.log` and `...-kv-green.log`.
+The compiled Wasm probe also failed against actual Chrome IndexedDB at
+`NAN-CACHE-IDB nan/volume/mode0`: one venue request instead of zero; see
+`/tmp/port-txflow-candle-idb-red.log` and `...-idb-green.log`.
+
+With the codec fix, actual filesystem/KV persistence and reopen pass ten profiles
+(five fields, both read modes), independently asserting stored JSON null, native
+field values, direct backend slots and zero venue fetches. Structural controls
+still refetch exactly once. Actual browser IndexedDB passes 26 profiles: five
+native NaN fields, five preexisting null fields and three structural misses,
+each under both read modes. The browser runner independently executes the
+maintained TS KV and IndexedDB writes, showing JSON null and native NaN
+respectively. It uses real browser transactions, not a replacement backend.
+
+Reproduce from the repository root (run cargo commands sequentially):
+
+```sh
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml -p safe-cex-candle-cache --jobs 1 --test runtime_backends filesystem_
+cargo +1.99.0 build --manifest-path sdk-rs/Cargo.toml -p safe-cex-candle-cache --jobs 1 --target wasm32-unknown-unknown --example indexed_db_probe
+wasm-bindgen sdk-rs/target/wasm32-unknown-unknown/debug/examples/indexed_db_probe.wasm --target web --out-dir sdk-rs/target/nan-codec-probe-green
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" CANDLE_CACHE_PLAYWRIGHT="$PWD/sdk-rs/target/candle-cache-probe-deps/node_modules/playwright/index.mjs" CANDLE_CACHE_BROWSER='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' node sdk-rs/safe-cex-candle-cache/scripts/nan-browser-probe.mjs sdk-rs/target/nan-codec-probe-green
+python3 sdk-rs/safe-cex-candle-cache/scripts/malformed-cache-control.py
+```
+
+Playwright is a task-local ignored dependency; select an installed browser with
+CANDLE_CACHE_BROWSER. The structural control compiled with only decoder refusal
+changed to an error, failed the named CACHE-MALFORMED assertion (exit 101), then
+restored exact source bytes and passed all 38 current structural cases. This
+positive browser result does not close the older rollback/fault probe coverage.
