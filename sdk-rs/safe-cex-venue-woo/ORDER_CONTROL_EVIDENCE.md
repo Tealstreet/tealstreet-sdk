@@ -205,3 +205,8 @@ affected production libraries on native and Wasm, plus WOO/BingX all targets on
 both targets. Full parity passes7459 rows/16622 public items; extractor check0.
 Only the five reviewed unchanged nested helpers' containing-file pins were
 refreshed; no unrelated core cancellation/override body pin was changed.
+
+After the final normal master merge (5a784f2f55), the required inventories pass
+again (7 cancellation, 8 override, 25 binding). BingX binding/completion passes
+58 tests; Apex binding/unmapped passes53. Native FFI/registry compile, full parity
+(7459 rows/16619 public items), and extraction freshness (0 changes) pass.
