@@ -2809,7 +2809,7 @@
             "ok": false,
             "error": {
               "name": "Error",
-              "message": "Invalid argument 0: invalid type: integer `7`, expected a string"
+              "message": "Invalid argument 0: invalid type: number, expected a string"
             }
           },
           "next": 1,
@@ -3067,7 +3067,7 @@
           "ok": false,
           "error": {
             "name": "Error",
-            "message": "invalid type: integer `7`, expected a string"
+            "message": "invalid type: number, expected a string"
           }
         }
       }
