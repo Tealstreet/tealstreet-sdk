@@ -6298,6 +6298,13 @@
       {
         "receiver": "path",
         "kind": "reference",
+        "hook": "fetch_historical_positions",
+        "callee": "crate :: ledger_history :: fetch_historical_positions",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
         "hook": "fetch_income_history",
         "callee": "members :: history :: fetch_income_history",
         "count": 1
