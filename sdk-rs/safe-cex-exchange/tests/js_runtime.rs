@@ -3658,3 +3658,34 @@ fn virtual_clock_global_preserves_synced_time_without_changing_date_now() {
     );
     VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
 }
+
+#[test]
+fn rate_limit_dequeues_before_signing_and_keeps_interceptor_registration_order() {
+    let runtime = Rc::new(Runtime::default());
+    runtime.clock.set(1000.0);
+    let http=Rc::new(Http {runtime:runtime.clone(),sent:RefCell::default()});
+    let xhr=client::create(http.clone(),Js::object(vec![]));
+    let request=xhr.get("interceptors").unwrap().get("request").unwrap();
+    let signing_clock=runtime.clone();
+    request.call_method("use",vec![Js::function("sign",move |_,args| {
+        let config=arg(&args,0);
+        config.get("headers")?.call_method("set",vec![Js::str("X-Nonce"),Js::Number(signing_clock.clock.get())])?;
+        Ok(config)
+    })]).unwrap();
+    xhr.call_method("__configureRateLimit",vec![Js::object(vec![("maxRequests",Js::Number(1.0)),("perMilliseconds",Js::Number(25.0))])]).unwrap();
+    let observed=Rc::new(RefCell::new(vec![]));
+    let capture=observed.clone();
+    let callback_clock=runtime.clone();
+    request.call_method("use",vec![Js::function("registeredAfterLimiter",move |_,args| {
+        capture.borrow_mut().push(callback_clock.clock.get());
+        Ok(arg(&args,0))
+    })]).unwrap();
+    for path in ["/first","/second"] {
+        settle(&runtime,xhr.call_method("get",vec![Js::str(path)]).unwrap()).unwrap();
+    }
+    assert_eq!(*observed.borrow(),[1000.0,1000.0],"later-registered callback runs before the limiter under Axios LIFO");
+    assert_eq!(runtime.clock.get(),1025.0);
+    let sent=http.sent.borrow();
+    assert_eq!(sent[0]["headers"]["X-Nonce"],json!("1000"));
+    assert_eq!(sent[1]["headers"]["X-Nonce"],json!("1025"),"queued request signs at dequeue, after its rate window advances");
+}
