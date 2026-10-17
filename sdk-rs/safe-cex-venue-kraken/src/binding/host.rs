@@ -971,9 +971,11 @@ impl ApiHost for Rt {
     }
     // ts: `encodeURIComponent(JSON.stringify(dataObj))`.
     fn json_component(&self, value: Handle<Self>) -> ReadResult<Self, Handle<Self>> {
-        let json = serde_json::to_string(&super::value::to_json(&value)?)
-            .map_err(|e| Thrown::type_error(&e.to_string()))?;
-        Ok(h(Js::str(&encode_uri_component(&json))))
+        let json = self
+            .global("JSON.stringify")?
+            .call(Js::Undefined, vec![(*value).clone()])?
+            .to_js_string()?;
+        Ok(h(Js::str(&encode_uri_component(&lossy(&json)))))
     }
     fn sha256(&self, value: Handle<Self>) -> ReadResult<Self, Handle<Self>> {
         use sha2::Digest;
