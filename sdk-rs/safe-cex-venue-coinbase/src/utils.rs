@@ -149,7 +149,10 @@ fn is_coinbase_key_name(value: &str) -> bool {
     let Some((organization, rest)) = rest.split_once("/apiKeys/") else {
         return false;
     };
-    !organization.is_empty() && !rest.is_empty() && !rest.contains('/')
+    !organization.is_empty()
+        && !organization.contains('/')
+        && !rest.is_empty()
+        && !rest.contains('/')
 }
 
 // ts: normalizeCoinbaseApiCredentials
