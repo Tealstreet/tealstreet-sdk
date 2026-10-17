@@ -17,6 +17,81 @@ and source-inventory rows compare unchanged; no manifest regeneration is used.
 The native production API continues to use its existing caller-owned shared
 limiter. This deletion adds no accepted-set contract or new exemption.
 
+# Production history, listeners and private snapshot dispatch
+
+The production perpetual Exchange now forwards candles, historical fills/orders,
+income history/range, client-ID lookup and private reconnect snapshots to the
+maintained Realm methods. Both public listeners use the existing Realm callback
+and cleanup boundary, matching the spot binding. Lookup preserves the source
+orderStatus request by cloid and its non-mutating behavior; reconnect runs the
+source parallel orders/core-state snapshot instead of the generic order-only
+fallback. Terminal-cancel classification, history collapse/mapping and derived
+closed-position imports now delegate to their existing maintained helpers.
+Derived closed positions remain distinct from fetchClosedPnl.
+
+Nine actual production-binding baselines fail before these overrides/imports:
+the read defaults return empty results, lookup takes the generic open-order path,
+reconnect skips core state and failed cancels replace the venue message with a
+ReferenceError. Both separately authored public listener baselines also fail
+against the defaults. After wiring, all fourteen new binding regressions pass.
+They observe real native candle/execution/history/income values, signed cancel
+cleanup, original nonterminal error preservation, precise REST queries, listener
+subscription/delivery/cleanup, and Store updates from actual private order,
+position and balance frames. The merged fill regression checks actual private
+userFills notifications, Store positions and emitted fill events; non-fill topic
+witnesses assert that those frames do not manufacture fill events. Only external
+HTTP, socket transport and clocks are scripted; imported names and mappers are
+production implementations. Startup order reads are joined before assertions so
+background startup completion cannot erase seeded orders or contaminate counts.
+
+Wiring exposed an additional native candle panic: the destructuring host returns
+only selected bindings, but fetchOHLCV indexed as if the leading skipped element
+occupied a slot. The compiled production candle case panics before this fix;
+reading selected slots zero and one matches the maintained TS destructuring and
+returns the authored candle/window values. Regex and arithmetic implementations
+are unchanged. Income-range expectations preserve the source's non-funding
+selection of both PnL and fee rows; balance total excludes unrealized PnL, and
+execution timestamps remain seconds while income timestamps remain milliseconds.
+
+Independent review caught an error bridge that inspected a resolver's thrown
+value before returning it. Its compiled Realm regression observes unwanted
+ordinary-object toString/code/response reads. The corrected bridge retains the
+original Value and uses an inert native sentinel only to unwind the DTO mapper.
+The restored test checks original identity and zero extra reads for both ordinary
+objects and Error values.
+
+Four additional production Realm tests execute the history imports, strict
+terminal classifier and derived native fields; retain callback throw identity;
+read all five actual class timeout properties; and exercise the four guarded
+browser network/approval flows without any window/ethers/browser stand-ins.
+Those guarded calls return their explicit missing-wallet refusal. This does not
+claim that every generic browser helper is directly callable on an unconfigured
+Realm. Browser workflow exports are not installed as Exchange class methods;
+the native class's builder-fee checker receives an explicit fourth fee argument.
+The production spot constructor aliases perp.createAPI to the native HTTP client,
+so its alternate generic spot_client factory and interceptor-only names are not
+assembled into the native path. These source-call graph distinctions retain the
+separate generic-helper/accepted-set obligations; no globals or exemptions were
+invented to suppress static leads.
+
+Seven independently compiled controls remove each of the four new import
+registrations, disconnect the orderUpdates and clearinghouseState dispatch
+branches, and invert the missing-window guard. They produce eight named native
+failures, including both clearinghouse positions and balance assertions. Every
+mutation is restored byte-for-byte. A first browser-control attempt failed to
+compile and is excluded; the corrected control compiles and fails its native
+missing-wallet assertion. The restored library, binding and placement targets
+pass 43 + 38 + 1 tests. Fourteen of the binding tests and four library tests are
+new in this slice. All 21 existing production Spot binding tests also pass after
+the shared import additions. Scoped formatting and strict native all-target Clippy
+pass. Global parity:check passes with 7459 rows and 17214 public Rust items,
+zero invention/status findings. Independent final review reports no remaining findings.
+
+The shared updateOrder result still returns Vec<String> and discards the named
+replacement clientOrderId property. The existing ReplacementOrderIds type and
+required common-trait/caller/dispatch migration are recorded for the overseer's
+shared API cutover; this venue slice does not claim to resolve that boundary.
+
 # Production TP/SL, fills and serial placement imports
 
 The production Realm now registers `hasSeenFill`, `markFillSeen`,

@@ -999,7 +999,7 @@ impl ExchangeImports for NativeImports {
         VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn uuid(&self) -> String {
-        safe_cex_exchange::native::uuid_v4()
+        safe_cex_crypto::uuid::uuid().expect("operating system entropy is available")
     }
     fn dayjs(&self, value: Option<f64>) -> Result<f64, Failure> {
         Ok(value.unwrap_or_else(|| VIRTUAL_CLOCK.get_current_time_ms()))

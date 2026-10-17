@@ -338,3 +338,7 @@ impl Exchange for WooExchange {
         self.invoke("fetchHistoricalOrders", a)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/live_order_mapping.rs"]
+mod live_order_mapping_tests;
