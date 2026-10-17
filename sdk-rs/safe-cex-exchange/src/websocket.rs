@@ -584,6 +584,22 @@ struct SocketState {
     next_task: u64,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SocketTimeout {
+    Ping,
+    PongMiss,
+    Receive,
+}
+impl From<SocketTimeout> for Timer {
+    fn from(timer: SocketTimeout) -> Self {
+        match timer {
+            SocketTimeout::Ping => Self::Ping,
+            SocketTimeout::PongMiss => Self::PongMiss,
+            SocketTimeout::Receive => Self::Receive,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Timer {
     Ping,
     PongMiss,
@@ -755,6 +771,16 @@ impl BaseWebSocket {
     /// Replaces the heartbeat deadline shared with pong and close handling.
     pub fn schedule_ping(self: &Rc<Self>, delay_ms: u64) {
         self.schedule(Timer::Ping, delay_ms as f64);
+    }
+    /// Identity of the currently owned timeout, shared with source field handles.
+    pub(crate) fn timeout_id(&self, timer: SocketTimeout) -> Option<u64> {
+        self.state.borrow().timer_ids.get(&timer.into()).copied()
+    }
+    /// A stale source handle cannot cancel a replacement in the same slot.
+    pub(crate) fn cancel_timeout(&self, timer: SocketTimeout, id: u64) {
+        if self.timeout_id(timer) == Some(id) {
+            self.cancel(timer.into());
+        }
     }
     pub fn handle_pong_event(self: &Rc<Self>, next_ping_time: u64) -> Result<(), ExchangeError> {
         self.record_message_handler_stats("pong")?;
