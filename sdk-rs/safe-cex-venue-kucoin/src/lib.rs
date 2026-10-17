@@ -18,8 +18,6 @@ pub mod spot_helpers;
 
 pub mod accounts;
 
-pub mod order_reads;
-
 pub mod spot_reads;
 
 pub mod api;
