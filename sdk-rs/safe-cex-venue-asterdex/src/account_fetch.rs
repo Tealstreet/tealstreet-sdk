@@ -378,16 +378,10 @@ impl AccountFetch {
                 let Some(key) = key.as_ref().and_then(Value::as_str) else {
                     continue;
                 };
-                // transformMarket applies `leverageMap.get(symbol) || 10`.
-                if !js_truthy(value.as_ref()) {
-                    continue;
-                }
-                let value = value.as_ref().and_then(Value::as_f64).ok_or_else(|| {
-                    mapper_error((
-                        "RepresentationError",
-                        "Leverage bracket initialLeverage must be a number".into(),
-                    ))
-                })?;
+                let value = value
+                    .as_ref()
+                    .map(safe_cex_exchange::js_runtime::value::from_json)
+                    .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined);
                 brackets.insert(key.to_owned(), value);
             }
             let items =
