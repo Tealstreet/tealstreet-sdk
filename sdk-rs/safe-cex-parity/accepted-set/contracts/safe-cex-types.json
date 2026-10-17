@@ -46822,5 +46822,2424 @@
         }
       }
     ]
+  },
+  "safe_cex_types::model_field::ModelField": {
+    "shape": "union",
+    "instantiation": "ModelField<f64>",
+    "monomorphization": "Fixed f64 payload: ordinary JSON numbers, native unit Undefined, and default Absent. Other T payload languages are not inferred from this witness.",
+    "evidence": "Actual ModelField::deserialize and its nested generic FieldVisitor run through production Serde JSON and UnitDeserializer; native presence and binary64 bits are observed before projection. Typed operations are not alternate raw parsers.",
+    "positive": [
+      1.25,
+      -0.0,
+      0,
+      3000000000
+    ],
+    "negative": [
+      null,
+      true,
+      "1.25",
+      [],
+      {},
+      {
+        "Value": 1.25
+      }
+    ],
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_absent",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_undefined",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "into_property",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_mut",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": true,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "into_value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "T"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_ref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_field_ref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_types::model_field::ModelField",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_some",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_none",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "T"
+                                }
+                              ],
+                              "output": {
+                                "generic": "U"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "U"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "and_then",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "T"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::option::Option",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "U"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "U"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "expect",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "message",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "The str argument is only the panic diagnostic; real typed Value inputs return their native Number bits.",
+        "call": "{ let decoded: $type = <$type>::from($value[\"value\"].as_f64().unwrap()); let absent=decoded.is_absent(); let number=decoded.expect($value[\"message\"].as_str().unwrap()); serde_json::json!({\"ok\":true,\"absent\":absent,\"numberBits\":format!(\"{:016x}\",number.to_bits())}) }",
+        "nativeFields": [
+          "absent",
+          "numberBits"
+        ],
+        "cases": [
+          {
+            "input": {
+              "value": 1.25,
+              "message": "left diagnostic"
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "numberBits": "3ff4000000000000"
+            }
+          },
+          {
+            "input": {
+              "value": -0.0,
+              "message": "right diagnostic"
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "numberBits": "8000000000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap_or",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "default",
+                {
+                  "generic": "T"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap_or_else",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "T"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "unwrap_or_default",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "T"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_some_and",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "T"
+                                }
+                              ],
+                              "output": {
+                                "primitive": "bool"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "filter",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "generic": "T"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "primitive": "bool"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "ok_or_else",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "E"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "T"
+                        }
+                      },
+                      {
+                        "type": {
+                          "generic": "E"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get_or_insert_with",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "T"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "T"
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "take",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "or",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "other",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::convert::Into",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "generic": "Self"
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "or_else",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "f",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "generic": "V"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_deref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "qualified_path": {
+                                "name": "Target",
+                                "args": null,
+                                "self_type": {
+                                  "generic": "T"
+                                },
+                                "trait": {
+                                  "path": "",
+                                  "args": null
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "serialize_field",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "state",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "S"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "S"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "The static name is an outbound serializer field label, never raw decoder input. Actual serde_json SerializeStruct is executed while native presence and Number bits are read directly before serialization.",
+        "call": "{ let decoded: Result<$type, serde_json::Error> = match $value[\"mode\"].as_str() { Some(\"unit\") => <$type as serde::Deserialize>::deserialize(serde::de::value::UnitDeserializer::<serde_json::Error>::new()), Some(\"default\") => Ok(<$type as Default>::default()), _ => serde_json::from_value($value[\"value\"].clone()) }; let decoded=decoded.unwrap(); let absent=decoded.is_absent(); let undefined=decoded.is_undefined(); let bits=decoded.value().map(|number|format!(\"{:016x}\",number.to_bits())); let mut output=serde::Serializer::serialize_struct(serde_json::value::Serializer,\"ModelRecord\",1).unwrap(); decoded.serialize_field(&mut output,\"field\").unwrap(); let output=serde::ser::SerializeStruct::end(output).unwrap(); serde_json::json!({\"ok\":true,\"absent\":absent,\"undefined\":undefined,\"numberBits\":bits,\"own\":output.as_object().unwrap().contains_key(\"field\")}) }",
+        "nativeFields": [
+          "absent",
+          "undefined",
+          "numberBits",
+          "own"
+        ],
+        "cases": [
+          {
+            "input": {
+              "mode": "json",
+              "value": 1.25
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "undefined": false,
+              "numberBits": "3ff4000000000000",
+              "own": true
+            }
+          },
+          {
+            "input": {
+              "mode": "json",
+              "value": -0.0
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "undefined": false,
+              "numberBits": "8000000000000000",
+              "own": true
+            }
+          },
+          {
+            "input": {
+              "mode": "unit"
+            },
+            "output": {
+              "ok": true,
+              "absent": false,
+              "undefined": true,
+              "numberBits": null,
+              "own": false
+            }
+          },
+          {
+            "input": {
+              "mode": "default"
+            },
+            "output": {
+              "ok": true,
+              "absent": true,
+              "undefined": false,
+              "numberBits": null,
+              "own": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "to_number",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "f64"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "generic": "T"
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "core::option::Option",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "generic": "T"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Typed presence/value operation or conversion at the fixed f64 instantiation; no raw deserializer is invoked."
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let decoded: Result<$type, serde_json::Error> = match $value[\"mode\"].as_str() { Some(\"unit\") => <$type as serde::Deserialize>::deserialize(serde::de::value::UnitDeserializer::<serde_json::Error>::new()), Some(\"default\") => Ok(<$type as Default>::default()), _ => serde_json::from_value($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"numberBits\":decoded.value().map(|number|format!(\"{:016x}\",number.to_bits()))}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "absent",
+        "undefined",
+        "numberBits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "mode": "json",
+            "value": 1.25
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "numberBits": "3ff4000000000000"
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": -0.0
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "numberBits": "8000000000000000"
+          }
+        },
+        {
+          "input": {
+            "mode": "unit"
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": true,
+            "numberBits": null
+          }
+        },
+        {
+          "input": {
+            "mode": "default"
+          },
+          "output": {
+            "ok": true,
+            "absent": true,
+            "undefined": false,
+            "numberBits": null
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": true
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": "1.25"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": []
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": {}
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": {
+              "Value": 1.25
+            }
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::model_field::deserialize_info": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_info",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::model_field::ModelField",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production deserialize_info delegates through ModelField<RetainedJsonInput>, preserving native unit undefined and present JSON null while projecting accepted JSON payloads. Read native ModelField state and its actual payload directly.",
+    "call": "{ let decoded=if $value[\"mode\"].as_str()==Some(\"unit\") { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded)=>serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"payload\":decoded.value().cloned()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "mode": "json",
+          "value": {
+            "left": 7,
+            "right": 19
+          }
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": {
+            "left": 7,
+            "right": 19
+          }
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": [
+            11,
+            23
+          ]
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": [
+            11,
+            23
+          ]
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": null
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": "kept"
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": "kept"
+        }
+      },
+      {
+        "input": {
+          "mode": "json",
+          "value": false
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": false,
+          "payload": false
+        }
+      },
+      {
+        "input": {
+          "mode": "unit"
+        },
+        "output": {
+          "ok": true,
+          "absent": false,
+          "undefined": true,
+          "payload": null
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let decoded=if $value[\"mode\"].as_str()==Some(\"unit\") { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded)=>serde_json::json!({\"ok\":true,\"absent\":decoded.is_absent(),\"undefined\":decoded.is_undefined(),\"payload\":decoded.value().cloned()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "absent",
+        "undefined",
+        "payload"
+      ],
+      "cases": [
+        {
+          "input": {
+            "mode": "json",
+            "value": {
+              "left": 7,
+              "right": 19
+            }
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": {
+              "left": 7,
+              "right": 19
+            }
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": [
+              11,
+              23
+            ]
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": [
+              11,
+              23
+            ]
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": null
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": null
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": "kept"
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": "kept"
+          }
+        },
+        {
+          "input": {
+            "mode": "json",
+            "value": false
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": false,
+            "payload": false
+          }
+        },
+        {
+          "input": {
+            "mode": "unit"
+          },
+          "output": {
+            "ok": true,
+            "absent": false,
+            "undefined": true,
+            "payload": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::PreparedOrderOpts": {
+    "shape": "union",
+    "evidence": "Actual prepared amendment decoder and private wire companion; fixed ordinary JSON corpus and independent native field identities, not a public placement or arbitrary generic claim.",
+    "instantiation": "PreparedOrderOpts<String, f64, Option<bool>>",
+    "positive": [
+      {
+        "symbol": "left",
+        "amount": 7
+      },
+      {
+        "symbol": "right",
+        "amount": 13,
+        "type": "limit",
+        "side": "buy",
+        "price": 31.25,
+        "triggerPrice": 47.5,
+        "reduceOnly": true,
+        "clientOrderId": "client-right"
+      }
+    ],
+    "negative": [
+      [],
+      null,
+      {
+        "symbol": "left"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "type": null
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "side": "unknown"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "price": null
+      }
+    ],
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::PlaceOrderOpts",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::PlaceOrderOpts",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnly\":decoded.reduce_only,\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "symbol",
+        "amountBits",
+        "priceBits",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "triggerPrice",
+        "reduceOnly",
+        "clientOrderId"
+      ],
+      "cases": [
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null
+          }
+        },
+        {
+          "input": {
+            "symbol": "right",
+            "amount": 13,
+            "type": "limit",
+            "side": "buy",
+            "price": 31.25,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "right",
+            "amountBits": "402a000000000000",
+            "priceBits": "403f400000000000",
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "type": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "side": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::PreparedWire": {
+    "shape": "union",
+    "evidence": "Actual prepared amendment decoder and private wire companion; fixed ordinary JSON corpus and independent native field identities, not a public placement or arbitrary generic claim.",
+    "positive": [
+      {
+        "symbol": "left",
+        "amount": 7
+      },
+      {
+        "symbol": "right",
+        "amount": 13,
+        "type": "limit",
+        "side": "buy",
+        "price": 31.25,
+        "triggerPrice": 47.5,
+        "reduceOnly": true,
+        "clientOrderId": "client-right"
+      }
+    ],
+    "negative": [
+      [],
+      null,
+      {
+        "symbol": "left"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "type": null
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "side": "unknown"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "price": null
+      }
+    ],
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnly\":decoded.reduce_only,\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "symbol",
+        "amountBits",
+        "priceBits",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "triggerPrice",
+        "reduceOnly",
+        "clientOrderId"
+      ],
+      "cases": [
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null
+          }
+        },
+        {
+          "input": {
+            "symbol": "right",
+            "amount": 13,
+            "type": "limit",
+            "side": "buy",
+            "price": 31.25,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "right",
+            "amountBits": "402a000000000000",
+            "priceBits": "403f400000000000",
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "type": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "side": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::deserialize_optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_optional",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual private optional-field decoder at f64; UnitDeserializer retains its None branch and explicit JSON null is refused.",
+    "call": "{ let decoded: Result<Option<f64>, serde_json::Error> = if $value[\"unit\"].as_bool() == Some(true) { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"present\":decoded.is_some(),\"numberBits\":decoded.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "value": 1.25
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "numberBits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 13
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "numberBits": "402a000000000000"
+        }
+      },
+      {
+        "input": {
+          "unit": true
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "numberBits": null
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": "1.25"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let decoded: Result<Option<f64>, serde_json::Error> = if $value[\"unit\"].as_bool() == Some(true) { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"present\":decoded.is_some(),\"numberBits\":decoded.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "present",
+        "numberBits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "value": 1.25
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "numberBits": "3ff4000000000000"
+          }
+        },
+        {
+          "input": {
+            "value": 13
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "numberBits": "402a000000000000"
+          }
+        },
+        {
+          "input": {
+            "unit": true
+          },
+          "output": {
+            "ok": true,
+            "present": false,
+            "numberBits": null
+          }
+        },
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": true
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": "1.25"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": []
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": {}
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
