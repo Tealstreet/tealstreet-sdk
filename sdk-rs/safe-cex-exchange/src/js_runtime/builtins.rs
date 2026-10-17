@@ -15,13 +15,18 @@ fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
 }
 
-fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+fn require_callback(callback: &Js) -> Result<(), Thrown> {
     if !callback.is_callable() {
         return Err(Thrown::type_error(&format!(
             "{} is not a function",
             callback.to_display()
         )));
     }
+    Ok(())
+}
+
+fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+    require_callback(callback)?;
     callback.call(Js::Undefined, args)
 }
 
@@ -604,9 +609,19 @@ fn map_member(this: Js, name: &str) -> Option<Js> {
         }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            let snapshot = m.borrow().clone();
-            for (k, v) in snapshot {
-                callback_call(&f, vec![v, k, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = m
+                    .borrow()
+                    .following(position)
+                    .map(|(at, entry)| (at, entry.clone()));
+                let Some((at, (key, value))) = item else {
+                    break;
+                };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value, key, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),
@@ -674,8 +689,17 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
         }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            for v in s.borrow().clone() {
-                callback_call(&f, vec![v.clone(), v, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = s
+                    .borrow()
+                    .following(position)
+                    .map(|(at, value)| (at, value.clone()));
+                let Some((at, value)) = item else { break };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value.clone(), value, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),
