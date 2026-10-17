@@ -190,11 +190,11 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
         &[
             (
                 "toKucoinSymbol",
-                "safe-cex-venue-kucoin/src/sizing.rs::to_kucoin_symbol",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::to_kucoin_symbol",
             ),
             (
                 "toInternalSymbol",
-                "safe-cex-venue-kucoin/src/sizing.rs::to_internal_symbol",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::to_internal_symbol",
             ),
             (
                 "toApiSymbol",
@@ -202,23 +202,23 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "contractSizeFor",
-                "safe-cex-venue-kucoin/src/sizing.rs::contract_size_for",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::contract_size_for",
             ),
             (
                 "nativeAmountForCancelReplace",
-                "safe-cex-venue-kucoin/src/sizing.rs::native_amount_for_cancel_replace",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::native_amount_for_cancel_replace",
             ),
             (
                 "parseMarginType",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::parse_margin_type",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::parse_margin_type",
             ),
             (
                 "parsePositionMode",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::parse_position_mode",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::parse_position_mode",
             ),
             (
                 "parseRowPositionMode",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::parse_row_position_mode",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::parse_row_position_mode",
             ),
             (
                 "getAccount",
@@ -267,7 +267,7 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "reconcileFetchedOrderRemainders",
-                "safe-cex-venue-kucoin/src/sizing.rs::reconcile_fetched_order_remainders",
+                "safe-cex-venue-kucoin/src/futures_native_order_reads.rs::reconcile_fetched_order_remainders",
             ),
             (
                 "fetchNormalOrders",
@@ -311,15 +311,15 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "formatCreateOrder",
-                "safe-cex-venue-kucoin/src/formatters.rs::format_create_order",
+                "safe-cex-venue-kucoin/src/futures_native_formatters.rs::format_create_order",
             ),
             (
                 "formatAlgoOrder",
-                "safe-cex-venue-kucoin/src/formatters.rs::format_algo_order",
+                "safe-cex-venue-kucoin/src/futures_native_formatters.rs::format_algo_order",
             ),
             (
                 "getOrderPlanType",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_order_plan_type",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_order_plan_type",
             ),
             (
                 "placeOrderBatch",
@@ -355,51 +355,51 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "mapOrder",
-                "safe-cex-venue-kucoin/src/mappers.rs::map_order",
+                "safe-cex-venue-kucoin/src/futures_native_mapping.rs::map_order",
             ),
             (
                 "getOrderSideV2",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_order_side_v2",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_order_side_v2",
             ),
             (
                 "getOrderSide",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_order_side",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_order_side",
             ),
             (
                 "getAlgoOrderSide",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_algo_order_side",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_algo_order_side",
             ),
             (
                 "getPositionForOrder",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_position_for_order",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_position_for_order",
             ),
             (
                 "getKucoinMarginMode",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_kucoin_margin_mode",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_kucoin_margin_mode",
             ),
             (
                 "getKucoinPositionSide",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_kucoin_position_side",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_kucoin_position_side",
             ),
             (
                 "mapStopPriceType",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::map_stop_price_type",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::map_stop_price_type",
             ),
             (
                 "getKucoinStopDirection",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::get_kucoin_stop_direction",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_kucoin_stop_direction",
             ),
             (
                 "isVirtualTPSLOrder",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::is_virtual_tpsl_order",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::is_virtual_tpsl_order",
             ),
             (
                 "isAlgoOrder",
-                "safe-cex-venue-kucoin/src/order_helpers.rs::is_algo_order",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::is_algo_order",
             ),
             (
                 "getOrderPlanTypeAndAmount",
-                "safe-cex-venue-kucoin/src/sizing.rs::get_order_plan_type_and_amount",
+                "safe-cex-venue-kucoin/src/futures_native_helpers.rs::get_order_plan_type_and_amount",
             ),
         ],
     )?;
@@ -455,7 +455,7 @@ fn initialize_spot_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) -> Re
             ),
             (
                 "getUsdPrice",
-                "safe-cex-venue-kucoin/src/sizing.rs::get_usd_price",
+                "safe-cex-venue-kucoin/src/spot_native_policy.rs::get_usd_price",
             ),
             (
                 "fetchPositions",
@@ -488,7 +488,7 @@ fn initialize_spot_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) -> Re
             ),
             (
                 "mapOrder",
-                "safe-cex-venue-kucoin/src/mappers.rs::map_spot_order",
+                "safe-cex-venue-kucoin/src/spot_native_order_reads.rs::map_order",
             ),
             (
                 "placeOrder",
