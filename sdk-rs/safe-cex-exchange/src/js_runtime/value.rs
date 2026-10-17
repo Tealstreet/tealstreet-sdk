@@ -1146,6 +1146,34 @@ impl Js {
             }
         }
     }
+    /// Object.getOwnPropertyNames: own string keys, enumerable or not, in
+    /// OrdinaryOwnPropertyKeys order; array and string `length` follows the indices.
+    pub fn own_property_names(&self) -> Result<Vec<Str>, Thrown> {
+        Ok(match self {
+            Js::Array(_) | Js::String(_) => {
+                let mut keys = self.own_keys();
+                keys.push(utf16("length"));
+                keys
+            }
+            Js::Object(o) => {
+                let keys: Vec<Str> = o.props.borrow().keys().cloned().collect();
+                let mut indexed: Vec<(usize, Str)> = keys
+                    .iter()
+                    .filter_map(|k| array_index(k).map(|i| (i, k.clone())))
+                    .collect();
+                indexed.sort_by_key(|(i, _)| *i);
+                let mut out: Vec<Str> = indexed.into_iter().map(|(_, k)| k).collect();
+                out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
+                out
+            }
+            Js::Function(_) | Js::Builtin(_) => {
+                return Err(Thrown::type_error(
+                    "Object.getOwnPropertyNames does not model function or intrinsic keys",
+                ));
+            }
+            _ => vec![],
+        })
+    }
     /// Object spread / Object.assign source read: own enumerable values in key order.
     pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
         self.own_keys()
