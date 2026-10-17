@@ -24,6 +24,9 @@ browser materializer. The native Error identity assertion fails with the prior
 plain-object materializer and passes after the repair. The actual structured
 clone retains Error identity and stack while applying the engine's ordinary
 Error-name and custom-property behavior.
+The standard TypeError witness also fails the former generic Error/enumerable-only
+materializer. It passes with the intrinsic prototype, hidden message and original
+stack retained, including a lone UTF-16 surrogate and actual structured clone.
 
 Typed producers call the existing native codec before any JSON serialization.
 Previously JSON-shaped fixture observations remain explicit finite projections;
