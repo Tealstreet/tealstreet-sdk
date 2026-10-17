@@ -1754,11 +1754,46 @@ impl ExchangeState {
             Venue::PM => crate::public_rest::fetch_pm_markets(&mut context).await?,
             Venue::Spot => crate::public_rest::fetch_spot_markets(&mut context).await?,
         };
-        Ok(EventValue::array(
-            rows.iter()
-                .map(market_value)
-                .collect::<Result<Vec<_>, _>>()?,
-        ))
+        let mut markets = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            let mut invalid = [
+                ("base", row.base.as_ref()),
+                ("quote", row.quote.as_ref()),
+                ("symbol", row.symbol.as_ref()),
+            ]
+            .into_iter()
+            .filter(|(_, value)| value.and_then(Value::as_str).is_none())
+            .map(|(field, value)| {
+                format!(
+                    "{field}={}: expected string",
+                    value.map_or_else(|| "undefined".into(), Value::to_string)
+                )
+            })
+            .collect::<Vec<_>>();
+            if safe_cex_num::numeric_ingress::js_value_as_f64(&row.leverage_max).is_none() {
+                invalid.push(format!(
+                    "limits.leverage.max={}: expected number",
+                    row.leverage_max
+                ));
+            }
+            if !invalid.is_empty() {
+                let symbol = row
+                    .symbol
+                    .as_ref()
+                    .map_or_else(|| "undefined".into(), Value::to_string);
+                emit_json(
+                    &self.base,
+                    &json!(format!(
+                        "Refused Binance market row {index} symbol={symbol}: {}",
+                        invalid.join(", ")
+                    )),
+                )
+                .map_err(Rc::new)?;
+                continue;
+            }
+            markets.push(market_value(row)?);
+        }
+        Ok(EventValue::array(markets))
     }
     pub async fn fetch_tickers(self: &Rc<Self>) -> Result<EventValue, Failure> {
         let mut context = RestContext(self.clone());

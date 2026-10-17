@@ -1523,6 +1523,25 @@ replace a later source conversion failure, skip the second historical timestamp,
 or turn the source's missing-order null result into a model error. See
 [§15](#closed-typed-output-boundary) and [§18](#divergence-taxonomy).
 
+
+Final strict-field decision (claude-ddi2il, 2026-10-17): constructed WEEX
+`fetchHistoricalFills` must retain the good rows of a page. Its one shared
+normalization pipeline distinguishes source failures from closed output-field
+projection refusals. For a maker or commission-asset refusal, the concrete
+binding emits the existing warning with the logical field and rejected value,
+then omits only that row through the existing truthy filter. An all-refused page
+resolves empty after reporting each refusal. It never coerces a flag, substitutes
+an asset, or stringifies a value into a model field. This is an accepted
+divergence: the maintained TS mapper retains those malformed fields and rows.
+
+The public single-row utility continues to return its original TypeError for
+that refusal. Capture/coercion failures remain separate, preserving the source
+scalar evaluation order, and a warning callback failure propagates normally.
+The actual constructed Exchange regression covers mixed pages, raw coin
+fallback, absent/true/false flags, all-refused pages and source commission-error
+precedence; the preexisting native-first `fills_error_order` source oracles stay
+unchanged. No shared Execution/HistoricalTrade type or transport API is widened.
+
 <a id="weex-record-shape-choice"></a>
 
 ### WEEX shared Market and response record choices

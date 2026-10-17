@@ -5,6 +5,7 @@ use safe_cex_venue_lighter::{
     transaction_signing::{
         AuthTokenEncoding, HostThrownValue, SigningResult, TransactionSigningError,
     },
+    ws_private,
     ws_private_class::*,
     ws_private_feed_helpers::LighterPrivateFeedRuntime,
     ws_private_recovery::{PrivateRecoveryHost, RecoveryCall, RecoveryCallback, RecoveryTimerCall},
@@ -939,14 +940,28 @@ impl PrivateWebsocketContexts<()> for Realm {
     fn stream(&self) -> Rc<LighterPrivateStreamRuntime<(), AccountValue>> {
         unimplemented!("stream family is covered by live_private_stream_handlers")
     }
-    fn json_view(&self, payload: &AccountValue) -> SigningResult<Option<serde_json::Value>> {
-        Ok(match payload {
-            AccountValue::Undefined => None,
-            _ => Some(serde_json::json!({"1": [{"id": 1}], "2": {"id": 2}, "3": 5})),
-        })
+    fn flatten_by_market_payload(
+        &self,
+        payload: &AccountValue,
+        include_single_objects: bool,
+    ) -> SigningResult<AccountValue> {
+        use safe_cex_exchange::js_runtime::value::{Js, to_json};
+        let input = match payload {
+            AccountValue::Undefined => Js::Undefined,
+            AccountValue::Null => Js::Null,
+            AccountValue::Boolean(value) => Js::Bool(*value),
+            AccountValue::Number(value) => Js::Number(*value),
+            AccountValue::String(value) => Js::String(value.clone().into()),
+            _ => return Err(self.type_error("flatten fixture requires a primitive input")),
+        };
+        let flattened = ws_private::flatten_by_market_payload(Some(&input), include_single_objects)
+            .expect("native flatten helper");
+        Ok(t(
+            &serde_json::to_string(&to_json(&flattened).unwrap()).unwrap()
+        ))
     }
-    fn json_array(&self, values: Vec<&serde_json::Value>) -> SigningResult<AccountValue> {
-        Ok(t(&serde_json::to_string(&values).unwrap()))
+    fn empty_array(&self) -> AccountValue {
+        t("[]")
     }
     fn type_error(&self, message: &str) -> TransactionSigningError {
         TransactionSigningError::Thrown(HostThrownValue::new(message.to_string()))
@@ -1191,11 +1206,11 @@ fn class_assembly_defines_statics_fields_and_dispatches_bodies() {
             PrivateWebsocketMethod::FlattenByMarketPayload,
             &[t("x"), b(true)]
         ),
-        r#"[{"id":1},{"id":2}]"#
+        "[]"
     );
     assert_eq!(
         call(PrivateWebsocketMethod::FlattenByMarketPayload, &[t("x")]),
-        r#"[{"id":1}]"#
+        "[]"
     );
     assert_eq!(
         call(
