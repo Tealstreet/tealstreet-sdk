@@ -3,7 +3,7 @@
 use super::{
     promise,
     scope::{ScopeShared, scope_of},
-    value::{Js, Thrown, arg, error_object},
+    value::{Js, Thrown, arg, error_constructor},
 };
 use std::rc::{Rc, Weak};
 
@@ -395,24 +395,8 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "Boolean",
         Js::function("Boolean", |_, a| Ok(Js::Bool(arg(&a, 0).truthy()))),
     );
-    def(
-        "Error",
-        Js::constructor("Error", |_, a| {
-            let message = arg(&a, 0);
-            let message = if message.is_undefined() {
-                String::new()
-            } else {
-                message.to_display()
-            };
-            Ok(error_object("Error", &message))
-        }),
-    );
-    def(
-        "SyntaxError",
-        Js::constructor("SyntaxError", |_, a| {
-            Ok(error_object("SyntaxError", &arg(&a, 0).to_display()))
-        }),
-    );
+    def("Error", error_constructor("Error"));
+    def("SyntaxError", error_constructor("SyntaxError"));
     def(
         "BigInt",
         Js::function("BigInt", |_, a| {
@@ -478,12 +462,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             ))
         }),
     );
-    def(
-        "TypeError",
-        Js::constructor("TypeError", |_, a| {
-            Ok(error_object("TypeError", &arg(&a, 0).to_display()))
-        }),
-    );
+    def("TypeError", error_constructor("TypeError"));
     def(
         "Array",
         Js::object(vec![
