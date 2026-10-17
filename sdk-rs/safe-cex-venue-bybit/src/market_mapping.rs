@@ -17,7 +17,7 @@ pub(crate) fn map_market(
     fees: &[Value],
     category: &str,
     family: Family,
-) -> Result<Market, String> {
+) -> Result<Result<Market, String>, String> {
     let spot = matches!(family, Family::Spot);
     let text = |key: &str| {
         raw.get(key)
@@ -53,43 +53,67 @@ pub(crate) fn map_market(
             }
         }
     }
-    // Preserve all instrument metadata, notably symbolType=innovation (crypto).
-    // The shared instrument classifier, not marketRegion, owns classification.
-    Ok(Market {
-        id: text("symbol")?,
-        symbol: text("symbol")?,
-        base: text("baseCoin")?,
-        quote: text("quoteCoin")?,
+    let id = text("symbol")?;
+    let precision = MarketPrecision {
+        amount: nested("lotSizeFilter", "qtyStep")?,
+        price: nested("priceFilter", "tickSize")?,
+    };
+    let limits = MarketLimits {
+        amount: MarketLimitsAmount {
+            min: nested("lotSizeFilter", "minOrderQty")?,
+            max: nested("lotSizeFilter", "maxOrderQty")?,
+        },
+        leverage: MarketLimitsLeverage {
+            min: if spot {
+                1.
+            } else {
+                nested("leverageFilter", "minLeverage")?
+            },
+            max: if spot {
+                1.
+            } else {
+                nested("leverageFilter", "maxLeverage")?
+            },
+        },
+        price: None,
+    };
+    let is_expiring = if spot {
+        false
+    } else {
+        let value = parse_float(raw.get("deliveryTime"))?;
+        value != 0. && !value.is_nan()
+    };
+    let taker_fee = fee
+        .map(|f| parse_float(f.get("takerFeeRate")))
+        .transpose()?;
+    let maker_fee = fee
+        .map(|f| parse_float(f.get("makerFeeRate")))
+        .transpose()?;
+    let (Some(base), Some(quote)) = (
+        raw.get("baseCoin").and_then(Value::as_str),
+        raw.get("quoteCoin").and_then(Value::as_str),
+    ) else {
+        let field = |key| {
+            raw.get(key)
+                .map_or_else(|| "undefined".into(), Value::to_string)
+        };
+        return Ok(Err(format!(
+            "Refused Bybit market row id={}: base={} quote={}: expected strings",
+            field("symbol"),
+            field("baseCoin"),
+            field("quoteCoin")
+        )));
+    };
+    // Preserve raw instrument metadata independently of typed asset admission.
+    Ok(Ok(Market {
+        id: id.clone(),
+        symbol: id,
+        base: base.into(),
+        quote: quote.into(),
         active: raw["status"] == "Trading" || (!spot && raw["status"] == "PreLaunch"),
-        precision: MarketPrecision {
-            amount: nested("lotSizeFilter", "qtyStep")?,
-            price: nested("priceFilter", "tickSize")?,
-        },
-        limits: MarketLimits {
-            amount: MarketLimitsAmount {
-                min: nested("lotSizeFilter", "minOrderQty")?,
-                max: nested("lotSizeFilter", "maxOrderQty")?,
-            },
-            leverage: MarketLimitsLeverage {
-                min: if spot {
-                    1.
-                } else {
-                    nested("leverageFilter", "minLeverage")?
-                },
-                max: if spot {
-                    1.
-                } else {
-                    nested("leverageFilter", "maxLeverage")?
-                },
-            },
-            price: None,
-        },
-        is_expiring: Some(if spot {
-            false
-        } else {
-            let value = parse_float(raw.get("deliveryTime"))?;
-            value != 0. && !value.is_nan()
-        }),
+        precision,
+        limits,
+        is_expiring: Some(is_expiring),
         // The bybit connection marks only inverse rows; the other families always say which.
         is_inverse: match family {
             Family::Linear => (category == "inverse").then_some(true),
@@ -97,18 +121,14 @@ pub(crate) fn map_market(
         },
         is_spot: spot.then_some(true),
         is_perpetual: None,
-        taker_fee: fee
-            .map(|f| parse_float(f.get("takerFeeRate")))
-            .transpose()?,
-        maker_fee: fee
-            .map(|f| parse_float(f.get("makerFeeRate")))
-            .transpose()?,
+        taker_fee,
+        maker_fee,
         info: Some(raw.clone()),
         pretty_symbol: None,
         contract_size: None,
         is_read_only: None,
         option: None,
-    })
+    }))
 }
 
 #[cfg(test)]
