@@ -47,17 +47,8 @@
   "Cloid": [
     "Cloid"
   ],
-  "OidOrCloid": [
-    "OidOrCloid"
-  ],
   "AllMids": [
     "AllMids"
-  ],
-  "Meta": [
-    "MetaUniverseItemMarginMode",
-    "MetaUniverseItemGrowthMode",
-    "MetaUniverseItem",
-    "Meta"
   ],
   "ClearinghouseState": [
     "ClearinghouseStateAssetPositionsItemPositionCumFunding",
@@ -70,24 +61,6 @@
   ],
   "UserFills": [
     "UserFills"
-  ],
-  "OrderResponseStatus": [
-    "OrderResponseStatusCase0RestingOid",
-    "OrderResponseStatusCase0Resting",
-    "OrderResponseStatusCase0",
-    "OrderResponseStatusCase1FilledOid",
-    "OrderResponseStatusCase1Filled",
-    "OrderResponseStatusCase1",
-    "OrderResponseStatusCase2",
-    "OrderResponseStatusCase3",
-    "OrderResponseStatusCase4",
-    "OrderResponseStatus"
-  ],
-  "OrderResponse": [
-    "OrderResponseResponseCase1Data",
-    "OrderResponseResponseCase1",
-    "OrderResponseResponse",
-    "OrderResponse"
   ],
   "WsTrade": [
     "WsTrade"
@@ -120,15 +93,6 @@
   "WsNonUserCancel": [
     "WsNonUserCancel"
   ],
-  "SpotClearinghouseBalance": [
-    "SpotClearinghouseBalance"
-  ],
-  "SpotClearinghouseState": [
-    "SpotClearinghouseState"
-  ],
-  "FrontendOpenOrders": [
-    "FrontendOpenOrders"
-  ],
   "UserRateLimit": [
     "UserRateLimit"
   ],
@@ -140,68 +104,17 @@
     "L2BookLevelsItem1Item",
     "L2Book"
   ],
-  "CandleSnapshot": [
-    "CandleSnapshot"
-  ],
-  "AssetCtx": [
-    "AssetCtx"
-  ],
-  "MetaAndAssetCtxs": [
-    "MetaAndAssetCtxs"
-  ],
-  "UserFundingDelta": [
-    "UserFundingDeltaType",
-    "UserFundingDelta"
-  ],
-  "UserFundingEntry": [
-    "UserFundingEntry"
-  ],
-  "UserFunding": [
-    "UserFunding"
-  ],
-  "UserNonFundingLedgerDelta": [
-    "UserNonFundingLedgerDeltaType",
-    "UserNonFundingLedgerDelta"
-  ],
-  "UserNonFundingLedgerEntry": [
-    "UserNonFundingLedgerEntry"
-  ],
-  "UserNonFundingLedgerUpdates": [
-    "UserNonFundingLedgerUpdates"
-  ],
   "FundingHistoryEntry": [
     "FundingHistoryEntry"
   ],
   "FundingHistory": [
     "FundingHistory"
   ],
-  "SpotToken": [
-    "SpotTokenEvmContract",
-    "SpotToken"
-  ],
-  "SpotMarket": [
-    "SpotMarket"
-  ],
-  "SpotMeta": [
-    "SpotMeta"
-  ],
-  "SpotAssetCtx": [
-    "SpotAssetCtx"
-  ],
-  "SpotMetaAndAssetCtxs": [
-    "SpotMetaAndAssetCtxs"
-  ],
   "UserOpenOrder": [
     "UserOpenOrder"
   ],
   "UserOpenOrders": [
     "UserOpenOrders"
-  ],
-  "OrderRequest": [
-    "OrderRequest"
-  ],
-  "OrderWire": [
-    "OrderWire"
   ],
   "CancelOrderRequest": [
     "CancelOrderRequest"
@@ -212,16 +125,6 @@
   ],
   "CancelByCloidRequest": [
     "CancelByCloidRequest"
-  ],
-  "ModifyRequest": [
-    "ModifyRequest"
-  ],
-  "ModifyWire": [
-    "ModifyWire"
-  ],
-  "ScheduleCancelAction": [
-    "ScheduleCancelActionType",
-    "ScheduleCancelAction"
   ],
   "Signature": [
     "Signature"
@@ -251,24 +154,10 @@
   "WsUserNonFundingLedgerUpdates": [
     "WsUserNonFundingLedgerUpdates"
   ],
-  "PerpDex": [
-    "PerpDex"
-  ],
-  "PerpDexs": [
-    "PerpDexs"
-  ],
-  "Hip3MarketInfo": [
-    "Hip3MarketInfoMarginMode",
-    "Hip3MarketInfoGrowthMode",
-    "Hip3MarketInfo"
-  ],
   "BuilderInfo": [
     "BuilderInfo"
   ],
   "BuilderFeeApprovalResult": [
     "BuilderFeeApprovalResult"
-  ],
-  "BuilderFeeCheckResult": [
-    "BuilderFeeCheckResult"
   ]
 }

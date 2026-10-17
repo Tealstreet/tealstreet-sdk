@@ -90,6 +90,64 @@ fn take(wire: &support::Wire) {
     wire.requests.borrow_mut().clear();
 }
 
+fn cancel_already_gone(status: u16) {
+    let (venue, rt, _, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    script(&wire);
+    let orders = drive(&rt, venue.fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    let errors = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let capture = errors.clone();
+    venue.base().on(
+        "error",
+        Rc::new(move |_, args| {
+            capture.borrow_mut().push(args.clone());
+            Ok(())
+        }),
+    );
+    wire.responses.borrow_mut().insert(
+        "/fapi/v1/order".into(),
+        json!({"code":-2011,"msg":"Unknown order sent."}),
+    );
+    wire.statuses
+        .borrow_mut()
+        .insert("/fapi/v1/order".into(), status);
+    take(&wire);
+    drive(&rt, venue.cancel_orders(orders)).unwrap();
+    assert!(
+        errors.borrow().is_empty(),
+        "already-gone cancel must not emit an error: {:?}",
+        errors.borrow()
+    );
+    assert!(
+        rt.console
+            .borrow()
+            .iter()
+            .any(|line| line.contains("was already gone"))
+    );
+    let requests = wire.requests.borrow();
+    let cancel = requests
+        .iter()
+        .find(|r| r.method.eq_ignore_ascii_case("DELETE"))
+        .unwrap();
+    assert_eq!(
+        cancel
+            .config_extensions
+            .get("__suppressAsterUnknownOrderError"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
+fn already_gone_cancel_suppresses_success_response_errors() {
+    cancel_already_gone(200);
+}
+
+#[test]
+fn already_gone_cancel_suppresses_http_response_errors() {
+    cancel_already_gone(400);
+}
+
 #[test]
 fn all_sixteen_defaults_are_bound_through_the_constructed_exchange() {
     let (concrete, rt, store, wire) =

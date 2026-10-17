@@ -89,3 +89,9 @@ artifacts before native Serde/conversion probes and compiled identity controls.
 
 `PROJECTION_CONTRACT_REVIEW.md` records twenty nonce/builder/request/projection
 function contracts, actual-source/native observations and isolated compiled controls.
+
+Order cancellation forwards `__suppressAsterUnknownOrderError` through the shared
+request config-extension carrier. The real API interceptors suppress only the
+already-gone `-2011` response; cancellation still logs completion.
+`tests/exchange_trait.rs` covers both HTTP-success and HTTP-error envelopes through
+the constructed venue, signer, transport and event emitter.

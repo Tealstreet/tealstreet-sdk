@@ -81,19 +81,6 @@ pub(crate) fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 ) -> Result<Option<T>, D::Error> {
     T::deserialize(decoder).map(Some)
 }
-#[derive(Deserialize)]
-struct Number(#[serde(deserialize_with = "number")] f64);
-pub(crate) fn number_pair<'de, D: serde::Deserializer<'de>>(
-    decoder: D,
-) -> Result<[f64; 2], D::Error> {
-    let values = <[Number; 2]>::deserialize(decoder)?;
-    Ok(values.map(|value| value.0))
-}
-pub(crate) fn present_number<'de, D: serde::Deserializer<'de>>(
-    decoder: D,
-) -> Result<Option<f64>, D::Error> {
-    number(decoder).map(Some)
-}
 
 /// Retain declared fields from a validated raw object without decoding its keys
 /// through UTF-8. JSON.parse takes the last duplicate value, while preserving

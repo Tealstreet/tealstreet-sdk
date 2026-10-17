@@ -10,6 +10,7 @@ use support::{Harness, harness, options};
 include!("support/binding_streams.rs");
 include!("support/binding_failures.rs");
 include!("support/binding_factory.rs");
+include!("support/placement_parity.rs");
 
 fn raw_order() -> Value {
     json!({"id":"order-1","symbol":"BTC-USDC","type":"LIMIT","side":"BUY","status":"OPEN","timeInForce":"GOOD_TIL_CANCEL","price":"100.12","size":"1.234","cumSuccessFillSize":"0","reduceOnly":false,"triggerPrice":"0","openSlParams":{"triggerPrice":"0"},"openTpParams":{"triggerPrice":"0"}})

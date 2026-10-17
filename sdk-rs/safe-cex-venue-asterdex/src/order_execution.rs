@@ -100,16 +100,20 @@ impl OrderExecution {
         url: String,
         body: Option<Value>,
         params: Option<Value>,
-        _suppress: bool,
+        suppress: bool,
     ) -> Result<Value, ExchangeError> {
-        let request = RestRequest {
+        let mut request = RestRequest {
             method: method.into(),
             url,
             body: body.map(RestBody::Untransformed),
             params,
             ..Default::default()
         };
-        // FORCED: RestRequest has no Axios config-extension carrier for suppression.
+        if suppress {
+            request
+                .config_extensions
+                .insert("__suppressAsterUnknownOrderError".into(), Value::Bool(true));
+        }
         let response = adapter.execute(request).await.map_err(|failure| {
             let mut e = ExchangeError::new(failure.message);
             e.is_axios_error = true;

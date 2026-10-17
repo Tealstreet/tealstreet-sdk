@@ -3448,6 +3448,18 @@
       {
         "receiver": "dynamic",
         "kind": "call",
+        "hook": "fetch_income_history",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history_range",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
         "hook": "start",
         "count": 1
       }
