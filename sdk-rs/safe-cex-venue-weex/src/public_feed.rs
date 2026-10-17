@@ -30,6 +30,7 @@ pub enum WeexPublicCallback<V> {
         symbol: V,
         json: V,
     },
+    GapSnapshotFailure,
     SnapshotFailure {
         symbol: V,
     },
@@ -507,6 +508,7 @@ pub fn run_public_callback<H, V: Clone, E>(
             }
             Ok(())
         }
+        WeexPublicCallback::GapSnapshotFailure => Ok(()),
         WeexPublicCallback::SnapshotFailure { symbol } => {
             let sink = (rt.warning_sink)(host)?;
             let mut warning: Vec<u16> = "WEEX orderbook snapshot failed for "
@@ -598,7 +600,7 @@ pub fn handle_depth<H, V: Clone, E>(
                 symbol: symbol.clone(),
                 json,
             },
-            WeexPublicCallback::SnapshotFailure { symbol },
+            WeexPublicCallback::GapSnapshotFailure,
         )?;
         return Ok(());
     }
