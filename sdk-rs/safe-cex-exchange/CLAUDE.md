@@ -1402,3 +1402,14 @@ throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
 installed NativeRuntime bindings, observing getter order, holes, duplicate amount
 reads, inserted identity and reentrant row/length changes. Both regressions compile
 and fail on the prior implementation; their inputs do not replace utility code.
+
+The imported get-key `v` helper rejects non-null primitive right-hand operands
+with TypeError before key conversion can execute user code. Null/undefined
+short-circuit without coercing the key. Property traversal stops at an explicit
+null prototype; existing own/inherited keys and alias precedence remain intact.
+The internal `in` helper is fallible, and lodash throttle checks whether options
+are objects before using it, as the maintained implementation does.
+`tests/js_get_key_in.rs` executes the complete maintained get-key module and
+installed lodash through 126 real native-host scenes, including poisonous keys,
+null prototypes and primitive/default throttle options. String-key diagnostics
+match Node; malformed non-string keys use an engine-neutral TypeError diagnostic.
