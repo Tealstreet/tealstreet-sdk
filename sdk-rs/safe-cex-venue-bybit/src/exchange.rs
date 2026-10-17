@@ -41,10 +41,6 @@ pub(crate) enum PublicCategory {
     Linear,
     Inverse,
 }
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired as the remaining receiver members land")
-)]
 impl PublicCategory {
     fn key(self) -> &'static str {
         match self {
@@ -159,13 +155,16 @@ impl BybitExchange {
 
     /// Options join this connection only when the account opted in.
     pub(crate) fn options_enabled(&self) -> bool {
-        self.base.options().enable_option_markets == Some(true)
+        self.base.name != safe_cex_types::ExchangeName::Hyrotrader
+            && self.base.options().enable_option_markets == Some(true)
     }
     /// A shared public data source has no inverse markets, so it cannot size inverse positions.
     pub(crate) fn inverse_enabled(&self) -> bool {
         let options = self.base.options();
-        self.base.name != safe_cex_types::ExchangeName::Bybitspot
-            && options.enable_inverse_markets == Some(true)
+        !matches!(
+            self.base.name,
+            safe_cex_types::ExchangeName::Bybitspot | safe_cex_types::ExchangeName::Hyrotrader
+        ) && options.enable_inverse_markets == Some(true)
             && options.external_public_data.is_none()
     }
 
@@ -269,22 +268,45 @@ impl BybitExchange {
     }
 
     pub(crate) fn requires_order_link_id(&self) -> bool {
-        false
+        self.base.name == safe_cex_types::ExchangeName::Hyrotrader
     }
 
-    pub(crate) fn generated_order_link_id(&self) -> Option<String> {
-        // The concrete linear hook never requires an ID; derived hooks have
-        // their own dispatch and generation contract.
-        None
+    pub(crate) fn generated_order_link_id(
+        &self,
+    ) -> Result<Option<String>, safe_cex_exchange::runtime::ExchangeError> {
+        if !self.requires_order_link_id() {
+            return Ok(None);
+        }
+        let rt = self.js.get().ok_or_else(|| {
+            safe_cex_exchange::runtime::ExchangeError::new("Bybit receiver is unavailable")
+        })?;
+        let value = rt
+            .shared
+            .globals
+            .get("nanoid")
+            .and_then(|factory| factory.call(crate::binding::value::Js::Undefined, vec![]))
+            .map_err(|error| error.to_exchange_error())?;
+        crate::binding::value::to_typed(&value)
+            .map(Some)
+            .map_err(|error| error.to_exchange_error())
     }
 
     pub(crate) fn validate_order_capabilities(
         &self,
-        _options: &crate::order_params::BybitPlaceOrderOpts,
+        options: &crate::order_params::BybitPlaceOrderOpts,
     ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
-        // The linear source hook is intentionally empty; basic validation and
-        // derived venue restrictions belong to their own preflight operations.
-        Ok(())
+        if self.base.name != safe_cex_types::ExchangeName::Hyrotrader {
+            return Ok(());
+        }
+        let rt = self.js.get().ok_or_else(|| {
+            safe_cex_exchange::runtime::ExchangeError::new("Bybit receiver is unavailable")
+        })?;
+        let options = crate::binding::value::from_typed(options)
+            .map_err(|error| error.to_exchange_error())?;
+        rt.this
+            .call_method("validateOrderCapabilities", vec![options])
+            .map(|_| ())
+            .map_err(|error| error.to_exchange_error())
     }
 
     pub(crate) fn get_execution_query_windows(
@@ -342,7 +364,7 @@ impl BybitExchange {
     }
 
     pub(crate) fn supports_trade_derived_candles(&self) -> bool {
-        true
+        self.base.name != safe_cex_types::ExchangeName::Hyrotrader
     }
 
     pub(crate) fn uses_bybit_demo_environment(&self) -> bool {
@@ -362,20 +384,50 @@ impl BybitExchange {
         &self,
         category: PublicCategory,
         network: Network,
-    ) -> &'static str {
-        crate::types::BASE_WS_URL["public"][category.key()][network.key()]
-            .as_str()
-            .expect("static Bybit public WS URL")
+    ) -> Result<&'static str, safe_cex_exchange::runtime::ExchangeError> {
+        if self.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+            if !matches!(category, PublicCategory::Linear) {
+                return Err(safe_cex_exchange::runtime::ExchangeError::new(
+                    "HyroTrader simulator only supports linear public WebSocket data",
+                ));
+            }
+            return crate::types::HYROTRADER_SIMULATOR_WS_URL["public"]["linear"][network.key()]
+                .as_str()
+                .filter(|url| !url.is_empty())
+                .ok_or_else(|| {
+                    safe_cex_exchange::runtime::ExchangeError::new(
+                        "HyroTrader simulator public WebSocket URL is not configured",
+                    )
+                });
+        }
+        Ok(
+            crate::types::BASE_WS_URL["public"][category.key()][network.key()]
+                .as_str()
+                .expect("static Bybit public WS URL"),
+        )
     }
-    pub(crate) fn get_bybit_private_ws_url(&self, network: Network) -> &'static str {
+    pub(crate) fn get_bybit_private_ws_url(
+        &self,
+        network: Network,
+    ) -> Result<&'static str, safe_cex_exchange::runtime::ExchangeError> {
+        if self.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+            return crate::types::HYROTRADER_SIMULATOR_WS_URL["private"][network.key()]
+                .as_str()
+                .filter(|url| !url.is_empty())
+                .ok_or_else(|| {
+                    safe_cex_exchange::runtime::ExchangeError::new(
+                        "HyroTrader simulator private WebSocket URL is not configured",
+                    )
+                });
+        }
         let table = if self.uses_bybit_demo_environment() {
             &crate::types::DEMO_WS_URL
         } else {
             &crate::types::BASE_WS_URL
         };
-        table["private"][network.key()]
+        Ok(table["private"][network.key()]
             .as_str()
-            .expect("static Bybit private WS URL")
+            .expect("static Bybit private WS URL"))
     }
 
     /// Mirrors the constructor's client/socket composition. Factories are

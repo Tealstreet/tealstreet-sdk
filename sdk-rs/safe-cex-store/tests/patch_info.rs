@@ -58,7 +58,7 @@ fn native_info_patch_retains_reserved_key_object() {
                 }
                 "positions" => {
                     store
-                        .update_positions(&[(seed.positions[0].id.clone(), model)])
+                        .update_positions(&[(Some(seed.positions[0].id.clone()), model)])
                         .expect("STORE-INFO native batch patch accepted");
                     assert_eq!(
                         store.positions()[0].entry_price.to_bits(),

@@ -32,6 +32,9 @@ const selectors={
  string_id:()=>({id:'123'}),number_id:()=>({id:123}),bare_string:()=> 'abc',
  undefined:()=>undefined,null:()=>null,missing_id:()=>({}),undefined_id:()=>({id:undefined}),
  null_id:()=>({id:null}),object_id:()=>({id:{toString(){return '123'}}}),
+ symbol_id:()=>({id:Symbol.iterator}),
+ object_symbol_id:()=>({id:{toString(){return Symbol.iterator}}}),
+ surrogate_id:()=>({id:'\ud800'}),
  throwing_id:()=>Object.defineProperty({},'id',{get(){throw new RangeError('selector getter')}}),
  noncoercible_id:()=>({id:{toString(){throw new RangeError('selector conversion')}}}),
 };
@@ -45,5 +48,5 @@ for(const [tag,select] of [...Object.entries(selectors),['empty_input',()=>null]
  let error=null;try{store.removeOrders(tag==='empty_input'?[]:[select()])}catch(e){error=e.name}
  cases.push({tag,empty,error,ids:store.orders.map(order=>order.id)});
 }
-assert.equal(cases.length,24,'twelve array-selector cases,empty/nonempty stores');
+assert.equal(cases.length,30,'fifteen array-selector cases,empty/nonempty stores');
 process.stdout.write(JSON.stringify({seed,ids,cases}));

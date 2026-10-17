@@ -31,7 +31,7 @@ class BaseSocket {get store(){return this.parent.store;}constructor(parent){this
 }
 const baseGuards=members(path.join(root,'packages/safe-cex/src/exchanges/base.ts'),'BaseExchange',['resolveCallerClientOrderId','assertCallerClientOrderIds','assertSingleNativeClientOrderId','wouldSplitOrder','assertCallerClientOrderIdUnsplit','rejectPreflight']);
 const context={...types,...constants,...deps,...iteration,...guards,dayjs:require(require.resolve("dayjs",{paths:[path.join(root,"node_modules")]})),Parent,BaseSocket,adjust,subtract,add,v,inverseObj,omitUndefined,createPositionId,jsonParse,bigIntAsStringJsonParse,BaseExchange:Parent,BaseWebSocket:BaseSocket,
- uuid:()=> 'ABCD-0123',nanoid:()=> 'n1',virtualClock:{getCurrentTimeMs:()=>1234},performance:{now:()=>1234},Blob,Date,
+ uuid:()=> 'ABCD-0123',nanoid:()=> 'n1',virtualClock:{getCurrentTimeMs:()=>5678},performance:{now:()=>1234},Blob,Date,
  readBlob:async b=>b.text(),calcOrderBookTotal:load(path.join(root,'packages/safe-cex/src/utils/orderbook.ts')).calcOrderBookTotal,
  loop:(fn,delay)=>{active.calls.push({op:'loop',delay});active.loops.push(fn);},
  setTimeout:(fn,delay)=>{const id=active.timers.length+1;active.timers.push({fn,delay,id});active.calls.push({op:'timer',delay,id});return id;},clearTimeout:id=>active.calls.push({op:'clear',id}),

@@ -109,8 +109,8 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `hyrotrader`, `kucoin`, `mexc`, `lighter`
-and `weex`.
+follow-up PR. The constructor table and its explicit membership test are the
+current binding inventory.
 
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;
@@ -318,8 +318,11 @@ Spot uses the same explicit native host and existing registry layer edge to the
 Bybit crate, with its distinct `BybitSpotExchange` receiver. The Bybit native
 HTTP tests include Spot for local HMAC and secretless hosted signing. Its
 category/market/leverage, order writes and order-only private subscriptions are
-covered by `safe-cex-venue-bybit/tests/spot_binding.rs`. Inverse and HyroTrader
-remain separate follow-ups.
+covered by `safe-cex-venue-bybit/tests/spot_binding.rs`. Inverse has its distinct
+receiver; HyroTrader now also selects its simulator receiver and acknowledged
+private session through the same Bybit host edge. Missing build-time origins
+retain the source configuration refusal. `native_host_hyrotrader` verifies real
+native registry construction and signed HTTP reads.
 
 Crypto.com is in the Rust constructor table. `tests/native_host_cryptocom.rs`
 constructs the bound venue using production native inputs and the shared host
