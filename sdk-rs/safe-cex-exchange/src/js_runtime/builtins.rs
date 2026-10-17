@@ -688,10 +688,10 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
     let chain = move |on_ok: Js, on_err: Js| -> Result<Js, Thrown> {
         let p = p.clone();
         let rt = p.runtime();
-        Ok(Js::Promise(Promise::spawn(
+        Ok(Js::Promise(Promise::deferred(
             &rt,
             Box::pin(async move {
-                match p.wait().await {
+                match p.reaction().await {
                     Ok(v) if on_ok.is_callable() => {
                         await_js(on_ok.call(Js::Undefined, vec![v])?).await
                     }

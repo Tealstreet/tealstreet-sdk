@@ -1,7 +1,10 @@
 //! Native promise: an async body starts eagerly to its first suspension and the
 //! runtime owns the rest, independently of whoever later awaits the handle.
-use super::value::{Js, Thrown};
-use crate::runtime::{ExchangeRuntime, ExchangeTask};
+use super::{
+    jobs::{self, Jobs},
+    value::{Js, Thrown},
+};
+use crate::runtime::ExchangeRuntime;
 use std::{
     cell::RefCell,
     future::{Future, poll_fn},
@@ -17,7 +20,7 @@ struct State {
     /// One entry per pending `PromiseWait`, removed by that wait's Drop.
     waiters: Vec<(u64, Waker)>,
     next_waiter: u64,
-    task: Option<Box<dyn ExchangeTask>>,
+    jobs: Rc<Jobs>,
     runtime: Rc<dyn ExchangeRuntime>,
 }
 
@@ -38,7 +41,7 @@ impl Promise {
             result: None,
             waiters: vec![],
             next_waiter: 0,
-            task: None,
+            jobs: jobs::for_runtime(runtime),
             runtime: runtime.clone(),
         })))
     }
@@ -47,15 +50,14 @@ impl Promise {
     }
     /// Settle once; later settlements are ignored like a resolved promise's.
     pub fn settle(&self, result: Result<Js, Thrown>) {
-        let (waiters, task) = {
+        let waiters = {
             let mut state = self.0.borrow_mut();
             if state.result.is_some() {
                 return;
             }
             state.result = Some(result);
-            (std::mem::take(&mut state.waiters), state.task.take())
+            std::mem::take(&mut state.waiters)
         };
-        drop(task);
         for (_, waiter) in waiters {
             waiter.wake();
         }
@@ -68,24 +70,39 @@ impl Promise {
     pub fn spawn(runtime: &Rc<dyn ExchangeRuntime>, body: JsFuture<'static>) -> Self {
         let promise = Promise::pending(runtime);
         let mut body: JsFuture<'static> = Box::pin(adopt(body));
-        if let Poll::Ready(result) = body.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+        let jobs = promise.0.borrow().jobs.clone();
+        if let Poll::Ready(result) =
+            jobs.poll(body.as_mut(), &mut Context::from_waker(Waker::noop()))
+        {
             promise.settle(result);
             return promise;
         }
         let driver = promise.clone();
-        let task = runtime.spawn_local(Box::pin(async move {
+        jobs.spawn(Box::pin(async move {
             let result = body.await;
             driver.settle(result);
         }));
-        if promise.0.borrow().result.is_none() {
-            promise.0.borrow_mut().task = Some(task);
-        }
+        promise
+    }
+    pub(super) fn deferred(runtime: &Rc<dyn ExchangeRuntime>, body: JsFuture<'static>) -> Self {
+        let promise = Self::pending(runtime);
+        let driver = promise.clone();
+        let jobs = promise.0.borrow().jobs.clone();
+        jobs.spawn(Box::pin(async move {
+            driver.settle(adopt(body).await);
+        }));
         promise
     }
     pub fn wait(&self) -> PromiseWait {
+        let mut wait = self.reaction();
+        wait.defer_settled = true;
+        wait
+    }
+    pub(super) fn reaction(&self) -> PromiseWait {
         PromiseWait {
             state: self.0.clone(),
             registration: None,
+            defer_settled: false,
         }
     }
 }
@@ -95,15 +112,25 @@ impl Promise {
 pub struct PromiseWait {
     state: Rc<RefCell<State>>,
     registration: Option<u64>,
+    defer_settled: bool,
 }
 impl Future for PromiseWait {
     type Output = Result<Js, Thrown>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let registration = self.registration;
-        let mut state = self.state.borrow_mut();
+        let owner = self.state.clone();
+        let mut state = owner.borrow_mut();
         if let Some(result) = &state.result {
+            if self.defer_settled {
+                let jobs = state.jobs.clone();
+                drop(state);
+                self.defer_settled = false;
+                jobs.wake(cx.waker().clone());
+                return Poll::Pending;
+            }
             return Poll::Ready(result.clone());
         }
+        self.defer_settled = false;
         let replaced = match registration
             .and_then(|id| state.waiters.iter_mut().find(|(entry, _)| *entry == id))
         {
@@ -149,6 +176,9 @@ async fn adopt(body: JsFuture<'static>) -> Result<Js, Thrown> {
 
 /// `await value`: promises are awaited, any other value resolves to itself.
 pub async fn await_js(value: Js) -> Result<Js, Thrown> {
+    if !matches!(value, Js::Promise(_)) {
+        jobs::yield_current().await;
+    }
     let mut value = value;
     while let Js::Promise(promise) = &value {
         let promise = promise.clone();
