@@ -22,9 +22,11 @@ async function open(t, hold = false) {
   const close = async () => { if (id !== undefined) { await native.nativeAccountClose(id); id = undefined; } };
   t.after(async () => {
     for (const response of responses) response.end('{"code":"0","data":[]}');
-    await close();
-    server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
+    try { await close(); }
+    finally {
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+    }
   });
   return { seen, responses, close, call: symbol => native.nativeAccountCallMethod(id, 'updateSymbolMetadata', [symbol]) };
 }
@@ -41,7 +43,7 @@ test('native metadata calls acknowledge before the real HTTP response settles', 
   await delay(50);
   const acknowledged = settled;
   h.responses[0].end('{"code":"0","data":[]}');
-  await pending;
+  assert.equal(await pending, null);
   assert.equal(acknowledged, true, 'the worker acknowledges its unawaited metadata method immediately');
 });
 

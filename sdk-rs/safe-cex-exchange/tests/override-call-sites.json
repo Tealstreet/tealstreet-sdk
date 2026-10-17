@@ -1028,12 +1028,6 @@
       {
         "receiver": "dynamic",
         "kind": "call",
-        "hook": "update_symbol_metadata",
-        "count": 1
-      },
-      {
-        "receiver": "dynamic",
-        "kind": "call",
         "hook": "validate_account",
         "count": 1
       }
@@ -11229,7 +11223,7 @@
   },
   {
     "file": "safe-cex-webworker/src/call_method.rs",
-    "function": "new",
+    "function": "symbol_metadata_throttler",
     "edges": [
       {
         "receiver": "dynamic",
