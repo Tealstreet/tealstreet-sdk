@@ -2,6 +2,7 @@
 mod backends;
 mod cache;
 pub mod calendar;
+mod codec;
 mod types;
 pub use backends::{KeyValueCandleCacheBackend, MemoryCandleCacheBackend};
 pub use cache::{
