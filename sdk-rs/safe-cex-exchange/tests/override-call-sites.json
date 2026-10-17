@@ -5972,6 +5972,26 @@
   },
   {
     "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+    "function": "listen_public_ohlcv",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "listen_ohlcv",
+        "callee": "crate :: stream_delegation :: listen_ohlcv",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "listen_ohlcv",
+        "callee": "crate :: ws_public :: single_candles :: listen_ohlcv",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
     "function": "listen_public_ohlcvs",
     "edges": [
       {

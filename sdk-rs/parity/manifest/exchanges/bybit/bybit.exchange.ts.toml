@@ -918,9 +918,9 @@ note = "Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::income_
 ts = "BybitExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv" ]
 status = "ported"
-note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv. Routes through publicSocketFor(opts.symbol): the inverse socket for inverse symbols when it exists, else publicWebsocket; forwards original options and callback handles and returns the socket method result."
+note = "Concrete Exchange listener routes to the maintained socket and returns its real cleanup. Four master-red binding controls now deliver klines and trades; native sequence corpus covers minute/week buckets, stale frames and nonfinite values. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv."
 
 [[symbol]]
 ts = "BybitExchange.listenOHLCVs"

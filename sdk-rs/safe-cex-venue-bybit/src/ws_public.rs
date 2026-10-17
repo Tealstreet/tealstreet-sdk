@@ -342,7 +342,9 @@ pub fn handle_tickers_event(
 #[cfg(test)]
 mod tests;
 
+pub(crate) mod candle_recovery;
 pub(crate) mod candles;
+pub(crate) mod single_candles;
 pub(crate) mod streams;
 /// BybitPublicWebsocket for the `bybit` connection: the linear socket, and the
 /// inverse socket when inverse markets are enabled.
