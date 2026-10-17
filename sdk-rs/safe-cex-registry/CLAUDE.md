@@ -245,6 +245,16 @@ signing requirement on private HTTP even with hosted signing. Private WS stays
 local-only; empty-secret recovery follows the existing approved onOpen contract.
 `native_host_orderly_hosted` covers all six names with valid/empty local secrets.
 
+Gateway candle requests use AnyTimeframe like worker OHLCVOptions. The maintained
+source forwards every chart interval despite its narrower gateway annotation;
+provider tests retain all 27 values through reconnect, delivery and cleanup.
+
+The native Hyperliquid JSON-to-query adapter lives at module scope so the accepted-set
+compiler inventory covers it directly. Its finite witnesses inspect QueryValue enum
+outputs for all JSON container/scalar kinds. The installed repeat serializer remains
+covered through the real native HTTP host; this owned Value input excludes undefined
+and nonfinite JSON values.
+
 
 
 The accepted-set registry contracts classify each public alias separately. The

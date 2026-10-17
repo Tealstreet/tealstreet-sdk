@@ -913,6 +913,67 @@ fn actual_source_command_admission_and_position_error_strings() {
 }
 
 #[test]
+fn fetch_ohlcv_worker_forwards_every_source_timeframe() {
+    let (inner, _, _) = venue();
+    let venue = Rc::new(MethodVenue {
+        inner,
+        orders_calls: Cell::new(0),
+        fail_orders: Cell::new(false),
+        calls: RefCell::default(),
+    });
+    let replies = Rc::new(RefCell::new(Vec::new()));
+    let capture = replies.clone();
+    let handler = safe_cex_webworker::call_method::CallMethodHandler::new(
+        venue.clone(),
+        data_trace::post(Rc::new(move |reply| capture.borrow_mut().push(reply))),
+        error_post_support::unexpected(),
+    );
+    let intervals = [
+        "1M", "1s", "5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h",
+        "12h", "1d", "1w", "3h", "5h", "7h", "8h", "9h", "10h", "11h", "24h", "2d", "3d",
+    ];
+    for (i, interval) in intervals.iter().enumerate() {
+        let options =
+            json!({"symbol":"BTC","interval":interval,"from":123.0,"to":456.0,"limit":7.0});
+        ready(handler.handle_call_method(
+            format!("interval-{i}"),
+            "fetchOHLCV".into(),
+            vec![options.clone()],
+        ));
+        let replies = replies.borrow();
+        let data = replies.last().unwrap().data.as_ref().unwrap();
+        assert_eq!(
+            data["success"], true,
+            "OHLCV-WORKER fetch admits {interval}: {data}"
+        );
+        assert_eq!(
+            venue.calls.borrow().last().unwrap(),
+            &json!({"method":"fetchOHLCV","args":[options]}),
+            "OHLCV-WORKER venue receives {interval}"
+        );
+    }
+    assert_eq!(replies.borrow().len(), 27);
+    assert_eq!(venue.calls.borrow().len(), 27);
+}
+
+#[test]
+fn actual_source_ohlcv_interval_inventory_and_forwarding() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/ohlcv-interval-source.cjs"
+        ))
+        .output()
+        .expect("execute actual worker OHLCV handlers");
+    assert!(
+        output.status.success(),
+        "OHLCV-WORKER maintained source: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn market_timeout_never_projects_its_error_into_the_json_post_channel() {
     use safe_cex_webworker::error_post::{WorkerErrorHandle, WorkerErrorPost};
     let (venue, runtime, _) = venue();
