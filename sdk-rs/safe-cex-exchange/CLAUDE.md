@@ -570,6 +570,13 @@ without sleeping or sending again. No caller supplies a remaining-timeout value.
 The installed Axios truthy guards retain timeout zero as unlimited and skip the
 first subtraction for a clock starting exactly at epoch zero.
 
+Transport JavaScript coercion failures retain their name and unprefixed message
+when converted into ExchangeError. The original RestFailure remains the opaque
+origin. Direct JsCoercionError conversion retains its typed native cause too;
+Binance and BingX signature predicates use these conversions instead of rebuilding
+an Error from text. The native order/account witnesses cover resolved envelopes
+and HTTP rejection, and assert that coercion failures never trigger a resend.
+
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
 copied from opaque NetworkFailure. The library network-or-idempotent helper is
