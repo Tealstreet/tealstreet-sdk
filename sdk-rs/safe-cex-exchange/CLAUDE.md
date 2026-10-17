@@ -1402,6 +1402,11 @@ binary64 samples, plus 60 coercion/error cases. Its test-only commit compiles an
 fails on the original binding at `(255).toString(2)`. This does not change the separate
 BigInt formatter or the existing Number method receiver profile.
 
+Error prototype thread-local storage stays inside its sole private accessor.
+Module-level item macros are rejected by the parity indexer. The focused
+`safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
+module graph and requires the public Error factory to remain discoverable.
+
 Orderbook utility bindings preserve raw price/amount comparisons and the source
 binary-search read order. They read only visited prices, defer amount reads until
 lookup completes, and retain the inserted update object. Totals capture both sides
