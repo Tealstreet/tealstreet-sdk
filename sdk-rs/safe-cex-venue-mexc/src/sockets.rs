@@ -125,7 +125,7 @@ impl PrivateProtocol {
             let owner = parent.clone();
             let weak_socket = weak_socket.clone();
             parent.base().start_owned_operation(async move {
-                let result = async {
+                let _ = async {
                     let balance = reaction(owner.fetch_balance()).await?;
                     if weak_socket
                         .upgrade()
@@ -142,12 +142,6 @@ impl PrivateProtocol {
                     Ok::<_, ExchangeError>(())
                 }
                 .await;
-                if let Err(error) = result {
-                    owner.base().runtime.report_exception(
-                        &error,
-                        &json!({"operation":"MEXC throttledFetchBalance"}),
-                    );
-                }
             });
             Ok(())
         })?;

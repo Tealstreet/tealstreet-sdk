@@ -307,3 +307,9 @@ values/keys/entries and raw Map, including insertion/deletion, native numeric bi
 and reference identity. `scripts/iterator-consumer-controls.py` compiles an
 iterator-object rejection, requires both named failures and restores exact bytes.
 Its Cargo subprocesses have deadlines and private temporary logs.
+
+The production private asset handler debounces `fetchBalance` for 1000ms and
+swallows both fetch and Store-update failures, matching the TypeScript callback's
+empty catch. `socket_assembly::registered_private_asset_refresh_swallows_balance_fetch_failure`
+drives a real registered private frame, advances the host monotonic timer, and
+requires one attempted balance read with no host exception report.
