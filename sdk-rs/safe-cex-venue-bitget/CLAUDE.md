@@ -1,3 +1,7 @@
+Private-position freshness timestamps read the shared virtualClock, matching the
+REST request-start clock. The synced-clock private_binding_frames regression feeds
+an actual position frame and reconciles an older signed REST reply through Store.
+
 # Bitget venue family
 
 The private-topic host consumes the shared iterator protocol instead of indexing

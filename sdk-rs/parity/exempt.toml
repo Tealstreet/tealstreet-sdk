@@ -3886,7 +3886,7 @@ reason = "Native value, receiver/callee and JS language-operation binding for ei
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::clock_now"
-reason = "Native value, receiver/callee and JS language-operation binding for eight private-topic bodies; actual helper, not a source symbol. Clone preserves identity, primitives bind JS semantics and host owns launched work. Concrete WebSocket/native binding remains pending; eight source body targets mapped separately."
+reason = "Native virtualClock.getCurrentTimeMs host operation used by mapped markWsPositions, not an independent TS declaration. The concrete binding delegates to the shared clock; private_binding_frames proves a fresh WS snapshot survives older REST reconciliation after native clock synchronization."
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::set_of"
