@@ -1391,3 +1391,13 @@ output in a child process and compares its payloads with Node, including exact
 info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
+
+Orderbook utility bindings preserve raw price/amount comparisons and the source
+binary-search read order. They read only visited prices, defer amount reads until
+lookup completes, and retain the inserted update object. Totals capture both sides
+before looping, re-read live lengths/rows and use JS addition; missing/null sides
+throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
+147 update and10 total cases against the maintained TS utility modules through
+installed NativeRuntime bindings, observing getter order, holes, duplicate amount
+reads, inserted identity and reentrant row/length changes. Both regressions compile
+and fail on the prior implementation; their inputs do not replace utility code.
