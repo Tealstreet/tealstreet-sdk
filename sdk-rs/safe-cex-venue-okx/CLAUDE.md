@@ -118,3 +118,22 @@ the okx.types.ts tables, mappers and createAPI collaborators. Generic needs go
 into js_runtime, not here. `tests/exchange_binding.rs` drives every trait method
 over a scripted transport; `tests/exchange_binding_controls.py` mutates each
 dispatch and requires its named test to fail, then passes 14/14 restored.
+
+The order-read and websocket-account harnesses now include the production
+intrinsic dispatcher and use shared `js_runtime::value::{Js, Thrown}`. Their
+private value models and intrinsic match tables are removed; scripted callbacks
+supply only fixture collaborators. The existing 53 order-read and 56 websocket
+source scenarios retain their native assertions, source comparisons, effect
+traces, error identity and live topic references. Websocket wire observations
+now pass through the shared JSON stringify/parse functions.
+
+This cutover exposed production bugs hidden by the old mocks: five-group order
+and new-market topic spreads consumed only two groups, and dedupe colon joins
+replaced lone UTF-16 surrogates. The dispatcher consumes all supplied iterables
+in order and appends colon-separated strings as UTF-16. A production Exchange
+regression loads distinct normal/OCO/trailing/conditional/trigger orders and
+checks all five groups reach symbol cancellation. Four permanent controls in
+`tests/production_intrinsic_controls.py` restore each broken behavior and require
+a named compiled failure followed by an exact source restoration and passing
+case. The API/history and other private harnesses remain separate migration work;
+this slice does not claim their intrinsic coverage.

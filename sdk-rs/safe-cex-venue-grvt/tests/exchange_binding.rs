@@ -116,6 +116,65 @@ fn fetch_markets_uses_public_gateway_and_keeps_signing_metadata() {
     );
 }
 #[test]
+fn refresh_markets_replaces_metadata_when_instrument_ids_are_unchanged() {
+    let h = setup();
+    let mut changed = instrument();
+    changed["ts"] = json!("0.25");
+    changed["mp"] = json!("77");
+    changed["ih"] = json!("0x030502");
+    changed["bd"] = json!(4);
+    changed["qd"] = json!(5);
+    h.http.route(
+        "POST",
+        "/lite/v1/all_instruments",
+        200.0,
+        json!({"r":[changed]}),
+    );
+    loaded(&h);
+
+    let changes = h.drive(h.venue().refresh_markets()).unwrap();
+    assert!(changes.added.is_empty());
+    assert!(changes.removed.is_empty());
+    let markets = h.store.markets();
+    assert_eq!(markets.len(), 1);
+    let market = &markets[0];
+    assert_eq!(market.id, "BTC_USDT_Perp");
+    assert_eq!(
+        market.precision.price, 0.25,
+        "refresh must replace metadata"
+    );
+    assert_eq!(market.limits.amount.max, 77.0);
+    let info = market.info.as_ref().unwrap();
+    assert_eq!(info["ih"], "0x030502");
+    assert_eq!(info["bd"].as_f64().unwrap().to_bits(), 4.0_f64.to_bits());
+    assert_eq!(info["qd"].as_f64().unwrap().to_bits(), 5.0_f64.to_bits());
+    assert_eq!(h.http.calls("/lite/v1/all_instruments").len(), 2);
+}
+#[test]
+fn refresh_markets_returns_added_and_removed_instruments_through_trait() {
+    let h = setup();
+    let mut added = instrument();
+    added["i"] = json!("ETH_USDT_Perp");
+    added["b"] = json!("ETH");
+    added["ih"] = json!("0x030503");
+    h.http.route(
+        "POST",
+        "/lite/v1/all_instruments",
+        200.0,
+        json!({"r":[added]}),
+    );
+    loaded(&h);
+
+    let changes = h.drive(h.venue().refresh_markets()).unwrap();
+    assert_eq!(changes.added.len(), 1);
+    assert_eq!(changes.added[0].id, "ETH_USDT_Perp");
+    assert_eq!(changes.added[0].info.as_ref().unwrap()["ih"], "0x030503");
+    assert_eq!(changes.removed.len(), 1);
+    assert_eq!(changes.removed[0].id, "BTC_USDT_Perp");
+    assert_eq!(changes.removed[0].info.as_ref().unwrap()["ih"], "0x030501");
+    assert_eq!(h.store.markets().as_ref(), changes.added.as_slice());
+}
+#[test]
 fn fetch_tickers_uses_loaded_markets_without_http() {
     let h = setup();
     loaded(&h);

@@ -18,7 +18,7 @@ use safe_cex_exchange::{
         store,
         value::{Js, Thrown, from_typed, to_typed},
     },
-    runtime::{ExchangeError, ExchangeFuture},
+    runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -176,6 +176,30 @@ impl PhemexExchange {
             Ok(())
         })
     }
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        member: &'static str,
+        first: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let listener = Js::function("callback", move |_, args| {
+            callback(to_typed(&safe_cex_exchange::js_runtime::value::arg(
+                &args, 0,
+            ))?);
+            Ok(Js::Undefined)
+        });
+        let cleanup = self
+            .rt
+            .this
+            .get("publicWebsocket")
+            .map_err(err)?
+            .call_method(member, vec![first, listener])
+            .map_err(err)?;
+        Ok(Box::new(move || {
+            cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            Ok(())
+        }))
+    }
 }
 
 fn capabilities() -> ExchangeCapabilities {
@@ -224,6 +248,35 @@ impl Exchange for PhemexExchange {
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         self.invoke_unit("start", vec![])
+    }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let options = js(&options)?;
+        let symbol = self
+            .rt
+            .this
+            .call_method("formatSymbolOut", vec![options.get("symbol").map_err(err)?])
+            .map_err(err)?;
+        options.define("symbol", symbol).map_err(err)?;
+        self.listen("listenOHLCV", options, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let symbol = self
+            .rt
+            .this
+            .call_method("formatSymbolOut", vec![js(&symbol)?])
+            .map_err(err)?;
+        self.listen("listenOrderBook", symbol, callback)
+    }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        self.invoke("fetchOHLCV", args!(js(&options)))
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
         self.invoke("getAccount", vec![])
