@@ -23,6 +23,7 @@ pub(super) struct PublicTopics {
     category: &'static str,
     active_symbols: bool,
     current: Topics,
+    streams: super::streams::Topics,
     active_listener: Option<String>,
     markets_listener: RefCell<Option<String>>,
 }
@@ -93,6 +94,10 @@ impl PublicTopics {
         base: &BaseExchange,
     ) -> Self {
         let current = Rc::new(RefCell::new(json!([])));
+        let streams = parent
+            .upgrade()
+            .expect("the exchange owns public socket construction")
+            .subscription_topics(category);
         // Dedicated Spot and Inverse register this before their first dial.
         // The primary optional inverse socket remains category-wide.
         let dedicated_inverse =
@@ -135,6 +140,7 @@ impl PublicTopics {
             category,
             active_symbols,
             current,
+            streams,
             active_listener,
             markets_listener: RefCell::new(None),
         }
@@ -143,9 +149,11 @@ impl PublicTopics {
         let topics = self.current.borrow().clone();
         let sender = Rc::downgrade(socket);
         let runtime = self.runtime.clone();
+        let mut subscriptions = serde_json::Map::from_iter([("tickers".into(), topics)]);
+        subscriptions.extend(self.streams.borrow().clone());
         // The canonical body sends the first chunk before yielding its async tail.
         let operation = lifecycle::subscribe(
-            move || Ok(serde_json::Map::from_iter([("tickers".into(), topics)])),
+            move || Ok(subscriptions),
             move |frame| send(&sender, frame),
             move |ms| runtime.sleep(ms),
         );
