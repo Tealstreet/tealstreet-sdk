@@ -2063,18 +2063,22 @@ parser phase is inferred. No polling timer is implemented by this read body.
 Response field coercion, including string/null timestamps, uses shared JS number
 and parseFloat semantics. Inherited interval keys preserve stringification and
 NaN range arithmetic. Sort remains stable and compares timestamp differences.
-CHOSEN: mixed NaN/non-NaN timestamp collections are refused, because the source
-comparator is inconsistent and Rust requires a consistent ordering. A paired
-actual-source witness records V8 accepting `[3, 2, NaN, 1]` and ordering it as
-`[1, 2, 3, NaN]`; native refusal reports/emits a named TypeError and resolves
-empty. All-NaN collections retain source order.
+CHOSEN per-row admission: refuse only candles whose coerced timestamp is NaN,
+reporting each row index and `timestamp=NaN` through the existing error diagnostic.
+Sort and return every admitted row; an all-refused response returns empty after
+reporting every refusal. This follows decision 3's batch-retention rule. Source
+keeps NaN-timestamp rows, but their inconsistent comparator has no claimed
+ordering parity. Other numeric candle fields retain NaN and infinities. The
+constructed Exchange/HTTP witness compiles and fails on the prior whole-batch
+refusal, then passes with one or multiple refused rows and the all-refused case.
 
 Named ts-bug compatibility: missing candle data is diagnosed before an error is
 raised; the outer catch reports that error, emits its message or fallback text,
 and resolves empty. Failure of the missing-data diagnostic enters the catch;
 failure of the catch diagnostic or emitter propagates without flattening native
-error metadata. The actual-source supplement pins 47 cases, 74 records and 444
-direct numeric field comparisons. Capture records CPU/Node; only NaN is canonical.
+error metadata. The actual-source supplement pins 47 cases and 74 source records;
+native admission observes 73 rows and 438 numeric fields plus the refused row.
+Capture records CPU/Node; only NaN is canonical.
 
 
 ### Kraken Spot balance host

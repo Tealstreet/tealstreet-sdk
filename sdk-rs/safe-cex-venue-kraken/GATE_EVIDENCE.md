@@ -186,9 +186,11 @@ corpus floors, not an exhaustive runtime enumeration.
 
 Sub-agent review explicitly inspected the committed implementation SHA using
 `git show` and cleared the slice. Its sole finding was mixed NaN/non-NaN sorting:
-the source sorts `[3,2,NaN,1]` as `[1,2,3,NaN]`, while Rust differed. The declared
-CHOSEN boundary now refuses that input with a diagnostic and emission; its paired
-actual-source/native witness passed. Other declared host, UTF-8 and owned-fallback
+the source sorts `[3,2,NaN,1]` as `[1,2,3,NaN]`, while Rust differed. The historical
+CHOSEN whole-batch refusal was superseded by decision 3's per-row rule: each NaN
+timestamp is diagnosed and refused, while good rows remain sorted and returned.
+The original source corpus is unchanged; native admission now has 73 rows and
+438 field comparisons, with the refused row observed separately. Other declared host, UTF-8 and owned-fallback
 boundaries remain in `parity/MANIFEST-SPEC.md`.
 
 Not run: workspace compilation, host Clippy, wasm Clippy, full test suite,
@@ -1754,3 +1756,15 @@ no-features invocation could not see its feature-gated health witness and is
 excluded from proof; no cancellation source or classification was changed.
 Independent review of the test-wiring fix is clean. CodeRabbit's manual request
 returned a rate limit, rather than an executed review.
+
+## Per-row Futures candle timestamp admission
+
+The constructed `futures_candles_refuse_only_nan_timestamp_rows` test compiled
+against unchanged production and failed because three valid candles were lost
+with the bad row (zero returned). It now passes mixed, multiple-refusal and
+all-refused responses, checks each visible `timestamp=NaN` diagnostic, and keeps
+NaN/infinities/signed zero in other candle fields. The two existing Futures
+candle source tests pass with the explicit admission distinction; source bytes
+and source cardinality remain unchanged. Scoped strict Clippy, formatting,
+required all-features cancellation inventory, global parity and extractor check
+pass. Receipts: `/tmp/kraken-candle-row-{before,after,read-corpus,clippy,cancellation,parity,extract}.log`.

@@ -241,6 +241,147 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
     }
 }
 
+#[test]
+fn attached_amendment_recreates_only_after_matching_refusal_and_successful_cancel() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_types::{Order, UpdateOrderOpts};
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-operations-oracle.cjs"
+        ))
+        .arg("attachedAmendmentRecovery")
+        .arg(support::MARKET)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 8, "actual-source fallback controls");
+    for case in cases {
+        let label = case["label"].as_str().unwrap();
+        if label == "tp" || label == "sl" {
+            assert_eq!(case["result"]["ids"], json!([format!("NEW__{label}")]));
+            assert_eq!(case["calls"].as_array().unwrap().len(), 3);
+            assert_eq!(case["calls"][1]["lane"], "limited");
+            assert_eq!(case["calls"][2]["payload"]["tpOrderType"], "MARKET");
+            assert_eq!(case["calls"][2]["payload"]["slOrderType"], "MARKET");
+        } else {
+            assert!(
+                case["result"]["error"].is_string(),
+                "source refusal {label}"
+            );
+        }
+        let (venue, rt, store, wire) = support::fixture_with(false);
+        let orders: Vec<Order> = serde_json::from_value(case["input"]["orders"].clone()).unwrap();
+        Store::update(
+            &*store,
+            StoreUpdate {
+                orders: Some(orders),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for (path, body) in [
+            ("/api/v1/futures/trade/modify_order", &case["modify"]),
+            ("/api/v1/futures/trade/cancel_orders", &case["cancel"]),
+            ("/api/v1/futures/trade/place_order", &case["placement"]),
+        ] {
+            wire.bodies
+                .lock()
+                .unwrap()
+                .insert(path.into(), body.clone());
+        }
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let sink = errors.clone();
+        venue.base().on(
+            "error",
+            Rc::new(move |_, v| {
+                sink.borrow_mut().push(v.as_str().unwrap().to_owned());
+                Ok(())
+            }),
+        );
+        let options: UpdateOrderOpts = serde_json::from_value(
+            json!({"order":case["input"]["order"],"update":case["input"]["update"]}),
+        )
+        .unwrap();
+        let actual = drive(&rt, venue.update_order(options));
+        if let Some(ids) = case["result"].get("ids") {
+            assert_eq!(
+                json!(actual.expect("attached TP/SL replacement must succeed")),
+                *ids,
+                "{label}"
+            );
+        } else {
+            assert_eq!(
+                actual.unwrap_err().message,
+                case["result"]["error"],
+                "{label}"
+            );
+        }
+        let expected_calls: Vec<Value> = case["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| json!({"endpoint":c["endpoint"],"payload":c["payload"]}))
+            .collect();
+        let requests = wire.requests.lock().unwrap();
+        let actual_calls: Vec<Value> = requests
+            .iter()
+            .map(|r| {
+                let body = match r.body.as_ref().unwrap() {
+                    safe_cex_transport::RestBody::Untransformed(v) => v.clone(),
+                    safe_cex_transport::RestBody::Transformed(t) => match t.value() {
+                        Value::String(s) => serde_json::from_str(s).unwrap(),
+                        v => v.clone(),
+                    },
+                    safe_cex_transport::RestBody::Encoded(b) => serde_json::from_slice(b).unwrap(),
+                };
+                json!({"endpoint":r.url,"payload":body})
+            })
+            .collect();
+        assert_eq!(
+            actual_calls, expected_calls,
+            "exact modify/cancel/replacement ordering and both retained protection legs: {label}"
+        );
+        let statuses = |orders: &Value| {
+            orders
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|o| json!([o["id"], o["status"]]))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            statuses(&serde_json::to_value(&*store.orders()).unwrap()),
+            statuses(&case["orders"]),
+            "cancel only the exact parent and children; neighbor survives: {label}"
+        );
+        let expected_errors: Vec<&str> = case["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            errors
+                .borrow()
+                .iter()
+                .map(|v| v.strip_prefix("Exchange Error: ").unwrap())
+                .collect::<Vec<_>>(),
+            expected_errors,
+            "visible original/fallback refusals: {label}"
+        );
+        drop(requests);
+        venue.dispose().unwrap();
+    }
+}
+
 #[path = "../../parity/test-support/ticker_coercion.rs"]
 mod ticker_coercion;
 
