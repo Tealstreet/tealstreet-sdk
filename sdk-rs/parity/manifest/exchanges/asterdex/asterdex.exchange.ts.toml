@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_klines"
 status = "ported"
-note = "Rename: this pure candle mapper is safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_klines; request execution remains host-owned. The live fetchOHLCV oracle checks V1/V3 klines paths, limit || 500 and truthy startTime params, empty responses, parseFloat prefixes, signed zero and non-finite output bits before serialization. A source mutation and a compiled Rust field-index mutation both fail by the named fetchOHLCV output assertion."
+note = "Rename: this candle mapper is safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_klines; request execution remains host-owned. It maps shared Js rows by indices0..5, preserving source parseFloat coercions without decoding unused tuple columns. The real Exchange regression compares five row shapes in V1/V3 with actual fetchOHLCV and proves the old full-tuple binding RED. The live helper oracle also checks request bounds, empty responses, signed zero and nonfinite output bits."
 
 [[symbol]]
 ts = "AsterDEXExchange.fetchHistoricalFills"
