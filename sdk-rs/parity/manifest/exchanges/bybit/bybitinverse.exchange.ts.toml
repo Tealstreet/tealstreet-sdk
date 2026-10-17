@@ -432,15 +432,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/rest_fills.rs::fetch_executions_fallback_from_order_history"
 status = "ported"
-note = "Actual receiver/HTTP order-history recovery preserves query windows, page-local deduplication, descending sort/limit, and throws that discard recovery prefixes. Primary/demo retain short then extended recovery; dedicated inverse retains its single 30-day policy."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/rest_fills.rs::fetch_executions_fallback_from_order_history. Actual receiver/HTTP order-history recovery preserves query windows, page-local deduplication, descending sort/limit, and throws that discard recovery prefixes. Primary/demo retain short then extended recovery; dedicated inverse retains its single 30-day policy."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchHistoricalFills"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/rest_fills.rs::fetch_historical_fills"
+rs = [ "safe-cex-venue-bybit/src/rest_fills.rs::fetch_historical_fills", "safe-cex-venue-bybit/src/primary_fills.rs::append_primary_fills" ]
 status = "ported"
-note = "Exchange dispatches actual primary/demo/inverse receivers through signed execution-history HTTP and native mappers. Preserves five-page cap, raw-row diagnostics, valid primary prefixes after later throws, source limit behavior, and actual order-history recovery; Spot inherits empty history. Compiled fresh-master family regressions and maintained reader source corpus cover production composition."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/rest_fills.rs::fetch_historical_fills. Renamed Rust target: safe-cex-venue-bybit/src/primary_fills.rs::append_primary_fills. Exchange dispatches actual primary/demo/inverse receivers through signed execution-history HTTP and native mappers. Preserves five-page cap, raw-row diagnostics, valid primary prefixes after later throws, source limit behavior, and actual order-history recovery; Spot inherits empty history. Compiled fresh-master family regressions and maintained reader source corpus cover production composition."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchIncomeHistory"
