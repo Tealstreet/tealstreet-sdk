@@ -41,7 +41,10 @@ normalizer record boundaries keep their existing declarations.
 
 The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly and
 async observation choices cite their explicit MANIFEST-SPEC anchors; ready
-private-refresh reactions suspend before disposal checks, updates and reports.
+private-refresh reactions suspend before disposal checks and updates. All three
+refresh callbacks silently catch fetch and Store-update failures, matching source.
+The real private-account-frame regression rejects its balance REST refresh and
+checks that the old balance survives with no host exception report.
 
 The API request callback signs an already serialized string body verbatim on
 replay, matching the bytes Axios sends. Other truthy values still use JSON

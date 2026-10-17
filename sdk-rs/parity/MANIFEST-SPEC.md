@@ -1576,13 +1576,14 @@ production JavaScript/transport/Store assembly.
 
 ### WEEX reporting and continuation ownership
 
-`fetchOrders`, the three private refresh callbacks and public depth-gap recovery
-choose observable rejection reporting where the maintained source discards
-failures. Silent partial orders or stale private/book state would hide missing
-updates from native callers. The added reporter call, and any failure of a
-fallible reporter, are observable costs; source empty catches are not copied.
+The three private refresh callbacks silently catch fetch and Store-update failures,
+matching the maintained source. A constructed account frame with a rejected REST
+balance refresh retains the old balance without reporting a host exception.
+`fetchOrders` reporting is corrected separately; public depth-gap recovery still
+reports failures discarded by source, an open porting finding.
 
-The returned `fetchOrders` and refresh futures own their aggregation/update/report
+The returned `fetchOrders` future owns its aggregation/dedup continuation;
+refresh futures own update
 continuations. Dropping one can omit those outcomes, even when host-started
 requests survive. This bounds abandoned native work instead of requiring every
 borrowed host context to survive an unobserved Promise. Public snapshot observers
@@ -1592,7 +1593,7 @@ not a cancellation proof from a recording fixture.
 
 The imported `settled` capability supplies Promise.allSettled reaction semantics
 and peer retention. Refresh reactions suspend after a ready fetch result before
-checking disposal or applying/reporting it. These boundaries do not implement an
+checking disposal or applying it. These boundaries do not implement an
 entire JavaScript microtask scheduler. Shared pager ownership and callback costs
 remain at [exchange-runtime-callback-choice](#exchange-runtime-callback-choice)
 and [shared-handler-and-ledger-choice](#shared-handler-and-ledger-choice).
