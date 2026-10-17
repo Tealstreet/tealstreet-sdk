@@ -6,7 +6,9 @@ use std::process::Command;
 #[path = "support/capture_metadata.rs"]
 mod capture_metadata;
 
-fn lone_unit_diagnostic(id: &str) -> &'static str {
+// Standalone Value still rejects in its JSON string parser. Typed numeric roots
+// first retain UTF-16, then reject at their explicit Rust String projection.
+fn value_lone_unit_diagnostic(id: &str) -> &'static str {
     match id {
         "high" => "unexpected end of hex escape",
         "low" => "lone leading surrogate in hex escape",
@@ -95,7 +97,7 @@ fn probe<T: DeserializeOwned + Serialize + JsNumberOutput>(
             );
             let error = decoded.err().expect("whole record refused").to_string();
             assert!(
-                error.starts_with(lone_unit_diagnostic(id)),
+                error.starts_with("invalid utf-16: lone surrogate found"),
                 "whole record surrogate refusal attribution {route} {} {}: {error}",
                 case["root"],
                 case["id"]
@@ -123,7 +125,7 @@ fn probe<T: DeserializeOwned + Serialize + JsNumberOutput>(
             .expect_err("Value boundary refuses before owned or borrowed typed route")
             .to_string();
         assert!(
-            error.starts_with(lone_unit_diagnostic(id)),
+            error.starts_with(value_lone_unit_diagnostic(id)),
             "upstream Value surrogate refusal attribution {} {}: {error}",
             case["root"],
             case["id"]
@@ -345,7 +347,7 @@ fn ignored_string_probe<T: DeserializeOwned + Serialize + JsNumberOutput>(
             });
             let message = error.to_string();
             assert!(
-                message.starts_with(lone_unit_diagnostic(case["id"].as_str().unwrap())),
+                message.starts_with("invalid utf-16: lone surrogate found"),
                 "ignored string refusal attribution {route}: {message}"
             );
             refused += 1;
