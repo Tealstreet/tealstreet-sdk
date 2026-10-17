@@ -1,5 +1,6 @@
 const B = require('bignumber.js');
 const specs = [
+ ['huge_finite','string','1e1000'],['negative_huge_finite','string','-1e1000'],['tiny_finite','string','1e-1000'],['negative_tiny_finite','string','-1e-1000'],
  ['tiny','number','-0.004'],['negative_zero','number','-0'],['zero','number','0'],
  ['positive','number','1.25'],['negative','number','-2.5'],
  ['infinity','number','Infinity'],['negative_infinity','number','-Infinity'],['nan','number','NaN'],
@@ -11,7 +12,7 @@ const specs = [
 ].map(([tag,kind,value])=>({tag,kind,value}));
 const input = s => s.kind==='number'?Number(s.value):s.value;
 const number = n => Object.is(n,-0)?'-0':String(n);
-const view = n => ({str:n.toString(),value:n.valueOf(),fixed:[n.toFixed(),n.toFixed(0),n.toFixed(2),n.toFixed(6)],json:JSON.stringify({sz:n}),nan:n.isNaN(),number:number(n.toNumber())});
+const view = n => ({str:n.toString(),value:n.valueOf(),fixed:[n.toFixed(),n.toFixed(0),n.toFixed(2),n.toFixed(6)],json:JSON.stringify({sz:n}),nan:n.isNaN(),finite:n.isFinite(),number:number(n.toNumber())});
 const scalars=specs.map(spec=>{const n=new B(input(spec));return {spec,result:view(n),clone:view(new B(n))}});
 const operations=['plus','minus','times','multipliedBy','idiv','dividedToIntegerBy'];
 const comparisons=['lt','lte','gt','gte','eq','isEqualTo'];
