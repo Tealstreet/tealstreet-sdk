@@ -809,6 +809,150 @@
       }
     }
   },
+  "safe_cex_registry::native_account::NativeHistoricalPositionOptions": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "account": "sample-account",
+      "from": 1,
+      "to": 2
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"account\":row.account,\"fromBits\":row.from.map(|v|v.to_bits().to_string()),\"toBits\":row.to.map(|v|v.to_bits().to_string()),\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "account",
+        "fromBits",
+        "toBits",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"account\":\"first\",\"from\":-0.0,\"to\":1.5,\"tag\":true}",
+          "output": {
+            "ok": true,
+            "account": "first",
+            "fromBits": "9223372036854775808",
+            "toBits": "4609434218613702656",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"account\":\"second\"}",
+          "output": {
+            "ok": true,
+            "account": "second",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "{\"account\":\"third\",\"from\":null,\"to\":null}",
+          "output": {
+            "ok": true,
+            "account": "third",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "[\"first\",1,2]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":\"a\",\"from\":\"1\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_registry::native_account::NativeOrderId": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "id": "sample-id"
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"id\":row.id,\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"first\",\"tag\":true}",
+          "output": {
+            "ok": true,
+            "id": "first",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"id\":\"second\",\"nested\":[]}",
+          "output": {
+            "ok": true,
+            "id": "second",
+            "extraKeys": [
+              "nested"
+            ]
+          }
+        },
+        {
+          "input": "[\"first\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"id\":7}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_registry::native_host::AdapterFactory": {
     "category": "non-decoder",
     "evidence": "safe-cex-registry/src/native_host.rs::AdapterFactory: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
@@ -895,6 +1039,84 @@
         }
       }
     }
+  },
+  "safe_cex_registry::native_host::query": {
+    "api": {
+      "kind": "function",
+      "name": "query",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::query_value::QueryValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
+    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
+    "cases": [
+      {
+        "input": null,
+        "output": "Null"
+      },
+      {
+        "input": false,
+        "output": "Bool(false)"
+      },
+      {
+        "input": 2.5,
+        "output": "Number(2.5)"
+      },
+      {
+        "input": "BTC $",
+        "output": "String(\"BTC $\")"
+      },
+      {
+        "input": [
+          true,
+          3,
+          "ETH",
+          null
+        ],
+        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
+      },
+      {
+        "input": {
+          "coin": [
+            "BTC",
+            "ETH"
+          ],
+          "nested": {
+            "enabled": false
+          }
+        },
+        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
+      }
+    ]
   },
   "safe_cex_registry::public_data::get_candle_subscription_key": {
     "api": {
@@ -1958,81 +2180,495 @@
       }
     }
   },
-  "safe_cex_registry::native_host::query": {
-    "api": {
-      "kind": "function",
-      "name": "query",
-      "signature": {
-        "inputs": [
-          [
-            "value",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
+  "safe_cex_registry::external_public_data::ExternalPublicDataProvider": {
+    "shape": "observed",
+    "evidence": "The production external_public_data provider owns gateway/controller state, not a replacement raw-frame parser. Constructor observations retain literal URL/exchange/auth fields. Subscription observations execute its actual registration, send, and returned cleanup against a scripted GatewaySocket I/O dependency, checking real outgoing subscribe/unsubscribe frames and listener state. Incoming frame admission remains separately required; tests/public_data_providers.rs covers production incoming frames and lifecycle. TS external-public-data.ts constructor and subscribeOrderbook preserve these inputs.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "parent",
+                {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_registry::public_data_host::PublicDataParent",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_registry::external_public_data::GatewayHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
                     "args": null
                   }
                 }
+              ],
+              [
+                "exchange_id",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "auth_token",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
               }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Constructor receives literal URL/exchange/auth strings; observe retained production fields and initial state rather than classify raw strings as typed.",
+        "call": "{ #[allow(unused_imports)] use std::{rc::Rc,cell::{Cell,RefCell}};\nuse safe_cex_exchange::runtime::{ExchangeError,LogSeverity};\n#[allow(unused_imports)] use crate::public_data_host::{PublicDataParent,PublicDataSnapshot,PublicDataUpdate,TickerBatch,MarketBatch,PublicDataCleanup};\nstruct Parent;\nimpl PublicDataParent for Parent {\n fn name(&self)->String {\"txflow\".into()} fn now_ms(&self)->f64 {0.0}\n fn loaded(&self)->safe_cex_types::StoreDataLoaded {panic!(\"unexpected parent read\")}\n fn tickers(&self)->TickerBatch {panic!(\"unexpected parent read\")}\n fn adapt_markets(&self,_:MarketBatch)->Result<MarketBatch,ExchangeError> {panic!(\"unexpected parent adaptation\")}\n fn update(&self,_:PublicDataUpdate)->Result<(),ExchangeError> {panic!(\"unexpected parent update\")}\n fn emit_log(&self,_:String,_:LogSeverity)->Result<(),ExchangeError> {Ok(())}\n}\nuse crate::external_public_data::{GatewayHost,GatewaySocket,GatewayTimerCallback};\nstruct Host;\nimpl GatewayHost for Host {\n fn create_socket(&self,_:&str)->Result<Rc<dyn GatewaySocket>,ExchangeError> {panic!(\"unexpected dial\")}\n fn reconnect_delay_ms(&self)->f64 {1000.0}\n fn set_timeout(&self,_:f64,_:GatewayTimerCallback)->Result<std::num::NonZeroU64,ExchangeError> {panic!(\"unexpected timer\")}\n fn clear_timeout(&self,_:std::num::NonZeroU64)->Result<(),ExchangeError> {panic!(\"unexpected timer cancellation\")}\n}\n let provider=$type::new(Rc::new(Parent),Rc::new(Host),$value[\"url\"].as_str().unwrap().into(),$value[\"exchange\"].as_str().unwrap().into(),$value[\"auth\"].as_str().map(str::to_owned)); serde_json::json!({\"url\":provider.url,\"exchange\":provider.exchange_id,\"auth\":provider.auth_token,\"initialized\":provider.initialized.get(),\"disposed\":provider.is_disposed.get()}) }",
+        "cases": [
+          {
+            "input": {
+              "url": "ws://gateway/a",
+              "exchange": "bybit",
+              "auth": null
+            },
+            "output": {
+              "url": "ws://gateway/a",
+              "exchange": "bybit",
+              "auth": null,
+              "initialized": false,
+              "disposed": false
             }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "safe_cex_types::query_value::QueryValue",
-            "args": null
+          },
+          {
+            "input": {
+              "url": "wss://gateway/b?x=1",
+              "exchange": "okx",
+              "auth": "literal-token"
+            },
+            "output": {
+              "url": "wss://gateway/b?x=1",
+              "exchange": "okx",
+              "auth": "literal-token",
+              "initialized": false,
+              "disposed": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "subscribe_orderbook",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "Self"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_registry::in_process_public_data::OrderbookObserver",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_registry::public_data_host::PublicDataCleanup",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
           }
         },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
+        "input": "observed",
+        "reason": "Execute actual symbol registration and cleanup, observing generated gateway frames with scripted socket I/O.",
+        "call": "{ #[allow(unused_imports)] use std::{rc::Rc,cell::{Cell,RefCell}};\nuse safe_cex_exchange::runtime::{ExchangeError,LogSeverity};\n#[allow(unused_imports)] use crate::public_data_host::{PublicDataParent,PublicDataSnapshot,PublicDataUpdate,TickerBatch,MarketBatch,PublicDataCleanup};\nstruct Parent;\nimpl PublicDataParent for Parent {\n fn name(&self)->String {\"txflow\".into()} fn now_ms(&self)->f64 {0.0}\n fn loaded(&self)->safe_cex_types::StoreDataLoaded {panic!(\"unexpected parent read\")}\n fn tickers(&self)->TickerBatch {panic!(\"unexpected parent read\")}\n fn adapt_markets(&self,_:MarketBatch)->Result<MarketBatch,ExchangeError> {panic!(\"unexpected parent adaptation\")}\n fn update(&self,_:PublicDataUpdate)->Result<(),ExchangeError> {panic!(\"unexpected parent update\")}\n fn emit_log(&self,_:String,_:LogSeverity)->Result<(),ExchangeError> {Ok(())}\n}\nuse crate::external_public_data::{GatewayHost,GatewaySocket,GatewayListener,GatewayTimerCallback};\nstruct Host;\nimpl GatewayHost for Host {\n fn create_socket(&self,_:&str)->Result<Rc<dyn GatewaySocket>,ExchangeError> {panic!(\"unexpected dial\")}\n fn reconnect_delay_ms(&self)->f64 {1000.0}\n fn set_timeout(&self,_:f64,_:GatewayTimerCallback)->Result<std::num::NonZeroU64,ExchangeError> {panic!(\"unexpected timer\")}\n fn clear_timeout(&self,_:std::num::NonZeroU64)->Result<(),ExchangeError> {panic!(\"unexpected timer cancellation\")}\n}\n#[derive(Default)] struct Socket { texts:RefCell<Vec<String>> }\nimpl GatewaySocket for Socket {\n fn ready_state(&self)->u16 {1}\n fn add_listener(&self,_:&'static str,_:GatewayListener)->Result<(),ExchangeError> {panic!(\"unexpected listener registration\")}\n fn send(&self,text:String)->Result<(),ExchangeError> {self.texts.borrow_mut().push(text);Ok(())}\n fn close(&self)->Result<(),ExchangeError> {Ok(())}\n}\n let provider=$type::new(Rc::new(Parent),Rc::new(Host),\"ws://scripted\".into(),\"txflow\".into(),None); let socket=Rc::new(Socket::default()); *provider.ws.borrow_mut()=Some(socket.clone()); let symbol=$value.as_str().unwrap(); let cleanup=provider.subscribe_orderbook(symbol.into(),Rc::new(|_| Ok(()))).unwrap(); let registered=super::has_listener(&provider.orderbook_callbacks,symbol); cleanup().unwrap(); let active=super::has_listener(&provider.orderbook_callbacks,symbol); let frames:Vec<serde_json::Value>=socket.texts.borrow().iter().map(|text|serde_json::from_str(text).unwrap()).collect(); serde_json::json!({\"registered\":registered,\"active\":active,\"frames\":frames}) }",
+        "cases": [
+          {
+            "input": "BTCUSDT",
+            "output": {
+              "registered": true,
+              "active": false,
+              "frames": [
+                {
+                  "type": "subscribe",
+                  "exchangeId": "txflow",
+                  "channel": "orderbook",
+                  "symbol": "BTCUSDT"
+                },
+                {
+                  "type": "unsubscribe",
+                  "exchangeId": "txflow",
+                  "channel": "orderbook",
+                  "symbol": "BTCUSDT"
+                }
+              ]
+            }
+          },
+          {
+            "input": "ETH:USD",
+            "output": {
+              "registered": true,
+              "active": false,
+              "frames": [
+                {
+                  "type": "subscribe",
+                  "exchangeId": "txflow",
+                  "channel": "orderbook",
+                  "symbol": "ETH:USD"
+                },
+                {
+                  "type": "unsubscribe",
+                  "exchangeId": "txflow",
+                  "channel": "orderbook",
+                  "symbol": "ETH:USD"
+                }
+              ]
+            }
+          }
+        ]
       }
-    },
-    "category": "decoder",
-    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
-    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
-    "cases": [
+    ]
+  },
+  "safe_cex_registry::in_process_public_data::InProcessPublicDataProvider": {
+    "shape": "observed",
+    "evidence": "The actual in-process provider constructor retains typed parent/source capabilities. Its raw String subscription entrypoint delegates to the supplied InProcessSource. Finite observations execute that actual production forwarding body with a scripted source I/O dependency and observe exact symbol, Rc callback identity and returned cleanup. They do not claim incoming snapshot decoding, source implementation behavior or the unavailable native source registry. TS exchanges/in-process-public-data.ts subscribeOrderbook delegates to its source; tests/public_data_providers.rs separately covers live provider snapshot/state behavior.",
+    "entrypoints": [
       {
-        "input": null,
-        "output": "Null"
-      },
-      {
-        "input": false,
-        "output": "Bool(false)"
-      },
-      {
-        "input": 2.5,
-        "output": "Number(2.5)"
-      },
-      {
-        "input": "BTC $",
-        "output": "String(\"BTC $\")"
-      },
-      {
-        "input": [
-          true,
-          3,
-          "ETH",
-          null
-        ],
-        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
-      },
-      {
-        "input": {
-          "coin": [
-            "BTC",
-            "ETH"
-          ],
-          "nested": {
-            "enabled": false
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "parent",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_registry::public_data_host::PublicDataParent",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "source",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_registry::in_process_public_data::InProcessSource",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
           }
         },
-        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
+        "input": "typed",
+        "reason": "Constructor accepts only already typed parent/source trait object capabilities; compiler raw-input role is false."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "subscribe_orderbook",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_registry::in_process_public_data::OrderbookObserver",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_registry::public_data_host::PublicDataCleanup",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Observe real String/callback/cleanup delegation without treating raw text as a typed-only input.",
+        "call": "{ #[allow(unused_imports)] use std::{rc::Rc,cell::{Cell,RefCell}};\nuse safe_cex_exchange::runtime::{ExchangeError,LogSeverity};\n#[allow(unused_imports)] use crate::public_data_host::{PublicDataParent,PublicDataSnapshot,PublicDataUpdate,TickerBatch,MarketBatch,PublicDataCleanup};\nstruct Parent;\nimpl PublicDataParent for Parent {\n fn name(&self)->String {\"txflow\".into()} fn now_ms(&self)->f64 {0.0}\n fn loaded(&self)->safe_cex_types::StoreDataLoaded {panic!(\"unexpected parent read\")}\n fn tickers(&self)->TickerBatch {panic!(\"unexpected parent read\")}\n fn adapt_markets(&self,_:MarketBatch)->Result<MarketBatch,ExchangeError> {panic!(\"unexpected parent adaptation\")}\n fn update(&self,_:PublicDataUpdate)->Result<(),ExchangeError> {panic!(\"unexpected parent update\")}\n fn emit_log(&self,_:String,_:LogSeverity)->Result<(),ExchangeError> {Ok(())}\n}\nuse crate::in_process_public_data::{InProcessSource,PublicDataObserver,OrderbookObserver,CandleObserver};\nstruct Source { symbols:RefCell<Vec<String>>, cleanup:Rc<Cell<bool>>, expected:OrderbookObserver, same:Cell<bool> }\nimpl InProcessSource for Source {\n fn snapshot(&self)->Result<PublicDataSnapshot,ExchangeError> {panic!(\"unexpected source snapshot\")}\n fn subscribe(&self,_:PublicDataObserver)->Result<PublicDataCleanup,ExchangeError> {panic!(\"unexpected source subscription\")}\n fn listen_order_book(&self,symbol:String,callback:OrderbookObserver)->Result<PublicDataCleanup,ExchangeError> {self.symbols.borrow_mut().push(symbol);self.same.set(Rc::ptr_eq(&callback,&self.expected));let cleanup=self.cleanup.clone();Ok(Rc::new(move || {cleanup.set(true);Ok(())}))}\n fn listen_ohlcv(&self,_:safe_cex_types::OHLCVOptions,_:CandleObserver)->Result<PublicDataCleanup,ExchangeError> {panic!(\"unexpected candle subscription\")}\n}\n let callback:OrderbookObserver=Rc::new(|_|Ok(())); let source=Rc::new(Source {symbols:RefCell::default(),cleanup:Rc::new(Cell::new(false)),expected:callback.clone(),same:Cell::new(false)}); let provider=$type::new(Rc::new(Parent),source.clone()); let cleanup=provider.subscribe_orderbook($value.as_str().unwrap().into(),callback).unwrap(); cleanup().unwrap(); serde_json::json!({\"symbols\":*source.symbols.borrow(),\"sameCallback\":source.same.get(),\"cleaned\":source.cleanup.get()}) }",
+        "cases": [
+          {
+            "input": "BTCUSDT",
+            "output": {
+              "symbols": [
+                "BTCUSDT"
+              ],
+              "sameCallback": true,
+              "cleaned": true
+            }
+          },
+          {
+            "input": "ETH:USD",
+            "output": {
+              "symbols": [
+                "ETH:USD"
+              ],
+              "sameCallback": true,
+              "cleaned": true
+            }
+          }
+        ]
       }
     ]
   },
@@ -3081,149 +3717,5 @@
         "reason": "Stores the supplied typed constructor factory without interpreting or deserializing its future call arguments."
       }
     ]
-  },
-  "safe_cex_registry::native_account::NativeHistoricalPositionOptions": {
-    "shape": "map",
-    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
-    "sample": {
-      "account": "sample-account",
-      "from": 1,
-      "to": 2
-    },
-    "entrypoints": [],
-    "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"account\":row.account,\"fromBits\":row.from.map(|v|v.to_bits().to_string()),\"toBits\":row.to.map(|v|v.to_bits().to_string()),\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-      "nativeFields": [
-        "account",
-        "fromBits",
-        "toBits",
-        "extraKeys"
-      ],
-      "cases": [
-        {
-          "input": "{\"account\":\"first\",\"from\":-0.0,\"to\":1.5,\"tag\":true}",
-          "output": {
-            "ok": true,
-            "account": "first",
-            "fromBits": "9223372036854775808",
-            "toBits": "4609434218613702656",
-            "extraKeys": [
-              "tag"
-            ]
-          }
-        },
-        {
-          "input": "{\"account\":\"second\"}",
-          "output": {
-            "ok": true,
-            "account": "second",
-            "fromBits": null,
-            "toBits": null,
-            "extraKeys": []
-          }
-        },
-        {
-          "input": "{\"account\":\"third\",\"from\":null,\"to\":null}",
-          "output": {
-            "ok": true,
-            "account": "third",
-            "fromBits": null,
-            "toBits": null,
-            "extraKeys": []
-          }
-        },
-        {
-          "input": "[\"first\",1,2]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"account\":\"a\",\"from\":\"1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"account\":null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_registry::native_account::NativeOrderId": {
-    "shape": "map",
-    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
-    "sample": {
-      "id": "sample-id"
-    },
-    "entrypoints": [],
-    "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"id\":row.id,\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-      "nativeFields": [
-        "id",
-        "extraKeys"
-      ],
-      "cases": [
-        {
-          "input": "{\"id\":\"first\",\"tag\":true}",
-          "output": {
-            "ok": true,
-            "id": "first",
-            "extraKeys": [
-              "tag"
-            ]
-          }
-        },
-        {
-          "input": "{\"id\":\"second\",\"nested\":[]}",
-          "output": {
-            "ok": true,
-            "id": "second",
-            "extraKeys": [
-              "nested"
-            ]
-          }
-        },
-        {
-          "input": "[\"first\"]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"id\":7}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
   }
 }
