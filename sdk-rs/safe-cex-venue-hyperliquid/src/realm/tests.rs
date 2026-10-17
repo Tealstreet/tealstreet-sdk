@@ -775,3 +775,52 @@ fn market_host_iterator_rejects_primitive_iterator_before_first_step() {
         "actual market host must reject a primitive iterator before reading next"
     );
 }
+
+#[test]
+fn production_builder_import_preserves_configured_value_and_lazy_default() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-builder-config.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 5);
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("resolveHyperliquidBuilder").unwrap();
+    let address = "0x1111111111111111111111111111111111111111";
+    let builders = [
+        r.object_from(vec![
+            ("address", Value::str(address)),
+            ("feeTenthsBps", Value::str("10")),
+        ]),
+        r.object_from(vec![("feeTenthsBps", Value::Number(7.))]),
+        Value::Bool(false),
+        Value::Number(17.),
+        Value::str("raw"),
+    ];
+    for (index, builder) in builders.into_iter().enumerate() {
+        let options = r.object_from(vec![
+            ("hyperliquidBuilder", builder.clone()),
+            ("testnet", Value::Bool(true)),
+        ]);
+        let result = r.call(&imported, &Value::Undefined, &[options]).unwrap();
+        assert!(
+            result.strict_equal(&builder),
+            "configured builder identity/type case {index}"
+        );
+        assert_eq!(
+            r.to_serde(&result).unwrap(),
+            source[index]["result"],
+            "source case {index}"
+        );
+        assert_eq!(source[index]["same"], true);
+        assert_eq!(source[index]["testnetReads"], 0);
+    }
+}
