@@ -1,7 +1,7 @@
 //! MEXC request primitives; query collation and the client are separate pending rows.
 use crate::types::PUBLIC_ENDPOINTS;
 use hmac::{Hmac, Mac};
-use safe_cex_num::{JsCoercionError, JsJsonValue, js_json_stringify};
+use safe_cex_num::{JsCoercionError, JsJsonValue};
 use sha2::Sha256;
 
 pub fn sign_mexc_request(
@@ -58,12 +58,13 @@ pub fn is_mexc_public_endpoint(url: Option<&str>) -> bool {
     })
 }
 
-pub fn normalize_request_data(data: &JsJsonValue) -> Result<String, JsCoercionError> {
+pub fn normalize_request_data(data: &safe_cex_types::retained_json::RetainedJsonInput) -> Result<String, JsCoercionError> {
     match data {
-        JsJsonValue::Undefined | JsJsonValue::Null => Ok(String::new()),
-        JsJsonValue::String(s) => Ok(s.clone()),
-        _ => Ok(js_json_stringify(data)?.unwrap_or_default()),
+        safe_cex_types::retained_json::RetainedJsonInput::Undefined | safe_cex_types::retained_json::RetainedJsonInput::Null => Ok(String::new()),
+        safe_cex_types::retained_json::RetainedJsonInput::Text(units) => String::from_utf16(units).map_err(|_|JsCoercionError{name:"RepresentationError",message:"request text is outside the UTF-8 preimage boundary"}),
+        _ => Ok(safe_cex_num::js_retained_json_stringify(data)?.unwrap_or_default()),
     }
+
 }
 
 // ts: serializeMexcParams. qs's default RFC3986 codec encodes brackets too.

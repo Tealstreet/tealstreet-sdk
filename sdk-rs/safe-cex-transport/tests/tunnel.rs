@@ -7,7 +7,7 @@ use safe_cex_transport::{
         TunnelSocket, TunnelTask,
     },
 };
-use safe_cex_types::QueryValue as Q;
+use safe_cex_types::{QueryValue as Q, retained_json::RetainedJsonInput as Input};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -102,7 +102,8 @@ impl TunnelSocket for FakeVenue {
                         if let Some(body) = self.response_data_json.borrow().as_ref() {
                             let nonce = serde_json::to_string(&value["nonce"]).unwrap();
                             let frame = format!(
-                                r#"{{"type":"rpc.http","nonce":{nonce},"data":{{"config":{{}},"status":200,"status_text":"OK","headers":{{}},"data":{body}}}}}"#
+                                r#"{{"type":"rpc.http","nonce":{nonce},"ignored":"\ud800","data":{{"config":{{"url":{url}}},"status":200,"status_text":"OK","headers":{{}},"data":{body}}}}}"#,
+                                url=serde_json::to_string(&value["arg"]["url"]).unwrap()
                             );
                             self.frames
                                 .borrow_mut()
@@ -1632,7 +1633,7 @@ fn custom_parser_and_forced_region_are_used_on_both_request_and_raw_response() {
             region: Some(HOWRegion::JA),
             custom_parser: Some(Rc::new(move |text| {
                 observed.borrow_mut().push(text.to_owned());
-                Ok(json!({"parsed":text}))
+                Ok(Input::from_value(json!({"parsed":text})).unwrap())
             })),
         },
     )
@@ -1714,7 +1715,7 @@ fn parser_consumed_deadline_does_not_send_or_close_the_shared_connection() {
                 if text.contains("expire") {
                     clock.set(1000);
                 }
-                Ok(json!({"parsed":text}))
+                Ok(Input::from_value(json!({"parsed":text})).unwrap())
             })),
             ..Default::default()
         },
@@ -1852,7 +1853,7 @@ fn expired_preparation_skips_parser_even_when_later_send_guard_also_rejects() {
         CreateAxiosHttpOverWebsocketAdapterOptions {
             custom_parser: Some(Rc::new(move |_| {
                 observed.set(observed.get() + 1);
-                Ok(json!({}))
+                Ok(Input::Object(Vec::new()))
             })),
             ..Default::default()
         },
@@ -2696,25 +2697,11 @@ fn ordinary_how_response_preserves_native_shape_without_json_projection() {
     let safe_cex_transport::RestResponseBody::Untransformed(value) = response.body else {
         panic!("ordinary HOW response must retain native untransformed data");
     };
-    assert_eq!(
-        value.as_object().unwrap().keys().collect::<Vec<_>>(),
-        vec!["z", "a", "nested"],
-        "ordinary HOW response retains insertion order"
-    );
-    assert_eq!(
-        value["z"].as_f64().unwrap().to_bits(),
-        (-0_f64).to_bits(),
-        "ordinary HOW response retains signed zero bits"
-    );
-    assert!(
-        value["a"].is_number(),
-        "ordinary HOW response must not project overflow to null"
-    );
-    assert_eq!(
-        value["nested"],
-        json!([null, true, "123"]),
-        "ordinary HOW response retains native nested shape"
-    );
+    assert_eq!(keys(&value),["z","a","nested"].iter().map(|key|key.encode_utf16().collect::<Vec<_>>()).collect::<Vec<_>>(),"ordinary HOW response retains insertion order");
+    assert_eq!(bits(field(&value,"z")),"8000000000000000","ordinary HOW response retains signed zero bits");
+    assert!(matches!(field(&value,"a"),Input::Float(value) if *value==f64::INFINITY),"ordinary HOW response must not project overflow to null");
+    assert_eq!(field(&value,"nested").clone().into_value().unwrap(),json!([null,true,"123"]),"ordinary HOW response retains native nested shape");
+
 }
 
 #[test]
@@ -3004,46 +2991,68 @@ fn surrogate_source() -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-// Diagnostic admission witnesses for the proposed retained response-carrier
-// cutover. Payload code-unit assertions require the approved canonical API.
+fn retained_field<'a>(value: &'a Input, key: &[u16]) -> &'a Input {
+    let Input::Object(fields)=value else {panic!("retained object required: {value:?}")};
+    fields.iter().rev().find(|(name,_)|name==key).map(|(_,value)|value).expect("own field")
+}
+fn field<'a>(value:&'a Input,key:&str)->&'a Input {retained_field(value,&key.encode_utf16().collect::<Vec<_>>())}
+fn units(value:&Input)->&[u16] {let Input::Text(units)=value else {panic!("retained text required")};units}
+fn bits(value:&Input)->String {let Input::Float(number)=value else {panic!("native Float required: {value:?}")};format!("{:016x}",number.to_bits())}
+fn keys(value:&Input)->Vec<Vec<u16>> {
+    let Input::Object(fields)=value else {panic!("retained object keys required")};
+    safe_cex_types::js_coercion::js_own_keys_utf16(fields.iter().map(|(key,_)|key.as_slice())).into_iter().map(<[u16]>::to_vec).collect()
+}
+fn retained_observation(value:&Input)->Value {
+    let Input::Array(rows)=field(value,"list") else {panic!("both retained rows required")};
+    assert_eq!(rows.len(),2,"independent native row census");
+    let own=field(value,"own");
+    let own_keys=keys(own);
+    json!({
+        "keys":keys(value), "label":units(field(value,"label")),
+        "loneKeyValue":units(retained_field(value,&[0xdfff])),"low":units(field(value,"low")),
+        "rows":rows.iter().map(|row|json!({"keys":keys(row).iter().map(|key|String::from_utf16(key).unwrap()).collect::<Vec<_>>(),"id":bits(field(row,"id")),"amount":bits(field(row,"amount"))})).collect::<Vec<_>>(),
+        "duplicate":bits(field(value,"dup")),"tiny":bits(field(value,"tiny")),
+        "ownKeys":own_keys.iter().map(|key|String::from_utf16(key).unwrap()).collect::<Vec<_>>(),
+        "ownValues":own_keys.iter().map(|key|String::from_utf16(units(retained_field(own,key))).unwrap()).collect::<Vec<_>>(),
+    })
+}
+
 #[test]
 fn how_lone_surrogate_ordinary_frame_settles_the_real_request() {
-    let source = surrogate_source();
-    assert_eq!(source["delivered"], 1);
-    assert_eq!(source["ordinary"]["label"], json!([116, 112, 32, 0xd800]));
-    let host = FakeHost::new();
-    *host.venue.response_data_json.borrow_mut() = Some(source["body"].as_str().unwrap().into());
-    let adapter = HowRestAdapter::new(host.clone(), None, false).unwrap();
-    let result = host.run(leaf_error(adapter.execute(request("/surrogate"))));
-    assert!(
-        result.is_ok(),
-        "valid source HOW UTF-16 response must settle instead of timing out: {result:?}"
-    );
+    let source=surrogate_source();
+    assert_eq!(source["delivered"],1);
+    assert_eq!(source["ordinary"]["rows"].as_array().unwrap().len(),2,"source row census");
+    for name in ["raw","gzipBinary","gzipBase64"] {assert_eq!(source[name],source["ordinary"],"actual source path {name}");}
+    let host=FakeHost::new();
+    *host.venue.response_data_json.borrow_mut()=Some(source["body"].as_str().unwrap().into());
+    let adapter=HowRestAdapter::new(host.clone(),None,false).unwrap();
+    let result=host.run(adapter.execute_with_receipt(request("/surrogate")));
+    assert!(result.is_ok(),"valid source HOW UTF-16 response must settle instead of timing out: {result:?}");
+    let receipt=result.unwrap();
+    assert_eq!(receipt.config.url,"/surrogate","caller config receipt");
+    assert_eq!(receipt.response.status,200);
+    assert_eq!(receipt.response.reason,None);
+    assert!(receipt.response.headers.is_empty());
+    assert!(receipt.response.body.json_value().is_err(),"native delivery must not require a UTF-8 model projection");
+    let safe_cex_transport::RestResponseBody::Untransformed(value)=receipt.response.body else {panic!("ordinary response provenance")};
+    assert_eq!(retained_observation(&value),source["ordinary"],"complete retained ordinary response");
 }
 #[test]
 fn how_lone_surrogate_raw_parser_returns_the_complete_object() {
     use safe_cex_transport::how_config::CreateAxiosHttpOverWebsocketAdapterOptions;
-    let source = surrogate_source();
-    assert_eq!(source["raw"]["rows"], 2);
-    let host = FakeHost::new();
-    *host.venue.raw_response_body.borrow_mut() = Some(source["body"].as_str().unwrap().into());
-    let adapter = HowRestAdapter::with_options(
-        host.clone(),
-        CreateAxiosHttpOverWebsocketAdapterOptions {
-            region: None,
-            custom_parser: Some(Rc::new(|text| {
-                Ok(safe_cex_transport::how::json_parse(text))
-            })),
-        },
-    )
-    .unwrap();
-    let response = host
-        .run(leaf_error(adapter.execute(request("/surrogate-raw"))))
-        .unwrap();
-    let value = response.body.json_value().unwrap();
-    assert!(
-        value.is_object(),
-        "valid source raw parser result must remain an object, got {value:?}"
-    );
-    assert_eq!(value["list"], json!([1, 2]), "complete raw response rows");
+    let source=surrogate_source();
+    assert_eq!(source["raw"]["rows"].as_array().unwrap().len(),2);
+    let host=FakeHost::new();
+    *host.venue.raw_response_body.borrow_mut()=Some(source["body"].as_str().unwrap().into());
+    let calls=Rc::new(Cell::new(0)); let parser_calls=calls.clone();
+    let adapter=HowRestAdapter::with_options(host.clone(),CreateAxiosHttpOverWebsocketAdapterOptions{
+        region:None,custom_parser:Some(Rc::new(move |text|{parser_calls.set(parser_calls.get()+1);Ok(safe_cex_transport::how::json_parse(text))})),
+    }).unwrap();
+    let response=host.run(leaf_error(adapter.execute(request("/surrogate-raw")))).unwrap();
+    assert_eq!(calls.get(),1,"only raw response text invokes custom parser");
+    assert_eq!(response.status,403);
+    assert_eq!(response.headers.get("X-Quota").map(String::as_str),Some("12"));
+    assert!(response.body.json_value().is_err(),"native custom parser output must precede typed projection");
+    let safe_cex_transport::RestResponseBody::Transformed(value)=response.body else {panic!("custom parser provenance")};
+    assert_eq!(retained_observation(&value),source["raw"],"complete retained raw response");
 }

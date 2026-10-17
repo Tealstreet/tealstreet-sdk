@@ -24,7 +24,7 @@ struct ResponseTransform {
 }
 fn transform_response(response: &mut RestResponse) {
     response.body = response.body.clone().transform(|data| match data {
-        Value::String(text) => safe_cex_transport::how::big_int_as_string_json_parse(&text),
+        safe_cex_types::retained_json::RetainedJsonInput::Text(text) => safe_cex_transport::how::big_int_as_string_json_parse(&String::from_utf16_lossy(&text)),
         data => data,
     });
 }
@@ -113,8 +113,7 @@ impl RestAdapter for MexcAttempt {
                     normalize_request_data(
                         &data
                             .cloned()
-                            .map(JsJsonValue::from)
-                            .unwrap_or(JsJsonValue::Undefined),
+                            .unwrap_or(safe_cex_types::retained_json::RetainedJsonInput::Undefined),
                     )
                     .map_err(|e| RestFailure::pre_transmit(e.message.into(), request.clone()))?
                 };
@@ -138,9 +137,9 @@ impl RestAdapter for MexcAttempt {
                 if !body.is_empty() {
                     request.body = Some(match request.body.as_ref() {
                         Some(previous) => previous
-                            .with_signed_data(Value::String(body))
+                            .with_signed_data(safe_cex_types::retained_json::RetainedJsonInput::Text(body.encode_utf16().collect()))
                             .map_err(|e| RestFailure::from_transport(e, request.clone()))?,
-                        None => RestBody::Untransformed(Value::String(body)),
+                        None => RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::Text(body.encode_utf16().collect())),
                     });
                 }
                 let recv = self

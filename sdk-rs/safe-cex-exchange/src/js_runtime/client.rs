@@ -582,7 +582,7 @@ fn rest_response(response: &Js) -> Result<RestResponse, Thrown> {
         status: if status.is_finite() { status as u16 } else { 0 },
         reason: None,
         headers: Default::default(),
-        body: RestResponseBody::Untransformed(to_json(&response.get("data")?)?),
+        body: RestResponseBody::Untransformed(to_retained_input(&response.get("data")?)?),
     })
 }
 

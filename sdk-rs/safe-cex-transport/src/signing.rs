@@ -383,7 +383,7 @@ impl RemoteSigningAdapter {
                             } else {
                                 config.method.to_uppercase()
                             },
-                            params: config.params.clone().map(try_parse_json),
+                            params: config.params.clone().map(try_parse_params_json),
                             data: config.data.clone().map(try_parse_json),
                             headers: serialize_headers(&config.headers),
                             ..config.clone()
@@ -559,7 +559,7 @@ struct WireSigningConfig {
     #[serde(default, deserialize_with = "present_json")]
     params: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default, deserialize_with = "present_input")]
+    #[serde(default, deserialize_with = "crate::native_data::deserialize_present")]
     data: Option<Input>,
     headers: IndexMap<String, String>,
 }
@@ -591,7 +591,7 @@ struct WireSignedConfig {
     url: Option<String>,
     #[serde(default, deserialize_with = "present_json")]
     params: Option<Value>,
-    #[serde(default, deserialize_with = "present_input")]
+    #[serde(default, deserialize_with = "crate::native_data::deserialize_present")]
     data: Option<Input>,
     headers: IndexMap<String, String>,
 }
@@ -640,8 +640,13 @@ mod header_shape_tests {
     }
 }
 
-fn present_input<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Input>, D::Error> {
-    Input::deserialize(deserializer).map(Some)
+
+// Legacy params retain their bounded Value ABI; request data does not use this projection.
+pub fn try_parse_params_json(value: Value) -> Value {
+    let Value::String(text) = &value else { return value; };
+    let Ok(parsed) = crate::native_data::parse(text) else { return value; };
+    if !matches!(parsed, Input::Object(_) | Input::Array(_)) { return value; }
+    let Ok(mut projected) = parsed.into_value() else { return value; };
+    crate::how::normalize_json_numbers(&mut projected, false, false);
+    projected
 }

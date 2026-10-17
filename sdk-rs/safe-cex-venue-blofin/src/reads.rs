@@ -27,7 +27,7 @@ fn body<E>(body: &RestResponseBody) -> Result<TickerInput, ReadError<E>> {
     match body {
         RestResponseBody::Encoded(bytes) => js_from_str(&String::from_utf8_lossy(bytes)),
         RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-            js_from_value_ref(value)
+            value.clone().into_value().and_then(|value|js_from_value_ref(&value))
         }
     }
     .map_err(ReadError::Ingress)

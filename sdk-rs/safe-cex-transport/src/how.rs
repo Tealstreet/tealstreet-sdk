@@ -10,6 +10,8 @@ use crate::{
     },
 };
 use indexmap::{IndexMap, IndexSet};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
+use crate::native_data::{self, property, text};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -149,10 +151,14 @@ impl HOWWebSocket {
     }
 
     pub fn send(&self, data: Value) -> Result<(), TransportError> {
-        let message =
-            safe_cex_num::js_json_stringify(&safe_cex_num::JsJsonValue::from(data.clone()))
-                .map_err(|error| TransportError::Host(error.message.to_owned()))?
-                .ok_or_else(|| TransportError::Host("HOW frame serialized as undefined".into()))?;
+        self.send_retained(native_data::from_json(data)?)
+    }
+
+    fn send_retained(&self, data: Input) -> Result<(), TransportError> {
+        let message = safe_cex_num::js_retained_json_stringify(&data)
+            .map_err(|error| TransportError::Host(error.to_string()))?
+            .ok_or_else(|| TransportError::Host("HOW frame serialized as undefined".into()))?;
+        let kind = property(&data, "type").and_then(text);
         let socket = self
             .state
             .borrow()
@@ -164,14 +170,14 @@ impl HOWWebSocket {
         } else {
             // ts-bug: validateAndSend matches ping/pong anywhere in the serialized frame.
             let lower = message.to_ascii_lowercase();
-            if !lower.contains("ping") && !lower.contains("pong") && data["type"] != "rpc.ping" {
+            if !lower.contains("ping") && !lower.contains("pong") && kind.as_deref() != Some("rpc.ping") {
                 return Err(TransportError::Host("WebSocketNotReadyError".into()));
             }
         }
-        if data["type"] == "rpc.http"
-            && let Some(url) = data["arg"]["url"].as_str()
+        if kind.as_deref() == Some("rpc.http")
+            && let Some(url) = property(&data, "arg").and_then(|arg| property(arg, "url")).and_then(text)
         {
-            self.track_domain_from_url(url);
+            self.track_domain_from_url(&url);
         }
         Ok(())
     }
@@ -199,10 +205,10 @@ impl HOWWebSocket {
         let Ok((data, binary)) = crate::codec::decode_trade_tunnel_message(frame) else {
             return Ok(());
         };
-        match data["type"].as_str() {
+        match property(&data, "type").and_then(text).as_deref() {
             Some("rpc.auth") => {
                 // ts: HOWWebSocket.onMessage uses error truthiness, not status.
-                self.state.borrow_mut().auth = if data.get("error").is_some_and(js_truthy) {
+                self.state.borrow_mut().auth = if property(&data, "error").is_some_and(safe_cex_num::js_retained_truthy) {
                     HOWWebSocketAuthState::Bad
                 } else {
                     HOWWebSocketAuthState::Good
@@ -211,14 +217,14 @@ impl HOWWebSocket {
             Some("serverTime") => {
                 self.state.borrow_mut().time_synced = true;
                 if let Some(callback) = crate::how_config::get_how_config().sync_server_time {
-                    if let Some(time) = data["serverTime"].as_f64() {
+                    if let Some(time) = property(&data, "serverTime").and_then(native_data::number) {
                         callback(time);
                     }
-                } else if let Some(time) = data["serverTime"].as_u64() {
+                } else if let Some(time) = property(&data, "serverTime").and_then(native_data::number).filter(|time| time.is_finite() && *time >= 0.0 && time.fract() == 0.0).map(|time| time as u64) {
                     self.host.sync_server_time(time);
                 }
             }
-            Some("rpc.ping") if data["status"] == "success" => {
+            Some("rpc.ping") if property(&data, "status").and_then(text).as_deref() == Some("success") => {
                 let now = self.host.now_ms();
                 self.pong_deadline.set(Some(now.saturating_add(25_000)));
                 if let Some(sent) = self.last_ping.get() {
@@ -234,37 +240,34 @@ impl HOWWebSocket {
                 // ts: onMessage catches heartbeat send errors without failing pending requests.
                 let _ = self.send(json!({"type":"rpc.ping", "nonce":self.next_nonce()}));
             }
-            Some("rpc.latency") => self.handle_latency_response(&data),
+            Some("rpc.latency") => self.handle_latency_response(&native_data::wire_json(&data)?),
             Some("rpc.http") => {
-                if let Some(nonce) = data["nonce"].as_str() {
+                if let Some(nonce) = property(&data, "nonce").and_then(text) {
                     let (raw, parser) = {
                         let state = self.state.borrow();
-                        let Some(slot) = state.pending.get(nonce) else {
+                        let Some(slot) = state.pending.get(&nonce) else {
                             return Ok(());
                         };
                         crate::how_diagnostics::log_trade_tunnel_response(
-                            &slot.request_summary,
-                            &data["data"],
+                            &native_data::from_json(slot.request_summary.clone())?,
+                            property(&data, "data").unwrap_or(&Input::Undefined),
                             Some(&slot.route),
                         );
                         (slot.raw, slot.parser.clone())
                     };
                     let response = if let Some(error) =
-                        data["data"].get("error").filter(|e| js_truthy(e))
+                        property(&data, "data").and_then(|data| property(data, "error")).filter(|e| safe_cex_num::js_retained_truthy(e))
                     {
                         Err(TransportError::Host(format!(
                             "TradeTunnelError: {}",
-                            crate::how_diagnostics::format_trade_tunnel_error_message(error)
+                            crate::how_diagnostics::format_trade_tunnel_error_message(&native_data::wire_json(error)?)
                         )))
                     } else {
                         // Decode typed envelope metadata without rebuffering the native
                         // response payload: Value deserialization can erase lexical -0.
-                        let mut envelope = data.clone();
-                        let native_data = envelope
-                            .get_mut("data")
-                            .and_then(Value::as_object_mut)
-                            .and_then(|fields| fields.shift_remove("data"));
-                        serde_json::from_value::<RpcHttpResponse>(envelope)
+                        let mut response_data = property(&data, "data").cloned().unwrap_or(Input::Undefined);
+                        let native_data = native_data::take_property(&mut response_data, "data");
+                        decode_response_metadata(&data, &response_data)
                             .map_err(|e| {
                                 TransportError::Host(format!("TradeTunnelResponseDecodeError: {e}"))
                             })
@@ -288,8 +291,7 @@ impl HOWWebSocket {
                                         }
                                     }
                                     None => {
-                                        let mut data = native_data.unwrap_or(Value::Null);
-                                        normalize_json_numbers(&mut data, false, false);
+                                        let data = native_data.unwrap_or(Input::Undefined);
                                         crate::RestResponseBody::Untransformed(data)
                                     }
                                 };
@@ -303,7 +305,7 @@ impl HOWWebSocket {
                                 })
                             })
                     };
-                    if let Some(slot) = self.state.borrow_mut().pending.get_mut(nonce) {
+                    if let Some(slot) = self.state.borrow_mut().pending.get_mut(&nonce) {
                         slot.result = Some(response);
                     }
                 }
@@ -864,48 +866,39 @@ impl HOWWebSocket {
         };
         let grvt = base.to_ascii_lowercase().contains("grvt.io");
         // ts-bug: createAxiosHttpOverWebsocketAdapter applies || {} to raw config.data, before parsing.
-        let encoded_body = request
-            .body
-            .as_ref()
-            .map(crate::RestBody::wire_bytes)
-            .transpose()?;
-        let data = encoded_body
-            .as_ref()
-            .filter(|bytes| grvt || !bytes.is_empty())
-            .map(|bytes| {
+        let data = request.body.as_ref().map(|body| match body {
+            crate::RestBody::Encoded(bytes) => Input::Text(String::from_utf8_lossy(bytes).encode_utf16().collect()),
+            crate::RestBody::Untransformed(value) => value.clone(),
+            crate::RestBody::Transformed(value) => value.value().clone(),
+        }).unwrap_or(Input::Undefined);
+        let data = if grvt {
+            (!matches!(data, Input::Undefined | Input::Null)).then_some(data)
+        } else {
+            Some(if safe_cex_num::js_retained_truthy(&data) { data } else { Input::Object(Vec::new()) })
+        };
+        let data = data.map(|data| {
+            if let Input::Text(units) = &data {
                 if let Some(parser) = parser {
-                    let text = std::str::from_utf8(bytes)
-                        .map_err(|error| TransportError::Host(error.to_string()))?;
-                    parser(text).or_else(|_| parse_fallback_data(text))
+                    // Custom parsers have an explicit UTF-8 input ABI; native trees do not pass here.
+                    let input = String::from_utf16(units).map_err(|error| TransportError::Host(error.to_string()))?;
+                    parser(&input).or_else(|_| parse_fallback_data(&input))
                 } else {
-                    parse_data(bytes, raw)
+                    match Input::parse_json(units) {
+                        Ok(value) => Ok(value),
+                        Err(_) => {
+                            let input = String::from_utf16(units).map_err(|error| TransportError::Host(error.to_string()))?;
+                            parse_fallback_data(&input)
+                        }
+                    }
                 }
-            })
-            .transpose()?;
-        let mut headers: serde_json::Map<String, Value> = request
-            .headers
-            .into_iter()
-            .map(|(key, value)| (key, Value::String(value)))
-            .collect();
-        // The browser cannot set Cookie directly. Only HOW interprets these
-        // GRVT config extensions; direct HTTP retains the original headers.
-        for (property, header) in [
-            ("grvtCookie", "Cookie"),
-            ("grvtAccountId", "X-Grvt-Account-Id"),
-        ] {
-            if let Some(value) = request
-                .config_extensions
-                .get(property)
-                .filter(|value| safe_cex_num::js_retained_truthy(value))
-            {
-                let json = safe_cex_num::js_retained_json_stringify(value)
-                    .map_err(|error| TransportError::Host(error.to_string()))?
-                    .expect("truthy config has a JSON representation");
-                headers.insert(
-                    header.into(),
-                    serde_json::from_str(&json)
-                        .map_err(|error| TransportError::Host(error.to_string()))?,
-                );
+            } else { Ok(data) }
+        }).transpose()?;
+        let mut headers: IndexMap<String, Input> = request.headers.into_iter()
+            .map(|(key,value)| (key, Input::Text(value.encode_utf16().collect()))).collect();
+        // Only HOW interprets these native GRVT config extensions.
+        for (property, header) in [("grvtCookie", "Cookie"), ("grvtAccountId", "X-Grvt-Account-Id")] {
+            if let Some(value) = request.config_extensions.get(property).filter(|value| safe_cex_num::js_retained_truthy(value)) {
+                headers.insert(header.into(), value.clone());
             }
         }
         if request.params.is_some() && request.query_params.is_some() {
@@ -937,22 +930,23 @@ impl HOWWebSocket {
                 ));
             }
         };
-        normalize_object_order(&mut headers);
         for value in params.values_mut() {
             normalize_json_numbers(value, false, false);
         }
         normalize_object_order(&mut params);
+        let method = request.method.to_uppercase();
+        let summary = json!({"url":url,"method":method});
+        // The shared protocol record supplies only finite envelope metadata.
+        // Native header overrides and data are attached outside its Value decoder.
         let args = HttpRequestArgs::<Value> {
-            headers,
-            method: request.method.to_uppercase(),
-            url,
-            data: if grvt {
-                data
-            } else {
-                Some(data.unwrap_or_else(|| json!({})))
-            },
-            params,
+            headers: serde_json::Map::new(), method, url, data: None, params,
         };
+        let mut args = native_data::from_json(serde_json::to_value(args)
+            .map_err(|error| TransportError::Host(error.to_string()))?)?;
+        native_data::take_property(&mut args, "headers");
+        let Input::Object(fields) = &mut args else { unreachable!("request args object") };
+        fields.insert(0, ("headers".encode_utf16().collect(), native_data::object(headers)));
+        if let Some(data) = data { fields.insert(3, ("data".encode_utf16().collect(), data)); }
         let nonce = self.next_nonce();
         let guard = Pending {
             client: self,
@@ -963,7 +957,7 @@ impl HOWWebSocket {
             PendingResponse {
                 raw,
                 parser: parser.cloned(),
-                request_summary: json!({"url":args.url,"method":args.method}),
+                request_summary: summary,
                 route: route.clone(),
                 result: None,
             },
@@ -978,13 +972,14 @@ impl HOWWebSocket {
             frame["bypass_proxy"] = json!(true);
         }
         frame["nonce"] = json!(nonce);
-        frame["arg"] =
-            serde_json::to_value(args).map_err(|error| TransportError::Host(error.to_string()))?;
-        crate::how_diagnostics::log_trade_tunnel_request(&frame["arg"], Some(route));
+        crate::how_diagnostics::log_trade_tunnel_request(&args, Some(route));
+        let mut frame = native_data::from_json(frame)?;
+        let Input::Object(fields) = &mut frame else { unreachable!("frame object") };
+        fields.push(("arg".encode_utf16().collect(), args));
         if self.host.now_ms() >= deadline {
             return Err(TransportError::Timeout);
         }
-        self.send(frame)?;
+        self.send_retained(frame)?;
         loop {
             if let Some(response) = self
                 .state
@@ -1004,6 +999,18 @@ impl Drop for HOWWebSocket {
     fn drop(&mut self) {
         self.dispose();
     }
+}
+
+fn decode_response_metadata(frame: &Input, response: &Input) -> Result<RpcHttpResponse, serde_json::Error> {
+    let selected = native_data::object(["config", "data_raw", "data_encoded", "data_encoding", "status", "status_text", "headers"]
+        .into_iter().filter_map(|name| property(response,name).cloned().map(|value| (name,value))));
+    let mut envelope = native_data::object([
+        ("type", property(frame,"type").cloned().unwrap_or(Input::Undefined)),
+        ("nonce", property(frame,"nonce").cloned().unwrap_or(Input::Undefined)),
+        ("data", selected),
+    ]).into_value()?;
+    normalize_json_numbers(&mut envelope, false, false);
+    serde_json::from_value(envelope)
 }
 
 fn js_truthy(value: &Value) -> bool {
@@ -1107,53 +1114,42 @@ fn protect_big_integer_tokens(text: &str) -> String {
 }
 
 /// Parse JSON with JavaScript number normalization, returning null on invalid JSON.
-pub fn json_parse(text: &str) -> Value {
-    let mut value = serde_json::from_str(text).unwrap_or(Value::Null);
-    normalize_json_numbers(&mut value, false, false);
-    value
+pub fn json_parse(text: &str) -> Input {
+    native_data::parse(text).unwrap_or(Input::Null)
 }
 
 /// Preserve the shared TS parser's rewrite, parse, and null-on-failure contract.
-pub fn big_int_as_string_json_parse(text: &str) -> Value {
+pub fn big_int_as_string_json_parse(text: &str) -> Input {
     // ts-bug: the source regex also corrupts matching runs inside quoted strings.
-    let protected = protect_big_integer_tokens(text);
-    let mut value = serde_json::from_str(&protected).unwrap_or(Value::Null);
-    normalize_json_numbers(&mut value, true, false);
-    value
+    json_parse(&protect_big_integer_tokens(text))
 }
 
-fn parse_data(bytes: &[u8], raw: bool) -> Result<Value, TransportError> {
+#[cfg(test)]
+fn parse_data(bytes: &[u8], raw: bool) -> Result<Input, TransportError> {
     let text = std::str::from_utf8(bytes).map_err(|e| TransportError::Host(e.to_string()))?;
-    if raw {
-        return Ok(big_int_as_string_json_parse(text));
-    }
-    if let Ok(mut value) = serde_json::from_str(text) {
-        // ts-bug: parseWebsocketData uses JSON.parse, rounding integers through binary64.
-        normalize_json_numbers(&mut value, false, false);
-        return Ok(value);
-    }
-    parse_fallback_data(text)
+    if raw { return Ok(big_int_as_string_json_parse(text)); }
+    native_data::parse(text).or_else(|_| parse_fallback_data(text))
 }
 
-fn parse_fallback_data(text: &str) -> Result<Value, TransportError> {
+fn parse_fallback_data(text: &str) -> Result<Input, TransportError> {
     let fields: Vec<_> = text.split('&').collect();
     if fields.iter().all(|field| {
         field.split_once('=').is_some_and(|(key, value)| {
             !key.is_empty() && !value.is_empty() && !value.contains('=')
         })
     }) {
-        let mut data = serde_json::Map::new();
+        let mut data = IndexMap::new();
         for field in fields {
             let (key, value) = field.split_once('=').expect("validated form field");
             let key = crate::relay::decode_query(key);
             // Source assigns strings into {}, invoking its primitive prototype setter.
             if key != "__proto__" {
-                data.insert(key, Value::String(crate::relay::decode_query(value)));
+                data.insert(key, Input::Text(crate::relay::decode_query(value).encode_utf16().collect()));
             }
         }
-        Ok(Value::Object(data))
+        Ok(native_data::object(data))
     } else {
-        Ok(Value::String(text.to_owned()))
+        Ok(Input::Text(text.encode_utf16().collect()))
     }
 }
 
@@ -1422,31 +1418,24 @@ impl RestAdapter for HowRestAdapter {
                 {
                     request.body = Some(crate::RestBody::Encoded(b"{}".to_vec()));
                 }
-                let body = request
-                    .body
-                    .as_ref()
-                    .map(|body| match body {
-                        crate::RestBody::Encoded(bytes) => {
-                            std::str::from_utf8(bytes).map_or(Value::Null, |body| json!(body))
-                        }
-                        crate::RestBody::Untransformed(value) => value.clone(),
-                        crate::RestBody::Transformed(data) => data.value().clone(),
-                    })
-                    .unwrap_or(Value::Null);
-                let logged = json!({"url":request.url,"method":request.method,"data":body,"params":request.query_params.as_ref().and_then(crate::query::query_json_projection).or_else(|| request.params.clone())});
+                let body = request.body.as_ref().map(|body| match body {
+                    crate::RestBody::Encoded(bytes) => Input::Text(String::from_utf8_lossy(bytes).encode_utf16().collect()),
+                    crate::RestBody::Untransformed(value) => value.clone(),
+                    crate::RestBody::Transformed(data) => data.value().clone(),
+                }).unwrap_or(Input::Undefined);
+                let mut logged = native_data::from_json(json!({"url":request.url,"method":request.method,"params":request.query_params.as_ref().and_then(crate::query::query_json_projection).or_else(|| request.params.clone())})).map_err(failure)?;
+                let Input::Object(fields) = &mut logged else { unreachable!("request log object") };
+                fields.push(("data".encode_utf16().collect(),body));
                 crate::how_diagnostics::log_trade_tunnel_request(&logged, Some(&route));
                 let response = within_deadline(client.host.as_ref(), deadline, async {
                     Ok(adapter.execute(request).await)
                 })
                 .await
                 .map_err(failure)??;
-                let body = response
-                    .body
-                    .json_value()
-                    .unwrap_or_else(|_| response.body.clone().into_data());
+                let body = native_data::object([("data",response.body.clone().into_data())]);
                 crate::how_diagnostics::log_trade_tunnel_response(
                     &logged,
-                    &json!({"data":body}),
+                    &body,
                     Some(&route),
                 );
                 Ok(response)

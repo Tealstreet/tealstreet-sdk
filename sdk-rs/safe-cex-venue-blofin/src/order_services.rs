@@ -35,7 +35,7 @@ pub(crate) fn body<E>(body: &RestResponseBody) -> Result<UtilityInput, ServiceEr
     match body {
         RestResponseBody::Encoded(bytes) => js_from_str(&String::from_utf8_lossy(bytes)),
         RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-            js_from_value_ref(value)
+            value.clone().into_value().and_then(|value|js_from_value_ref(&value))
         }
     }
     .map_err(ServiceError::Ingress)
@@ -54,7 +54,7 @@ pub(crate) async fn request<E>(
             .expect("static endpoint")
             .into(),
         params,
-        body: payload.map(RestBody::Untransformed),
+        body: payload.map(safe_cex_types::retained_json::RetainedJsonInput::from_value).transpose().map_err(ServiceError::Ingress)?.map(RestBody::Untransformed),
         ..Default::default()
     };
     let response = xhr

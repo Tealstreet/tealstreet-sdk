@@ -105,10 +105,7 @@ pub async fn fetch_open_interest_map(
             .map_err(|failure| failure.message)?;
         // Axios's default silent JSON transform keeps non-JSON response text
         // as a string (including an empty body) rather than rejecting it.
-        Ok(response
-            .body
-            .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+        response.body.transform_axios_response().map_err(|error|error.to_string())?.json_value().map_err(|error|error.to_string())
     }
 
     let mut map = Map::new();

@@ -4,7 +4,6 @@ use indexmap::IndexMap;
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{ExchangeName, QueryValue};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,7 +66,7 @@ struct WireSigningConfig {
     #[serde(default, deserialize_with = "deserialize_query_wire")]
     params: Option<QueryValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default, deserialize_with = "present_input")]
+    #[serde(default, deserialize_with = "crate::native_data::deserialize_present")]
     data: Option<Input>,
     headers: IndexMap<String, String>,
 }
@@ -99,7 +98,7 @@ struct WireSignedConfig {
     url: Option<String>,
     #[serde(default, deserialize_with = "deserialize_query_wire")]
     params: Option<QueryValue>,
-    #[serde(default, deserialize_with = "present_input")]
+    #[serde(default, deserialize_with = "crate::native_data::deserialize_present")]
     data: Option<Input>,
     headers: IndexMap<String, String>,
 }
@@ -120,17 +119,4 @@ impl<'de> Deserialize<'de> for HttpSigningResponse {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         WireHttpSigningResponse::deserialize(safe_cex_types::strict_decode::object(deserializer))
     }
-}
-
-// Omission is authoritative, but an explicitly present JSON null is still data.
-fn present_json<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Value>, D::Error> {
-    Value::deserialize(deserializer).map(Some)
-}
-
-fn present_input<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Input>, D::Error> {
-    Input::deserialize(deserializer).map(Some)
 }

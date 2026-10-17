@@ -180,7 +180,7 @@ impl BreakoutpropExchange {
                 let options = self.base.options();
                 Ok(client.request(RestRequest {
                     method: "POST".into(), url: "/login".into(),
-                    body: Some(safe_cex_transport::provider::RestBody::Untransformed(json!({"domain":"default","username":options.key,"password":options.secret}))),
+                    body: Some(safe_cex_transport::provider::RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"domain":"default","username":options.key,"password":options.secret})).map_err(|error|ExchangeError::new(error.to_string()))?)),
                     ..Default::default()
                 }))
             })(

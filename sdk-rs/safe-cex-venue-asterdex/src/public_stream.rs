@@ -188,7 +188,7 @@ impl PublicStream {
                 SocketFrame::Binary(b) => String::from_utf8_lossy(b).into_owned(),
                 SocketFrame::Close { .. } => return Ok(()),
             };
-            let json = safe_cex_transport::signing::try_parse_json(
+            let json = safe_cex_transport::signing::try_parse_params_json(
                 serde_json::from_str(&text).map_err(|e| ExchangeError::new(e.to_string()))?,
             );
             if !js_truthy(Some(&json)) {

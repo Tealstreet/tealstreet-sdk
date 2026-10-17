@@ -387,7 +387,7 @@ impl RestRequest {
             .keys()
             .find(|key| key.eq_ignore_ascii_case("content-type"))
             .cloned();
-        let object = matches!(&self.body, Some(RestBody::Untransformed(value)) if value.is_object() || value.is_array());
+        let object = matches!(&self.body, Some(RestBody::Untransformed(value)) if matches!(value, Input::Object(_) | Input::Array(_)));
         if content_key.is_none() && object {
             self.headers
                 .insert("Content-Type".into(), "application/json".into());
@@ -419,7 +419,7 @@ impl RestRequest {
         let mut wire = self.clone();
         wire.body = match &self.body {
             None => None,
-            Some(RestBody::Transformed(data)) if data.value().is_null() => None,
+            Some(RestBody::Transformed(data)) if matches!(data.value(), Input::Null | Input::Undefined) => None,
             Some(body) => Some(RestBody::Encoded(body.wire_bytes()?)),
         };
         Ok(wire)
@@ -477,7 +477,11 @@ impl RestResponseBody {
             Self::Encoded(bytes) => {
                 serde_json::from_slice::<Input>(bytes).and_then(Input::into_value)
             }
-            Self::Untransformed(value) | Self::Transformed(value) => value.clone().into_value(),
+            Self::Untransformed(value) | Self::Transformed(value) => {
+                let mut projected=value.clone().into_value()?;
+                crate::how::normalize_json_numbers(&mut projected,false,false);
+                Ok(projected)
+            },
         }
     }
 }

@@ -4,7 +4,8 @@ use base64::{
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
 };
 use flate2::bufread::GzDecoder;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
+use crate::native_data::{property,text};
 use std::io::Read;
 
 pub fn to_array_buffer(bytes: &[u8]) -> Vec<u8> {
@@ -34,7 +35,7 @@ pub fn decode_base64(encoded: &str) -> Result<Vec<u8>, TransportError> {
 
 pub fn decode_trade_tunnel_message(
     frame: SocketFrame,
-) -> Result<(Value, Option<Vec<u8>>), TransportError> {
+) -> Result<(Input, Option<Vec<u8>>), TransportError> {
     match frame {
         SocketFrame::Close { .. } => Err(decode_error("close event has no message payload")),
         SocketFrame::Text(text) => Ok((crate::how::json_parse(&text), None)),
@@ -63,10 +64,10 @@ pub fn decode_trade_tunnel_message(
             }
             let header = std::str::from_utf8(&bytes[8..offset]).map_err(decode_error)?;
             let header = header.strip_prefix('\u{feff}').unwrap_or(header);
-            let value: Value = crate::how::json_parse(header);
-            if value["type"] != "rpc.http"
-                || !value["nonce"].is_string()
-                || value["data"]["data_encoding"] != "gzip"
+            let value = crate::how::json_parse(header);
+            if property(&value,"type").and_then(text).as_deref() != Some("rpc.http")
+                || !matches!(property(&value,"nonce"), Some(Input::Text(_)))
+                || property(&value,"data").and_then(|data| property(data,"data_encoding")).and_then(text).as_deref() != Some("gzip")
             {
                 return Err(decode_error(
                     "TradeTunnel binary frame has an invalid response header",

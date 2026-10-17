@@ -56,12 +56,12 @@ pub async fn get_order_books(
         RestRequest {
             method: "post".into(),
             url: endpoint("ORDER_BOOKS"),
-            body: Some(RestBody::Untransformed(json!(
+            body: Some(RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!(
                 token_ids
                     .iter()
                     .map(|token_id| json!({"token_id": token_id}))
                     .collect::<Vec<_>>()
-            ))),
+            )).expect("bounded UTF-8 token-ID request"))),
             ..RestRequest::default()
         },
     )
@@ -97,7 +97,7 @@ async fn read<T: DeserializeOwned + Serialize + JsNumberOutput>(
             .map_err(|error| error.to_string())
             .and_then(|text| js_from_str::<T>(text).map_err(|error| error.to_string())),
         RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-            js_from_value_ref::<T>(value).map_err(|error| error.to_string())
+            value.clone().into_value().and_then(|value|js_from_value_ref::<T>(&value)).map_err(|error| error.to_string())
         }
     };
     decoded.map_err(|message| RestFailure {

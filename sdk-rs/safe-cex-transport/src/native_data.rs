@@ -77,3 +77,20 @@ impl Serialize for Wire<'_> {
         }
     }
 }
+
+pub(crate) fn deserialize_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Input>, D::Error> {
+    <Input as serde::Deserialize>::deserialize(deserializer).map(Some)
+}
+pub(crate) fn text(value: &Input) -> Option<String> {
+    match value { Input::Text(units) => String::from_utf16(units).ok(), _ => None }
+}
+pub(crate) fn object(fields: impl IntoIterator<Item = (impl AsRef<str>, Input)>) -> Input {
+    Input::Object(fields.into_iter().map(|(key,value)| (key.as_ref().encode_utf16().collect(),value)).collect())
+}
+pub(crate) fn from_json(value: serde_json::Value) -> Result<Input, crate::TransportError> {
+    Input::from_value(value).map_err(|error| crate::TransportError::Host(error.to_string()))
+}
+/// A deliberate diagnostic/typed-metadata JSON view, never adapter data.
+pub(crate) fn wire_json(value: &Input) -> Result<serde_json::Value, crate::TransportError> {
+    serde_json::to_value(Wire(value)).map_err(|error| crate::TransportError::Host(error.to_string()))
+}
