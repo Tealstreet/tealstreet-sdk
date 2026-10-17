@@ -455,14 +455,20 @@ pub(super) fn native_book(book: &PublicListenerBook) -> safe_cex_types::OrderBoo
 fn write_book(book: &PublicListenerBook, native: safe_cex_types::OrderBook) {
     let book = book.borrow();
     for (levels, values) in [(&book.bids, native.bids), (&book.asks, native.asks)] {
-        let old = levels.borrow().clone();
+        // A snapshot can contain several distinct levels at the same price.
+        // Consume each retained root once so helper copyback cannot alias them.
+        let mut old: Vec<_> = levels.borrow().iter().cloned().map(Some).collect();
         *levels.borrow_mut() = values
             .into_iter()
             .map(|value| {
                 let level = old
-                    .iter()
-                    .find(|level| level.borrow().price == value.price)
-                    .cloned()
+                    .iter_mut()
+                    .find(|level| {
+                        level.as_ref().is_some_and(|level| {
+                            level.borrow().price.to_bits() == value.price.to_bits()
+                        })
+                    })
+                    .and_then(Option::take)
                     .unwrap_or_else(|| {
                         Rc::new(RefCell::new(PublicBookLevel {
                             price: value.price,
@@ -629,17 +635,14 @@ impl PrivateStreamHost for SocketHost {
             .mark_private_user_stream_auth_failed(
                 self.host.shared.store.as_ref(),
                 message.as_deref(),
-                |message, severity| {
-                    let _ = self.host.base().log(message, severity);
-                },
+                |message, severity| self.host.base().log(message, severity).map_err(failure),
                 |message| {
-                    let _ = self
-                        .host
+                    self.host
                         .base()
-                        .emit_args("warning", &[json!(message), json!({"forceToast": true})]);
+                        .emit_args("warning", &[json!(message), json!({"forceToast": true})])
+                        .map_err(failure)
                 },
             )
-            .map_err(|error| Rc::new(error.into()))
     }
     fn mark_private_user_stream_message_received(&self) -> Result<(), PortfolioFailure> {
         self.host

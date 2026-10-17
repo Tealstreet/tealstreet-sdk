@@ -1,3 +1,6 @@
+#[path = "support/oracle_clock.rs"]
+mod oracle_clock;
+
 use safe_cex_exchange::{
     client_order_id::ClientOrderIdRule,
     exchange::{BaseExchange, ExchangeSettings},
@@ -304,7 +307,11 @@ fn check(case: &Value) {
     let input = &case["input"];
     let (venue, store, transport, host) = fixture(input.clone());
     let method = case["method"].as_str().unwrap();
+    let clock = oracle_clock::ClockWindow::start();
     let result = invoke(&venue, method, input);
+    let clock = clock.finish();
+    let mut native_state = state(&store);
+    clock.normalize_orders(&mut native_state, &case["state"]);
     let output = match result {
         Ok(v) => json!({"ok":v}),
         Err(e) => json!({"error":{"name":e.name,"message":e.message}}),
@@ -328,8 +335,7 @@ fn check(case: &Value) {
         method, case["variant"]
     );
     assert_eq!(
-        state(&store),
-        case["state"],
+        native_state, case["state"],
         "BINGX-PLACE decoded Store {method}"
     );
     assert_eq!(

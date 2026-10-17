@@ -17,7 +17,7 @@ fn strict_id_of(target: &Js) -> Result<Option<String>, Thrown> {
     })
 }
 
-// Tickers use a JS object-key lookup, rather than strict id equality.
+// Object-key Store lookups use property keys, rather than strict id equality.
 fn property_id_of(target: &Js) -> Result<Option<String>, Thrown> {
     let id = target.get("id")?;
     // ToPropertyKey first uses the string hint, then preserves Symbol keys.
@@ -39,10 +39,7 @@ fn mutation(e: safe_cex_store::StoreMutationError) -> Thrown {
 fn ids(value: &Js) -> Result<Vec<String>, Thrown> {
     let mut out = vec![];
     for v in value.array_values().unwrap_or_default() {
-        let id = v.get("id")?;
-        if !matches!(id, Js::SymbolIterator)
-            && let Ok(id) = String::from_utf16(&id.to_js_string()?)
-        {
+        if let Some(id) = property_id_of(&v)? {
             out.push(id);
         }
     }
