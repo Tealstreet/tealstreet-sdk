@@ -294,13 +294,16 @@ APIs, method bodies, TypeScript sources and native witnesses; only the import-dr
 Rust line spans and whole-file hash change. This visibility repair does not
 classify the remaining unreviewed owners.
 
-GRVT SDK OrderWithBuilderFee signing treats its 20-byte 0x-prefixed builder
-address as bytes, matching the vendored MetaMask signer rather than ethers'
-checksum admission. Normalize only that address's casing in the local typed-data
-copy before calling shared EIP-712; preserve the caller's original spelling and
-all existing integer conversion. The 24-case actual-SDK signature matrix covers
-three address spellings across both networks, order kinds and integer ranges.
-Shared ethers address validation and legacy signing retain their own boundaries.
+GRVT SDK OrderWithBuilderFee signing converts the builder field with MetaMask's
+address rules in the local typed-data copy before shared EIP-712. Short hex and
+either prefix casing are padded to 20 bytes; safe integer Numbers become bytes.
+Other strings use the SDK dependency's legacy base-10 loop over UTF-16 units,
+including its first-20-byte selection for oversized results. Preserve source
+error names/messages, the caller's original value/reference, and integer-field
+conversion after the address's Number conversion. The original 24-case signature
+matrix remains; a separate constructed SDK host compares 24 independently
+authored address inputs with the actual vendored Signer. Shared ethers address
+validation and legacy signing retain their own boundaries.
 
 The native `Exchange::refresh_markets` entry calls the existing GRVT receiver
 override, which always replaces stored markets. It must not inherit the shared
@@ -335,3 +338,9 @@ closed Timeframe union; the receiver-level test calls the real constructor's
 method, compares all 93 maintained-source cases, and checks inherited kind,
 stringification, arity and repeated reference identity. The accepted helper row
 now witnesses every inherited member (17 -> 27 cases).
+
+`private_receive_watchdog_obeys_grvt_idle_thresholds` drives the real private socket
+through authentication and the shared receive timer. GRVT stays silent at 8 seconds,
+pings after 30 seconds and reconnects after 90 seconds with source Warning severity.
+The shared socket bridge preserves lastReceived reads and dispatches the actual
+GRVT override; the former base-only timer fails the 8-second assertion.

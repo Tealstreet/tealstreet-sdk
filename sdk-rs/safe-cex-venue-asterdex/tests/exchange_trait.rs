@@ -228,8 +228,10 @@ fn cancel_already_gone(status: u16) {
     assert_eq!(
         cancel
             .config_extensions
-            .get("__suppressAsterUnknownOrderError"),
-        Some(&json!(true))
+            .get("__suppressAsterUnknownOrderError")
+            .cloned()
+            .map(|value| value.into_value().unwrap()),
+        Some(json!(true))
     );
 }
 

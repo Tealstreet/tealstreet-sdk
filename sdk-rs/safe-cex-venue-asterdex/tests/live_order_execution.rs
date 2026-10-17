@@ -458,8 +458,11 @@ fn order_execution_matches_live_typescript() {
             );
             if r.method == "DELETE" {
                 assert_eq!(
-                    r.config_extensions.get("__suppressAsterUnknownOrderError"),
-                    e.get("__suppressAsterUnknownOrderError"),
+                    r.config_extensions
+                        .get("__suppressAsterUnknownOrderError")
+                        .cloned()
+                        .map(|value| value.into_value().unwrap()),
+                    e.get("__suppressAsterUnknownOrderError").cloned(),
                     "native request preserves source Axios suppression"
                 );
             }

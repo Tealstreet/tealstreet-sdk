@@ -285,9 +285,11 @@ impl PublicTopics {
                 },
                 || self.start_subscribe(&socket),
                 || super::ping(&socket),
-                // No OHLCV listeners are installed by this facade. Their recovery
-                // binding remains a separately pending source row.
-                || Ok(()),
+                || {
+                    parent
+                        .candle_recovery(&socket, self.category)
+                        .arm_existing()
+                },
                 || Ok(handler.clone()),
                 || Ok(off),
                 || Ok(on),

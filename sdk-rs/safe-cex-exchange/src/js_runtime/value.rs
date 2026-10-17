@@ -1265,6 +1265,18 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
     typed::encode(value)
 }
 
+/// Capture data-only adapter config before JSON projection, retaining own
+/// undefined fields and native number bits through transport/signing/retry.
+pub fn to_retained_input(
+    value: &Js,
+) -> Result<safe_cex_types::retained_json::RetainedJsonInput, Thrown> {
+    typed::capture(value, 0, false)
+}
+/// Restore the canonical retained data carrier without a JSON roundtrip.
+pub fn from_retained_input(value: safe_cex_types::retained_json::RetainedJsonInput) -> Js {
+    typed::from_input(value)
+}
+
 /// The JSON-shaped projection a typed wire body takes, keeping undefined and BigInt.
 pub fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
     use safe_cex_num::JsJsonValue as J;

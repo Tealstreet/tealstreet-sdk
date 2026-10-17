@@ -15,7 +15,7 @@ pub(super) fn encode<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thro
         .map_err(fault)
 }
 
-fn from_input(value: Input) -> Js {
+pub(super) fn from_input(value: Input) -> Js {
     match value {
         Input::Undefined => Js::Undefined,
         Input::Null => Js::Null,
@@ -36,7 +36,7 @@ fn from_input(value: Input) -> Js {
     }
 }
 
-fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thrown> {
+pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thrown> {
     if depth >= 128 {
         return Err(Thrown::type_error("typed value recursion limit exceeded"));
     }

@@ -1391,7 +1391,11 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             method: method.into(),
             url: url.into(),
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
-            config_extensions: [("grvtCookie".into(), json!("gravity=bridge"))].into(),
+            config_extensions: [(
+                "grvtCookie".into(),
+                safe_cex_types::retained_json::RetainedJsonInput::Text("gravity=bridge".into()),
+            )]
+            .into(),
             ..Default::default()
         };
         settle(
@@ -3443,13 +3447,25 @@ fn rest_http_host_retains_adapter_config_without_inventing_direct_cookie_headers
     .unwrap();
     let seen = terminal.seen.lock().unwrap();
     assert_eq!(
-        seen[0].config_extensions["grvtCookie"],
+        seen[0].config_extensions["grvtCookie"]
+            .clone()
+            .into_value()
+            .unwrap(),
         json!("rm=true; gravity=session-42"),
         "REST ADAPTER CONFIG lost GRVT cookie before terminal transport"
     );
-    assert_eq!(seen[0].config_extensions["grvtAccountId"], json!("42"));
     assert_eq!(
-        seen[0].config_extensions["customTrace"],
+        seen[0].config_extensions["grvtAccountId"]
+            .clone()
+            .into_value()
+            .unwrap(),
+        json!("42")
+    );
+    assert_eq!(
+        seen[0].config_extensions["customTrace"]
+            .clone()
+            .into_value()
+            .unwrap(),
         json!({"attempt":2.0})
     );
     assert!(
@@ -3742,6 +3758,9 @@ fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_iden
     assert_eq!(owner.store.request_stats().unwrap().other, 0.0);
 }
 
+#[path = "support/js_socket_receive.rs"]
+mod socket_receive;
+
 #[test]
 fn promise_combinators_consume_live_iterables_and_reject_iterator_failures() {
     use safe_cex_exchange::js_runtime::value::from_json;
@@ -3913,3 +3932,76 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
 
 #[path = "support/emitter_retained.rs"]
 mod emitter_retained;
+
+#[test]
+fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_config() {
+    use safe_cex_exchange::js_runtime::value::from_retained_input;
+    for url in ["/ok", "/down"] {
+        let runtime = Rc::new(Runtime::default());
+        let terminal = std::sync::Arc::new(Terminal::default());
+        let xhr = client::create(
+            client::rest_http_host(runtime.clone(), terminal.clone()),
+            Js::object(vec![]),
+        );
+        let data = Js::object(vec![
+            ("missing", Js::Undefined),
+            ("nan", Js::Number(f64::from_bits(0x7ff8000000000042))),
+            ("infinity", Js::Number(f64::INFINITY)),
+            ("negativeZero", Js::Number(-0.0)),
+            (
+                "array",
+                Js::array(vec![Js::Undefined, Js::Number(f64::NEG_INFINITY)]),
+            ),
+        ]);
+        let result = settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![
+                    Js::str(url),
+                    Js::object(vec![("nativeData", data), ("ownUndefined", Js::Undefined)]),
+                ],
+            )
+            .unwrap(),
+        );
+        let effective = match result {
+            Ok(response) => response.get("config").unwrap(),
+            Err(error) => error.value.get("config").unwrap(),
+        };
+        let seen = terminal.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "one actual terminal attempt");
+        assert!(matches!(
+            seen[0].config_extensions.get("ownUndefined"),
+            Some(safe_cex_types::retained_json::RetainedJsonInput::Undefined)
+        ));
+        assert!(effective.has_own("ownUndefined"));
+        assert!(effective.get("ownUndefined").unwrap().is_undefined());
+        for native in [
+            from_retained_input(seen[0].config_extensions["nativeData"].clone()),
+            effective.get("nativeData").unwrap(),
+        ] {
+            assert!(native.has_own("missing"));
+            assert!(native.get("missing").unwrap().is_undefined());
+            assert_eq!(
+                native.get("nan").unwrap().as_f64().unwrap().to_bits(),
+                0x7ff8000000000042
+            );
+            assert_eq!(
+                native.get("infinity").unwrap().as_f64(),
+                Some(f64::INFINITY)
+            );
+            assert_eq!(
+                native
+                    .get("negativeZero")
+                    .unwrap()
+                    .as_f64()
+                    .unwrap()
+                    .to_bits(),
+                (-0.0_f64).to_bits()
+            );
+            let array = native.get("array").unwrap();
+            assert!(array.get("0").unwrap().is_undefined());
+            assert_eq!(array.get("1").unwrap().as_f64(), Some(f64::NEG_INFINITY));
+        }
+    }
+}
