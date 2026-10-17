@@ -111,3 +111,12 @@ state on native reconnects. `exchange_trait::private_reopen_refreshes_orders_mis
 closes/redials the real production socket and requires a new signed order read and
 replacement Store snapshot. It fails without the inherited policy. The same target
 covers private order/fill/position/balance frames through production handlers.
+
+The live market-load binding ignores non-string leverage Map keys because they
+cannot match a market's string symbol. Nullish/falsy initialLeverage values follow
+the source transformMarket default of 10. The helper still retains original Map
+identity, duplicate last-write precedence, log cardinality and partial entries
+before a later parse error. `exchange_trait` compares fifteen payloads in V1/V3
+against actual TS fetch/transform methods through the real production HTTP binding.
+Truthy nonnumeric leverage remains the pre-existing declared typed-output finding;
+this repair does not coerce it or claim a wider Market limit representation.

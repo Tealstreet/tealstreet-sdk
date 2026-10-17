@@ -3081,5 +3081,149 @@
         "reason": "Stores the supplied typed constructor factory without interpreting or deserializing its future call arguments."
       }
     ]
+  },
+  "safe_cex_registry::native_account::NativeHistoricalPositionOptions": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "account": "sample-account",
+      "from": 1,
+      "to": 2
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"account\":row.account,\"fromBits\":row.from.map(|v|v.to_bits().to_string()),\"toBits\":row.to.map(|v|v.to_bits().to_string()),\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "account",
+        "fromBits",
+        "toBits",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"account\":\"first\",\"from\":-0.0,\"to\":1.5,\"tag\":true}",
+          "output": {
+            "ok": true,
+            "account": "first",
+            "fromBits": "9223372036854775808",
+            "toBits": "4609434218613702656",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"account\":\"second\"}",
+          "output": {
+            "ok": true,
+            "account": "second",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "{\"account\":\"third\",\"from\":null,\"to\":null}",
+          "output": {
+            "ok": true,
+            "account": "third",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "[\"first\",1,2]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":\"a\",\"from\":\"1\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_registry::native_account::NativeOrderId": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "id": "sample-id"
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"id\":row.id,\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"first\",\"tag\":true}",
+          "output": {
+            "ok": true,
+            "id": "first",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"id\":\"second\",\"nested\":[]}",
+          "output": {
+            "ok": true,
+            "id": "second",
+            "extraKeys": [
+              "nested"
+            ]
+          }
+        },
+        {
+          "input": "[\"first\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"id\":7}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }

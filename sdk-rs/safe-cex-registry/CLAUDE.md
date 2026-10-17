@@ -236,6 +236,8 @@ signing requirement on private HTTP even with hosted signing. Private WS stays
 local-only; empty-secret recovery follows the existing approved onOpen contract.
 `native_host_orderly_hosted` covers all six names with valid/empty local secrets.
 
+
+
 The accepted-set registry contracts classify each public alias separately. The
 TickerBatch and MarketBatch Rc/RefCell array handles also implement Deserialize;
 their contracts execute ordered model-field observations and reject forbidden
@@ -246,16 +248,5 @@ module/error owners and JSON error owner intact. These finite identity probes
 and ordinary Serde/conversion checks do not establish future execution, every
 lifetime/type argument, or the behavior of a module/browser/transport host.
 
-The native Hyperliquid JSON-to-query adapter lives at module scope so the accepted-set
-compiler inventory covers it directly. Its finite witnesses inspect QueryValue enum
-outputs for all JSON container/scalar kinds. The installed repeat serializer remains
-covered through the real native HTTP host; this owned Value input excludes undefined
-and nonfinite JSON values.
 
-Seven ordinary accepted-set function contracts classify listener key lookup/removal,
-outbound message construction, module import/require forwarding, and typed provider
-factory selection. These reviewed bodies do not decode incoming JSON. The
-ExchangeConstructor constructor retains a typed callback capability; its exact
-compiler entrypoint is checked with the ordinary alternate-decoder detectors.
-These classifications do not claim callback execution or discharge the separate
-provider frame, account argument, and host-controller observations.
+
