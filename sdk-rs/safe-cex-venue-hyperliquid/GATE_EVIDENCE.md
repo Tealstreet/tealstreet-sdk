@@ -1,3 +1,45 @@
+# Three fixed future and callback alias reviews
+
+The ordinary package preflight previously stopped at
+`spot_account_reads::AccountFuture` with `fixed local future alias probe:
+lifetime then output parameter required`. These three reviewed declarations use
+two type parameters, so their exact identities belong in the existing finite
+`generic-aliases` registry. No scanner, alias helper or validator is widened.
+All six existing fixed Realm projection records remain unchanged.
+
+| Actual alias | Fixed reviewed instantiation | Independent expected container |
+| --- | --- | --- |
+| `spot_account_reads::AccountFuture<V,E>` | production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>>>>` |
+| `income::IncomeFuture<'a,V,E>` | `'static`, production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>> + 'static>>` |
+| `startup_timeout::TimeoutCallback<V,E>` | production `Value, Value` | `Rc<dyn Fn(Vec<Value>)->Result<Value,Value>>` |
+
+The registry fixes the actual source file, compiler generic bounds, raw and
+expanded targets, parameter order, canonical Pin/Rc roots, sizedness and expected
+native type. Fresh ordinary compiler discovery retains every 534 owner and 36
+alias before selecting the three. Artifact authentication and all ordinary Serde
+and conversion detectors run through the maintained `runProbes` implementation.
+
+`tests/support/accepted_future_aliases.rs` additionally runs three actual native
+witnesses. Compile-time Realm host bounds authenticate Value/Error bindings;
+invariant mutable references and TypeId pin the independently authored expected
+container. Both futures preserve Pending, a real waker call, Ready success/error,
+exact numeric bits, lone UTF-16 units, undefined and object/error identity. Poll,
+wake and drop counts include unpolled cancellation. The callback preserves shared
+Rc allocation/clone identity, ordered native arguments and returned/thrown object
+identity. These are distinct runtime witnesses, not classification-only receipts.
+They do not exercise the host bodies that supply those executable containers.
+
+The three actual alias contracts pass ordinary native and target-specific Wasm capability classifications (three classifications, zero failures on each target). Separate native ownership/result tests pass 3/3. Strict all-target native clippy, formatting and parity pass; parity indexes 7459 rows and 17214 public Rust items.
+
+Removing each of the three exact finite registry entries independently restores its original ordinary preflight refusal in a fresh process using actual compiler/artifact context. Each policy file is restored byte-for-byte in finally, and all three native capability probes pass after restoration. No validator guard is removed or widened.
+
+After integrating merged #378, all 79 master contracts and six master projection records remain unchanged. The branch has 73 reviewed owners, nine aliases and two construction obligations: 84 of 572 reviewed, 488 remaining. Ordinary preflight advances past the three aliases and retains `rate_limit.rs::LOCAL_FUNCTION:text: decoder helper requires its inventoried production decoder`; its existing policy points to non-indexed `rate_limit::raw_number`. The inventoried request-weight caller and its native observations require a separate review.
+
+Only these three fixed Value/Value monomorphizations are classified; other
+arguments, IncomeFuture lifetimes, host bodies, local helpers, dependencies and
+the remaining feature/target matrix retain their separate obligations. No whole
+package clearance is claimed.
+
 # Twenty-two required-field record reviews
 
 This cohort reviews 22 concrete records individually against their maintained TS
