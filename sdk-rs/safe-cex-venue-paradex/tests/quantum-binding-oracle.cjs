@@ -10,4 +10,5 @@ const rows=[];
 for(const field of ['size','price'])for(const value of ['Infinity','-Infinity','NaN','1.234567891']){
  const id=field+':'+value;try{rows.push({id,value:new Signer().toChainQuantum(value,field)});}catch(error){rows.push({id,name:error.name,message:error.message});}
 }
-assert.equal(rows.length,8);process.stdout.write(JSON.stringify(rows));
+for(const field of ['size','price']){const value='1e400',id=field+':'+value;try{rows.push({id,value:new Signer().toChainQuantum(value,field)});}catch(error){rows.push({id,name:error.name,message:error.message});}}
+assert.equal(rows.length,10);process.stdout.write(JSON.stringify(rows));

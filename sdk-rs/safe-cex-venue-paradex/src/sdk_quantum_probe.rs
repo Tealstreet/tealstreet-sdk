@@ -23,7 +23,7 @@ fn constructed_sdk_quantum_matches_source_nonfinite_admission() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.len(), 10);
     let (venue, runtime, _, wire) = io::fixture_with(
         serde_json::json!({"key":format!("0x{:064x}",1),"secret":"","paradexAddress":"0x123","subkeyAddress":"0x456"}),
         |wire| {
@@ -34,30 +34,39 @@ fn constructed_sdk_quantum_matches_source_nonfinite_admission() {
     let signer = venue.rt.this.get("requestSigner").unwrap();
     assert!(!signer.is_nullish());
     let requests = wire.requests.borrow().len();
-    let mut index = 0;
-    for field in ["size", "price"] {
-        for value in ["Infinity", "-Infinity", "NaN", "1.234567891"] {
-            assert_eq!(rows[index]["id"], format!("{field}:{value}"));
-            let result = signer.call_method("toChainQuantum", vec![Js::str(value), Js::str(field)]);
-            match result {
-                Ok(value) => assert_eq!(
-                    String::from_utf16(&value.to_js_string().unwrap()).unwrap(),
-                    rows[index]["value"].as_str().unwrap()
-                ),
-                Err(error) => {
-                    let error = error.to_exchange_error();
-                    assert_eq!(error.name, rows[index]["name"].as_str().unwrap());
-                    assert_eq!(error.message, rows[index]["message"].as_str().unwrap());
-                }
+    let specs = ["size", "price"]
+        .into_iter()
+        .flat_map(|field| {
+            ["Infinity", "-Infinity", "NaN", "1.234567891"]
+                .into_iter()
+                .map(move |value| (field, value))
+        })
+        .chain([("size", "1e400"), ("price", "1e400")]);
+    let mut actual = Vec::new();
+    for (index, (field, value)) in specs.enumerate() {
+        let id = format!("{field}:{value}");
+        assert_eq!(rows[index]["id"], id);
+        let result = signer.call_method("toChainQuantum", vec![Js::str(value), Js::str(field)]);
+        actual.push(match result {
+            Ok(value) => serde_json::json!({"id":id,"value":String::from_utf16(&value.to_js_string().unwrap()).unwrap()}),
+            Err(error) => {
+                let error = error.to_exchange_error();
+                serde_json::json!({"id":id,"name":error.name,"message":error.message})
             }
-            index += 1;
-        }
+        });
     }
-    assert_eq!(index, 8);
+    assert_eq!(
+        actual.len(),
+        10,
+        "all8 original plus2 finite-overflow profiles execute natively"
+    );
     assert_eq!(
         wire.requests.borrow().len(),
         requests,
         "quantum admission performs no HTTP"
     );
     venue.dispose().unwrap();
+    for (native, source) in actual.iter().zip(rows.iter()) {
+        assert_eq!(native, source, "actual SDK {}", source["id"]);
+    }
 }

@@ -1434,7 +1434,6 @@ fn actual_order_signer_refuses_infinite_price_before_posting() {
     let mut opts = limit_order("infinite-price");
     opts.price = Some(f64::INFINITY);
     let error = drive(&runtime, venue.base().place_order(venue.as_ref(), opts)).unwrap_err();
-    assert_eq!(error.message, "Invalid price value for signing: Infinity");
     assert_eq!(
         wire.requests
             .borrow()
@@ -1445,6 +1444,7 @@ fn actual_order_signer_refuses_infinite_price_before_posting() {
             .count(),
         before
     );
+    assert_eq!(error.message, "Invalid price value for signing: Infinity");
     venue.dispose().unwrap();
 }
 #[test]
