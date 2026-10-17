@@ -664,3 +664,9 @@ Primary placement preserves Lodash `times` count admission before materializing
 lots. A zero market maximum produces Infinity and no payloads, as in TypeScript.
 `tests/zero_order_max_binding.rs` drives both actual primary/demo placement paths
 in bounded child processes so the pre-fix infinite loop fails safely.
+
+The Exchange order-book listener now selects the source public socket and installs
+real snapshot/delta subscriptions: depth 200 for Spot and 1000 for derivatives.
+Core-owned retry/resync timers and retained topic maps preserve delayed connection,
+sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
+four families; the maintained source book oracle includes array-like level lists.

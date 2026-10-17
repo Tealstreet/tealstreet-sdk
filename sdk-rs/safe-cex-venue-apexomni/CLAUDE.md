@@ -436,3 +436,10 @@ fill, position and wallet frames cover Store, fill notification and execution
 history behavior; wallet-only frames leave balance owned by REST, as in source.
 The socket oracle supplies no invented `log` method: unknown-market position rows
 compare the source TypeError and unchanged state.
+
+Native HTTP auth, socket URLs/login and fallback pong, mapped model timestamps,
+private snapshot grace and order expiration read the shared synchronized clock.
+Raw Date.now remains separate for cancellation caches, fill freshness, client IDs
+and zkLink transaction timestamps; ping timing remains monotonic. The isolated
+native_clock target syncs the actual singleton and covers signed REST/placement,
+socket authentication and a terminal private order frame after a clock advance.

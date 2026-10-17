@@ -243,6 +243,16 @@ signing requirement on private HTTP even with hosted signing. Private WS stays
 local-only; empty-secret recovery follows the existing approved onOpen contract.
 `native_host_orderly_hosted` covers all six names with valid/empty local secrets.
 
+The accepted-set registry contracts classify each public alias separately. The
+TickerBatch and MarketBatch Rc/RefCell array handles also implement Deserialize;
+their contracts execute ordered model-field observations and reject forbidden
+outer/member shapes. The remaining15 capability aliases are non-decoders. The existing reviewed generic-alias policy pins
+`ConstructorFuture<'static>`, `ModuleFuture<'static>` and `JsonFuture<bool>` to
+independently authored native types. Keep the optional constructor, dynamic
+module/error owners and JSON error owner intact. These finite identity probes
+and ordinary Serde/conversion checks do not establish future execution, every
+lifetime/type argument, or the behavior of a module/browser/transport host.
+
 The native Hyperliquid JSON-to-query adapter lives at module scope so the accepted-set
 compiler inventory covers it directly. Its finite witnesses inspect QueryValue enum
 outputs for all JSON container/scalar kinds. The installed repeat serializer remains
