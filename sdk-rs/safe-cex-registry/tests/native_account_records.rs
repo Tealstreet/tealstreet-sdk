@@ -1,10 +1,11 @@
-//! Real JSON dispatch on a production TxFlow account. Its Phase-0 history
+//! Real native dispatch on a production TxFlow account. Its Phase-0 history
 //! refusal distinguishes accepted options from argument rejection without IO.
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
 use safe_cex_registry::native_account::{
     NativeAccount, NativeAccountSpec, native_account_call, open_native_account,
 };
+use safe_cex_registry::native_value::NativeValue;
 use serde_json::{Value, json};
 use std::rc::Rc;
 
@@ -12,14 +13,14 @@ fn account() -> Rc<NativeAccount> {
     open_native_account(NativeAccountSpec {
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange: "txflow".into(),
-        options: json!({"key":"", "secret":""}),
+        options: json!({"key":"", "secret":""}).into(),
         account_name: None,
         sign: None,
         proxy_token: None,
     })
     .unwrap()
 }
-fn invalid_argument(result: &Result<Value, Value>) -> bool {
+fn invalid_argument(result: &Result<NativeValue, Value>) -> bool {
     result.as_ref().err().is_some_and(|error| {
         error["message"]
             .as_str()
@@ -28,7 +29,7 @@ fn invalid_argument(result: &Result<Value, Value>) -> bool {
 }
 
 #[test]
-fn order_id_records_require_objects_at_the_real_json_entrypoint() {
+fn order_id_records_require_objects_at_the_real_native_entrypoint() {
     support::run_local(async {
         let account = account();
         for input in [
@@ -37,9 +38,12 @@ fn order_id_records_require_objects_at_the_real_json_entrypoint() {
             json!([{}]),
             json!([{"id":7}]),
         ] {
-            let result =
-                native_account_call(account.clone(), "removeOrders".into(), vec![input.clone()])
-                    .await;
+            let result = native_account_call(
+                account.clone(),
+                "removeOrders".into(),
+                vec![input.clone().into()],
+            )
+            .await;
             assert!(
                 invalid_argument(&result),
                 "native_account_records::order_object {input}: {result:?}"
@@ -49,10 +53,10 @@ fn order_id_records_require_objects_at_the_real_json_entrypoint() {
             native_account_call(
                 account.clone(),
                 "removeOrders".into(),
-                vec![json!([{"id":"absent", "extra":[1]}])]
+                vec![json!([{"id":"absent", "extra":[1]}]).into()]
             )
             .await,
-            Ok(Value::Null)
+            Ok(NativeValue::Null)
         );
         native_account_call(account, "dispose".into(), vec![])
             .await
@@ -74,7 +78,7 @@ fn historical_options_require_an_object_before_the_real_venue_refusal() {
             let result = native_account_call(
                 account.clone(),
                 "fetchHistoricalPositions".into(),
-                vec![input.clone()],
+                vec![input.clone().into()],
             )
             .await;
             assert!(
@@ -90,7 +94,7 @@ fn historical_options_require_an_object_before_the_real_venue_refusal() {
             let result = native_account_call(
                 account.clone(),
                 "fetchHistoricalPositions".into(),
-                vec![input.clone()],
+                vec![input.clone().into()],
             )
             .await;
             assert!(

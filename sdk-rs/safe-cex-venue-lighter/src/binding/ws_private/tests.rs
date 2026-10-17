@@ -695,3 +695,222 @@ fn token_failure_logs_and_skips_the_orders_subscription() {
             .truthy()
     );
 }
+
+#[test]
+fn production_private_position_loop_consumes_live_iterators() {
+    for shape in ["set", "set-values", "map-values", "array"] {
+        let world = world();
+        let position = |id| Js::object(vec![("id", Js::str(id)), ("size", Js::str("1"))]);
+        let (a, b, c) = (position("a"), position("b"), position("c"));
+        let source = match shape {
+            "map-values" => {
+                let map = Js::new_map();
+                map.call_method("set", vec![Js::str("a"), a]).unwrap();
+                map.call_method("set", vec![Js::str("b"), b.clone()])
+                    .unwrap();
+                map
+            }
+            "array" => Js::array(vec![a, b.clone()]),
+            _ => {
+                let set = Js::new_set();
+                set.call_method("add", vec![a]).unwrap();
+                set.call_method("add", vec![b.clone()]).unwrap();
+                set
+            }
+        };
+        let input = if shape.ends_with("values") {
+            source.call_method("values", vec![]).unwrap()
+        } else {
+            source.clone()
+        };
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let trace = seen.clone();
+        let parent = world.socket.get("parent").unwrap();
+        parent
+            .define(
+                "mapPosition",
+                Js::function("mapPosition", move |_, args| {
+                    let id = args[0].get("id")?.to_display();
+                    trace.borrow_mut().push(id.clone());
+                    if id == "a" {
+                        match shape {
+                            "map-values" => {
+                                source.call_method("delete", vec![Js::str("b")])?;
+                                source.call_method("set", vec![Js::str("c"), c.clone()])?;
+                            }
+                            "array" => {
+                                source.set("1", c.clone())?;
+                            }
+                            _ => {
+                                source.call_method("delete", vec![b.clone()])?;
+                                source.call_method("add", vec![c.clone()])?;
+                            }
+                        }
+                    }
+                    Ok(Js::Undefined)
+                }),
+            )
+            .unwrap();
+        world
+            .socket
+            .call_method("handlePositionTopic", vec![input])
+            .unwrap();
+        assert_eq!(
+            &*seen.borrow(),
+            &["a", "c"],
+            "{shape}: live source for-of trace"
+        );
+        assert!(
+            world.store.positions().is_empty(),
+            "nonzero unmapped rows do not synthesize closes"
+        );
+    }
+}
+
+#[test]
+fn production_private_position_loop_closes_only_after_a_body_throw() {
+    for mode in ["body", "next", "done", "value"] {
+        let world = world();
+        let iterator = Js::new_set().call_method("values", vec![]).unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let close_count = closes.clone();
+        let original = Js::str("original failure");
+        let receiver = iterator.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |this, _| {
+                    assert!(this.same_reference(&receiver), "IteratorClose receiver");
+                    close_count.set(close_count.get() + 1);
+                    Err(Thrown::error(
+                        "Error",
+                        "close failure must not replace the body throw",
+                    ))
+                }),
+            )
+            .unwrap();
+        let failure = original.clone();
+        iterator
+            .define(
+                "next",
+                Js::function("next", move |_, _| {
+                    if mode == "next" {
+                        return Err(Thrown::new(failure.clone()));
+                    }
+                    let step = Js::object(vec![
+                        ("done", Js::Bool(false)),
+                        ("value", Js::object(vec![("size", Js::str("1"))])),
+                    ]);
+                    if mode == "done" || mode == "value" {
+                        let failure = failure.clone();
+                        step.define_accessor(
+                            mode,
+                            Some(Rc::new(move |_| Err(Thrown::new(failure.clone())))),
+                            None,
+                        );
+                    }
+                    Ok(step)
+                }),
+            )
+            .unwrap();
+        let parent = world.socket.get("parent").unwrap();
+        parent
+            .define(
+                "mapPosition",
+                Js::function("mapPosition", |_, _| {
+                    Err(Thrown::error("Error", "mapping failure"))
+                }),
+            )
+            .unwrap();
+        let failure = original.clone();
+        parent
+            .define(
+                "log",
+                Js::function("log", move |_, _| Err(Thrown::new(failure.clone()))),
+            )
+            .unwrap();
+        let error = world
+            .socket
+            .call_method("handlePositionTopic", vec![iterator])
+            .unwrap_err();
+        assert!(
+            error.value.strict_equals(&original),
+            "{mode}: original throw wins"
+        );
+        assert_eq!(
+            closes.get(),
+            usize::from(mode == "body"),
+            "{mode}: IteratorClose boundary"
+        );
+    }
+}
+
+#[test]
+fn production_private_position_close_spread_accepts_iterator_values() {
+    let world = world();
+    // Use the actual Store mutator rather than this fixture's dispatch recorder.
+    let native_store = store::facade(world.store.clone());
+    world
+        .socket
+        .get("store")
+        .unwrap()
+        .define(
+            "updatePositions",
+            native_store.get("updatePositions").unwrap(),
+        )
+        .unwrap();
+    world
+        .store
+        .add_or_update_position(
+            serde_json::from_value(json!({
+                "id":"p", "symbol":"ETH", "side":"long", "entryPrice":10,
+                "notional":10, "leverage":2, "unrealizedPnl":0, "contracts":1,
+                "liquidationPrice":1, "marginSize":120
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let pair = Js::array(vec![
+        Js::object(vec![("id", Js::str("p"))]),
+        Js::object(vec![
+            ("contracts", Js::Number(0.0)),
+            ("marginSize", Js::Undefined),
+        ]),
+    ]);
+    let closes = Js::new_set();
+    closes.call_method("add", vec![pair]).unwrap();
+    let values = closes.call_method("values", vec![]).unwrap();
+    world
+        .socket
+        .define(
+            "resolveExplicitlyClosedPositionUpdates",
+            Js::function("resolveExplicitlyClosedPositionUpdates", move |_, _| {
+                Ok(values.clone())
+            }),
+        )
+        .unwrap();
+    world
+        .socket
+        .get("parent")
+        .unwrap()
+        .define(
+            "mapPosition",
+            Js::function("mapPosition", |_, _| Ok(Js::Undefined)),
+        )
+        .unwrap();
+    let revision = world.store.update_ids().positions;
+    world
+        .socket
+        .call_method(
+            "handlePositionTopic",
+            vec![Js::array(vec![Js::object(vec![("size", Js::str("0"))])])],
+        )
+        .unwrap();
+    let positions = world.store.positions();
+    assert_eq!(
+        positions[0].contracts, 0.0,
+        "spread must deliver its close pair to the actual Store"
+    );
+    assert!(positions[0].margin_size.is_undefined());
+    assert_eq!(world.store.update_ids().positions, revision + 1.0);
+}
