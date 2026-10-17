@@ -222,106 +222,125 @@ pub fn map_bybit_closed_pnl(
         ("leverage", Js::Number(number("leverage")?)),
     ]))
 }
-pub fn bybit_transaction_category(value: Option<&Value>) -> Result<IncomeCategory, &'static str> {
-    let key = text(value)?;
-    check_table_key(&key)?;
-    Ok(match key.as_str() {
-        "TRADE" | "DELIVERY" => IncomeCategory::RealizedPnl,
-        "SETTLEMENT" => IncomeCategory::Funding,
-        "LIQUIDATION" => IncomeCategory::Liquidation,
-        "TRANSFER_IN" | "TRANSFER_OUT" => IncomeCategory::Transfer,
-        "FEE_REFUND" => IncomeCategory::Rebate,
-        _ => IncomeCategory::Other,
+fn income_table(
+    fields: Vec<(&str, safe_cex_exchange::js_runtime::value::Js)>,
+) -> safe_cex_exchange::js_runtime::value::Js {
+    use safe_cex_exchange::js_runtime::value::Js;
+    let table = Js::object(fields);
+    if let Js::Object(object) = &table {
+        *object.proto.borrow_mut() = Some(Js::Builtin(
+            safe_cex_num::PrototypeRealm::current().reference(safe_cex_num::ProtoMember::Prototype),
+        ));
+    }
+    table
+}
+pub fn bybit_transaction_category(
+    value: &safe_cex_exchange::js_runtime::value::Js,
+) -> Result<safe_cex_exchange::js_runtime::value::Js, safe_cex_exchange::js_runtime::value::Thrown>
+{
+    use safe_cex_exchange::js_runtime::value::Js;
+    let key = if value.is_nullish() {
+        Js::str("")
+    } else {
+        Js::String(value.to_js_string()?)
+    };
+    let table = income_table(vec![
+        ("TRADE", Js::str("realized_pnl")),
+        ("DELIVERY", Js::str("realized_pnl")),
+        ("SETTLEMENT", Js::str("funding")),
+        ("LIQUIDATION", Js::str("liquidation")),
+        ("TRANSFER_IN", Js::str("transfer")),
+        ("TRANSFER_OUT", Js::str("transfer")),
+        ("FEE_REFUND", Js::str("rebate")),
+    ]);
+    let category = table.get_property(&key)?;
+    Ok(if category.truthy() {
+        category
+    } else {
+        Js::str("other")
     })
 }
-fn retained_string(value: Option<&Value>, fallback: &str) -> Result<String, &'static str> {
-    match value.filter(|v| truthy(v)) {
-        Some(Value::String(s)) => Ok(s.clone()),
-        Some(_) => Err("Bybit native income string cannot retain truthy nonstring"),
-        None => Ok(fallback.into()),
-    }
-}
 pub fn map_bybit_transaction_to_income_records(
-    row: &Map<String, Value>,
-) -> Result<Vec<IncomeRecord>, &'static str> {
-    let timestamp = parse_int(&text(row.get("transactionTime"))?, Some(10));
+    row: &safe_cex_exchange::js_runtime::value::Js,
+) -> Result<safe_cex_exchange::js_runtime::value::Js, safe_cex_exchange::js_runtime::value::Thrown>
+{
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    let time = row.get("transactionTime")?;
+    let time = if time.is_nullish() {
+        Js::str("0")
+    } else {
+        time
+    };
+    let timestamp = parse_int(&String::from_utf16_lossy(&time.to_js_string()?), Some(10));
     if !timestamp.is_finite() || timestamp <= 0. {
-        return Ok(vec![]);
+        return Ok(Js::array(vec![]));
     }
-    let cash_flow = to_number(row.get("cashFlow"))?;
-    let funding = to_number(row.get("funding"))?;
-    let fee = to_number(row.get("fee"))?;
-    let type_key = text(row.get("type"))?;
-    let category = bybit_transaction_category(Some(&Value::String(type_key)));
-    // Preserve identity coercion even on zero-term rows before any typed refusal.
-    let id = row
-        .get("tradeId")
-        .filter(|v| truthy(v))
-        .or_else(|| row.get("orderId").filter(|v| truthy(v)));
-    let base_id = [
+    let cash_flow = closed_number(&row.get("cashFlow")?)?;
+    let funding = closed_number(&row.get("funding")?)?;
+    let fee = closed_number(&row.get("fee")?)?;
+    let category = bybit_transaction_category(&row.get("type")?)?;
+    let or = |value: Js, fallback: Js| if value.truthy() { value } else { fallback };
+    let symbol = or(row.get("symbol")?, Js::str(""));
+    let asset = or(row.get("currency")?, Js::str("USDT"));
+    let trade_id = or(row.get("tradeId")?, Js::Undefined);
+    let id = row.get("tradeId")?;
+    let id = if id.truthy() {
+        id
+    } else {
+        or(row.get("orderId")?, Js::str(""))
+    };
+    let base = Js::array(vec![
         id,
-        row.get("symbol"),
-        row.get("type"),
-        row.get("transactionTime"),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|v| truthy(v))
-    .map(|v| js_string(Some(v)).map_err(|e| e.message))
-    .collect::<Result<Vec<_>, _>>()?
-    .join("-");
-    if cash_flow == 0. && funding == 0. && fee == 0. {
-        return Ok(vec![]);
-    }
-    let symbol = retained_string(row.get("symbol"), "")?;
-    let asset = retained_string(row.get("currency"), "USDT")?;
-    let trade_id = row
-        .get("tradeId")
-        .filter(|v| truthy(v))
-        .map(|v| {
-            v.as_str()
-                .map(str::to_owned)
-                .ok_or("Bybit native income tradeId cannot retain truthy nonstring")
-        })
-        .transpose()?;
+        symbol.clone(),
+        row.get("type")?,
+        row.get("transactionTime")?,
+    ]);
+    let filter = Js::function("Boolean", |_, args| {
+        Ok(Js::Bool(args.first().is_some_and(Js::truthy)))
+    });
+    let base_id = base
+        .call_method("filter", vec![filter])?
+        .call_method("join", vec![Js::str("-")])?;
+    let income_types = income_table(vec![
+        ("realized_pnl", Js::str("REALIZED_PNL")),
+        ("funding", Js::str("FUNDING_FEE")),
+        ("commission", Js::str("COMMISSION")),
+        ("rebate", Js::str("REBATE")),
+        ("transfer", Js::str("TRANSFER")),
+        ("liquidation", Js::str("LIQUIDATION")),
+        ("other", Js::str("OTHER")),
+    ]);
     let mut records = Vec::new();
-    let mut push = |income, category: IncomeCategory, suffix| {
-        let income_type = match category {
-            IncomeCategory::RealizedPnl => "REALIZED_PNL",
-            IncomeCategory::Funding => "FUNDING_FEE",
-            IncomeCategory::Commission => "COMMISSION",
-            IncomeCategory::Rebate => "REBATE",
-            IncomeCategory::Transfer => "TRANSFER",
-            IncomeCategory::Liquidation => "LIQUIDATION",
-            IncomeCategory::Other => "OTHER",
-        };
-        records.push(IncomeRecord {
-            symbol: symbol.clone(),
-            income_type: income_type.into(),
-            income,
-            asset: asset.clone(),
-            timestamp,
-            tran_id: format!("{base_id}:{suffix}"),
-            trade_id: trade_id.clone(),
-            category: Some(category),
-        });
+    let mut push = |income, category: Js, suffix: &str| -> Result<(), Thrown> {
+        let mut id = base_id.to_js_string()?.to_vec();
+        id.extend(format!(":{suffix}").encode_utf16());
+        let record = Js::object(vec![
+            ("symbol", symbol.clone()),
+            ("incomeType", income_types.get_property(&category)?),
+            ("income", Js::Number(income)),
+            ("asset", asset.clone()),
+            ("timestamp", Js::Number(timestamp)),
+            ("tranId", Js::utf16(&id)),
+            ("category", category),
+        ]);
+        if trade_id.truthy() {
+            record.define("tradeId", trade_id.clone())?;
+        }
+        records.push(record);
+        Ok(())
     };
     if cash_flow != 0. {
-        push(cash_flow, category?, "flow");
+        push(cash_flow, category, "flow")?;
     }
     if funding != 0. {
-        push(funding, IncomeCategory::Funding, "funding");
+        push(funding, Js::str("funding"), "funding")?;
     }
     if fee != 0. {
         push(
             -fee,
-            if fee > 0. {
-                IncomeCategory::Commission
-            } else {
-                IncomeCategory::Rebate
-            },
+            Js::str(if fee > 0. { "commission" } else { "rebate" }),
             "fee",
-        );
+        )?;
     }
-    Ok(records)
+    Ok(Js::array(records))
 }

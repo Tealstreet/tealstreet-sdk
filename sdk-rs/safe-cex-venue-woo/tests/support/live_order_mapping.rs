@@ -1,7 +1,5 @@
 //! Real production class members, with native values observed before projection.
-#[path = "binding_harness.rs"]
-#[allow(dead_code)]
-mod binding_harness;
+use crate::binding_test_harness as binding_harness;
 use binding_harness::{Harness, harness, options};
 use safe_cex_exchange::js_runtime::{
     promise::await_js,
