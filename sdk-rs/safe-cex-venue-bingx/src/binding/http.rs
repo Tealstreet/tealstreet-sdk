@@ -404,7 +404,38 @@ impl ApiHost for Host {
         self.scope
             .globals
             .get("qs")
-            .and_then(|q| q.call_method("stringify", vec![from_json(params)]))
+            .and_then(|q| {
+                let collator = safe_cex_num::JsRootCollator::try_new()
+                    .map_err(|e| Thrown::error(e.name, e.message))?;
+                let sort = Js::function("localeCompare", move |_, args| {
+                    let left =
+                        String::from_utf16(&arg(&args, 0).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    let right =
+                        String::from_utf16(&arg(&args, 1).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    Ok(Js::Number(match collator.compare(&left, &right) {
+                        std::cmp::Ordering::Less => -1.0,
+                        std::cmp::Ordering::Equal => 0.0,
+                        std::cmp::Ordering::Greater => 1.0,
+                    }))
+                });
+                q.call_method(
+                    "stringify",
+                    vec![
+                        from_json(params),
+                        Js::object(vec![("arrayFormat", Js::str("repeat")), ("sort", sort)]),
+                    ],
+                )
+            })
             .map(|s| s.to_display())
             .map_err(error)
     }
