@@ -405,3 +405,9 @@ win over close errors, while normal pair completion validates the return result.
 The constructed public class and its real operation table carry the regressions.
 The native exchange target also covers account_all orders, positions, fills and
 the source-throttled balance refresh through the real private socket.
+
+Private fill freshness uses Number.isFinite's non-coercing numeric guard before
+reading either clock. `private_fill_timestamp_types_match_the_maintained_handler`
+drives actual account_all data.fills frames against maintained TypeScript arrow
+bodies for 15 timestamp values, retaining the five-second boundary and future
+numeric timestamps while rejecting strings, arrays and other non-number inputs.
