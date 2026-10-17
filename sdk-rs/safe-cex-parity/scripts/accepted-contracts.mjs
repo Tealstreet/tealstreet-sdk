@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { reviewedConstantOutput } from './accepted-constant-output.mjs';
+import { copyJsonSourceProperty } from './accepted-json-source.mjs';
 
 export function contractFor(type, contracts, context = {}) {
   const contract = contracts[type.name];
@@ -73,7 +74,10 @@ export function contractFor(type, contracts, context = {}) {
       assert.ok(new Set(entry.cases.map(row => JSON.stringify(row.input))).size >= 2 && (constant || new Set(entry.cases.map(row => JSON.stringify(row.output))).size >= 2), `${type.name}: accepted-set assertion: observed entrypoint requires distinct inputs and outputs`);
     }
     const call = `{ match $value["entrypoint"].as_u64().expect("internally generated observed entrypoint") { ${observed.map((entry, index) => `${index} => { ${entry.call.includes('$value') ? 'let __accepted_input = &$value["input"];' : ''} ${entry.call.replaceAll('$value', '__accepted_input')} },`).join(' ')} _ => panic!("unclassified observed entrypoint") } }`;
-    const cases = observed.flatMap((entry, index) => entry.cases.map(row => ({ input: { entrypoint: index, input: row.input }, output: row.output })));
+    const cases = observed.flatMap((entry, index) => entry.cases.map(row => {
+      const input = copyJsonSourceProperty({ entrypoint: index, input: row.input }, 'input', row);
+      return copyJsonSourceProperty({ input, output: row.output }, 'output', row);
+    }));
     return { ...contract, call, cases };
   }
   for (const [index, entry] of expected.entries()) {
