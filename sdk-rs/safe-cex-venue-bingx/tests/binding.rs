@@ -1051,3 +1051,73 @@ fn refresh_markets_commits_valid_rows_around_bad_assets() {
     h.runtime.reports.borrow_mut().clear();
     done(&h);
 }
+
+fn market_leverage_refusal_case(refresh: bool) {
+    use std::{cell::RefCell, rc::Rc};
+    for value in [
+        json!("75"),
+        json!({"leverage":75}),
+        json!([75]),
+        json!(true),
+    ] {
+        let h = fixture();
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(method, path, _)| method != "GET" || path != MARKET);
+        let mut bad = asset_market("BAD-USDT", "BAD");
+        bad["maxLongLeverage"] = value.clone();
+        h.http.ok(
+            "GET",
+            MARKET,
+            json!([
+                asset_market("BTC-USDT", "BTC"),
+                bad,
+                asset_market("ETH-USDT", "ETH")
+            ]),
+        );
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let capture = errors.clone();
+        h.exchange.base().on(
+            "error",
+            Rc::new(move |_, error| {
+                capture.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        let markets = if refresh {
+            h.drive(h.venue().refresh_markets()).unwrap();
+            h.store.markets().to_vec()
+        } else {
+            h.drive(h.venue().fetch_markets()).unwrap()
+        };
+        assert_eq!(
+            markets
+                .iter()
+                .map(|m| m.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["BTCUSDT", "ETHUSDT"]
+        );
+        assert_eq!(markets[0].limits.leverage.max, 75.0);
+        assert_eq!(markets[1].limits.leverage.max, 75.0);
+        let errors = errors.borrow();
+        assert_eq!(errors.len(), 1);
+        let message = errors[0].as_str().unwrap();
+        assert!(
+            message.contains("BAD-USDT")
+                && message.contains(&format!("limits.leverage.max={value}")),
+            "{message}"
+        );
+        drop(errors);
+        h.runtime.reports.borrow_mut().clear();
+        done(&h);
+    }
+}
+#[test]
+fn fetch_market_leverage_refusals_keep_siblings() {
+    market_leverage_refusal_case(false);
+}
+#[test]
+fn refresh_market_leverage_refusals_keep_siblings() {
+    market_leverage_refusal_case(true);
+}

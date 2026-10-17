@@ -69,7 +69,7 @@ const accounts=[
  {data:{positionMode:{toString:1},available:2}},
 ];
 assert.equal(markets.length,7,'REST market corpus');assert.equal(tickers.length,6,'REST ticker corpus');assert.equal(accounts.length,10,'REST account corpus');
-async function run(method,fixture){
+async function run(method,fixture,observeMaximum=true){
  const calls=[],traces=[],emits=[];
  const owner={store:{markets:[market],marketsBySymbol:{BTCUSDT:market},tickers:[ticker],balance,positions},accountPositionMode:enums.PositionMode.OneWay,
  xhr:{get:async(url,config)=>{calls.push({url,config:config??{}});if(fixture.fail)throw {message:'wire failure',response:{data:{msg:'venue failure'}}};return {data:fixture};}},
@@ -78,7 +78,7 @@ async function run(method,fixture){
  for(const name of names)owner[name]=vm.runInNewContext(arrows[name],context,{filename:file}).call(owner);
  let result,error;
  try{result=await owner[method]();}catch(e){error=e.name||e.message;}
- const numericMax=method==='fetchMarkets'&&!error?result.map(m=>observe(Number(m.limits.amount.max))):[];
+ const numericMax=method==='fetchMarkets'&&!error&&observeMaximum?result.map(m=>observe(Number(m.limits.amount.max))):[];
  return {method,raw:JSON.stringify(fixture),result:observe(result),error:error??null,calls,traceCount:traces.length,emits,mode:owner.accountPositionMode,numericMax};
 }
 (async()=>{
@@ -97,5 +97,17 @@ async function run(method,fixture){
   assetRows.push(result);
  }
  assert.equal(assetRows.length,5,'asset boundary source corpus');
- process.stdout.write(JSON.stringify({rows,market,ticker,balance,positions,assetRows}));
+ const scalarRows=[];
+ for(const value of [{symbol:'wrong'},false,null,17,undefined]){
+  const result=await run('fetchMarkets',{data:[base,{...base,symbol:value},{...base,symbol:'ETHUSDT',base:'ETH'}]});
+  assert.equal(result.result.items.length,3,'source keeps raw symbol and siblings');
+  assert.equal(result.traceCount,0,'source accepts raw symbol');
+  scalarRows.push(result);
+ }
+ const rawMaximum=await run('fetchMarkets',{data:[base,{...base,symbol:'BADUSDT',maxLimitOrderVolume:{toString:null}},{...base,symbol:'ETHUSDT',base:'ETH'}]},false);
+ assert.equal(rawMaximum.result.items.length,3,'source copies maximum without coercion');
+ assert.equal(rawMaximum.traceCount,0);
+ scalarRows.push(rawMaximum);
+ assert.equal(scalarRows.length,6,'strict scalar source corpus');
+ process.stdout.write(JSON.stringify({rows,market,ticker,balance,positions,assetRows,scalarRows}));
 })().catch(e=>{console.error(e);process.exitCode=1;});
