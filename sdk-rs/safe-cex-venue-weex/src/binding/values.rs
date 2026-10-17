@@ -253,12 +253,19 @@ pub(super) fn execution(h: &Host, raw: Js, market: Js) -> Result<Js, Thrown> {
     } else {
         Some(to_typed::<Market>(&market)?)
     };
-    from_typed(
-        &crate::fills::normalize_execution(&capture(&raw)?, market.as_ref(), |ms| {
-            (h.0.shared.extra.local_to_utc)(ms)
-        })
-        .map_err(utility_error)?,
-    )
+    match crate::fills::normalize_execution_row(&capture(&raw)?, market.as_ref(), |ms| {
+        (h.0.shared.extra.local_to_utc)(ms)
+    }) {
+        Ok(execution) => from_typed(&execution),
+        Err(crate::fills::ExecutionRowError::Source(error)) => Err(utility_error(error)),
+        Err(crate::fills::ExecutionRowError::Projection(refusal)) => {
+            h.warn(Js::str(&format!(
+                "WEEX historical fill row refused: {}; received: {}",
+                refusal.error.message, refusal.value
+            )))?;
+            Ok(Js::Undefined)
+        }
+    }
 }
 pub(super) fn income(h: &Host, raw: Js) -> Result<Js, Thrown> {
     from_typed(
