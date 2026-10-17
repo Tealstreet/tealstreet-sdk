@@ -1517,6 +1517,16 @@ The reporter retains lazy reads, native formatted messages and worker error iden
 Optional message/extra-data and main-thread exception-host ABIs retain their stated
 UTF-8/JSON profiles; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
 
+Worker/native delivery services live in exchange-core so constructor hosts never
+depend upward on safe-cex-webworker. `delivery_timers` owns the existing timer
+capability; `store_delivery` owns its single leading/trailing Store throttle;
+`store_payload` owns snapshot preparation; `message_stats` owns socket-stat
+projection; `throttle` owns the distinct keyed metadata throttle. Worker and native
+hosts import these implementations directly. `ExchangeWorkerHost` inherits the
+minimal StoreUpdateThrottleHost capability; each host supplies its existing timer
+error reporter. The deterministic timer fixture and keyed cancellation witness
+also live with the lower core owner.
+
 GetIterator rejects missing or non-callable iterator methods with the shared V8
 non-iterable diagnostic, before invoking input coercion hooks. Nullish inputs use
 that diagnostic as well. `tests/js_iterator_errors.rs` compares 30 live Node

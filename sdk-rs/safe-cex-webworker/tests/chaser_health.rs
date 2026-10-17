@@ -1,4 +1,4 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 #[path = "../../safe-cex-exchange/tests/support/store.rs"]
 mod test_store;
