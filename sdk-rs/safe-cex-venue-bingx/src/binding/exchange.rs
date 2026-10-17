@@ -1,8 +1,10 @@
 use super::hosts::Host;
 use crate::exchange::{BingxExchange as Bodies, BingxHosts};
 use safe_cex_exchange::{
-    capabilities::{CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding},
-    exchange::{BaseExchange, Exchange, ValidatedOrder},
+    capabilities::{
+        CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
+    },
+    exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
     js_runtime::{base_exchange::ExternalPublicDataFactory, client::JsHttpHost},
     runtime::{ExchangeError, ExchangeFuture},
     websocket::WsRuntime,
@@ -74,6 +76,7 @@ impl BingxExchange {
             capabilities: ExchangeCapabilities {
                 start: CapabilityBinding::implemented(|v, ()| v.start()),
                 place_order: PlaceOrderBinding::implemented::<Self>(Exchange::place_order),
+                place_orders: PlaceOrdersBinding::implemented::<Self>(Exchange::place_orders),
                 fetch_historical_fills: CapabilityBinding::implemented(|v, o| {
                     v.fetch_historical_fills(o)
                 }),
@@ -127,6 +130,14 @@ impl Exchange for BingxExchange {
             preflight?;
             ids(self.inner.placement.place_order(order.options()).await?)
         })
+    }
+    fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
+        let options: Vec<_> = orders
+            .orders()
+            .iter()
+            .map(|o| o.options().clone())
+            .collect();
+        Box::pin(async move { ids(self.inner.placement.place_orders(&options).await?) })
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.inner.start())
