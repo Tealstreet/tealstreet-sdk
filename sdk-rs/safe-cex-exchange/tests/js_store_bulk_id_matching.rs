@@ -16,6 +16,15 @@ fn selector(tag: &str) -> Js {
         "missing_id" => Js::object(vec![]),
         "undefined_id" => Js::object(vec![("id", Js::Undefined)]),
         "null_id" => Js::object(vec![("id", Js::Null)]),
+        "symbol_id" => Js::object(vec![("id", Js::SymbolIterator)]),
+        "object_symbol_id" => Js::object(vec![(
+            "id",
+            Js::object(vec![(
+                "toString",
+                Js::function("toString", |_, _| Ok(Js::SymbolIterator)),
+            )]),
+        )]),
+        "surrogate_id" => Js::object(vec![("id", Js::String(vec![0xd800]))]),
         "object_id" => Js::object(vec![(
             "id",
             Js::object(vec![(
@@ -63,7 +72,7 @@ fn bulk_remove_selector_ids_match_source_property_keys_and_early_returns() {
     );
     let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     let cases = source["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 24, "source array cases and empty Store floor");
+    assert_eq!(cases.len(), 30, "source array cases and empty Store floor");
     for row in cases {
         let facade = store::facade(Rc::new(DefaultStore::new()));
         let seeds = if row["empty"] == true {
