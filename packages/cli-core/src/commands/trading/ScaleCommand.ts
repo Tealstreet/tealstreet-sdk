@@ -135,24 +135,6 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const orderSide = args[1] === 'buy' ? OrderSide.Buy : OrderSide.Sell;
-    // Match the buy/sell vs close convention from Phase 0 decision 1:
-    // entries (non-reduce) take % of balance, exits (reduce) take % of
-    // position. Without `allowPercentage=true` the regex-vs-parser
-    // layer mismatch surfaced as confusing throws — see the test
-    // `regex accepts percent-size, parser used to reject it`.
-    let totalSize: number;
-    try {
-      totalSize = this.parseSizeAndConvertIfUsd(
-        exchange,
-        targetSymbol,
-        args[2],
-        true,
-        reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
-        reduceOnly ? 'position' : 'balance',
-      );
-    } catch (e) {
-      return this.error((e as Error).message);
-    }
     const ordersCount = parseInt(args[4], 10);
 
     const currentPrice = exchange.store?.tickers?.find((ticker) => ticker.symbol === targetSymbol)?.last;
@@ -165,17 +147,34 @@ export class ScaleCommand extends TradingBaseCommand {
     const priceUpper = Math.max(parseFloat(from), parseFloat(to));
     const priceLower = Math.min(parseFloat(to), parseFloat(from));
     const priceIncrement = subtract(priceUpper, priceLower) / subtract(ordersCount, 1);
-    const orderSize = totalSize / ordersCount;
 
+    // Entries take a bare % of balance, reduce-only exits a % of position.
+    // Each rung gets an equal share: a `$` / `%bal` share is converted at that
+    // rung's price (equal dollars per rung); position and inverse sizes don't
+    // depend on price, so they split evenly in contracts.
     const orders = [];
-    for (let i = 0; i < ordersCount; i++) {
-      const price = priceLower + i * priceIncrement;
-      orders.push({
-        size: orderSize,
-        price: String(price),
-        side: orderSide,
-        reduceOnly: reduceOnly,
-      });
+    try {
+      for (let i = 0; i < ordersCount; i++) {
+        const price = priceLower + i * priceIncrement;
+        const size =
+          this.parseSizeAndConvertIfUsd(
+            exchange,
+            targetSymbol,
+            args[2],
+            true,
+            reduceOnly ? (orderSide === OrderSide.Buy ? PositionSide.Short : PositionSide.Long) : undefined,
+            reduceOnly ? 'position' : 'balance',
+            price,
+          ) / ordersCount;
+        orders.push({
+          size,
+          price: String(price),
+          side: orderSide,
+          reduceOnly: reduceOnly,
+        });
+      }
+    } catch (e) {
+      return this.error((e as Error).message);
     }
 
     // Fatfinger gate — applies per-leg, not per-total. A scale command
