@@ -150,7 +150,7 @@ fn fallback(tag: &str, n: f64) -> Order {
         amount: n + 2.5,
         filled: n + 3.75,
         remaining: n + 4.125,
-        reduce_only: true,
+        reduce_only: true.into(),
         close: (None).into(),
         info: (Some(json!({"tag":tag}))).into(),
         time_in_force: (Some(OrderTimeInForce::PostOnly)).into(),

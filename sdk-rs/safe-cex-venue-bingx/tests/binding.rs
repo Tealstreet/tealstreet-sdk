@@ -942,6 +942,69 @@ fn historical_fills_use_host_local_time_conversion() {
     }
 }
 
+#[test]
+fn undefined_reduce_only_amendment_omits_the_signed_wire_field_like_source() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
+    use std::process::Command;
+
+    let h = fixture();
+    let mut source_order = serde_json::to_value(order()).unwrap();
+    let info = source_order["info"].as_object_mut().unwrap();
+    info.insert("clientOrderId".into(), json!("original-presence-client"));
+    for key in ["reduceOnly", "ro", "R", "positionSide", "ps"] {
+        info.remove(key);
+    }
+    let raw = from_json(&source_order);
+    raw.define("reduceOnly", Js::Undefined).unwrap();
+    let original: Order = to_typed(&raw).expect("native Order admits own-undefined reduceOnly");
+    h.store.add_or_update_order(original.clone()).unwrap();
+    const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
+    h.http.ok("POST", REPLACE, json!({"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"presence-replacement"}));
+    let mut request: UpdateOrderOpts =
+        serde_json::from_value(json!({"order":order(),"update":{"price":110}})).unwrap();
+    request.order = original;
+    assert_eq!(
+        h.drive(h.venue().update_order(request)).unwrap(),
+        ["presence-replacement"]
+    );
+    let calls = h.http.calls(REPLACE);
+    assert_eq!(calls.len(), 1);
+    let wire = &calls[0].data;
+    assert!(
+        wire.get("reduceOnly").is_none(),
+        "undefined reduceOnly must be omitted, including before HMAC: {wire}"
+    );
+    // Control only clock and UUID entropy; execute the maintained class, actual
+    // createAPI signer, installed qs and real HMAC over the source payload.
+    let input = json!({"order":source_order,"options":options(),"markets":&*h.store.markets(),"price":110,"timestamp":wire["timestamp"],"uuid":wire["clientOrderId"].as_str().unwrap().strip_prefix("ts").unwrap()});
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/completion_oracle.cjs"
+        ))
+        .arg("--undefined-reduce-only")
+        .arg(input.to_string())
+        .output()
+        .expect("execute actual TypeScript amendment and signer");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        wire, &expected["body"],
+        "complete signed wire body matches source"
+    );
+    assert!(
+        !expected["preimage"]
+            .as_str()
+            .unwrap()
+            .contains("reduceOnly")
+    );
+    done(&h);
+}
+
 fn asset_market(symbol: &str, base: &str) -> Value {
     json!({"symbol":symbol,"asset":base,"currency":"USDT","status":1,"quantityPrecision":"3","pricePrecision":"2","tradeMinLimit":"0.01","maxLongLeverage":75})
 }
@@ -1050,4 +1113,74 @@ fn refresh_markets_commits_valid_rows_around_bad_assets() {
     );
     h.runtime.reports.borrow_mut().clear();
     done(&h);
+}
+
+fn market_leverage_refusal_case(refresh: bool) {
+    use std::{cell::RefCell, rc::Rc};
+    for value in [
+        json!("75"),
+        json!({"leverage":75}),
+        json!([75]),
+        json!(true),
+    ] {
+        let h = fixture();
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(method, path, _)| method != "GET" || path != MARKET);
+        let mut bad = asset_market("BAD-USDT", "BAD");
+        bad["maxLongLeverage"] = value.clone();
+        h.http.ok(
+            "GET",
+            MARKET,
+            json!([
+                asset_market("BTC-USDT", "BTC"),
+                bad,
+                asset_market("ETH-USDT", "ETH")
+            ]),
+        );
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let capture = errors.clone();
+        h.exchange.base().on(
+            "error",
+            Rc::new(move |_, error| {
+                capture.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        let markets = if refresh {
+            h.drive(h.venue().refresh_markets()).unwrap();
+            h.store.markets().to_vec()
+        } else {
+            h.drive(h.venue().fetch_markets()).unwrap()
+        };
+        assert_eq!(
+            markets
+                .iter()
+                .map(|m| m.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["BTCUSDT", "ETHUSDT"]
+        );
+        assert_eq!(markets[0].limits.leverage.max, 75.0);
+        assert_eq!(markets[1].limits.leverage.max, 75.0);
+        let errors = errors.borrow();
+        assert_eq!(errors.len(), 1);
+        let message = errors[0].as_str().unwrap();
+        assert!(
+            message.contains("BAD-USDT")
+                && message.contains(&format!("limits.leverage.max={value}")),
+            "{message}"
+        );
+        drop(errors);
+        h.runtime.reports.borrow_mut().clear();
+        done(&h);
+    }
+}
+#[test]
+fn fetch_market_leverage_refusals_keep_siblings() {
+    market_leverage_refusal_case(false);
+}
+#[test]
+fn refresh_market_leverage_refusals_keep_siblings() {
+    market_leverage_refusal_case(true);
 }

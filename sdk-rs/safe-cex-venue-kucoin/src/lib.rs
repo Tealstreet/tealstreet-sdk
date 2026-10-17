@@ -18,14 +18,9 @@ pub mod spot_helpers;
 
 pub mod accounts;
 
-pub mod order_reads;
-
-pub mod spot_reads;
-
 pub mod api;
 
 pub mod spot_topics;
-pub mod spot_writes;
 
 pub mod message_routing;
 pub mod position_metadata;

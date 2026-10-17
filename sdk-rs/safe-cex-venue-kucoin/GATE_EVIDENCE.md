@@ -1154,3 +1154,34 @@ Clippy, wasm compilation/Clippy, parity Rust tests, or CI. The historical table
 mutation/census findings above were not remeasured. This evidence covers the
 named code SHA; the following evidence-only commit adds this record and does
 not claim new code validation.
+
+
+## Production order-reader cleanup (2026-10-18 SGT)
+
+The old src/order_reads.rs implementation, its eight tests, source-only oracle
+and cardinality control are retired. Earlier measurements of that copy above
+are historical, not production coverage. The constructed Exchange installs
+futures_native_order_reads through binding/futures.rs. Its retained component
+tests remain; tests/order_reads_binding.rs additionally drives actual HTTP
+requests and the real Store. Redirecting the live normal reader to the algo
+endpoint compiles, leaves all eight old copy tests passing, and fails the new
+binding witness at duplicated algo IDs. Exact restoration passes. The new
+witness also checks ordered endpoints/params, native contract-size scaling and
+failed-normal/empty-algo Store category preservation. This deletion changes no
+production algorithm or shared representation policy.
+
+
+## Production Spot I/O cleanup (2026-10-18 SGT)
+
+The parallel typed spot_reads/spot_writes implementations, their four test
+targets and exclusive source oracles are retired. Earlier measurements of those
+copies are historical. Production already installs spot_native_order_reads
+through spot_exchange_class; its native/source component cases remain. New
+tests/spot_io_binding.rs drives the actual constructed Exchange, HTTP factory
+and Store for market precision, distinct ticker prices and fallback, active
+symbol discovery/paging and three cancellation routes with exact params. Three
+compiled mutations independently change the live ticker bid field, discovery
+endpoint and cancel-all endpoint. Each leaves its corresponding retired-copy
+tests passing but fails the constructed witness. Exact restoration passes all
+three constructed tests. This is deletion of unused code, not an algorithm
+cutover or a resolution of shared typed projection/identity policy.
