@@ -1068,10 +1068,25 @@ fn constructed_spot_private_fill_updates_store_and_emits_original_payload() {
         (0.75, 2.25)
     );
     assert_eq!(h.store.orders()[0].status, OrderStatus::Open);
-    assert_eq!(
-        &*fills.borrow(),
-        &[json!({"side":"buy","symbol":"XBT/USD","price":30002.0,"amount":0.25})]
-    );
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert_eq!(fill.own_keys().len(), 4);
+    for (key, expected) in [("side", "buy"), ("symbol", "XBT/USD")] {
+        assert!(fill.has_own(key));
+        assert!(
+            fill.get(key)
+                .unwrap()
+                .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(expected))
+        );
+    }
+    for (key, expected) in [("price", 30002.0_f64), ("amount", 0.25_f64)] {
+        assert!(fill.has_own(key));
+        assert_eq!(
+            fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+            expected.to_bits()
+        );
+    }
 }
 
 #[test]

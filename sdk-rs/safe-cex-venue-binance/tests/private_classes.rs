@@ -4422,7 +4422,7 @@ fn market_field_refusal_case(venue: Venue, leverage: bool) {
             );
             let errors = errors.borrow();
             assert_eq!(errors.len(), 1);
-            let message = errors[0].as_str().unwrap();
+            let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
             let expected = value
                 .as_ref()
                 .map_or_else(|| "undefined".into(), Value::to_string);
