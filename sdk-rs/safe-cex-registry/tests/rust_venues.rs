@@ -770,6 +770,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bybitdemo,
             ExchangeName::Bybitspot,
             ExchangeName::Bybitinverse,
+            ExchangeName::Hyrotrader,
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
             ExchangeName::Cryptocom,

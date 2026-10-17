@@ -32,6 +32,14 @@ owned socket disposal; the concrete WS signing hook; public candle/book listener
 and shared hosted WS signing with exact request fields. A failed hosted signature
 sends no subscription and closes the connection for the base retry path.
 
+The duplicate-price book witness delivers actual public socket snapshots and
+deltas for both variants and compares the listener output with executed source
+`listenOrderBook` and its real helper imports. Copyback from shared book helpers
+consumes each retained level once, preserving distinct same-price amounts and
+running totals. The per-declaration exemption review is in
+[EXEMPTION_REVIEW.md](EXEMPTION_REVIEW.md); retaining a capability exemption does
+not close a separately recorded mapped-body finding.
+
 The native-number witness checks negative-zero bits and infinity in the Store
 after the real tick loop. The subscriber witness checks market commit before
 failure, original subscriber cause identity, stopped later fanout and absence of

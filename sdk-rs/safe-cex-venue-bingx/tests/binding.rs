@@ -871,3 +871,73 @@ fn native_synced_clock_reaches_all_order_mapping_paths() {
         "all real order mapper callers must use synced clock: {failures:?}"
     );
 }
+
+#[test]
+fn historical_fills_use_host_local_time_conversion() {
+    use std::{cell::RefCell, process::Command, rc::Rc};
+    for zone in ["Asia/Singapore", "America/New_York"] {
+        let output = Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/history_timezone_oracle.mjs"
+            ))
+            .env("TZ", zone)
+            .output()
+            .expect("execute actual TS historical fill mapper");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(source["zone"], zone);
+        let conversions = source["conversions"].as_array().unwrap().clone();
+        assert_eq!(conversions.len(), 2);
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let recorded = observed.clone();
+        let conversion = Rc::new(move |ms: f64| {
+            recorded.borrow_mut().push(ms);
+            conversions
+                .iter()
+                .find(|row| row["wall"].as_f64() == Some(ms))
+                .expect("callback receives the ISO civil date in milliseconds")["utc"]
+                .as_f64()
+                .unwrap()
+        });
+        let h =
+            support::harness_with_local_time(ExchangeName::Bingx, options(), conversion, |http| {
+                http.ok(
+                    "GET",
+                    "/openApi/swap/v2/trade/fillHistory",
+                    json!({"fill_history_orders": source["fills"]}),
+                );
+            });
+        let fills = h
+            .drive(h.venue().fetch_historical_fills(
+                serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(fills.len(), 6, "all local and zoned source fills");
+        for (fill, expected) in fills.iter().zip(source["executions"].as_array().unwrap()) {
+            assert_eq!(
+                fill.timestamp,
+                expected["timestamp"].as_f64().unwrap(),
+                "real binding historical fill timestamp matches TS in {zone}: {}",
+                expected["orderId"]
+            );
+            let expected: Execution = serde_json::from_value(expected.clone()).unwrap();
+            assert_eq!(*fill, expected, "complete source execution in {zone}");
+        }
+        assert_eq!(
+            *observed.borrow(),
+            source["conversions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["wall"].as_f64().unwrap())
+                .collect::<Vec<_>>(),
+            "only offset-less timestamps invoke the host, once per date"
+        );
+        done(&h);
+    }
+}

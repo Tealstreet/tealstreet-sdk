@@ -419,3 +419,8 @@ not close. Pair destructuring closes early and validates the return result.
 and connected public socket; it checks callback identity, emitted subscription
 channels, native string units, pull ordering and cleanup. These iterator-valued
 inputs exercise latent language contracts; maintained wire inputs remain arrays.
+
+The SocketOps pair reader used by book listeners now reuses the existing
+IteratorRecord helpers. Numeric-key objects from real JSON frames are refused
+before the book callback, matching source array destructuring; the error remains
+visible and a later valid array frame still reaches the listener.

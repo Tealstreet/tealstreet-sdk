@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs", "safe-cex-venue-bybit/src/binding/members/history.rs", "safe-cex-venue-bybit/src/rest_fills.rs", "safe-cex-venue-bybit/src/primary_fills.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/binding/members/options.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs", "safe-cex-venue-bybit/src/binding/members/history.rs", "safe-cex-venue-bybit/src/rest_fills.rs", "safe-cex-venue-bybit/src/primary_fills.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -757,34 +757,34 @@ note = "Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::f
 [[symbol]]
 ts = "BybitExchange.fetchOptionChain"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_chain"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_chain. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange.fetchOptionExpiries"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_expiries"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_expiries. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange.fetchAccountGreeks"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::fetch_account_greeks"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::fetch_account_greeks. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange#assertOptionsEnabled"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::assert_options_enabled"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::assert_options_enabled. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange#refuseOptionSymbol"
