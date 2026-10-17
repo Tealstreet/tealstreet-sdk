@@ -46,7 +46,7 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
     }
     native.config = field("config");
     native.request = field("request");
-    native.code = field("code");
+    // The common thrown-error projection already retains code as a native value.
     native
 }
 pub(super) struct Host {

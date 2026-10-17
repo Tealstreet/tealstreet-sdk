@@ -1,3 +1,4 @@
+use safe_cex_exchange::js_runtime::value::{Js, to_typed};
 //! Actual placement, reconciliation, completion and monitoring bodies. Missing
 //! partial-cancel and optional-fill ABI are explicit venue leaf dependencies.
 use crate::{
@@ -78,7 +79,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
         instance
             .exchange
             .base()
-            .emit("error", Value::String(message.into()))
+            .emit("error", safe_cex_exchange::js_runtime::value::Js::str(message))
     }
     fn cancel_input(instance: &ChaserOrderInstance, id: &str) -> ChaserCancel {
         let order = instance
@@ -581,7 +582,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
                 instance
                     .exchange
                     .base()
-                    .emit("warning", Value::String(message))?;
+                    .emit("warning", safe_cex_exchange::js_runtime::value::Js::str(&message))?;
             }
             if instance.is_stopped() {
                 engine.cleanup_instance(instance).await?;
@@ -618,8 +619,8 @@ impl<H: ChaserHost> ChaserEngine<H> {
                     has_seen_orders: Cell::new(false),
                     missing_updates: Cell::new(0),
                     queued_check: Cell::new(false),
-                    last_orders_id: RefCell::new(serde_json::json!(-1)),
-                    last_positions_id: RefCell::new(serde_json::json!(-1)),
+                    last_orders_id: RefCell::new(Js::Number(-1.0)),
+                    last_positions_id: RefCell::new(Js::Number(-1.0)),
                     last_price_check: Cell::new(0.),
                 });
                 let dispose = monitor.clone();
@@ -658,7 +659,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
                 instance
                     .exchange
                     .base()
-                    .emit("warning", Value::String(message))?;
+                    .emit("warning", safe_cex_exchange::js_runtime::value::Js::str(&message))?;
                 instance.mark_complete(Some("No order placed"));
             }
             engine.cleanup_instance(instance).await
@@ -702,8 +703,8 @@ struct ChaserMonitor<H: ChaserHost> {
     has_seen_orders: Cell<bool>,
     missing_updates: Cell<u32>,
     queued_check: Cell<bool>,
-    last_orders_id: RefCell<Value>,
-    last_positions_id: RefCell<Value>,
+    last_orders_id: RefCell<Js>,
+    last_positions_id: RefCell<Js>,
     last_price_check: Cell<f64>,
 }
 impl<H: ChaserHost> ChaserMonitor<H> {
@@ -896,7 +897,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                 self.instance
                     .exchange
                     .base()
-                    .emit("warning", Value::String(message))?;
+                    .emit("warning", safe_cex_exchange::js_runtime::value::Js::str(&message))?;
                 self.cleanup();
                 return Ok(Some(self.engine.cleanup_instance(self.instance.clone())));
             }
@@ -1052,7 +1053,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
         );
         *self.price_timer.borrow_mut() = Some(timer);
     }
-    fn on_update(self: &Rc<Self>, data: &Value) -> ExchangeFuture<'static, ()> {
+    fn on_update(self: &Rc<Self>, data: &Js) -> ExchangeFuture<'static, ()> {
         let prefix: Result<Option<ExchangeFuture<'static, ()>>, ExchangeError> = (|| {
             if self.instance.is_stopped() {
                 chaser_manager::log(
@@ -1063,29 +1064,14 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                 self.cleanup();
                 return Ok(Some(self.engine.cleanup_instance(self.instance.clone())));
             }
-            let orders_id = data.get("updateIds").and_then(|v| v.get("orders")).cloned();
-            let order_update = orders_id
-                .as_ref()
-                .is_none_or(|id| !strict_id_equal(id, &self.last_orders_id.borrow()));
-            if let Some(id) = orders_id {
-                *self.last_orders_id.borrow_mut() = id;
-            }
-            let positions_id = data
-                .get("updateIds")
-                .and_then(|v| v.get("positions"))
-                .cloned();
-            let position_update = positions_id
-                .as_ref()
-                .is_none_or(|id| !strict_id_equal(id, &self.last_positions_id.borrow()));
-            if let Some(id) = positions_id {
-                *self.last_positions_id.borrow_mut() = id;
-            }
-            let decode = || {
-                serde_json::from_value::<Vec<Order>>(
-                    data.get("orders").cloned().unwrap_or(Value::Null),
-                )
-                .map_err(|e| ExchangeError::new(e.to_string()))
-            };
+            let ids = data.get("updateIds")?;
+            let orders_id = ids.get("orders")?;
+            let order_update = !orders_id.strict_equals(&self.last_orders_id.borrow());
+            *self.last_orders_id.borrow_mut() = orders_id;
+            let positions_id = ids.get("positions")?;
+            let position_update = !positions_id.strict_equals(&self.last_positions_id.borrow());
+            *self.last_positions_id.borrow_mut() = positions_id;
+            let decode = || to_typed::<Vec<Order>>(&data.get("orders")?).map_err(Into::into);
             if order_update || position_update {
                 self.clear_timer(&self.price_timer);
                 self.clear_timer(&self.queued_timer);
@@ -1106,28 +1092,21 @@ impl<H: ChaserHost> ChaserMonitor<H> {
             Ok(())
         })
     }
-    fn on_fill(self: &Rc<Self>, data: &Value) {
+    fn on_fill(self: &Rc<Self>, data: &Js) {
         let result: Result<(), ExchangeError> = (|| {
-            let Some(id) = data
-                .get("orderId")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-            else {
-                return Ok(());
-            };
-            if !self.instance.current_order_ids().iter().any(|i| i == id)
-                || data.get("symbol").and_then(Value::as_str)
-                    != Some(self.instance.options().borrow().symbol.as_str())
-            {
+            let id = data.get("orderId")?;
+            let Some(id) = id.as_str().filter(|id| !id.is_empty()) else { return Ok(()) };
+            let id = String::from_utf16(id).map_err(|_| ExchangeError::new("fill orderId requires UTF-8"))?;
+            if !self.instance.current_order_ids().iter().any(|i| i == &id)
+                || !data.get("symbol")?.strict_equals(&Js::str(&self.instance.options().borrow().symbol)) {
                 return Ok(());
             }
-            let amount = safe_cex_num::js_number(data.get("amount"))
-                .map_err(|e| ExchangeError::new(e.message))?;
+            let amount = data.get("amount")?.to_number()?;
             chaser_manager::log(
                 &format!("fill event received: orderId={id}, amount={}", num(amount)),
                 &self.instance,
             )?;
-            self.instance.add_fill_amount(id, amount);
+            self.instance.add_fill_amount(&id, amount);
             if self.instance.is_stopped() {
                 chaser_manager::log(
                     "fully filled via fill events - marking ourselves completed",
@@ -1161,15 +1140,4 @@ fn prime_future<T: 'static>(mut future: ExchangeFuture<'static, T>) -> ExchangeF
         std::task::Poll::Pending => future,
     }
 }
-fn strict_id_equal(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Number(_), Value::Number(_)) => safe_cex_num::js_number(Some(a))
-            .ok()
-            .zip(safe_cex_num::js_number(Some(b)).ok())
-            .is_some_and(|(a, b)| a == b),
-        (Value::Null, Value::Null) => true,
-        (Value::String(a), Value::String(b)) => a == b,
-        (Value::Bool(a), Value::Bool(b)) => a == b,
-        _ => false,
-    }
-}
+

@@ -104,7 +104,7 @@ impl BackpackExchange {
                     })
                 },
                 move |m, s| log.base.log(m, s),
-                move |ev, e| emit.base.emit(ev, serde_json::Value::String(e.message)),
+                move |ev, e| emit.base.emit(ev, safe_cex_exchange::js_runtime::value::Js::str(&e.message)),
                 move || {
                     let f = fetch.fetch_positions();
                     Ok(async move {
@@ -134,7 +134,7 @@ impl BackpackExchange {
     pub fn change_position_mode(&self, hedged: bool) -> ExchangeFuture<'static, ()> {
         crate::account_reads::change_position_mode(
             hedged,
-            |ev, e| self.base.emit(ev, serde_json::Value::String(e.message)),
+            |ev, e| self.base.emit(ev, safe_cex_exchange::js_runtime::value::Js::str(&e.message)),
             |m, s| self.base.log(m, s),
         )
     }
@@ -146,7 +146,7 @@ impl BackpackExchange {
         crate::account_reads::change_margin_type(
             isolated,
             symbol,
-            |ev, e| self.base.emit(ev, serde_json::Value::String(e.message)),
+            |ev, e| self.base.emit(ev, safe_cex_exchange::js_runtime::value::Js::str(&e.message)),
             |m, s| self.base.log(m, s),
         )
     }

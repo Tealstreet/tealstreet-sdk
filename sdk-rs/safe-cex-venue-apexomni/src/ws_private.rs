@@ -390,23 +390,13 @@ impl ApexOmniPrivateWebsocket {
                 let order = &orders[0];
                 self.parent.base.emit(
                     "fill",
-                    crate::exchange::fields(&object([
-                        ("id", J::String(order.id.clone())),
-                        (
-                            "side",
-                            J::String(
-                                if order.side == safe_cex_types::OrderSide::Buy {
-                                    "buy"
-                                } else {
-                                    "sell"
-                                }
-                                .into(),
-                            ),
-                        ),
-                        ("symbol", J::String(order.symbol.clone())),
-                        ("price", J::Number(price)),
-                        ("amount", J::Number(amount)),
-                    ]))?,
+                    safe_cex_exchange::js_runtime::value::Js::object(vec![
+                        ("id", safe_cex_exchange::js_runtime::value::Js::str(&order.id)),
+                        ("side", safe_cex_exchange::js_runtime::value::from_typed(&order.side)?),
+                        ("symbol", safe_cex_exchange::js_runtime::value::Js::str(&order.symbol)),
+                        ("price", safe_cex_exchange::js_runtime::value::Js::Number(price)),
+                        ("amount", safe_cex_exchange::js_runtime::value::Js::Number(amount)),
+                    ]),
                 )?;
             }
             if filled || canceled {

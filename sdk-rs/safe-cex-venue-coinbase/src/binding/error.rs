@@ -22,7 +22,7 @@ pub(super) fn from_thrown(error: Thrown) -> PortfolioFailure {
         };
         native.response = property("response");
         native.config = property("config");
-        native.code = property("code");
+
         native.is_axios_error = error
             .value
             .get("isAxiosError")

@@ -636,7 +636,7 @@ impl PrivateStreamHost for SocketHost {
                     let _ = self
                         .host
                         .base()
-                        .emit_args("warning", &[json!(message), json!({"forceToast": true})]);
+                        .emit_args("warning", &[safe_cex_exchange::js_runtime::value::Js::str(message), safe_cex_exchange::js_runtime::value::Js::object(vec![("forceToast", safe_cex_exchange::js_runtime::value::Js::Bool(true))])]);
                 },
             )
             .map_err(|error| Rc::new(error.into()))
