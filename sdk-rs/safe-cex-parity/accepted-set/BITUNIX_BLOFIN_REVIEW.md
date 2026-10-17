@@ -434,3 +434,57 @@ This leaves nine original Bitunix owners and the previously measured 49 Blofin
 owners. OrderFrame itself, complete-package/local-owner and feature/WASM matrices
 remain separate obligations. These finite selected runtime profiles make no
 arbitrary callback, source-object or complete lifecycle claim.
+
+## Concrete OrderFrame receiver
+
+All 23 inventoried OrderFrame methods execute through 61 native cases, including
+both no-argument Store snapshot methods. The actual constructor, Store, HTTP
+lanes and BaseExchange listeners supply the receiver. Declared returned JSON is
+inspected recursively with numeric bits; the probe does not serialize a decoded
+owner to manufacture its expected result. Snapshots retain complete distinct
+positions/orders. The profile observes native cache mutation, caller-ID admission,
+missing/null/false presence, identity and trigger/snapshot fields, and standalone
+HTTP delegation.
+
+GET/POST cases forward distinct nonempty inputs with false/null fields and
+numbers; actual transport params/body and GET custom headers/timeouts are checked.
+Independent review found this initial forwarding hole before publication.
+
+Eight compiling copied-production controls produce named output failures:
+GET/POST forwarding loss, empty and partial position snapshots, empty and partial
+order snapshots, flipped reduce-cache truthiness and lost own-null presence.
+Snapshot loss occurs only after constructing the complete native output. All 61
+restored native cases pass, and real production source bytes remain unchanged.
+These finite concrete profiles do not classify the other venue/socket receivers
+or replace the separate shared model, generic helper, full-package/local-owner
+and feature/WASM obligations.
+
+## Socket Parent, book constructor and historical fills
+
+Three native owners execute through twenty cases. The concrete socket Parent
+uses the real venue, BaseExchange and Store: distinct event names/messages,
+severity, error prefixes and suppression metadata retain actual events/reports;
+a missing weak owner refuses before forwarding.
+
+The book constructor uses String callbacks and usize parser/timer tokens. All
+native returned subscription fields and initially empty book vectors are checked,
+with exact live handler/topic mutations and sent frame, or deferred 100 ms wait.
+Precision lookup failure occurs before parser allocation. The bounded host refuses
+unused parsing/cancellation hooks; concrete Feed and lifecycle behavior stay
+separate.
+
+Historical fills retain complete ordered native JsJsonValue fields and number
+bits, two surviving rows, newest-first order and replacement of an earlier
+duplicate. Distinct symbol/order/side/price filters, millisecond timestamps,
+limit clamp/truncation, exact suppression request data and warning failure are
+selected. A surviving negative-fee row proves positive commission conversion.
+
+All three actual native owners pass. Eleven compiling copied-production controls
+fail intended output assertions: Parent event-name/severity/prefix forwarding,
+book handler case/topic count/deferred wait, and fill consuming empty/partial
+output loss, sort reversal, lost duplicate replacement and removed commission abs.
+Every owner passes its complete restored cases; production source bytes remain
+unchanged. Independent review strengthened event-name and surviving-fee fixtures
+before publication. Complete-package/local-owner and feature/WASM matrices, full
+telemetry/console, concrete socket integration and source-object boundaries retain
+their independent obligations.
