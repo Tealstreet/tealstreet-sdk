@@ -357,7 +357,8 @@ fn signature_refusal_replays_serialized_write_once() {
     let _clock = ResetModelClock;
     for status in [200.0, 400.0] {
         let h = fixture();
-        h.http.advance_ms.set(1.0);
+        // VirtualClock deliberately ignores server corrections below one second.
+        h.http.advance_ms.set(2_000.0);
         *h.http
             .routes
             .borrow_mut()
@@ -440,7 +441,8 @@ fn ambiguous_write_failure_is_not_replayed() {
 fn retryable_read_gets_a_fresh_signature() {
     let _clock = ResetModelClock;
     let h = fixture();
-    h.http.advance_ms.set(1.0);
+    // VirtualClock deliberately ignores server corrections below one second.
+    h.http.advance_ms.set(2_000.0);
     let original = h
         .http
         .routes
