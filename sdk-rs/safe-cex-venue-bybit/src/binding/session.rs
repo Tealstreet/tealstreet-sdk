@@ -267,6 +267,12 @@ impl SessionHost for Rt {
                 &r"(\d+)([a-zA-Z]+)".encode_utf16().collect::<Vec<_>>(),
                 &[],
             ),
+            "missingTicker" => {
+                let mut message: Vec<u16> = "Ticker ".encode_utf16().collect();
+                message.extend_from_slice(&arg(&args, 0).to_js_string()?);
+                message.extend(" not found".encode_utf16());
+                Ok(Js::utf16(&message))
+            }
             "missingMarket" => Js::Undefined.get("limits"),
             "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" | "LogSeverity" => {
                 self.shared.globals.get(name)
