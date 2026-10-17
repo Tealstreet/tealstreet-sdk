@@ -28,6 +28,7 @@ pub struct Runtime {
     pub sent: Rc<RefCell<Vec<String>>>,
     pub random_values: RefCell<VecDeque<f64>>,
     pub urls: RefCell<Vec<String>>,
+    pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub http_options: RefCell<Vec<safe_cex_types::ExchangeOptions>>,
 }
 
@@ -101,20 +102,23 @@ impl ExchangeRuntime for Runtime {
     }
 }
 
-struct Socket {
-    events: RefCell<VecDeque<WsEvent>>,
+pub struct Socket {
+    pub events: Rc<RefCell<VecDeque<WsEvent>>>,
     sent: Rc<RefCell<Vec<String>>>,
-    closed: Cell<bool>,
+    pub closed: Cell<bool>,
 }
 impl WsSocket for Socket {
     fn ready_state(&self) -> u8 {
         if self.closed.get() { 3 } else { 1 }
     }
     fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
-        match self.events.borrow_mut().pop_front() {
-            Some(event) => Box::pin(async move { Ok(event) }),
-            None => Box::pin(std::future::pending()),
-        }
+        let events = self.events.clone();
+        Box::pin(std::future::poll_fn(move |_| {
+            events
+                .borrow_mut()
+                .pop_front()
+                .map_or(Poll::Pending, |event| Poll::Ready(Ok(event)))
+        }))
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
         self.sent.borrow_mut().push(message.into());
@@ -146,13 +150,14 @@ impl WsRuntime for Runtime {
         _: WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
-        self.urls.borrow_mut().push(url);
-        let socket: Rc<dyn WsSocket> = Rc::new(Socket {
-            events: RefCell::new(VecDeque::from([WsEvent::Open])),
+        self.urls.borrow_mut().push(url.clone());
+        let socket = Rc::new(Socket {
+            events: Rc::new(RefCell::new(VecDeque::from([WsEvent::Open]))),
             sent: self.sent.clone(),
             closed: Cell::new(false),
         });
-        Box::pin(async move { Ok(socket) })
+        self.sockets.borrow_mut().push((url, socket.clone()));
+        Box::pin(async move { Ok(socket as Rc<dyn WsSocket>) })
     }
     fn headers_capable(&self) -> bool {
         true
@@ -228,6 +233,7 @@ pub fn fixture(
         sent: Rc::default(),
         random_values: RefCell::default(),
         urls: RefCell::default(),
+        sockets: RefCell::default(),
         http_options: RefCell::default(),
     });
     #[expect(clippy::arc_with_non_send_sync)]

@@ -95,3 +95,11 @@ request config-extension carrier. The real API interceptors suppress only the
 already-gone `-2011` response; cancellation still logs completion.
 `tests/exchange_trait.rs` covers both HTTP-success and HTTP-error envelopes through
 the constructed venue, signer, transport and event emitter.
+
+Public transport errors call the stream's existing `on_close(None, "")` path,
+matching the source error listener's `this.onClose()` call. This runs the existing
+subscription reset wrapper and native reconnect without an invented close code.
+`public_socket_error` proves master has no redial before the watchdog timeout and
+requires one after the hook is installed. Shared scripted response data lives in
+`tests/support/exchange_data.rs`; frame queues stay injectable at the transport
+boundary while the production constructor, API and socket handlers run unchanged.
