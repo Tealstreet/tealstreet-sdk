@@ -560,7 +560,7 @@ fn compare(family: &str) {
                         delegates
                             .listen_ohlcv(
                                 "BTCUSDT",
-                                Timeframe::M1,
+                                safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
                                 Rc::new(move |candle| {
                                     candles.borrow_mut().push(candle);
                                     Ok(())

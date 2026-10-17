@@ -695,6 +695,12 @@ impl Exchange for BybitExchange {
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&options)))
     }
+    fn fetch_historical_orders(
+        &self,
+        options: Option<OrderHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<HistoricalOrder>> {
+        self.invoke("fetchHistoricalOrders", args!(opt_js(options)))
+    }
     fn fetch_income_history(
         &self,
         options: Option<IncomeHistoryOptions>,

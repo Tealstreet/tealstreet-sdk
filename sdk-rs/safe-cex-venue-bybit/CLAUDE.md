@@ -647,6 +647,13 @@ Spot retains its existing spot-only body. Retirement consumes only `id` and
 without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
 four production constructors and the real retained receiver/HTTP client path.
 
+Retry-condition coverage uses the real HTTP factory in `tests/api_factory.rs`.
+The dead `api::should_retry_bybit_request` copy and its fake-only optional-config
+supplement were removed. Keep the factory attempt, HMAC, effective error-config
+and retained-error assertions. `scripts/factory-retry-condition-control.py`
+inverts the production instruments-info exclusion, requires a compiled attempt
+count failure and restores exact source bytes before requiring a passing run.
+
 The Exchange candle-read override reaches the concrete receiver for all four bound
 families. `binding/members/ohlcv.rs` preserves primary validation/errors and the
 dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
@@ -714,3 +721,8 @@ maintained transaction-log helpers. Spot retains inherited empty history. Keep
 linear/inverse context order, source combined-category sort/limit rules, inclusive
 windows and repeated IDs. The mapper stays native until the typed public output;
 its ordinary lookup tables retain actual Object.prototype members.
+
+Historical order reads now bind primary/demo to the native mapper and signed
+history client. Dedicated Spot/Inverse keep Base's empty method. Keep ascending
+inclusive windows, category order and first-seen ID deduplication before sorting
+and limits. All three ledger mappers share native numeric coercion.

@@ -3,7 +3,7 @@
 use super::{
     promise,
     scope::{ScopeShared, scope_of},
-    value::{Js, Str, Thrown, arg, error_object, from_json},
+    value::{Js, Str, Thrown, arg, error_object},
 };
 use std::rc::{Rc, Weak};
 
@@ -665,10 +665,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             (
                 "parse",
                 Js::function("parse", |_, a| {
-                    let text = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
-                    serde_json::from_str::<serde_json::Value>(&text)
-                        .map(|v| from_json(&v))
-                        .map_err(|e| Thrown::error("SyntaxError", &e.to_string()))
+                    super::json_parse::parse(&arg(&a, 0).to_js_string()?)
                 }),
             ),
         ]),
