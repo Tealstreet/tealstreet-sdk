@@ -229,3 +229,10 @@ REST signature timestamps read the shared synced `VIRTUAL_CLOCK`, matching
 performs a real signed account read, verifies the transmitted HMAC, and requires
 the timestamp to fall inside the synced interval. Raw runtime time remains the
 clock for source `Date.now()` paths.
+
+The concrete API serializer forwards the source's repeat-array and pinned
+localeCompare sort options to the shared qs binding for both signing and final
+wire serialization. The final sort includes the newly appended signature key.
+`safe-cex-registry/tests/native_host_bingx.rs` proves the account GET sends
+signature before timestamp and independently verifies its HMAC. Shared option
+corpora cover nested and 12-element array key sorting and comma/form encoding.
