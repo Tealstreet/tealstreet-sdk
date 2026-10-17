@@ -152,7 +152,7 @@ fn null_batch_rows_match_actual_source_errors_prefix_and_next_chunk() {
 }
 
 #[test]
-fn native_nonfinite_placement_amounts_reach_the_source_formatter() {
+fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
     let source = Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -170,53 +170,74 @@ fn native_nonfinite_placement_amounts_reach_the_source_formatter() {
     let source: Value = serde_json::from_slice(&source.stdout).unwrap();
     let rows = source["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 3);
-    for (amount, source) in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
-        .into_iter()
-        .zip(rows)
+    for ((amount, source_qty), source) in [
+        (f64::NAN, Some("NaN")),
+        (f64::INFINITY, None),
+        (f64::NEG_INFINITY, Some("-Infinity")),
+    ]
+    .into_iter()
+    .zip(rows)
     {
-        let (venue, rt, _, wire) = support::fixture_with(false);
-        let mut opts = order();
-        opts.amount = amount;
-        opts.client_order_id = Some("caller1".into());
-        let outcome = drive(&rt, venue.base().place_order(venue.as_ref(), opts));
-        let requests = wire.requests.lock().unwrap();
-        let requests = requests
-            .iter()
-            .filter(|request| request.url.ends_with("/place_order"))
-            .collect::<Vec<_>>();
-        let expected = source["result"]["ok"]
-            .as_array()
-            .expect("source formatter returns payloads");
-        assert_eq!(
-            requests.len(),
-            expected.len(),
-            "native amount{amount} must preserve source placement count: {outcome:?}"
-        );
-        outcome.expect("source accepts the native amount and its formatter result");
-        for (request, expected) in requests.iter().zip(expected) {
-            let payload: Value =
-                serde_json::from_slice(&request.body.as_ref().unwrap().wire_bytes().unwrap())
-                    .unwrap();
-            let qty = &expected["entries"]
+        // Source behavior is retained as evidence of the accepted strict-input difference.
+        let payloads = source["result"]["ok"].as_array().unwrap();
+        assert_eq!(payloads.len(), usize::from(source_qty.is_some()));
+        if let Some(qty) = source_qty {
+            let observed = &payloads[0]["entries"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .find(|pair| pair[0] == "qty")
                 .unwrap()[1];
-            let qty = String::from_utf16(
-                &qty["units"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|value| value.as_u64().unwrap() as u16)
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap();
             assert_eq!(
-                payload["qty"], qty,
-                "native amount{amount} must reach adjust before JSON projection"
+                observed["units"],
+                json!(qty.encode_utf16().collect::<Vec<_>>())
             );
         }
-        venue.dispose().unwrap();
+        for batch in [false, true] {
+            let (venue, rt, _, wire) = support::fixture_with(false);
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let captured = errors.clone();
+            venue.base().on(
+                "error",
+                Rc::new(move |_, value: &Value| {
+                    captured.borrow_mut().push(value.clone());
+                    Ok(())
+                }),
+            );
+            let mut opts = order();
+            opts.amount = amount;
+            opts.client_order_id = Some("caller1".into());
+            let result = if batch {
+                drive(
+                    &rt,
+                    venue
+                        .base()
+                        .place_orders(venue.as_ref(), vec![order(), opts]),
+                )
+            } else {
+                drive(&rt, venue.base().place_order(venue.as_ref(), opts))
+            };
+            let error = result.expect_err("strict nonfinite placement amount must be refused");
+            let message = format!(
+                "Bitunix placement amount must be finite (received {})",
+                safe_cex_num::js_number_string(amount)
+            );
+            assert_eq!(
+                error.name, "TypeError",
+                "field refusal must not leak a JSON decode error"
+            );
+            assert_eq!(error.message, message);
+            assert_eq!(
+                errors.borrow().len(),
+                1,
+                "one visible field refusal per call"
+            );
+            assert!(errors.borrow()[0].as_str().unwrap().contains(&message));
+            assert!(
+                wire.requests.lock().unwrap().is_empty(),
+                "batch preflight must refuse before any hydration or order HTTP"
+            );
+            venue.dispose().unwrap();
+        }
     }
 }
