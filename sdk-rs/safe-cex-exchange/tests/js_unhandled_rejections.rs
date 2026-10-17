@@ -37,6 +37,7 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
             .output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&native.stderr);
+        assert!(!stderr.contains("panicked"), "{stderr}");
         assert!(
             native.status.success(),
             "{}\n{stderr}",
@@ -82,6 +83,32 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
         };
         let catch = Js::function("catch", |_, _| Ok(Js::Undefined));
         let live = reject("unhandled-live");
+        let parked = Promise::pending(&runtime);
+        drop(Promise::spawn(
+            &runtime,
+            Box::pin(async move { parked.wait().await }),
+        ));
+        let reentrant = Rc::new(std::cell::RefCell::new(Js::Undefined));
+        let weak_reentrant = Rc::downgrade(&reentrant);
+        let handler = catch.clone();
+        let reason = Thrown::error("Error", "initial").value;
+        reason.define_accessor(
+            "message",
+            Some(Rc::new(move |_| {
+                if let Some(owner) = weak_reentrant.upgrade() {
+                    let promise = owner.borrow().clone();
+                    promise.call_method("catch", vec![handler.clone()])?;
+                }
+                Ok(Js::str("unhandled-reentrant"))
+            })),
+            None,
+        );
+        *reentrant.borrow_mut() = shared
+            .globals
+            .get("Promise")
+            .unwrap()
+            .call_method("reject", vec![reason])
+            .unwrap();
         let async_runtime = runtime.clone();
         drop(Promise::spawn(
             &runtime,
@@ -164,7 +191,47 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
             .unwrap();
         tokio::time::sleep(Duration::from_millis(5)).await;
         pending.settle(Ok(Js::Undefined));
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        reject("unhandled-idle-driver");
         tokio::time::sleep(Duration::from_millis(15)).await;
         assert!(matches!(live, Js::Promise(_)));
     });
+}
+
+#[test]
+fn native_host_discard_releases_unreported_rejection_values() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let local = tokio::task::LocalSet::new();
+    let (capture, runtime) = local.block_on(&rt, async {
+        let native = native_runtime();
+        let runtime = Rc::downgrade(&native);
+        let native: Rc<dyn ExchangeRuntime> = native;
+        let captured = Rc::new(());
+        let capture = Rc::downgrade(&captured);
+        let value = Js::object(vec![(
+            "capture",
+            Js::function("capture", move |_, _| {
+                let _keep = &captured;
+                Ok(Js::Undefined)
+            }),
+        )]);
+        drop(Promise::settled(&native, Err(Thrown::new(value))));
+        (capture, runtime)
+    });
+    assert!(
+        capture.upgrade().is_some(),
+        "checkpoint owns the discarded rejection until its reporting turn"
+    );
+    drop(local);
+    assert!(
+        capture.upgrade().is_none(),
+        "host discard drops queued rejection captures"
+    );
+    assert!(
+        runtime.upgrade().is_none(),
+        "host discard breaks the rejection/queue ownership cycle"
+    );
 }

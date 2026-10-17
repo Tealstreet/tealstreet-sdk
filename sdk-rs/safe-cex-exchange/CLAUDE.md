@@ -1297,3 +1297,10 @@ frames that the host delivers together. Scope timers use the same queue and
 drain reactions before the next timer. Other runtime embedders still control
 their host callback boundaries; the scoped native witnesses cover this native
 checkpoint, timer cancellation and host task discard.
+
+The shared JS Promise sink reports unhandled rejections through the runtime
+exception boundary at a quiescent microtask checkpoint. Registering an await or
+reaction handles its source immediately; an unhandled propagated rejection
+belongs to the derived promise. Reading result() alone does not handle it.
+Checks retain discarded rejection values until their reporting turn, and host
+driver discard releases those pending captures without reporting them.

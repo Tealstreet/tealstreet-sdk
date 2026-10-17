@@ -1,6 +1,11 @@
 const unhandled = [];
 process.on('unhandledRejection', error => unhandled.push(error.message));
 const live = Promise.reject(new Error('unhandled-live'));
+let reentrant;
+const reason = { get message() { reentrant.catch(() => {}); return 'unhandled-reentrant'; } };
+reentrant = Promise.reject(reason);
+void (async () => { await new Promise(() => {}); })();
+setTimeout(() => Promise.reject(new Error('unhandled-idle-driver')), 10);
 void (async () => { await null; throw new Error('unhandled-void'); })();
 setTimeout(async () => { await null; throw new Error('unhandled-timer'); }, 0);
 const handled = Promise.reject(new Error('handled-sync'));
