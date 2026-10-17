@@ -1,5 +1,5 @@
 //! HTTP interceptor behavior from packages/safe-cex/src/safeCexAxiosCreate.ts.
-use crate::runtime::ExchangeRuntime;
+use crate::runtime::{ExchangeError, ExchangeRuntime};
 use safe_cex_store::Store;
 use safe_cex_transport::query::{
     query_identity_eq, query_json_projection, query_truthy, render_query,
@@ -636,7 +636,12 @@ impl HttpClient {
                         stringify_response_body(&body)
                     );
                     self.runtime.console("error", &message);
-                    let _ = self.host.emit("error", &message);
+                    if let Err(error) = self.host.emit("error", &message) {
+                        self.runtime.report_exception(
+                            &ExchangeError::new(error),
+                            &json!({"event":"error"}),
+                        );
+                    }
                 }
             }
             if self.host.is_main_window() {
