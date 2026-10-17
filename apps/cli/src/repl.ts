@@ -2254,7 +2254,7 @@ async function runScriptStep(command: string, step: import('@tealstreet/cli-core
     reportStepError(
       step,
       new Error(
-        `script '${parsed.name}' not loaded — drop a file at ~/.tealstreet/scripts/${parsed.name}.ts and run \`script reload\`.`,
+        `script '${parsed.name}' not loaded — drop a file at ~/${BRAND.configDirName}/scripts/${parsed.name}.ts and run \`script reload\`.`,
       ),
     );
     return;
@@ -2524,7 +2524,7 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
   }
 
   adapter.printInfo('Type "help" for available commands, "exit" to quit');
-  adapter.printInfo('Full logs → yarn logs (or tail -f ~/.tealstreet/cli.log)\n');
+  adapter.printInfo(`Full logs → yarn logs (or tail -f ~/${BRAND.configDirName}/cli.log)\n`);
 
   // Load command history
   const history = loadHistory();
@@ -2787,7 +2787,7 @@ export async function runSingleCommand(
 
   if (config.accounts.length === 0) {
     adapter.printWarning('No accounts configured.');
-    adapter.printInfo('Run: tealstreet account add --help');
+    adapter.printInfo(`Run: ${BRAND.binName} account add --help`);
     process.exit(1);
   }
 
@@ -2878,7 +2878,7 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         if (!config.accounts?.length) {
           return fail(
             'NO_ACCOUNTS',
-            'No accounts configured. Add one with `tealstreet account add`, or sync from the web app.',
+            `No accounts configured. Add one with \`${BRAND.binName} account add\`, or sync from the web app.`,
           );
         }
         const account = getAccount(accountName);
