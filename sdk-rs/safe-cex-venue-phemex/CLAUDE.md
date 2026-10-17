@@ -226,3 +226,13 @@ snapshots replacing Store without fill notifications, terminal deltas emitting
 the execution price, supported-market position updates, and per-currency balance
 merging with current position PnL. These are coverage of existing source behavior,
 not additional venue fixes.
+
+
+Post-merge #418 review found snapshot failure warnings dispatching to the socket's
+missing log instead of parent.log, and stringifying Error rather than reading its
+message. The real constructed public-book regression proves both failures with
+compiled REDs. It compares the maintained TS subscription, asserts the warning
+text/severity, next-delta retries, 30-second warning throttling/reopening and later
+snapshot recovery with the buffered delta. Error instances read message; other
+thrown values retain String(value). The source supplement includes plain object
+and string rejections. The real read limiter remains active in this regression.
