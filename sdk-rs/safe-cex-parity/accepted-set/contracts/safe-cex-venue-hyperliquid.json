@@ -12611,5 +12611,1618 @@
     },
     "evidence": "Reviewed the actual reference-counted startup timeout callback declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the actual production realm::value::Value for both success and error; native trait bounds authenticate the production Realm host Value/Error bindings. tests/support/accepted_future_aliases.rs::timeout_callback_fixed_value_preserves_arguments_result_and_identity proves invariant mutable-reference equality and TypeId against the independently authored std container type. It preserves Rc allocation identity, clone sharing, ordered distinct native arguments, negative-zero/infinity bits, lone UTF-16 units, returned object and thrown error identities. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
     "reason": "For this one fixed production Value/Value instantiation, the reference-counted startup timeout callback is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
+  },
+  "safe_cex_venue_hyperliquid::rate_limit::get_hyperliquid_rest_request_weight": {
+    "api": {
+      "kind": "function",
+      "name": "get_hyperliquid_rest_request_weight",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "call": "{ let data=if $value[\"mode\"].as_str().unwrap()==\"raw\" {serde_json::Value::String($value[\"data\"].as_str().unwrap().to_owned())}else{$value[\"data\"].clone()}; match $type($value[\"url\"].as_str().unwrap(),&data){Ok(weight)=>serde_json::json!({\"ok\":true,\"weightText\":weight.to_string(),\"weightBits\":format!(\"{:016x}\",weight.to_bits())}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})} }",
+    "cases": [
+      {
+        "input": {
+          "case": "omitted response limit",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "role base",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userRole\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "60",
+          "weightBits": "404e000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "low base",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"allMids\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "2",
+          "weightBits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "candle before boundary",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"candleSnapshot\",\"limit\":119}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "21",
+          "weightBits": "4035000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "candle boundary",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"candleSnapshot\",\"limit\":120}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "22",
+          "weightBits": "4036000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "twenty before boundary",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":39.999}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "21",
+          "weightBits": "4035000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "twenty boundary",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":40}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "22",
+          "weightBits": "4036000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "decimal string",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":\"60\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "23",
+          "weightBits": "4037000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "JS trim hex",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":\"\\ufeff0x78\\ufeff\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "26",
+          "weightBits": "403a000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "not JS whitespace",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":\"\\u008560\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "true",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":true}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "false",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":false}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "null",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":null}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "empty array",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[]}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "singleton array",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[60]}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "23",
+          "weightBits": "4037000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "nested singleton array",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[[60]]}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "23",
+          "weightBits": "4037000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "comma join",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[\"1\",\"20\"]}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "null comma join",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[null,null]}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "plain object",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":{}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "noncallable valueOf",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":{\"valueOf\":0}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "lone surrogate",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":\"\\ud800\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "overflow",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":1e400}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "negative overflow",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":-1e400}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "negative underflow",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":-1e-400}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "negative zero",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":-0.0}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "nested comma join",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[[null,\"120\"]]}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "empty first comma join",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[\"\",\"120\"]}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "own toString",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":{\"toString\":0}}"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      },
+      {
+        "input": {
+          "case": "array own toString",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[{\"toString\":0}]}"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      },
+      {
+        "input": {
+          "case": "late poison after surrogate",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userFills\",\"limit\":[\"\\ud800\",{\"toString\":0}]}"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      },
+      {
+        "input": {
+          "case": "unknown type still coerces",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{\"type\":\"unknown\",\"limit\":{\"toString\":0}}"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      },
+      {
+        "input": {
+          "case": "invalid text",
+          "url": "/info",
+          "mode": "raw",
+          "data": "{oops"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "array root",
+          "url": "/info",
+          "mode": "raw",
+          "data": "[]"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "null root",
+          "url": "/info",
+          "mode": "raw",
+          "data": "null"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "number root",
+          "url": "/info",
+          "mode": "raw",
+          "data": "7"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "single JSON parse only",
+          "url": "/info",
+          "mode": "raw",
+          "data": "\"{\\\"type\\\":\\\"userRole\\\"}\""
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "endpoint suffix",
+          "url": "https://host/info",
+          "mode": "raw",
+          "data": "{\"type\":\"userRole\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "60",
+          "weightBits": "404e000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "query is not endpoint suffix",
+          "url": "https://host/info?x=1",
+          "mode": "raw",
+          "data": "{\"type\":\"userRole\"}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "order before boundary",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\": {\"type\": \"order\", \"orders\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "order boundary",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\": {\"type\": \"order\", \"orders\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "2",
+          "weightBits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancel boundary",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\": {\"type\": \"cancel\", \"cancels\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "3",
+          "weightBits": "4008000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "modify boundary",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\": {\"type\": \"batchModify\", \"modifies\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "4",
+          "weightBits": "4010000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "unknown action",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\":{\"type\":\"unknown\",\"orders\":[1]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "other endpoint does not coerce",
+          "url": "/other",
+          "mode": "raw",
+          "data": "{\"limit\":{\"toString\":0}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "typed comma join",
+          "url": "/info",
+          "mode": "value",
+          "data": {
+            "type": "userFills",
+            "limit": [
+              "1",
+              "20"
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "typed singleton",
+          "url": "/info",
+          "mode": "value",
+          "data": {
+            "type": "userFills",
+            "limit": [
+              60
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "23",
+          "weightBits": "4037000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "typed role",
+          "url": "/info",
+          "mode": "value",
+          "data": {
+            "type": "userRole"
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "60",
+          "weightBits": "404e000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "typed poison",
+          "url": "/info",
+          "mode": "value",
+          "data": {
+            "type": "candleSnapshot",
+            "limit": {
+              "toString": 0
+            }
+          }
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      },
+      {
+        "input": {
+          "case": "typed null",
+          "url": "/info",
+          "mode": "value",
+          "data": null
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "typed number",
+          "url": "/info",
+          "mode": "value",
+          "data": 7
+        },
+        "output": {
+          "ok": true,
+          "weightText": "20",
+          "weightBits": "4034000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "typed order batch",
+          "url": "/exchange",
+          "mode": "value",
+          "data": {
+            "action": {
+              "type": "order",
+              "orders": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "2",
+          "weightBits": "4000000000000000"
+        }
+      }
+    ],
+    "nativeObservation": {
+      "nativeFields": [
+        "weightText",
+        "weightBits"
+      ],
+      "call": "{ let data=if $value[\"mode\"].as_str().unwrap()==\"raw\" {serde_json::Value::String($value[\"data\"].as_str().unwrap().to_owned())}else{$value[\"data\"].clone()}; match $type($value[\"url\"].as_str().unwrap(),&data){Ok(weight)=>serde_json::json!({\"ok\":true,\"weightText\":weight.to_string(),\"weightBits\":format!(\"{:016x}\",weight.to_bits())}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})} }",
+      "cases": [
+        {
+          "input": {
+            "case": "omitted response limit",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "role base",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userRole\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "60",
+            "weightBits": "404e000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "low base",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"allMids\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "2",
+            "weightBits": "4000000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "candle before boundary",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"candleSnapshot\",\"limit\":119}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "21",
+            "weightBits": "4035000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "candle boundary",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"candleSnapshot\",\"limit\":120}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "22",
+            "weightBits": "4036000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "twenty before boundary",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":39.999}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "21",
+            "weightBits": "4035000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "twenty boundary",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":40}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "22",
+            "weightBits": "4036000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "decimal string",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":\"60\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "23",
+            "weightBits": "4037000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "JS trim hex",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":\"\\ufeff0x78\\ufeff\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "26",
+            "weightBits": "403a000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "not JS whitespace",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":\"\\u008560\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "true",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":true}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "false",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":false}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "null",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":null}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "empty array",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[]}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "singleton array",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[60]}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "23",
+            "weightBits": "4037000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "nested singleton array",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[[60]]}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "23",
+            "weightBits": "4037000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "comma join",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[\"1\",\"20\"]}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "null comma join",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[null,null]}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "plain object",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":{}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "noncallable valueOf",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":{\"valueOf\":0}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "lone surrogate",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":\"\\ud800\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "overflow",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":1e400}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "negative overflow",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":-1e400}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "negative underflow",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":-1e-400}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "negative zero",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":-0.0}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "nested comma join",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[[null,\"120\"]]}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "empty first comma join",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[\"\",\"120\"]}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "own toString",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":{\"toString\":0}}"
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        },
+        {
+          "input": {
+            "case": "array own toString",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[{\"toString\":0}]}"
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        },
+        {
+          "input": {
+            "case": "late poison after surrogate",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userFills\",\"limit\":[\"\\ud800\",{\"toString\":0}]}"
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        },
+        {
+          "input": {
+            "case": "unknown type still coerces",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{\"type\":\"unknown\",\"limit\":{\"toString\":0}}"
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        },
+        {
+          "input": {
+            "case": "invalid text",
+            "url": "/info",
+            "mode": "raw",
+            "data": "{oops"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "array root",
+            "url": "/info",
+            "mode": "raw",
+            "data": "[]"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "null root",
+            "url": "/info",
+            "mode": "raw",
+            "data": "null"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "number root",
+            "url": "/info",
+            "mode": "raw",
+            "data": "7"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "single JSON parse only",
+            "url": "/info",
+            "mode": "raw",
+            "data": "\"{\\\"type\\\":\\\"userRole\\\"}\""
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "endpoint suffix",
+            "url": "https://host/info",
+            "mode": "raw",
+            "data": "{\"type\":\"userRole\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "60",
+            "weightBits": "404e000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "query is not endpoint suffix",
+            "url": "https://host/info?x=1",
+            "mode": "raw",
+            "data": "{\"type\":\"userRole\"}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "1",
+            "weightBits": "3ff0000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "order before boundary",
+            "url": "/exchange",
+            "mode": "raw",
+            "data": "{\"action\": {\"type\": \"order\", \"orders\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "1",
+            "weightBits": "3ff0000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "order boundary",
+            "url": "/exchange",
+            "mode": "raw",
+            "data": "{\"action\": {\"type\": \"order\", \"orders\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "2",
+            "weightBits": "4000000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "cancel boundary",
+            "url": "/exchange",
+            "mode": "raw",
+            "data": "{\"action\": {\"type\": \"cancel\", \"cancels\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "3",
+            "weightBits": "4008000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "modify boundary",
+            "url": "/exchange",
+            "mode": "raw",
+            "data": "{\"action\": {\"type\": \"batchModify\", \"modifies\": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "4",
+            "weightBits": "4010000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "unknown action",
+            "url": "/exchange",
+            "mode": "raw",
+            "data": "{\"action\":{\"type\":\"unknown\",\"orders\":[1]}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "1",
+            "weightBits": "3ff0000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "other endpoint does not coerce",
+            "url": "/other",
+            "mode": "raw",
+            "data": "{\"limit\":{\"toString\":0}}"
+          },
+          "output": {
+            "ok": true,
+            "weightText": "1",
+            "weightBits": "3ff0000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "typed comma join",
+            "url": "/info",
+            "mode": "value",
+            "data": {
+              "type": "userFills",
+              "limit": [
+                "1",
+                "20"
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "typed singleton",
+            "url": "/info",
+            "mode": "value",
+            "data": {
+              "type": "userFills",
+              "limit": [
+                60
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "weightText": "23",
+            "weightBits": "4037000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "typed role",
+            "url": "/info",
+            "mode": "value",
+            "data": {
+              "type": "userRole"
+            }
+          },
+          "output": {
+            "ok": true,
+            "weightText": "60",
+            "weightBits": "404e000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "typed poison",
+            "url": "/info",
+            "mode": "value",
+            "data": {
+              "type": "candleSnapshot",
+              "limit": {
+                "toString": 0
+              }
+            }
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        },
+        {
+          "input": {
+            "case": "typed null",
+            "url": "/info",
+            "mode": "value",
+            "data": null
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "typed number",
+            "url": "/info",
+            "mode": "value",
+            "data": 7
+          },
+          "output": {
+            "ok": true,
+            "weightText": "20",
+            "weightBits": "4034000000000000"
+          }
+        },
+        {
+          "input": {
+            "case": "typed order batch",
+            "url": "/exchange",
+            "mode": "value",
+            "data": {
+              "action": {
+                "type": "order",
+                "orders": [
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null
+                ]
+              }
+            }
+          },
+          "output": {
+            "ok": true,
+            "weightText": "2",
+            "weightBits": "4000000000000000"
+          }
+        }
+      ]
+    },
+    "evidence": "Reviewed maintained hyperliquid.rateLimiter.ts request parsing, endpoint/batch/base/extra weights and JavaScript Number/array coercion, plus the exact current compiler function API. Actual native observations invoke this production caller through raw_request_weight -> raw_number -> nested text, directly reading returned f64 decimal text and binary64 bits or error name/message. Independently authored raw and typed JSON cases exercise scalar, array, nested array, own-toString errors, signed/overflow inputs, batch boundaries and endpoint choice. Mutating only the nested text comma separator must fail the named comma-join native witness; exact restoration must pass. This is the concrete native/default API with JSON payloads; live getters/prototypes and limiter scheduling are separate obligations."
   }
 }
