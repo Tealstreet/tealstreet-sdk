@@ -1212,3 +1212,9 @@ real private-frame witnesses cover the production caller and final fill ordering
 `resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
+
+JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
+It rejects signs inside radix digits (for example `0x+1`) and preserves the shared
+full-string, whitespace and arbitrary-length binary64 rounding rules. The native
+host `js_string_number` target compares 93 Node results through installed Number,
+including signed radix refusals, large values, overflow and signed zero.
