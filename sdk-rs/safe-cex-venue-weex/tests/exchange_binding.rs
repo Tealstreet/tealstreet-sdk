@@ -274,6 +274,191 @@ fn fills_response_array_keys_match_source() {
         assert_eq!(h.http.calls(endpoint("USER_TRADES")).len(), 1, "{name}");
     }
 }
+fn historical_fill_row(id: &str, maker: Option<Value>, time: i64) -> Value {
+    let mut row = json!({"symbol":"BTCUSDT","id":id,"orderId":"order-1","side":"BUY", "price":"101.5","qty":"2","time":time,"commissionAsset":"USDT"});
+    if let Some(maker) = maker {
+        row["maker"] = maker;
+    }
+    row
+}
+fn historical_fill_logs(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value>>> {
+    let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = logs.clone();
+    h.venue().base().on_args(
+        "log",
+        std::rc::Rc::new(move |_, args| {
+            captured
+                .borrow_mut()
+                .push(json!({"message":args[0],"severity":args[1]}));
+            Ok(())
+        }),
+    );
+    logs
+}
+#[test]
+fn historical_fills_closed_maker_refusals_keep_good_rows_and_report_values() {
+    for bad in [
+        json!("true"),
+        json!("false"),
+        json!(1),
+        json!(0),
+        Value::Null,
+        json!({}),
+    ] {
+        let rows = json!([
+            historical_fill_row("before", Some(json!(false)), 1700000000000),
+            historical_fill_row("refused", Some(bad.clone()), 1700000001000),
+            historical_fill_row("after", Some(json!(true)), 1700000002000),
+            historical_fill_row("missing", None, 1700000003000)
+        ]);
+        let h = harness(options(), |http| {
+            http.ok("GET", endpoint("USER_TRADES"), rows);
+            script(http);
+        });
+        seed(&h);
+        let logs = historical_fill_logs(&h);
+        let fills = h
+            .drive(h.venue().fetch_historical_fills(
+                serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+            ))
+            .expect("a closed maker field refuses only its row");
+        assert_eq!(fills.len(), 3, "bad maker {bad}");
+        for (id, maker) in [
+            ("before", Some(false)),
+            ("after", Some(true)),
+            ("missing", None),
+        ] {
+            let fill = fills
+                .iter()
+                .find(|fill| fill.id.as_deref() == Some(id))
+                .unwrap();
+            assert_eq!(
+                fill.maker, maker,
+                "{id}: no boolean coercion or fabricated flag"
+            );
+            assert_eq!((fill.price, fill.qty), (101.5, 2.0));
+            assert_eq!(fill.commission_asset.as_deref(), Some("USDT"));
+        }
+        let logs = logs.borrow();
+        assert_eq!(logs.len(), 1, "each refused row needs a visible report");
+        assert_eq!(logs[0]["severity"], "warning");
+        let message = logs[0]["message"].as_str().unwrap();
+        assert!(message.contains("Execution.maker"), "{message}");
+        assert!(message.contains(&format!("received: {bad}")), "{message}");
+        assert_eq!(h.http.calls(endpoint("USER_TRADES")).len(), 1);
+    }
+}
+#[test]
+fn historical_fills_closed_asset_refusals_keep_good_rows_and_report_values() {
+    for bad in [json!(17), json!(true), json!({"asset":"USDT"})] {
+        let mut refused = historical_fill_row("refused", Some(json!(false)), 1700000001000);
+        refused["commissionAsset"] = bad.clone();
+        let h = harness(options(), |http| {
+            http.ok(
+                "GET",
+                endpoint("USER_TRADES"),
+                json!([
+                    historical_fill_row("before", None, 1700000000000),
+                    refused,
+                    historical_fill_row("after", Some(json!(true)), 1700000002000)
+                ]),
+            );
+            script(http);
+        });
+        seed(&h);
+        let logs = historical_fill_logs(&h);
+        let fills = h
+            .drive(h.venue().fetch_historical_fills(
+                serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+            ))
+            .expect("a closed commission asset refuses only its row");
+        assert_eq!(fills.len(), 2);
+        assert!(
+            fills
+                .iter()
+                .any(|fill| fill.id.as_deref() == Some("before"))
+        );
+        assert!(fills.iter().any(|fill| fill.id.as_deref() == Some("after")));
+        assert!(
+            fills
+                .iter()
+                .all(|fill| fill.commission_asset.as_deref() == Some("USDT"))
+        );
+        let logs = logs.borrow();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0]["severity"], "warning");
+        let message = logs[0]["message"].as_str().unwrap();
+        assert!(message.contains("Execution.commissionAsset"), "{message}");
+        assert!(message.contains(&format!("received: {bad}")), "{message}");
+        assert_eq!(h.http.calls(endpoint("USER_TRADES")).len(), 1);
+    }
+}
+#[test]
+fn historical_fills_closed_all_refused_rows_return_empty_with_each_report() {
+    let mut asset = historical_fill_row("asset", None, 1700000001000);
+    asset["commissionAsset"] = json!(17);
+    let h = harness(options(), |http| {
+        http.ok(
+            "GET",
+            endpoint("USER_TRADES"),
+            json!([
+                historical_fill_row("maker", Some(json!("true")), 1700000000000),
+                asset
+            ]),
+        );
+        script(http);
+    });
+    seed(&h);
+    let logs = historical_fill_logs(&h);
+    let fills = h
+        .drive(
+            h.venue().fetch_historical_fills(
+                serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+            ),
+        )
+        .expect("all refused rows resolve after reporting each refusal");
+    assert!(fills.is_empty());
+    assert_eq!(logs.borrow().len(), 2);
+    assert_eq!(h.http.calls(endpoint("USER_TRADES")).len(), 1);
+}
+#[test]
+fn historical_fills_closed_refusal_does_not_replace_source_coercion_error() {
+    let mut bad = historical_fill_row("coercion", Some(Value::Null), 1700000001000);
+    bad["commissionAsset"] = json!(17);
+    bad["commission"] = json!({"toString":null});
+    let h = harness(options(), |http| {
+        http.ok(
+            "GET",
+            endpoint("USER_TRADES"),
+            json!([
+                historical_fill_row("before", None, 1700000000000),
+                bad,
+                historical_fill_row("after", None, 1700000002000)
+            ]),
+        );
+        script(http);
+    });
+    seed(&h);
+    let logs = historical_fill_logs(&h);
+    let error = h
+        .drive(
+            h.venue().fetch_historical_fills(
+                serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+            ),
+        )
+        .expect_err("source commission conversion runs before closed maker admission");
+    assert!(
+        error
+            .message
+            .contains("Cannot convert object to primitive value"),
+        "{error:?}"
+    );
+    assert!(
+        logs.borrow().is_empty(),
+        "source errors are not typed-field refusals"
+    );
+    assert_eq!(h.http.calls(endpoint("USER_TRADES")).len(), 1);
+}
 #[test]
 fn fetch_orders_e2e() {
     let h = setup();
