@@ -81,15 +81,7 @@ pub struct BybitExchange {
     pub(crate) api_key_info: RefCell<Option<crate::types::BybitApiKeyInfo>>,
     pub(crate) batch_limit: Cell<f64>,
     pub(crate) force_unified_balance: Cell<bool>,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired as the remaining receiver members land")
-    )]
     pub(crate) execution_query_max_range_ms: f64,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired as the remaining receiver members land")
-    )]
     pub(crate) default_executions_lookback_ms: f64,
 }
 
