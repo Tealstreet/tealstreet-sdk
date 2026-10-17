@@ -1495,3 +1495,43 @@ HOW runtime gate or installed Axios transform gate was run. Sub-agent review
 covered the pagination slice and new predicate; inherited whole-branch review
 status remains unverified as warned above. The unused inherited
 order_mapping_error.rs draft and both local Aimux brief files remain uncommitted.
+
+## Live algo mapper and fetch repair (wave 3)
+
+Production `mapAlgoOrder` now executes the runtime-value mapper in
+`binding/hosts/order_mapping.rs`. A partial STOP retains an own undefined type,
+copied quantity/reduceOnly values, native arithmetic and the original parent
+`info` reference. The actual HTTP `fetchAlgoOrders` member retains the STOP and
+both bracket children (three rows); it previously returned zero after the
+closed typed mapper rejected the STOP. Both unused typed order mappers and
+their facade-only tests/controls are deleted. Only the genuine `is_algo_order`
+predicate remains in `orders.rs`.
+
+The two new real-class regressions first compiled and failed on the old dispatch
+(`/tmp/woo-live-algo-before.log`). The maintained `algo-order-control.py`
+compiles a closed-type regression inside the actual mapper, requires named
+mapper and HTTP failures, restores exact source bytes, then passes all five
+live mapper tests. `terminal-report-control.py` independently restores a closed
+output refusal inside the actual limit mapper: all three terminal IOC/FOK/MARKET
+socket assertions fail, then the restored stream suite passes. Neither control
+replaces the production mapper or host with a stub.
+
+The live unit suite executes all 103 actual-source mapper records, 36 native
+numeric-bit witnesses and 12 filter/error/clock-order cases. Native observations
+include own undefined fields, original prototype referents, UTF-16 values and
+parent reference identity. The new TypeScript source witness and maintained
+order-output oracle both pass. From the SDK directory with Rust 1.99.0,
+`RUSTC_BOOTSTRAP=1`, one Cargo job and `SAFE_CEX_TYPESCRIPT_PATH` set to the
+installed TypeScript module: library 16, `binding_orders` 36 and
+`binding_streams` 15 tests pass (67 total). Strict native and Wasm all-targets,
+all-features Clippy and workspace formatting checks pass. Global manifest
+invention/status checks pass: 7,459 rows and 17,212 public Rust items. These
+results concern live mapper/fetch behavior, not accepted-set contract coverage.
+
+The shared Store/public typed-return boundary is still separate: measured,
+uninstalled socket regressions reject undefined STOP type, string amount and
+missing reduceOnly. No numeric coercion or row skipping is introduced to hide
+that boundary. The shared model owner has the enum/price cutover; amount and
+reduceOnly remain subject to the documented shared-type decision. The synthetic
+string-quantity fixture proves TS behavior, not that a live legacy endpoint has
+sent that payload.

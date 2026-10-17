@@ -87,13 +87,15 @@ impl crate::public_stream::PublicStreamParent for Parent {
         symbol: &Value,
         ticker: &Ticker,
     ) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit(event, json!([symbol, ticker]))
+        self.rt()?
+            .base()
+            .emit_args(event, &[symbol.clone(), json!(ticker)])
     }
     fn emit_trade(
         &self,
         trade: &crate::ws_helpers::PublicStreamTradeEvent,
     ) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("trade",json!([{"symbol":trade.symbol,"price":trade.price,"qty":trade.qty,"timestamp":trade.timestamp,"side":trade.side}]))
+        self.rt()?.base().emit("trade",json!({"symbol":trade.symbol,"price":trade.price,"qty":trade.qty,"timestamp":trade.timestamp,"side":trade.side}))
     }
 }
 impl crate::private_repairs::RepairParent for Parent {
@@ -212,16 +214,18 @@ impl crate::private_stream::PrivateStreamParent for Parent {
             .unwrap_or(0.0)
     }
     fn emit_order(&self, order: &Order) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("order", json!([order]))
+        self.rt()?
+            .base()
+            .emit_args("order", &[json!(order.id), json!(order)])
     }
     fn emit_fill(&self, fill: &crate::private_stream::PrivateFill) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("fill",json!([{"id":fill.id,"orderId":fill.order_id,"symbol":fill.symbol,"side":fill.side,"price":fill.price,"amount":fill.amount}]))
+        self.rt()?.base().emit("fill",json!({"id":fill.id,"orderId":fill.order_id,"symbol":fill.symbol,"side":fill.side,"price":fill.price,"amount":fill.amount}))
     }
     fn emit_positions(&self, positions: &[Position]) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("positions", json!([positions]))
+        self.rt()?.base().emit("positions", json!(positions))
     }
     fn emit_account(&self, data: &Value) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("account", json!([data]))
+        self.rt()?.base().emit("account", data.clone())
     }
 }
 

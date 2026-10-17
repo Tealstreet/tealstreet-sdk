@@ -192,6 +192,8 @@ impl From<safe_cex_transport::RestFailure> for ExchangeError {
 }
 pub type ExchangeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ExchangeError>> + 'a>>;
 pub type Listener = Rc<dyn Fn(&str, &serde_json::Value) -> Result<(), ExchangeError>>;
+/// The actual emitted argument list, including zero arguments and array values.
+pub type ArgsListener = Rc<dyn Fn(&str, &[serde_json::Value]) -> Result<(), ExchangeError>>;
 pub type Cleanup = Box<dyn FnOnce()>;
 /// Cleanup of an event subscription can itself emit and fail.
 pub type ListenerCleanup = Box<dyn FnOnce() -> Result<(), ExchangeError>>;

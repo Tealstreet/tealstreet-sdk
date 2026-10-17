@@ -4,6 +4,7 @@
 use crate::native_host::{native_venue_host_signed, native_venue_host_with};
 use crate::rust_venues::rust_constructor;
 use safe_cex_exchange::{
+    client_order_id::ClientOrderLookup,
     exchange::Exchange,
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
     runtime::{Cleanup, ExchangeError, RemoteSigner},
@@ -254,6 +255,12 @@ pub fn native_account_call(
             "reconnect" => done(base.reconnect()).map(|_| Value::Null),
             "recoverAfterOffline" => done(venue.recover_after_offline()).and_then(encode),
             "waitForRemoteSigner" => done(base.wait_for_remote_signer().await).and_then(encode),
+            "getActiveTickerSymbols" => encode(base.get_active_ticker_symbols()),
+            "setActiveTickerSymbols" => {
+                let symbols: Vec<String> = arg(&args, 0)?;
+                done(base.set_active_ticker_symbols(&symbols)).map(|_| Value::Null)
+            }
+            "fetchLastLogsFromWebsockets" => encode(base.fetch_last_logs_from_websockets()),
             "validateAccount" => done(venue.validate_account().await).and_then(encode),
             "getAccount" => done(venue.get_account().await).and_then(encode),
             "fetchMarkets" => done(venue.fetch_markets().await).and_then(encode),
@@ -265,6 +272,27 @@ pub fn native_account_call(
             "fetchOrders" => done(venue.fetch_orders(arg(&args, 0)?).await).and_then(encode),
             "fetchAndSetOrders" => {
                 done(venue.fetch_and_set_orders(arg(&args, 0)?).await).and_then(encode)
+            }
+            "findOrderByClientOrderId" => done(
+                venue
+                    .find_order_by_client_order_id(arg(&args, 0)?, arg(&args, 1)?)
+                    .await,
+            )
+            .map(|lookup| match lookup {
+                ClientOrderLookup::Found(order) => json!({"found": true, "order": order}),
+                ClientOrderLookup::NotFound { definitive } => {
+                    json!({"found": false, "definitive": definitive})
+                }
+            }),
+            "removeOrders" => {
+                // TS accepts Pick<Order, 'id'>[], not an array of bare IDs.
+                #[derive(serde::Deserialize)]
+                struct OrderId {
+                    id: String,
+                }
+                let orders: Vec<OrderId> = arg(&args, 0)?;
+                let ids: Vec<String> = orders.into_iter().map(|order| order.id).collect();
+                done(base.remove_orders(&ids)).map(|_| Value::Null)
             }
             "fetchAndSetPrivateSnapshot" => {
                 done(venue.fetch_and_set_private_snapshot(1).await).map(|_| Value::Null)

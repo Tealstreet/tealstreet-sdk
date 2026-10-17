@@ -1,7 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import {spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const directory=path.join(root,'sdk-rs/safe-cex-venue-okx/tests');
-const sources=fs.readdirSync(directory).filter(x=>x.endsWith('-oracle.mjs')&&x!=='field-identity-oracle.mjs'&&x!=='archive-identity-oracle.mjs'&&x!=='numeric-helper-identity-oracle.mjs').sort();
+const sources=fs.readdirSync(directory).filter(x=>x.endsWith('-oracle.mjs')&&x!=='field-identity-oracle.mjs'&&x!=='numeric-helper-identity-oracle.mjs').sort();
 const report={method:'Execute original oracle generators, recursively inspect every emitted object, group sibling scalar fields by JS runtime type and exact value; count equal pairs as candidates, not defects. Schemas with distinct-value witnesses are reported separately. This includes input, expected output, trace and metadata objects.',files:[],records:0,candidates:0,nullPairs:0};
 for(const name of sources){
  const run=spawnSync(process.execPath,[path.join(directory,name)],{encoding:'utf8',maxBuffer:128*1024*1024});

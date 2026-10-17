@@ -1588,7 +1588,9 @@ fn rest_http_host_carries_config_to_the_terminal_adapter() {
         let seen = terminal.seen.lock().unwrap();
         assert_eq!(seen[0].method, "get");
         assert_eq!(seen[0].base_url.as_deref(), Some("https://www.okx.com"));
-        assert_eq!(seen[0].params, Some(json!({"instId": "BTC-USDT-SWAP"})));
+        // query_in_url marks this adapter as a physical URL-consuming terminal.
+        assert_eq!(seen[0].url, "/ok?instId=BTC-USDT-SWAP");
+        assert_eq!(seen[0].params, None);
         assert_eq!(seen[0].timeout_ms, Some(20000));
         assert_eq!(seen[0].headers.get("X-A").map(String::as_str), Some("1"));
         assert_eq!(seen[1].method, "post");
