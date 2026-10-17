@@ -186,20 +186,20 @@ pub async fn change_position_mode<F: Future<Output = Result<(), E>>, E>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn change_position_mode_helper<Post, Fetch>(
+pub async fn change_position_mode_helper<Post, Fetch, P>(
     hedged: bool,
     category: Option<&str>,
     coin: Option<&str>,
     symbol: Option<&str>,
     post: impl FnOnce(&str, Map<String, Value>) -> Result<Post, Error>,
     mut fetch: impl FnMut(Option<Vec<String>>) -> Result<Fetch, Error>,
-    update: impl FnOnce(Positions) -> Result<(), Error>,
-    upsert: impl FnOnce(Positions) -> Result<(), Error>,
+    update: impl FnOnce(P) -> Result<(), Error>,
+    upsert: impl FnOnce(P) -> Result<(), Error>,
     emit: impl FnOnce(Option<Value>) -> Result<(), Error>,
 ) -> Result<(), Error>
 where
     Post: Future<Output = Result<Rc<Value>, Error>>,
-    Fetch: Future<Output = Result<Positions, Error>>,
+    Fetch: Future<Output = Result<P, Error>>,
 {
     let mut payload = Map::new();
     for (key, value) in [("category", category), ("coin", coin), ("symbol", symbol)] {
@@ -230,18 +230,18 @@ where
     Ok(())
 }
 
-pub async fn change_margin_type<Post, Fetch>(
+pub async fn change_margin_type<Post, Fetch, P>(
     isolated: bool,
     _symbol: Option<&str>,
     post: impl FnOnce(&str, Map<String, Value>) -> Result<Post, Error>,
     emit: impl FnOnce(Option<Value>) -> Result<(), Error>,
     set_margin_type: impl FnOnce(MarginType) -> Result<(), Error>,
     fetch: impl FnOnce(Option<Vec<String>>) -> Result<Fetch, Error>,
-    update: impl FnOnce(Positions) -> Result<(), Error>,
+    update: impl FnOnce(P) -> Result<(), Error>,
 ) -> Result<(), Error>
 where
     Post: Future<Output = Result<Rc<Value>, Error>>,
-    Fetch: Future<Output = Result<Positions, Error>>,
+    Fetch: Future<Output = Result<P, Error>>,
 {
     let data = post(
         endpoint("SET_MARGIN_MODE"),

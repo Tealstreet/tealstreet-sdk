@@ -3993,7 +3993,6 @@ dependencies = [
  "safe-cex-venue-txflow",
  "safe-cex-venue-weex",
  "safe-cex-venue-woo",
- "safe-cex-webworker",
  "serde",
  "serde_json",
  "sha2 0.10.9",
