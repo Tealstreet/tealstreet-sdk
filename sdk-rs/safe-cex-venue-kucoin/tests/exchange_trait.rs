@@ -1031,7 +1031,7 @@ fn native_ticker_coercion(spot: bool) {
     let source = ticker_coercion::source(name);
     assert_eq!(
         source["cases"].as_array().unwrap().len(),
-        if spot { 96 } else { 72 }
+        if spot { 256 } else { 72 }
     );
     let (venue, f, _) = private_topic_fixture(spot);
     let socket = f

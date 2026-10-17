@@ -43,7 +43,7 @@ satisfy this corpus.
 | Kraken futures | kraken/kraken.ws-public.ts | Numeric coercion, including fundingTime helper | Pending complete coercion corpus |
 | Kraken Spot | kraken/krakenspot.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | KuCoin futures | kucoin/kucoin.ws-public.ts | Truthy tickerV2 fallback; nullish snapshot/instrument guards with parseFloat | Native proven: safe-cex-venue-kucoin/tests/exchange_trait.rs::production_ticker_coercion_futures_matches_constructed_typescript; 72 cases / 216 frames across tickerV2, snapshot and instrument |
-| KuCoin Spot | kucoin/kucoinspot.ws-public.ts | Finite parseFloat after nullish-to-empty conversion; nonfinite values leave prior fields | Native proven: safe-cex-venue-kucoin/tests/exchange_trait.rs::production_ticker_coercion_spot_matches_constructed_typescript; 96 cases / 288 symbol and ticker-all frames |
+| KuCoin Spot | kucoin/kucoinspot.ws-public.ts | Finite parseFloat after nullish-to-empty conversion; nonfinite values leave prior fields | Native proven: safe-cex-venue-kucoin/tests/exchange_trait.rs::production_ticker_coercion_spot_matches_constructed_typescript; 256 cases / 768 symbol and ticker-all frames, including every nullish numeric alias |
 | Lighter | lighter/lighter.ws-public.ts | parseLighterWsNumber and funding normalization | Pending; prioritize missing ticker binding corpus |
 | MEXC | mexc/mexc.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | OKX | okx/okx.ws-public.ts | Numeric coercion | Pending complete coercion corpus |

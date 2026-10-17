@@ -310,8 +310,8 @@ remain; the retired typed reconcile helper was an identity over an empty Store
 and added no production coverage at that representation boundary.
 
 The constructed ticker corpus in `tests/exchange_trait.rs` drives 72 futures
-cases across tickerV2/snapshot/instrument and 96 Spot cases across symbol/all
-topics, using 504 actual public socket frames. Each numeric input independently
+cases across tickerV2/snapshot/instrument and 256 Spot cases across symbol/all
+topics, using 984 actual public socket frames, including every numeric alias. Each numeric input independently
 receives eight malformed/coercion values between distinct good rows. Every
 native Ticker number is compared by bits with the constructed TS exchange and
 DefaultStore. The shared control runner independently misroutes futures and

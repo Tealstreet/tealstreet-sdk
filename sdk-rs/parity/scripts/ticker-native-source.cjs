@@ -37,7 +37,7 @@ const channels = venue === 'bitunix'
       : venue === 'weex' ? { ticker: ['c', 'm', 'i', 'P', 'v', 'q'], 'ticker-array': ['c', 'm', 'i', 'P', 'v', 'q'] }
         : venue === 'phemex' ? { packed: ['openRp', 'lastRp', 'volumeRq', 'openInterestRv', 'indexRp', 'markRp', 'fundingRateRr', 'bid', 'ask'] }
           : venue === 'kucoin' ? { tickerV2: ['bestBidPrice', 'bestAskPrice'], snapshot: ['lastPrice', 'priceChgPct', 'fundingRate', 'volume', 'turnover'], instrument: ['markPrice', 'indexPrice'] }
-            : { ticker: ['bestBid', 'bestAsk', 'price', 'changeRate', 'volume', 'turnover'], 'ticker-all': ['bestBid', 'bestAsk', 'price', 'changeRate', 'volume', 'turnover'] };
+            : { ticker: ['bestBid', 'bestBidPrice', 'buy', 'bestAsk', 'bestAskPrice', 'sell', 'price', 'last', 'lastPrice', 'changeRate', 'volume', 'vol', 'volume24h', 'turnover', 'volValue', 'turnover24h'], 'ticker-all': ['bestBid', 'bestBidPrice', 'buy', 'bestAsk', 'bestAskPrice', 'sell', 'price', 'last', 'lastPrice', 'changeRate', 'volume', 'vol', 'volume24h', 'turnover', 'volValue', 'turnover24h'] };
 (async () => {
   const cases = [];
   try {
@@ -54,13 +54,22 @@ const channels = venue === 'bitunix'
         if (venue === 'kucoin') {
           const data = { symbol: ticker.id, bestBidPrice: String(29.5 + offset), bestAskPrice: String(33.75 + offset), lastPrice: String(31.5 + offset), priceChgPct: String(.125 + index), fundingRate: String(.0025 + index), volume: String(53.25 + offset), turnover: String(1091.75 + offset), markPrice: String(37.75 + offset), indexPrice: String(38.25 + offset) };
           if (index === 0) data[key] = value;
+          if (channel === 'instrument') delete data.symbol;
           const prefix = channel === 'instrument' ? '/contract/instrument' : `/contractMarket/${channel}`;
           return JSON.stringify({ type: 'message', topic: `${prefix}:${ticker.id}`, data });
         }
         if (venue === 'kucoinspot') {
           const data = { bestBid: String(29.5 + offset), bestAsk: String(33.75 + offset), price: String(31.5 + offset), changeRate: String(.125 + index), volume: String(53.25 + offset), turnover: String(1091.75 + offset) };
+          const chain = [['bestBid', 'bestBidPrice', 'buy'], ['bestAsk', 'bestAskPrice', 'sell'], ['price', 'last', 'lastPrice'], ['volume', 'vol', 'volume24h'], ['turnover', 'volValue', 'turnover24h']].find(keys => keys.includes(key));
+          if (chain) {
+            data[key] = data[chain[0]];
+            for (const earlier of chain.slice(0, chain.indexOf(key))) {
+              if (channel === 'ticker-all') data[earlier] = null;
+              else delete data[earlier];
+            }
+          }
           if (index === 0) data[key] = value;
-          return JSON.stringify({ type: 'message', topic: `/market/ticker:${channel === 'ticker-all' ? 'all' : ticker.symbol}`, subject: ticker.symbol, data });
+          return JSON.stringify({ type: 'message', topic: `/market/ticker:${channel === 'ticker-all' ? 'all' : ticker.symbol}`, ...(channel === 'ticker-all' ? { subject: ticker.symbol } : {}), data });
         }
         if (venue === 'apexomni') {
           const row = { s: ticker.symbol, p: String(31.5 + offset), mp: String(37.75 + offset), xp: String(38.25 + offset),
