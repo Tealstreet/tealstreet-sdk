@@ -292,6 +292,23 @@ fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -
 }
 
 impl WsProtocol for JsProtocol {
+    fn recovers_after_offline(&self) -> bool {
+        let Some(core) = self.0.upgrade() else {
+            return false;
+        };
+        let this = core.this.borrow().clone();
+        match this.get("recoversAfterOffline") {
+            Ok(value) => value.truthy(),
+            Err(thrown) => {
+                core.context.runtime.report_exception(
+                    &core_error(thrown),
+                    &serde_json::json!({ "operation": "recoversAfterOffline" }),
+                );
+                false
+            }
+        }
+    }
+
     fn dispose(&self) {
         let Some(core) = self.0.upgrade() else {
             return;
@@ -590,6 +607,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
     // TS field initializers. The Rust core owns ping/pong and reconnect timing,
     // so these are the derived classes' own state, not views of the core.
     for (field, value) in [
+        ("recoversAfterOffline", Js::Bool(true)),
         ("lastCloseTime", Js::Number(0.0)),
         ("onCloseCount", Js::Number(0.0)),
         ("reconnecting", Js::Bool(false)),
