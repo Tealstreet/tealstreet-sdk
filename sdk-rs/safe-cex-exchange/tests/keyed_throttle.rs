@@ -1,4 +1,4 @@
-use safe_cex_webworker::throttle::ThrottleManager;
+use safe_cex_exchange::throttle::ThrottleManager;
 use std::{cell::RefCell, rc::Rc};
 
 #[path = "support/runtime.rs"]

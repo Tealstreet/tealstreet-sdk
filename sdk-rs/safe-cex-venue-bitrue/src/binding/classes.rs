@@ -341,9 +341,11 @@ fn member(rt: &Rt, r: Js, name: &'static str) -> Js {
                 let v = to_json(&x(0))?;
                 let balance = h.shared.store.balance();
                 return from_typed(
-                    crate::balance::parse_balance(Some(&v), &balance)
-                        .map_err(coercion)?
-                        .as_ref(),
+                    crate::balance::parse_balance(Some(&v), &balance, |message| {
+                        h.exchange_runtime().console("warn", message)
+                    })
+                    .map_err(coercion)?
+                    .as_ref(),
                 );
             }
             "getPositionAccounts" => {

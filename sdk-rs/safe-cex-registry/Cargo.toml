@@ -43,7 +43,6 @@ serde_json.workspace = true
 workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-safe-cex-webworker = { path = "../safe-cex-webworker" }
 getrandom.workspace = true
 # Native registry builds carry the production RustVenueHost (src/native_host.rs).
 safe-cex-venue-binance = { workspace = true, features = ["native"] }

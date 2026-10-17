@@ -1973,11 +1973,33 @@ impl PrivateParent for ExchangeState {
                     .store
                     .add_or_update_position(typed(&arg(0))?)
                     .map_err(|error| Rc::new(error.into())),
-                UpdatePosition => owner
-                    .base
-                    .store
-                    .update_position(&arg(0).read("id")?.text()?, &patch(&arg(1))?)
-                    .map_err(|error| Rc::new(error.into())),
+                UpdatePosition => {
+                    let position = arg(0);
+                    let mut changes = arg(1).spread();
+                    if owner.venue == Venue::PM
+                        && changes.get("info").is_some_and(|info| info.same(&position))
+                    {
+                        // The source creates position.info === position. The owned
+                        // Store keeps the chosen depth-one snapshot of the updated
+                        // fields, excluding info so subsequent frames stay bounded.
+                        let mut snapshot = position.spread();
+                        snapshot.remove("info");
+                        for (field, value) in &changes {
+                            if field != "info" {
+                                snapshot.insert(field.clone(), value.clone());
+                            }
+                        }
+                        changes.insert("info".into(), EventValue::record_object(snapshot));
+                    }
+                    owner
+                        .base
+                        .store
+                        .update_position(
+                            &position.read("id")?.text()?,
+                            &patch(&EventValue::record_object(changes))?,
+                        )
+                        .map_err(|error| Rc::new(error.into()))
+                }
                 Fill => owner.fill(arg(0)),
                 MarkPosition => {
                     owner.mark_position_state_updated();

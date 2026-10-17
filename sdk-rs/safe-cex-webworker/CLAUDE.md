@@ -9,7 +9,7 @@ Behavioral source: [worker guidance](../../packages/safe-cex/src/webworker/CLAUD
 and its linked subsystem guidance. This crate consumes Exchange and Store
 directly; hosts provide the existing ExchangeRuntime clock and local scheduler.
 
-Keyed ThrottleManager follows the source's leading call and resettable trailing
+The shared exchange-core keyed ThrottleManager follows the source's leading call and resettable trailing
 timer. This differs from the worker bridge's fixed-window lodash throttle.
 Clear cancels the timers still registered by key, including the source bug where
 an older orphan tail survives a newer leading call and clear. Drop cancels all
