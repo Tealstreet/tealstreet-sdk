@@ -311,6 +311,29 @@ pub fn native_account_call(
                 done(venue.cancel_symbol_orders(arg(&args, 0)?).await).map(|_| Value::Null)
             }
             "cancelAllOrders" => done(venue.cancel_all_orders().await).map(|_| Value::Null),
+            "mintClientOrderId" => encode(base.mint_client_order_id(&arg(&args, 0)?)),
+            "placeOrderWithClientOrderId" => {
+                let order: PlaceOrderOpts = arg(&args, 0)?;
+                done(base.place_order_with_client_order_id(venue, order).await).map(|placed| {
+                    json!({"orderIds": placed.order_ids, "clientOrderId": placed.client_order_id})
+                })
+            }
+            "fetchOptionChain" => {
+                done(venue.fetch_option_chain(arg(&args, 0)?).await).and_then(encode)
+            }
+            "fetchOptionExpiries" => {
+                done(venue.fetch_option_expiries(arg(&args, 0)?).await).and_then(encode)
+            }
+            "fetchAccountGreeks" => done(venue.fetch_account_greeks().await).and_then(encode),
+            "nuke" => done(venue.nuke(arg::<Option<u32>>(&args, 0)?.unwrap_or(0)).await)
+                .map(|_| Value::Null),
+            "nukePositions" => done(
+                venue
+                    .nuke_positions(arg::<Option<u32>>(&args, 0)?.unwrap_or(0))
+                    .await,
+            )
+            .map(|_| Value::Null),
+            "nukeOrders" => done(base.nuke_orders(venue).await).map(|_| Value::Null),
             "setLeverage" => done(
                 venue
                     .set_leverage(arg(&args, 0)?, arg(&args, 1)?, arg(&args, 2)?)
