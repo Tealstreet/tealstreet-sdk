@@ -4320,3 +4320,169 @@ fn production_native_pm_market_asset_refusals_keep_siblings() {
 fn production_native_spot_market_asset_refusals_keep_siblings() {
     market_asset_refusal_case(Venue::Spot);
 }
+
+#[cfg(feature = "native")]
+fn market_field_refusal_case(venue: Venue, leverage: bool) {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
+    use std::sync::Arc;
+    struct Markets {
+        rows: Value,
+        brackets: Value,
+    }
+    impl RestAdapter for Markets {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            let path = request.url.split('?').next().unwrap();
+            let body = if path.ends_with("/exchangeInfo") {
+                &self.rows
+            } else if path.ends_with("/leverageBracket") {
+                &self.brackets
+            } else {
+                panic!("unexpected {path}")
+            };
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(serde_json::to_vec(body).unwrap()),
+            })))
+        }
+    }
+    let values = if leverage {
+        vec![
+            Some(json!("125")),
+            Some(json!({"leverage":125})),
+            Some(json!([125])),
+            Some(json!(true)),
+        ]
+    } else {
+        vec![
+            Some(json!({"symbol":"wrong"})),
+            Some(json!(false)),
+            Some(Value::Null),
+            Some(json!(17)),
+            None,
+        ]
+    };
+    let field = if leverage {
+        "limits.leverage.max"
+    } else {
+        "symbol"
+    };
+    let mut count = 0;
+    for value in values {
+        for refresh in [false, true] {
+            let runtime = Rc::new(Runtime::default());
+            let mut bad = asset_market("BADUSDT", "BAD");
+            if !leverage {
+                if let Some(value) = &value {
+                    bad["symbol"] = value.clone();
+                } else {
+                    bad.as_object_mut().unwrap().remove("symbol");
+                }
+            }
+            let deps = safe_cex_venue_binance::native_host::native_dependencies(
+                runtime.clone(),
+                Arc::new(Markets {
+                    rows: json!({"symbols":[asset_market("BTCUSDT","BTC"),bad,asset_market("ETHUSDT","ETH")]}),
+                    brackets: json!([{"symbol":"BADUSDT","brackets":[{"initialLeverage":value}]}]),
+                }),
+                Rc::new(|_, _| panic!("no external provider")),
+                None,
+                safe_cex_exchange::native::NativeHttpEvents::default(),
+            );
+            let owner=ExchangeOwner::new(venue,serde_json::from_value(json!(match venue{Venue::Futures=>"binance",Venue::PM=>"binancepm",Venue::Spot=>"binancespot"})).unwrap(),serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret","publicDataOnly":!leverage})).unwrap(),Rc::new(safe_cex_store::store::DefaultStore::new()),deps).unwrap();
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let capture = errors.clone();
+            owner.base.on(
+                "error",
+                Rc::new(move |_, error| {
+                    capture.borrow_mut().push(error.clone());
+                    Ok(())
+                }),
+            );
+            let exchange = sdk_class(venue, owner.clone());
+            let markets = if refresh {
+                run(&runtime, exchange.refresh_markets()).unwrap();
+                owner.base.store.markets().to_vec()
+            } else {
+                run(&runtime, exchange.fetch_markets()).unwrap()
+            };
+            assert_eq!(
+                markets
+                    .iter()
+                    .map(|m| m.symbol.as_str())
+                    .collect::<Vec<_>>(),
+                ["BTCUSDT", "ETHUSDT"],
+                "bad{field} refresh={refresh}"
+            );
+            let errors = errors.borrow();
+            assert_eq!(errors.len(), 1);
+            let message = errors[0].as_str().unwrap();
+            let expected = value
+                .as_ref()
+                .map_or_else(|| "undefined".into(), Value::to_string);
+            assert!(
+                message.contains("row 1") && message.contains(&format!("{field}={expected}")),
+                "{message}"
+            );
+            assert_eq!(runtime.reported.borrow().len(), 1);
+            owner.base.dispose().unwrap();
+            count += 1;
+        }
+    }
+    assert_eq!(count, if leverage { 8 } else { 10 });
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_market_symbol_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::Futures, false);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_market_symbol_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::PM, false);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_spot_market_symbol_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::Spot, false);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_market_leverage_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::Futures, true);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_market_leverage_refusals_keep_siblings() {
+    market_field_refusal_case(Venue::PM, true);
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_market_field_source_preserves_raw_symbol_and_leverage() {
+    let mut count = 0;
+    for venue in ["futures", "pm", "spot"] {
+        let result = std::process::Command::new("node")
+            .arg(format!(
+                "{}/scripts/public-rest.mjs",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .args([venue, "markets", "field-rows"])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let source: Value = serde_json::from_slice(&result.stdout).unwrap();
+        let rows = source.as_array().unwrap();
+        assert_eq!(rows.len(), if venue == "spot" { 5 } else { 9 });
+        count += rows.len();
+    }
+    assert_eq!(count, 23, "source raw symbols and leverage cases");
+}

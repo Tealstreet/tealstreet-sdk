@@ -12,15 +12,23 @@ let helpers='';if(venue!=='spot'){const stem=venue==='futures'?'Binance':'Binanc
 if(venue==='futures')helpers+='\n'+declaration(t,'emitBinanceExchangeError');
 function normalize(v){if(v===undefined)return {$undefined:true};if(typeof v==='number'){if(Number.isNaN(v))return 'nan';if(v===Infinity)return 'infinity';if(v===-Infinity)return '-infinity';if(Object.is(v,-0))return '-zero';return v;}if(Array.isArray(v))return v.map(normalize);if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,v])=>[k,normalize(v)]));return v;}
 const assetRows=[];
-if(mode==='asset-rows'){
+if(mode==='asset-rows'||mode==='field-rows'){
  assert.equal(family,'markets');
  const market=(symbol,base)=>({symbol,baseAsset:base,quoteAsset:'USDT',marginAsset:'USDT',contractType:'PERPETUAL',status:'TRADING',filters:[{filterType:'PRICE_FILTER',tickSize:'0.1'},{filterType:'LOT_SIZE',stepSize:'0.01',minQty:'0.01',maxQty:'100'},{filterType:'MARKET_LOT_SIZE',stepSize:'0.01',minQty:'0.01',maxQty:'100'}]});
- for(const field of ['baseAsset','quoteAsset'])for(const value of [{asset:'wrong'},false,null,17,undefined]){
+ if(mode==='asset-rows') for(const field of ['baseAsset','quoteAsset'])for(const value of [{asset:'wrong'},false,null,17,undefined]){
   const bad={...market('BADUSDT','BAD'),[field]:value};
   assetRows.push({name:'public-only',payloads:[{data:{symbols:[market('BTCUSDT','BTC'),bad,market('ETHUSDT','ETH')]}}]});
  }
+ if(mode==='field-rows'){
+  for(const value of [{symbol:'wrong'},false,null,17,undefined]){
+   assetRows.push({name:'public-only',payloads:[{data:{symbols:[market('BTCUSDT','BTC'),{...market('BADUSDT','BAD'),symbol:value},market('ETHUSDT','ETH')]}}]});
+  }
+  if(venue!=='spot')for(const value of ['125',{leverage:125},[125],true]){
+   assetRows.push({name:'field-refusal',payloads:[{data:{symbols:[market('BTCUSDT','BTC'),market('BADUSDT','BAD'),market('ETHUSDT','ETH')]}},{data:[{symbol:'BADUSDT',brackets:[{initialLeverage:value}]}]}]});
+  }
+ }
 }
-const inputs=mode==='asset-rows'?assetRows:JSON.parse(fs.readFileSync(new URL('../tests/fixtures/public-rest.json',import.meta.url),'utf8')).filter(c=>c.family===family);assert.equal(inputs.length,mode==='asset-rows'?10:{markets:17,tickers:15,ohlcv:18}[family],'independent input floor');const results=[];
+const inputs=mode==='asset-rows'||mode==='field-rows'?assetRows:JSON.parse(fs.readFileSync(new URL('../tests/fixtures/public-rest.json',import.meta.url),'utf8')).filter(c=>c.family===family);assert.equal(inputs.length,mode==='asset-rows'?10:mode==='field-rows'?(venue==='spot'?5:9):{markets:17,tickers:15,ohlcv:18}[family],'independent input floor');const results=[];
 for(const fixture of inputs){
  const c=structuredClone(fixture),trace=[],emissions=[],exports={};let calls=0,publicOnly=c.name==='public-only';
  function clock(value){trace.push(['dayjs',value===undefined?null:normalize(value)]);if(c.name==='date-fail')throw error;const dt=dayjs(value===undefined?200000000:value);return {valueOf:()=>dt.valueOf(),subtract(amount,unit){trace.push(['subtract',dt.valueOf(),normalize(amount),unit]);if(c.name==='subtract-fail')throw error;const out=dt.subtract(amount,unit);return {valueOf:()=>out.valueOf()};}};}
@@ -40,14 +48,20 @@ for(const fixture of inputs){
  try{value=await subject[method](opts);}catch(e){failure=e;}
  results.push({name:c.name,trace,emissions,fallback:value===cachedMarkets||value===cachedTickers,value:value===undefined?null:normalize(value),failure:failure?{original:failure===error,name:failure.name,message:failure.message,code:normalize(failure.code),response:normalize(failure.response)}:null});
 }
-if(mode==='asset-rows'){
+if(mode==='asset-rows'||mode==='field-rows'){
  for(const [index,result] of results.entries()){
-  assert.equal(result.failure,null,'source accepts raw asset');
+  assert.equal(result.failure,null,'source accepts raw field');
   assert.equal(result.fallback,false,'source keeps fresh mixed response');
   assert.equal(result.emissions.length,0,'source emits no typed refusal');
   assert.equal(result.value.length,3,'source retains all rows');
-  const field=index<5?'base':'quote';
-  assert.deepEqual(result.value[1][field],normalize([{asset:'wrong'},false,null,17,undefined][index%5]),'source raw asset value');
+  if(mode==='asset-rows'){
+   const field=index<5?'base':'quote';
+   assert.deepEqual(result.value[1][field],normalize([{asset:'wrong'},false,null,17,undefined][index%5]),'source raw asset value');
+  }else if(index<5){
+   assert.deepEqual(result.value[1].symbol,normalize([{symbol:'wrong'},false,null,17,undefined][index]),'source raw symbol');
+  }else{
+   assert.deepEqual(result.value[1].limits.leverage.max,normalize(['125',{leverage:125},[125],true][index-5]),'source raw leverage');
+  }
  }
 }
 process.stdout.write(JSON.stringify(results));
