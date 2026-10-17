@@ -596,6 +596,10 @@ fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snap
             "OKX private terminal memory refuses stale open REST snapshot {state}"
         );
         assert!(
+            errors.borrow().is_empty(),
+            "OKX private terminal frame emits no error"
+        );
+        assert!(
             h.runtime.reports.borrow().is_empty(),
             "OKX private frame has no uncaught runtime error"
         );

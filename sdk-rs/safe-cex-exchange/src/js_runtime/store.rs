@@ -245,7 +245,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
                 .ok_or_else(|| Thrown::type_error("orders.forEach is not a function"))?;
             let mut keys = vec![];
             for order in orders {
-                keys.push(String::from_utf16_lossy(&order.get("id")?.to_js_string()?));
+                keys.push(to_typed::<String>(&order.get("id")?)?);
             }
             let status: OrderStatus = to_typed(&arg(&a, 1))?;
             let refs: Vec<&str> = keys.iter().map(String::as_str).collect();

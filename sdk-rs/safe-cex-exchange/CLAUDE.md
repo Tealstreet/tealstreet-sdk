@@ -1189,3 +1189,11 @@ then restores exact source bytes. Algorithms follow
 [CreateMapIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createmapiterator)
 and [CreateSetIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createsetiterator)
 within the runtime's existing value/property profile.
+
+The JS Store facade exposes `markOrdersTerminal` by delegating to the existing
+native terminal-memory operation. It remembers IDs even when the Store has no
+orders, and preserves committed-state subscriber errors through the existing
+mutation bridge. IDs cross the declared typed string boundary without lossy
+surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
+snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
+real private-frame witnesses cover the production caller and final fill ordering.
