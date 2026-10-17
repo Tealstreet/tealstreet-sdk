@@ -39,6 +39,7 @@ pub struct Runtime {
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub logs: RefCell<Vec<String>>,
+    pub completed_sleeps: Rc<RefCell<Vec<u64>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -88,8 +89,10 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
+        let completed = self.completed_sleeps.clone();
         Box::pin(std::future::poll_fn(move |_| {
             if now.get() >= at {
+                completed.borrow_mut().push(ms);
                 Poll::Ready(Ok(()))
             } else {
                 Poll::Pending

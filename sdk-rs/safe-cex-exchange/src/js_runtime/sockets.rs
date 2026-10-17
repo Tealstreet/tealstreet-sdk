@@ -10,13 +10,15 @@ use crate::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture},
     websocket::{
-        BaseWebSocket, PreparedWebSocket, WebSocketConnectionOptions, WsProtocol, WsRuntime,
+        BaseWebSocket, PreparedWebSocket, SocketTimeout, WebSocketConnectionOptions, WsProtocol,
+        WsRuntime,
     },
     ws_parent::WsExchangeParent,
 };
 use safe_cex_transport::socket::SocketFrame;
 use std::{
     cell::{Cell, OnceCell, RefCell},
+    collections::HashMap,
     rc::{Rc, Weak},
 };
 
@@ -32,6 +34,35 @@ pub struct JsSocketContext {
 }
 
 impl JsSocketContext {
+    pub(crate) fn clear_timeout(&self, handle: &Js) {
+        let cores: Vec<_> = self
+            .cores
+            .borrow()
+            .iter()
+            .map(|(_, core)| core.clone())
+            .collect();
+        for core in cores {
+            let matching: Vec<_> = core
+                .timeout_handles
+                .borrow()
+                .iter()
+                .filter_map(|(timer, alias)| {
+                    alias
+                        .native_handle
+                        .same_reference(handle)
+                        .then_some((*timer, alias.id))
+                })
+                .collect();
+            if let Some(base) = core.base.get() {
+                for (timer, id) in matching {
+                    if let Some(id) = id {
+                        base.cancel_timeout(timer, id);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn new(runtime: Rc<dyn WsRuntime>) -> Rc<Self> {
         Rc::new(Self {
             runtime,
@@ -57,10 +88,27 @@ pub struct SocketCore {
     pub on_close_member: RefCell<Option<Js>>,
     /// The JS `pingAt` value; every write also reaches the core's ping time.
     ping_at: RefCell<Js>,
+    timeout_handles: RefCell<HashMap<SocketTimeout, TimeoutAlias>>,
     /// Source Number field before lazy native-core creation.
     last_received: Cell<f64>,
     /// Prevent a source `super.dispose()` from dispatching its override again.
     disposing: Cell<bool>,
+}
+
+struct TimeoutAlias {
+    id: Option<u64>,
+    native_handle: Js,
+    value: Js,
+}
+
+impl Default for TimeoutAlias {
+    fn default() -> Self {
+        Self {
+            id: None,
+            native_handle: Js::Undefined,
+            value: Js::Undefined,
+        }
+    }
 }
 
 struct JsProtocol(Weak<SocketCore>);
@@ -446,6 +494,26 @@ impl WsProtocol for JsProtocol {
 }
 
 impl SocketCore {
+    fn timeout_handle(&self, timer: SocketTimeout) -> Js {
+        let id = self.base.get().and_then(|base| base.timeout_id(timer));
+        let mut handles = self.timeout_handles.borrow_mut();
+        let entry = handles.entry(timer).or_default();
+        if id.is_some() && entry.id != id {
+            entry.id = id;
+            entry.native_handle = Js::object_with_class("Timeout", vec![]);
+            entry.value = entry.native_handle.clone();
+        }
+        entry.value.clone()
+    }
+    fn set_timeout_handle(&self, timer: SocketTimeout, value: Js) {
+        self.timeout_handle(timer);
+        self.timeout_handles
+            .borrow_mut()
+            .get_mut(&timer)
+            .unwrap()
+            .value = value;
+    }
+
     /// The core is created on first use, once the venue exists as `dyn Exchange`.
     pub fn base(self: &Rc<Self>) -> Result<Rc<BaseWebSocket>, Thrown> {
         if let Some(base) = self.base.get() {
@@ -544,6 +612,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         ping_at: RefCell::new(Js::Number(0.0)),
         last_received: Cell::new(0.0),
         disposing: Cell::new(false),
+        timeout_handles: RefCell::default(),
     });
     let def = |name: &str, f: Js| {
         let _ = socket.define(name, f);
@@ -590,6 +659,21 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
             })),
         );
     }
+    for (field, timer) in [
+        ("pingTimeoutId", SocketTimeout::Ping),
+        ("pongMissTimeoutId", SocketTimeout::PongMiss),
+        ("lastReceivedTimer", SocketTimeout::Receive),
+    ] {
+        let (reader, writer) = (core.clone(), core.clone());
+        socket.define_accessor(
+            field,
+            Some(Rc::new(move |_| Ok(reader.timeout_handle(timer)))),
+            Some(Rc::new(move |_, value| {
+                writer.set_timeout_handle(timer, value);
+                Ok(())
+            })),
+        );
+    }
     let _ = socket.define("messageHandlers", Js::object(vec![]));
     {
         let (reader, writer) = (core.clone(), core.clone());
@@ -611,17 +695,13 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
             })),
         );
     }
-    // TS field initializers. The Rust core owns ping/pong and reconnect timing,
-    // so these are the derived classes' own state, not views of the core.
+    // Source field initializers without a native state accessor.
     for (field, value) in [
         ("recoversAfterOffline", Js::Bool(true)),
         ("lastCloseTime", Js::Number(0.0)),
         ("onCloseCount", Js::Number(0.0)),
         ("reconnecting", Js::Bool(false)),
         ("pingSent", Js::Bool(false)),
-        ("pingTimeoutId", Js::Undefined),
-        ("pongMissTimeoutId", Js::Undefined),
-        ("lastReceivedTimer", Js::Undefined),
     ] {
         let _ = socket.define(field, value);
     }

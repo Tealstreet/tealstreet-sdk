@@ -374,6 +374,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "fetchIncomeHistoryRange", |rt, a| {
         members::history::fetch_income_history_range(rt, arg(&a, 0), arg(&a, 1), arg(&a, 2))
     });
+    method(&this, rt, "fetchHistoricalOrders", |rt, a| {
+        members::history::fetch_historical_orders(rt, arg(&a, 0))
+    });
     method(&this, rt, "fetchClosedPnl", |rt, a| {
         members::history::fetch_closed_pnl(rt, arg(&a, 0))
     });
