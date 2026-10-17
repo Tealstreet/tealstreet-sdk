@@ -1699,6 +1699,15 @@
       "reason": "Records its window slot only once no sleep remains, with no borrow across the sleep. A failed host sleep now rejects the request rather than spinning on the window."
     },
     {
+      "owner": "src/js_runtime/library.rs::QsOptions::encode",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "45fbd0dee2b758500a7fa699bec30d0db0b94bc88b7aeca2cb3a7ee91fdd90aa",
+      "classification": "immediate",
+      "reason": "Reviewed #533 write! expansion: std::fmt::Write appends percent-encoded bytes to a local String synchronously. No async body, future, host task, shared registration or cancellation latch is created."
+    },
+    {
       "owner": "src/js_runtime/library.rs::install_library",
       "boundaries": [
         "async-block",
