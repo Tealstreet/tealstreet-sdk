@@ -69,10 +69,10 @@ note = "Live TypeScript oracle runs under cargo test; adapted Rust representatio
 [[symbol]]
 ts = "isBybitSignRejection"
 kind = "const-fn"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/api.rs::is_bybit_sign_rejection"
-status = "ported"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/api.rs::is_bybit_sign_rejection", "safe-cex-transport/src/retry.rs::is_error_signature" ]
+status = "divergent"
+note = "Split signature classification: safe-cex-venue-bybit/src/api.rs::is_bybit_sign_rejection implements the maintained venue predicate; safe-cex-transport/src/retry.rs::is_error_signature inspects response data for the retained typed signature-retry composition. FINDING: the transport compatibility fragment still checks case-sensitive error sign! in ret_msg/retMsg; current source also admits retCode 10004 and case-insensitive error sign. Mapping this existing helper does not claim those predicates are equivalent or change request behavior. The production venue factory remains independently mapped and witnessed."
 
 [[symbol]]
 ts = "isBybitEnvProbeRequest"

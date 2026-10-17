@@ -1,4 +1,4 @@
-# MEXC remaining-row gate exits
+# MEXC remaining-row gate exits (historical snapshot)
 
 Built on integration `1ef197eb733830953e0ea1cffb40de13ee24269d`.
 Branch: `feat/rust-mexc-runtime-assembly`.
@@ -165,3 +165,18 @@ monitored repeat is the measured result above.
 The following documentation-only commit preserves these inputs. Final tomllib
 comparison to merged integration still moves exactly nine pending -> ported,
 zero -> divergent, with MEXC 145 / 40 / 0.
+
+## Dead socket-copy retirement
+
+The publicListenOrderBook/privateOnMessage generic branches and their35 source
+cases were removed after the unbound-name caller census. The old9-row/96-case
+proof table above is historical; the maintained assembly target now has7 groups
+and61 source cases. The two socket rows point to their live native owners and
+are explicit coverage findings. Their fake-host controls above no longer run.
+
+Retirement verification: retained production assembly prefix is byte-identical;
+all seven retained live-source oracle groups (61 cases) match the original oracle
+output exactly. Scoped runtime_assembly7, exchange_trait4 and socket_assembly7
+pass. Actual registry HTTP/WebSocket private order/fill/position/balance4 pass.
+Native/wasm strict scoped Clippy, extractor0updates, parity7459rows/254items,
+all-features cancellation6pass/1explicitexportignore and fmt/diff checks pass.
