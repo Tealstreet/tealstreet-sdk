@@ -1,0 +1,195 @@
+//! Option reads through the constructed venue, receiver and signed HTTP client.
+#[path = "support/binding_harness.rs"]
+mod support;
+use safe_cex_store::{Store, StoreUpdate};
+use safe_cex_types::{ExchangeName, Market};
+use serde_json::{Value, json};
+use support::{harness_as, options};
+
+fn market(symbol: &str, underlying: &str, expiry: f64, strike: f64, right: &str) -> Market {
+    serde_json::from_value(json!({
+        "id":symbol,"symbol":symbol,"base":underlying,"quote":"USDT","active":true,
+        "precision":{"amount":0.01,"price":0.1},
+        "limits":{"amount":{"min":0.01,"max":100},"leverage":{"min":1,"max":1}},
+        "option":{"underlying":underlying,"expiry":expiry,"strike":strike,"right":right,
+            "style":"european","settlement":"cash","premiumAsset":"USDT","settleAsset":"USDT"}
+    }))
+    .unwrap()
+}
+fn seed(h: &support::Harness) {
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(vec![
+                market("put", "BTC", 2000., 100., "put"),
+                market("call", "BTC", 2000., 100., "call"),
+                market("later", "BTC", 3000., 50., "call"),
+                market("earlier", "BTC", 1000., 200., "call"),
+                market("eth", "ETH", 500., 10., "call"),
+                market("unquoted", "BTC", 1000., 50., "call"),
+            ]),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+}
+fn quote(symbol: &str, bid: &str) -> Value {
+    json!({"symbol":symbol,"bid1Price":bid,"ask1Price":"2.5suffix","markPrice":"Infinity",
+        "markIv":"0.4","bid1Iv":"0.3","ask1Iv":"0.5","underlyingPrice":"60000",
+        "delta":"-0","gamma":null,"vega":"0x10","theta":"-3"})
+}
+fn chain(name: ExchangeName) {
+    let mut opts = options();
+    opts.enable_option_markets = Some(true);
+    let h = harness_as(name, opts, |wire| {
+        wire.ok(
+            "GET",
+            "/v5/market/tickers",
+            json!({"list":[
+                quote("call","1"),quote("put","2"),quote("earlier","3"),
+                quote("later","4"),quote("eth","5"),quote("call","9")
+            ]}),
+        );
+    });
+    seed(&h);
+    let query = serde_json::from_value(json!({"underlying":"BTC"})).unwrap();
+    let rows = h.drive(h.venue().fetch_option_chain(query)).unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| r.market.symbol.as_str())
+            .collect::<Vec<_>>(),
+        vec!["earlier", "call", "put", "later"]
+    );
+    let q = &rows[1].quote;
+    assert_eq!(
+        (q.bid, q.ask, q.mark, q.mark_iv, q.underlying_price),
+        (9., 2.5, 0., 0.4, 60000.)
+    );
+    let g = q.greeks.as_ref().unwrap();
+    assert_eq!(g.delta.to_bits(), (-0.0f64).to_bits());
+    assert_eq!((g.gamma, g.vega, g.theta), (0., 0., -3.));
+    let calls = h.wire.calls("/v5/market/tickers");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["category"], "option");
+    assert_eq!(calls[0].params["baseCoin"], "BTC");
+    h.venue().dispose().unwrap();
+}
+fn expiries(name: ExchangeName) {
+    let mut opts = options();
+    opts.enable_option_markets = Some(true);
+    let h = harness_as(name, opts, |_| {});
+    seed(&h);
+    assert_eq!(
+        h.drive(h.venue().fetch_option_expiries("BTC".into()))
+            .unwrap(),
+        vec![1000., 2000., 3000.]
+    );
+    assert_eq!(
+        h.drive(h.venue().fetch_option_expiries("SOL".into()))
+            .unwrap(),
+        Vec::<f64>::new()
+    );
+    assert!(h.wire.calls("/v5/market/tickers").is_empty());
+    h.venue().dispose().unwrap();
+}
+fn greeks(name: ExchangeName) {
+    let mut opts = options();
+    opts.enable_option_markets = Some(true);
+    let h = harness_as(name, opts, |wire| {
+        wire.ok("GET","/v5/asset/coin-greeks",json!({"list":[{
+            "baseCoin":"BTC","totalDelta":"-0","totalGamma":"1.5x","totalVega":null,"totalTheta":"Infinity"
+        }]}));
+    });
+    let rows = h.drive(h.venue().fetch_account_greeks()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].underlying, "BTC");
+    assert_eq!(rows[0].delta.to_bits(), (-0.0f64).to_bits());
+    assert_eq!((rows[0].gamma, rows[0].vega, rows[0].theta), (1.5, 0., 0.));
+    assert_eq!(h.wire.calls("/v5/asset/coin-greeks").len(), 1);
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn primary_chain_joins_live_markets_and_quotes() {
+    chain(ExchangeName::Bybit);
+}
+#[test]
+fn demo_chain_joins_live_markets_and_quotes() {
+    chain(ExchangeName::Bybitdemo);
+}
+#[test]
+fn primary_expiries_read_live_markets() {
+    expiries(ExchangeName::Bybit);
+}
+#[test]
+fn demo_expiries_read_live_markets() {
+    expiries(ExchangeName::Bybitdemo);
+}
+#[test]
+fn primary_account_greeks_read_signed_http() {
+    greeks(ExchangeName::Bybit);
+}
+#[test]
+fn demo_account_greeks_read_signed_http() {
+    greeks(ExchangeName::Bybitdemo);
+}
+
+#[test]
+fn primary_options_require_account_opt_in() {
+    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        let h = harness_as(name, options(), |_| {});
+        let query = serde_json::from_value(json!({"underlying":"BTC"})).unwrap();
+        assert_eq!(
+            h.drive(h.venue().fetch_option_chain(query))
+                .unwrap_err()
+                .message,
+            "Options are not enabled on this Bybit account"
+        );
+        assert_eq!(
+            h.drive(h.venue().fetch_option_expiries("BTC".into()))
+                .unwrap_err()
+                .message,
+            "Options are not enabled on this Bybit account"
+        );
+        assert_eq!(
+            h.drive(h.venue().fetch_account_greeks())
+                .unwrap_err()
+                .message,
+            "Options are not enabled on this Bybit account"
+        );
+        assert!(h.wire.calls("/v5/market/tickers").is_empty());
+        assert!(h.wire.calls("/v5/asset/coin-greeks").is_empty());
+        h.venue().dispose().unwrap();
+    }
+}
+#[test]
+fn dedicated_families_keep_source_options_refusals() {
+    for (name, label) in [
+        (ExchangeName::Bybitspot, "bybitspot"),
+        (ExchangeName::Bybitinverse, "bybitinverse"),
+    ] {
+        let mut opts = options();
+        opts.enable_option_markets = Some(true);
+        let h = harness_as(name, opts, |_| {});
+        let query = serde_json::from_value(json!({"underlying":"BTC"})).unwrap();
+        assert_eq!(
+            h.drive(h.venue().fetch_option_chain(query))
+                .unwrap_err()
+                .message,
+            format!("Option chains are not supported on {label}")
+        );
+        assert_eq!(
+            h.drive(h.venue().fetch_option_expiries("BTC".into()))
+                .unwrap_err()
+                .message,
+            format!("Option expiries are not supported on {label}")
+        );
+        assert_eq!(
+            h.drive(h.venue().fetch_account_greeks())
+                .unwrap_err()
+                .message,
+            format!("Account greeks are not supported on {label}")
+        );
+        h.venue().dispose().unwrap();
+    }
+}
