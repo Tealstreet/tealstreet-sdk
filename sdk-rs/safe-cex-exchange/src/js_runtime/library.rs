@@ -950,49 +950,63 @@ fn sleep_promise<X>(scope: &Scope<X>, ms: f64) -> Js {
 }
 
 fn update_order_book(book: &Js, side: &Js, update: Js, upsert: bool) -> Result<Js, Thrown> {
-    let side_name = text(side)?;
-    let Js::Array(levels) = book.get(&side_name)? else {
-        return Err(Thrown::type_error("orderBook side is not an array"));
-    };
-    let descending = side_name == "bids";
-    let price = update.get("price")?.to_number()?;
-    let amount = update.get("amount")?.to_number()?;
-    let prices = levels
-        .borrow()
-        .iter()
-        .map(|l| l.clone().unwrap_or(Js::Undefined).get("price")?.to_number())
-        .collect::<Result<Vec<_>, _>>()?;
-    let (mut left, mut right) = (0i64, prices.len() as i64 - 1);
+    let levels = book.get(&text(side)?)?;
+    let descending = side.strict_equals(&Js::str("bids"));
+    // The source evaluates update.price before entering binarySearchPrice.
+    let price = update.get("price")?;
+    let (mut left, mut right) = (0.0, levels.get("length")?.to_number()? - 1.0);
     let mut found = None;
     while left <= right {
-        let mid = (left + right) / 2;
-        let p = prices[mid as usize];
-        if p == price {
-            found = Some(mid as usize);
+        // Source midpoint is (left + right) >>> 1, including Uint32 wrapping.
+        let mid = ((left + right).trunc().rem_euclid(4_294_967_296.0) as u32 >> 1) as f64;
+        let mid_price = levels.get(&Js::Number(mid).to_display())?.get("price")?;
+        if mid_price.strict_equals(&price) {
+            found = Some(mid);
             break;
         }
-        if (descending && p > price) || (!descending && p < price) {
-            left = mid + 1;
+        let after = if descending {
+            ops::greater_than(&mid_price, &price)?
         } else {
-            right = mid - 1;
+            ops::less_than(&mid_price, &price)?
+        };
+        if after {
+            left = mid + 1.0;
+        } else {
+            right = mid - 1.0;
         }
     }
-    Ok(Js::Number(match found {
-        None if !upsert || amount == 0.0 => -1.0,
+    let index = match found {
         None => {
-            levels.borrow_mut().insert(left as usize, Some(update));
-            left as f64
+            if !upsert || update.get("amount")?.strict_equals(&Js::Number(0.0)) {
+                return Ok(Js::Number(-1.0));
+            }
+            let Js::Array(rows) = &levels else {
+                return Err(Thrown::type_error("orderBook side is not an array"));
+            };
+            let mut rows = rows.borrow_mut();
+            // splice clamps against the current length, after callback effects.
+            let insert_at = (left as usize).min(rows.len());
+            rows.insert(insert_at, Some(update));
+            left
         }
-        Some(i) if amount == 0.0 => {
-            levels.borrow_mut().remove(i);
-            -1.0
-        }
-        Some(i) => {
-            let level = levels.borrow()[i].clone().unwrap_or(Js::Undefined);
+        Some(index) => {
+            if update.get("amount")?.strict_equals(&Js::Number(0.0)) {
+                let Js::Array(rows) = &levels else {
+                    return Err(Thrown::type_error("orderBook side is not an array"));
+                };
+                let removed = {
+                    let mut rows = rows.borrow_mut();
+                    (index < rows.len() as f64).then(|| rows.remove(index as usize))
+                };
+                drop(removed);
+                return Ok(Js::Number(-1.0));
+            }
+            let level = levels.get(&Js::Number(index).to_display())?;
             level.set("amount", update.get("amount")?)?;
-            i as f64
+            index
         }
-    }))
+    };
+    Ok(Js::Number(index))
 }
 
 // lodash times: ToInteger count, castFunction (non-callables are identity),
@@ -1319,11 +1333,18 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "calcOrderBookTotal",
         func("calcOrderBookTotal", |a| {
             let book = arg(&a, 0);
-            for side in ["bids", "asks"] {
+            // Destructure both sides before any amount getter can mutate the book.
+            let bids = book.get("bids")?;
+            let asks = book.get("asks")?;
+            for levels in [bids, asks] {
                 let mut total = Js::Number(0.0);
-                for level in list(&book.get(side)?) {
-                    total = ops::add(&total, &level.get("amount")?)?;
-                    level.set("total", total.clone())?;
+                let mut index = 0.0;
+                while ops::less_than(&Js::Number(index), &levels.get("length")?)? {
+                    let key = Js::Number(index).to_display();
+                    total = ops::add(&total, &levels.get(&key)?.get("amount")?)?;
+                    // Re-read the row after the amount getter, as the source does.
+                    levels.get(&key)?.set("total", total.clone())?;
+                    index += 1.0;
                 }
             }
             Ok(Js::Undefined)
