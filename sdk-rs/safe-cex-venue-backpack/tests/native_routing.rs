@@ -136,6 +136,10 @@ impl TealstreetTransportHost for ProxyHost {
     }
 }
 #[test]
+#[expect(
+    clippy::arc_with_non_send_sync,
+    reason = "TransportProvider requires Arc; this fixture stays on one thread"
+)]
 fn native_request_uses_the_selected_private_proxy_region_and_authorization() {
     let options = serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true,"tealstreetProxy":true,"proxyRegion":"JA","tealstreetTunnel":false})).unwrap();
     let runtime = Rc::new(support::Runtime::default());
