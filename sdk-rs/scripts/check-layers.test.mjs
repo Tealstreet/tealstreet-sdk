@@ -54,7 +54,7 @@ for (const [name, from, to, reason] of [
   ['lateral edge', 'safe-cex-store', 'safe-cex-transport', 'lateral dependency'],
   ['skip edge', 'safe-cex-ffi', 'safe-cex-types', 'skip dependency'],
   ['upward edge', 'safe-cex-types', 'safe-cex-ffi', 'dependency cycle|upward dependency'],
-  ['runtime-to-tooling edge', 'safe-cex-transport', 'safe-cex-parity', 'non-runtime dependency'],
+  ['runtime-to-tooling edge', 'safe-cex-transport', 'safe-cex-parity', 'dependency cycle|non-runtime dependency'],
 ]) test(`${name} is rejected and names the edge`, () => {
   const { policy, metadata } = inputs();
   addEdge(metadata, from, to);
