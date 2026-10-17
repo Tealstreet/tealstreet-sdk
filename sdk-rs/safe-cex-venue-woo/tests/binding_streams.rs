@@ -838,6 +838,7 @@ fn historical_positions(rows: Value, from: f64) -> (Harness, Vec<Value>) {
             json!({"success":true,"rows":rows,"meta":{"total":2,"records_per_page":100}}),
         );
     });
+    h.drive(h.venue().refresh_markets()).unwrap();
     let result = h
         .drive(h.venue().fetch_historical_positions(
             safe_cex_exchange::journal::HistoricalPositionOptions {
@@ -877,9 +878,9 @@ fn real_journal_folds_historical_orders_with_reported_pnl() {
     assert_eq!(r["provenance"], "derived");
     let calls = h.http.calls(ORDERS);
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].params["start_t"], 1_699_999_800_000.0);
-    assert_eq!(calls[0].params["end_t"], 1_700_000_100_000.0);
-    assert_eq!(calls[0].params["realized_pnl"], true);
+    assert_eq!(calls[0].params["start_t"], "1699999800000");
+    assert_eq!(calls[0].params["end_t"], "1700000100000");
+    assert_eq!(calls[0].params["realized_pnl"], "true");
     h.venue().dispose().unwrap();
 }
 
@@ -903,4 +904,47 @@ fn real_journal_refuses_missing_close_pnl_and_filters_older_closes() {
         assert_eq!(h.http.calls(ORDERS).len(), 1);
         h.venue().dispose().unwrap();
     }
+}
+
+#[test]
+fn real_journal_does_not_report_an_open_interval() {
+    let (h, records) = historical_positions(
+        json!([journal_order("entry", "BUY", 1_699_999_900.0, Some(0.0))]),
+        1_699_999_800_000.0,
+    );
+    assert!(
+        records.is_empty(),
+        "an open interval is not a closed journal record"
+    );
+    assert_eq!(h.http.calls(ORDERS).len(), 1);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_journal_default_window_uses_the_runtime_clock() {
+    let h = harness(ExchangeName::Woo, options(), |http| {
+        http.route("GET", ORDERS, 200.0, json!({"success":true,"rows":[]}));
+    });
+    let now = h.runtime.now.get();
+    let records = h
+        .drive(h.venue().fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "journal-fixture".into(),
+                from: None,
+                to: None,
+            },
+        ))
+        .expect("default WOO journal window must reach the production order reader");
+    assert!(records.is_empty());
+    let calls = h.http.calls(ORDERS);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].params["end_t"],
+        safe_cex_num::js_number_string(now)
+    );
+    assert_eq!(
+        calls[0].params["start_t"],
+        safe_cex_num::js_number_string(now - 30.0 * 24.0 * 60.0 * 60.0 * 1000.0)
+    );
+    h.venue().dispose().unwrap();
 }

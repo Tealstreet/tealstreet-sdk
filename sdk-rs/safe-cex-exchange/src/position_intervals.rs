@@ -8,12 +8,14 @@ use std::cmp::Ordering;
 type LegResolver<'a> = &'a mut dyn FnMut(&Execution) -> Option<PositionRecordLeg>;
 
 const FLAT_EPSILON: f64 = 1e-9;
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PositionInterval {
     pub symbol: String,
     pub position_side: PositionRecordLeg,
     pub side: PositionSide,
     pub opened_at: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_at: Option<f64>,
     pub max_size: f64,
     pub closed_size: f64,
@@ -21,7 +23,9 @@ pub struct PositionInterval {
     pub closed_by_flip: bool,
     pub avg_entry_price: f64,
     pub avg_exit_price: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realized_pnl: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realized_pnl_partial: Option<bool>,
     pub fees: f64,
     pub fee_currencies: Vec<String>,
