@@ -1,4 +1,7 @@
 //! Production Bitget venue: the assembled class graph behind the typed Exchange trait.
+#[cfg(test)]
+#[path = "iterator_tests.rs"]
+mod iterator_tests;
 use super::{
     globals,
     promise::await_js,

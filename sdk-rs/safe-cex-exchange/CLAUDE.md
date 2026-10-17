@@ -570,6 +570,13 @@ without sleeping or sending again. No caller supplies a remaining-timeout value.
 The installed Axios truthy guards retain timeout zero as unlimited and skip the
 first subtraction for a clock starting exactly at epoch zero.
 
+Transport JavaScript coercion failures retain their name and unprefixed message
+when converted into ExchangeError. The original RestFailure remains the opaque
+origin. Direct JsCoercionError conversion retains its typed native cause too;
+Binance and BingX signature predicates use these conversions instead of rebuilding
+an Error from text. The native order/account witnesses cover resolved envelopes
+and HTTP rejection, and assert that coercion failures never trigger a resend.
+
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
 copied from opaque NetworkFailure. The library network-or-idempotent helper is
@@ -1225,6 +1232,15 @@ full-string, whitespace and arbitrary-length binary64 rounding rules. The native
 host `js_string_number` target compares 93 Node results through installed Number,
 including signed radix refusals, large values, overflow and signed zero.
 
+Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
+JavaScript callbacks need not define a Rust total order: NaN comparison results
+mean equality, and inconsistent callbacks must not panic. The first source throw
+stops comparisons immediately. Default Array sorting compares original UTF-16
+units, puts undefined before holes and rejects a present non-callable comparator.
+The native-host `js_sort` target checks the compiled master panic and error count,
+plus Node ordering across merge boundaries. Ordering under an inconsistent
+comparator remains implementation-dependent under ECMAScript.
+
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
 receiver and thrown value. String conversion uses the same private primitive
@@ -1258,6 +1274,32 @@ regression additionally observes final signed GET query ordering through the
 production HTTP client and verifies the signature against the source preimage.
 Other qs options remain outside this imported runtime surface.
 
+The JS socket's lastReceived accessor shares the native core's Number field;
+pre-assembly writes are retained until lazy core creation. Frames and JS session
+resets therefore update the same health timestamp, preserving native f64 bits.
+Receive timers dispatch the instance checkLastReceived method through WsProtocol;
+the inherited facade method calls the base check directly, avoiding recursion.
+Scoped js_runtime witnesses cover lazy initialization, bidirectional reads/writes,
+raw bits, zero reset/reinitialization and a derived watchdog receiver. A real GRVT
+private socket witnesses its 30-second ping / 90-second Warning reconnect behavior;
+all three regressions compile and fail before this bridge/dispatch repair.
+
+Installed Promise.all/allSettled consume the shared synchronous iterator protocol,
+including Map/Set iterators and Unicode strings. Iterator acquisition/step errors
+reject the returned Promise. Inputs remain native Js values until existing
+combinator settlement; pending members, object identity, negative zero and NaN
+payloads survive. `js_runtime`'s two promise_combinators tests compare eighteen
+Node outcomes and exercise native pending members; both compile/fail on the old
+array-only globals dispatch. Promise scheduling remains in the shared promise core.
+
+Map/Set `forEach` uses stable insertion positions, like the live iterators, and
+releases its collection borrow before each callback. Deletions, clear/reinsert,
+updates and new entries are observed during traversal. Callbacks receive the
+source thisArg and native value/key/owner references; invalid callbacks reject
+even on empty collections. `js_collection_foreach` checks fourteen Node traces,
+nested traversal, abrupt completion, native signed-zero/reference identity and
+thisArg. Both named regressions compiled and failed on the snapshot implementation.
+
 Both JS `virtualClock` getters delegate to the shared synced singleton.
 `getCurrentTime` wraps `VirtualClock::get_current_time` in the existing dayjs
 object, retaining date clipping and arithmetic; `getCurrentTimeMs` remains the
@@ -1266,3 +1308,30 @@ Registry `native_host_phemex_clock` exercises the real dayjs consumer through a
 signed native HTTP request, verifying its HMAC and expiry after a 90-second
 server correction. The core virtual-clock regression checks both getters and
 the independent raw Date clock.
+
+String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
+units and honor their position argument after search-string coercion. Positions
+truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
+endsWith defaults to the full length only for undefined. The native Node corpus
+covers surrogate halves, empty needles, all position boundaries and thrown
+position conversion identity.
+
+Adapter config capture/restore reuses the canonical RetainedJsonInput and existing
+native typed codec through two thin value helpers. Shared HTTP adapters retain
+own undefined, raw NaN payloads, infinities and signed zero at the terminal and
+effective success/error config; they do not JSON-copy extension data. Transport
+HOW owns the eventual protocol projection. This retains the typed codec
+limitations and does not claim executable callbacks or live JS alias identity.
+
+SubscribedCandle.interval uses ModelField<AnyTimeframe> at the callback boundary.
+Its native record codec preserves absent, own undefined and concrete intervals,
+including 1M, and omits undefined intervals from JSON. Candle number bits remain
+native through that codec; strict public OHLCV(S) request options are unchanged.
+The scoped subscribed_candle_fields witness exercises the actual native bridge.
+
+The JS Axios dispatcher lets installed callable adapters own response settlement,
+as Axios does. HOW fulfills non-2xx and zero-status responses, so their configured
+transforms and fulfilled response interceptors run; default native HTTP responses
+still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
+the actual native runtime, factory, transport and HOW protocol against scripted
+socket I/O and compares four statuses with the maintained HOW adapter and Axios.

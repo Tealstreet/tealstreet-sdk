@@ -489,3 +489,19 @@ the same native mapper as the actual exchange. Keep the canonical history source
 corpus in `history_native` and the production private-topic regressions in
 `private_classes --features native`; do not restore a parallel typed mapper to
 make a test host easier to implement.
+
+Signature-predicate coercion failures retain their TypeError name and unprefixed
+message through the shared ExchangeError conversion. The real native receiver
+regressions cover both resolved and rejected HTTP responses without a resend.
+
+Native HTTP dispatch retains the original params/data until the real request
+interceptors run. Query BigInt leaves take qs decimal spelling; signed bodies
+are moved into query fields by the source signer before JSON transformation.
+Public/unsigned BigInt bodies reject with TypeError before terminal I/O, retaining
+the original refusal when signing is skipped. Never turn a conversion error into
+an absent params/body field. `private_classes::native_projection_*` uses actual
+native imports, factories, signing and terminal HTTP; four regressions compile
+and fail on master. Signed GET/POST wire bytes and HMACs compare against actual
+TypeScript with real qs/create-hmac in one two-case capture. Maintained typed
+exchange callers still supply ordinary string/number payloads; these BigInt cases
+cover the reachable native-host boundary, not a new typed DTO admission claim.
