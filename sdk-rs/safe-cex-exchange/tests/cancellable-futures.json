@@ -1745,13 +1745,13 @@
       "boundaries": [
         "future-poll"
       ],
-      "producer_sha256": "d9df972f9d642e6187fdae1cb9e199226fabcaab41944a8c1743e8329f00aa1e",
+      "producer_sha256": "f817e196a48d2508b97d7dd87717bbfc5b1786e2f6e0c7deb281d68104f72850",
       "classification": "guarded",
-      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard.",
+      "reason": "The detached OwnedTasks driver owns the queue while suspended. Driver::drop takes every queued job outside the registry borrow, clears its waker and running flag, and releases pending captures on host discard. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "651621130602cd3d59f851469c71350167bf938a8cbd4bb9659f430ec4fe299d"
+          "sha256": "7c58c87fd11f7649317a583806ab5bde6817d1b2aaad8dc289d4b54d0da9e588"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1759,12 +1759,13 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "5ca33135ade0f24cc66487d191db92eee92f8b5a9c342ee3e3d3912a3c289a42"
+          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
         }
       ],
       "witnesses": [
         "tests/js_microtasks.rs::native_host_discard_releases_polled_and_unpolled_promise_jobs",
-        "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver"
+        "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver",
+        "tests/js_unhandled_rejections.rs::native_host_discard_releases_unreported_rejection_values"
       ],
       "guards": [
         {
@@ -1778,13 +1779,13 @@
       "boundaries": [
         "future-signature"
       ],
-      "producer_sha256": "4b454685205cff5ea1a8dc63c007a43799c916da4ab5614f7af82a9ac142fd6b",
+      "producer_sha256": "9bebf021f3754b4f9996de1597b53217ef5e078f871bb932e0740a9679fea446",
       "classification": "guarded",
-      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver.",
+      "reason": "Registers the future once, eagerly polls only when requested with its real readiness waker, and retains pending work in the queue. Driver::drop releases all work on host discard; Task::cancel removes the selected timer and wakes an idle driver. Reviewed rejection checkpoints: the same detached driver also owns quiescent checks, wakes when a check is added, and drops pending check captures outside queue borrows on host discard. No extra timer or fallback executor is introduced.",
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "651621130602cd3d59f851469c71350167bf938a8cbd4bb9659f430ec4fe299d"
+          "sha256": "7c58c87fd11f7649317a583806ab5bde6817d1b2aaad8dc289d4b54d0da9e588"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1792,12 +1793,13 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "5ca33135ade0f24cc66487d191db92eee92f8b5a9c342ee3e3d3912a3c289a42"
+          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
         }
       ],
       "witnesses": [
         "tests/js_microtasks.rs::native_host_discard_releases_polled_and_unpolled_promise_jobs",
-        "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver"
+        "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver",
+        "tests/js_unhandled_rejections.rs::native_host_discard_releases_unreported_rejection_values"
       ],
       "guards": [
         {
@@ -1925,9 +1927,9 @@
         "future-signature",
         "future-return"
       ],
-      "producer_sha256": "928738134627ccaee33d856d2c33280264b1709f4eafa6447694577ec70ac985",
+      "producer_sha256": "959181a7c5dbdf04d0a432ad1a19eeed51c964b5a3e126652e7fc97ba51369cc",
       "classification": "immediate",
-      "reason": "Constructs an unpolled PromiseWait. Its id-keyed registration is installed in poll and removed by Drop."
+      "reason": "Marks the source promise handled synchronously and constructs an unpolled PromiseWait. No waiter is registered until poll; its id-keyed registration is released by Drop."
     },
     {
       "owner": "src/js_runtime/promise.rs::Promise::spawn",
@@ -1942,7 +1944,7 @@
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "651621130602cd3d59f851469c71350167bf938a8cbd4bb9659f430ec4fe299d"
+          "sha256": "7c58c87fd11f7649317a583806ab5bde6817d1b2aaad8dc289d4b54d0da9e588"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1950,12 +1952,13 @@
         },
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "5ca33135ade0f24cc66487d191db92eee92f8b5a9c342ee3e3d3912a3c289a42"
+          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
         }
       ],
       "witnesses": [
         "tests/js_microtasks.rs::native_host_discard_releases_polled_and_unpolled_promise_jobs",
-        "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver"
+        "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver",
+        "tests/js_unhandled_rejections.rs::native_host_discard_releases_unreported_rejection_values"
       ],
       "guards": [
         {
@@ -1990,7 +1993,7 @@
       "source_dependencies": [
         {
           "file": "src/js_runtime/promise.rs",
-          "sha256": "5ca33135ade0f24cc66487d191db92eee92f8b5a9c342ee3e3d3912a3c289a42"
+          "sha256": "c314567327941c1aa50ea93272e9e12323cd5a571dce0ae6d43fb2054237d94e"
         }
       ],
       "guards": [
