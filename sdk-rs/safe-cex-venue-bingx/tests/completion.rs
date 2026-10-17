@@ -1031,7 +1031,7 @@ fn startup_reports_private_task_rejection() {
 }
 
 #[test]
-fn api_nan_field_boundary_is_visible() {
+fn api_nan_field_signs_before_final_json_projection() {
     let c = &corpus()["nanApi"];
     assert_eq!(
         c["serializedNaNAsNull"], true,
@@ -1063,15 +1063,29 @@ fn api_nan_field_boundary_is_visible() {
         )),
         ..Default::default()
     };
-    let e = api.prepare(request).unwrap_err();
+    let prepared = api.prepare(request).unwrap();
+    let body = prepared
+        .body
+        .as_ref()
+        .unwrap()
+        .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
+        .unwrap();
     assert_eq!(
-        e.message, "BingX native signing refuses NaN field",
-        "BINGX-C native POST NaN refusal"
+        body, c["prepared"]["data"],
+        "BINGX-C source final JSON retains NaN as null"
     );
     assert_eq!(
-        h.calls.borrow().last().unwrap()["op"],
-        "hmac",
-        "BINGX-C sign before field-number conversion"
+        observe(&json!(*h.calls.borrow())),
+        observe(&c["calls"]),
+        "BINGX-C complete source signing sequence precedes final JSON projection"
+    );
+    let wire: Value = serde_json::from_str(body.as_str().unwrap()).unwrap();
+    assert!(
+        wire["quantity"].is_null(),
+        "BINGX-C NaN projects only at the final JSON boundary"
     );
 }
 
