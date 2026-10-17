@@ -1,3 +1,24 @@
+# Production emitter argument lists
+
+The Realm BaseExchange facade forwards TinyEmitter arguments through the shared
+BaseExchange::emit_args API. Empty calls retain an empty list, one array remains
+one argument, and separate message/metadata arguments remain separate. The
+existing per-value JSON boundary and native callback error propagation remain.
+
+The production-facade regression constructs the actual Realm superclass over a
+real BaseExchange and observes native on_args listeners. The old bridge compiles
+and fails: empty calls produce [null], and the warning pair produces one nested
+array. The single-array payload and inherited native log already match. After
+the bridge change, all 40 library, 24 production Perpetual binding and 21 Spot
+binding tests pass (85 total). Scoped formatting passes. This test scripts only
+the runtime boundary; the facade, native emitter and JSON conversions are real.
+
+The three existing enclosing-function pins for base_exchange_class are reviewed
+manually. Only b.emit becomes b.emit_args; the existing b.dispose, b.can_sign and
+b.name edges are unchanged. The token hash changes from d0b3260d4e9cb7dc to
+87e8a021dad29e72. No other call-site inventory or shared runtime code is authored
+in this slice. The required shared emitter API is inherited from PR425.
+
 # Production TP/SL, fills and serial placement imports
 
 The production Realm now registers `hasSeenFill`, `markFillSeen`,

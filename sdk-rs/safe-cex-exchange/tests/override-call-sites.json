@@ -4747,19 +4747,19 @@
   },
   {
     "function": "base_exchange_class",
-    "body": "d0b3260d4e9cb7dc",
+    "body": "87e8a021dad29e72",
     "call": "b . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
   {
     "function": "base_exchange_class",
-    "body": "d0b3260d4e9cb7dc",
+    "body": "87e8a021dad29e72",
     "call": "b . can_sign ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
   {
     "function": "base_exchange_class",
-    "body": "d0b3260d4e9cb7dc",
+    "body": "87e8a021dad29e72",
     "call": "b . name ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },

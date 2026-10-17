@@ -205,6 +205,79 @@ fn production_realm() -> (Realm, Rc<TestRuntime>) {
 }
 
 #[test]
+fn production_emitter_preserves_empty_array_and_multiple_arguments() {
+    use std::cell::RefCell;
+
+    let (mut r, rt) = production_realm();
+    let options = serde_json::from_value(serde_json::json!({"key":"","secret":""})).unwrap();
+    let base = Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
+        safe_cex_types::ExchangeName::Hyperliquid,
+        options,
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        rt,
+        safe_cex_exchange::exchange::ExchangeSettings::default(),
+    ));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    for event in ["arity", "warning", "log"] {
+        let seen = seen.clone();
+        base.on_args(
+            event,
+            Rc::new(move |event, args| {
+                seen.borrow_mut().push((event.to_owned(), args.to_vec()));
+                Ok(())
+            }),
+        );
+    }
+    let class = super::facade_exchange::base_exchange_class(&mut r, base, None);
+    let options = r.new_object();
+    let store = r.new_object();
+    let instance = r
+        .construct(&class, &[Value::str("hyperliquid"), options, store], None)
+        .unwrap();
+    let emitter = r.get_str(&instance, "emitter").unwrap();
+    r.call_method(&emitter, "emit", &[Value::str("arity")])
+        .unwrap();
+    let array = r.new_array(vec![Value::Number(7.0), Value::str("eight")]);
+    r.call_method(&emitter, "emit", &[Value::str("arity"), array])
+        .unwrap();
+    let metadata = r.object_from(vec![("code", Value::Number(42.0))]);
+    r.call_method(
+        &emitter,
+        "emit",
+        &[Value::str("warning"), Value::str("venue warning"), metadata],
+    )
+    .unwrap();
+    r.call_method(
+        &instance,
+        "log",
+        &[Value::str("native log"), Value::str("Warning")],
+    )
+    .unwrap();
+    assert_eq!(
+        *seen.borrow(),
+        vec![
+            ("arity".into(), vec![]),
+            ("arity".into(), vec![serde_json::json!([7, "eight"])]),
+            (
+                "warning".into(),
+                vec![
+                    serde_json::json!("venue warning"),
+                    serde_json::json!({"code":42})
+                ]
+            ),
+            (
+                "log".into(),
+                vec![
+                    serde_json::json!("[hyperliquid] native log"),
+                    serde_json::json!("Warning")
+                ]
+            ),
+        ],
+        "the production facade must retain the emitter's actual argument list"
+    );
+}
+
+#[test]
 fn production_import_registry_uses_real_helpers_and_rejects_unknown_names() {
     let (mut r, _) = production_realm();
     for name in [
