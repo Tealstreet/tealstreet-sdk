@@ -478,3 +478,14 @@ Market batches retain the source config update, filter and complete numeric map
 before strict output admission. A refused id/symbol/base/quote/active/info row
 warns with its index, field and original value; valid siblings remain available
 to fetch and Store refresh. Source evaluation and reporting failures propagate.
+
+
+`binding::production_ticker_coercion_matches_constructed_typescript` adds
+64 field-independent cases through the constructed production socket/Store:
+three-row instrumentInfo frames, truthy guards and mark/index fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py apexomni` fault must fail that test and
+pass after exact source restoration.

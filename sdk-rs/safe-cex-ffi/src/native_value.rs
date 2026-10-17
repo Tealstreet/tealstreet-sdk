@@ -4,10 +4,17 @@ use napi::{
         Array, BigInt, FromNapiValue, JsObjectValue, KeyCollectionMode, KeyConversion, KeyFilter,
         Null, Object, ToNapiValue, TypeName, Undefined, Unknown, Utf16String, ValidateNapiValue,
     },
-    check_status, sys,
+    sys,
 };
 use safe_cex_registry::native_value::NativeValue;
 use std::ptr;
+
+pub(crate) fn check_status(status: sys::napi_status) -> napi::Result<()> {
+    match status {
+        sys::Status::napi_ok => Ok(()),
+        _ => Err(napi::Error::new(napi::Status::from(status), String::new())),
+    }
+}
 
 #[derive(Clone)]
 pub struct JsData(pub NativeValue);
@@ -50,9 +57,7 @@ unsafe fn capture(
             }
             for ancestor in ancestors.iter() {
                 let mut same = false;
-                check_status!(unsafe {
-                    sys::napi_strict_equals(env, *ancestor, value, &mut same)
-                })?;
+                check_status(unsafe { sys::napi_strict_equals(env, *ancestor, value, &mut same) })?;
                 if same {
                     return Err(napi::Error::from_reason(
                         "native account value contains a cycle",
@@ -61,13 +66,13 @@ unsafe fn capture(
             }
             ancestors.push(value);
             let mut array = false;
-            check_status!(unsafe { sys::napi_is_array(env, value, &mut array) })?;
+            check_status(unsafe { sys::napi_is_array(env, value, &mut array) })?;
             let captured = if array {
                 let array = unsafe { Array::from_napi_value(env, value)? };
                 let mut values = Vec::with_capacity(array.len() as usize);
                 for index in 0..array.len() {
                     let mut item = ptr::null_mut();
-                    check_status!(unsafe { sys::napi_get_element(env, value, index, &mut item) })?;
+                    check_status(unsafe { sys::napi_get_element(env, value, index, &mut item) })?;
                     values.push(unsafe { capture(env, item, ancestors)? });
                 }
                 NativeValue::Array(values)
@@ -89,7 +94,7 @@ unsafe fn capture(
                     }
                     let name = unsafe { Utf16String::from_napi_value(env, key.raw())? }.to_vec();
                     let mut item = ptr::null_mut();
-                    check_status!(unsafe {
+                    check_status(unsafe {
                         sys::napi_get_property(env, value, key.raw(), &mut item)
                     })?;
                     fields.push((name, unsafe { capture(env, item, ancestors)? }));
@@ -149,7 +154,7 @@ impl ToNapiValue for JsData {
                             | sys::PropertyAttributes::configurable,
                         data: ptr::null_mut(),
                     };
-                    check_status!(unsafe {
+                    check_status(unsafe {
                         sys::napi_define_properties(env, object.raw(), 1, &descriptor)
                     })?;
                 }

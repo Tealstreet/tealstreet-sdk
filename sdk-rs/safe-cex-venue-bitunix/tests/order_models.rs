@@ -282,6 +282,31 @@ impl OrderModelHost for Host {
             .cloned()
             .unwrap_or_else(|| json!({"data":{"code":0,"data":{"orderId":"ACK"}}})))
     }
+    async fn post_limited(
+        &mut self,
+        endpoint: &'static str,
+        payload: JsJsonValue,
+    ) -> Result<Value, Error> {
+        self.note("postLimited", vec![text(endpoint), obs(&payload)])?;
+        Ok(json!({"data":{"code":0}}))
+    }
+    fn update_status(&mut self, ids: &[String]) -> Result<(), Error> {
+        self.note("updateStatus", vec![json!(ids)])?;
+        for order in &mut self.orders {
+            if order
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| ids.iter().any(|candidate| candidate == id))
+            {
+                order["status"] = json!("canceled");
+            }
+        }
+        Ok(())
+    }
+    async fn place_replacement(&mut self, options: Value) -> Result<Vec<String>, Error> {
+        self.note("placeReplacement", vec![value_obs(&options)])?;
+        Ok(vec!["NEW".into()])
+    }
     fn cached_tif(&mut self, client: Option<&Value>) -> Result<Option<Value>, Error> {
         self.note("cachedTif", vec![client.map_or_else(undefined, value_obs)])?;
         Ok(client
