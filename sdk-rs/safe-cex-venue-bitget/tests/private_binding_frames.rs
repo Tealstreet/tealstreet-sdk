@@ -217,7 +217,8 @@ fn synced_clock_keeps_fresh_private_position_during_rest_reconciliation() {
         "private frame must trigger actual REST position reconciliation"
     );
     assert_eq!(
-        s.h.store.positions()[0].contracts, 0.25,
+        s.h.store.positions()[0].contracts,
+        0.25,
         "fresh private position must survive the older REST payload under the synced clock"
     );
     assert!(s.h.runtime.reports.borrow().is_empty());
