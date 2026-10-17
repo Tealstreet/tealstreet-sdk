@@ -1,12 +1,12 @@
 {
   "safe-cex-venue-apexomni/src/exchange_utils.rs::LOCAL_FUNCTION:parts": {
     "category": "non-decoder",
-    "reason": "Inside decimal_multiply: splits an f64's JS number spelling into BigInt mantissa and decimal exponent for exact multiplication. Typed numeric arithmetic on already decoded values; no raw input.",
-    "sourceSha256": "33517207cc7b35729bed8aa5f38612e25954c45e27c5b3b4d4e608cbaae3cae3"
+    "reason": "Inside decimal_multiply: splits an f64's JS number spelling into BigInt mantissa and decimal exponent for exact multiplication. Typed numeric arithmetic on already decoded values; no raw input. Reviewed source changes through ce51a1ec7e: additions are cfg(test) scalar-helper witnesses and their actual d8 source check; decimal_multiply and parts are unchanged.",
+    "sourceSha256": "1682a0777f5875a21dd3e8e52677f448f76a2c46c8613dc168bc935667bab902"
   },
   "safe-cex-venue-apexomni/src/exchange.rs::LOCAL_FUNCTION:retained": {
     "category": "non-decoder",
     "reason": "Inside fields: converts an already modeled JS JSON value into RetainedJsonInput for diagnostic field projection, refusing undefined/unsupported nodes. It projects outbound data rather than admitting a decoded shape. Reviewed source since961c095af0: base/API plumbing, log capability, ModelField conversions, synchronized-clock reads and disposal guards are outside this nested helper. This canonical carrier migration explicitly encodes existing UTF-8 prepared text/keys to units before the same fallible Value projection; filtering and numeric events are unchanged. Reviewed merged ModelField import and mapOrder missing-enum branches: all are outside fields/retained, whose outbound role and body are unchanged.",
-    "sourceSha256": "ee0a797e626aadfa93bf5990899fc80c61ee24e95028c0cd2f7e966e54e6be58"
+    "sourceSha256": "0c9de5ed74d5f474ca74fd29ef34b47f8db72847c45ecd22eea8e7142a7fd71f"
   }
 }

@@ -745,7 +745,7 @@ fn empty_order(id: String, symbol: String, side: OrderSide) -> safe_cex_types::O
         amount: 0.0,
         filled: 0.0,
         remaining: 0.0,
-        reduce_only: false,
+        reduce_only: false.into(),
         close: (None).into(),
         info: (None).into(),
         time_in_force: (Some(safe_cex_types::OrderTimeInForce::GoodTillCancel)).into(),
@@ -813,7 +813,7 @@ pub fn normalize_order(
     order.amount = amount;
     order.filled = filled;
     order.remaining = math_max(amount - filled, 0.0);
-    order.reduce_only = js_truthy(raw.get("reduceOnly")) || side_info.reduce_only;
+    order.reduce_only = (js_truthy(raw.get("reduceOnly")) || side_info.reduce_only).into();
     order.time_in_force = (Some(
         numeric_table(&crate::types::ORDER_TIME_IN_FORCE, type_code)?
             .unwrap_or(safe_cex_types::OrderTimeInForce::GoodTillCancel),
@@ -857,7 +857,7 @@ pub fn normalize_plan_order(
     order.price = (price).into();
     order.amount = amount;
     order.remaining = amount;
-    order.reduce_only = js_truthy(raw.get("reduceOnly")) || side_info.reduce_only;
+    order.reduce_only = (js_truthy(raw.get("reduceOnly")) || side_info.reduce_only).into();
     order.last_update =
         normalize_timestamp_to_ms(pick(raw, &["updateTime", "createTime"]), local_to_utc)?;
     let mut info = raw.clone();
@@ -915,7 +915,7 @@ pub fn normalize_stop_order(
     order.price = (price).into();
     order.amount = amount;
     order.remaining = amount;
-    order.reduce_only = true;
+    order.reduce_only = true.into();
     order.last_update =
         normalize_timestamp_to_ms(pick(raw, &["updateTime", "createTime"]), local_to_utc)?;
     let mut info = raw.clone();
