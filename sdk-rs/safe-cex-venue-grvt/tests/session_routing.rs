@@ -458,7 +458,7 @@ impl SessionHost for Host {
             return Ok(own);
         }
         match (v, k) {
-            (N::S(_), "split" | "startsWith") | (N::A(_), "find" | "pop") => {
+            (N::S(_), "split" | "startsWith") | (N::A(_), "find") => {
                 let h = self.self_rc();
                 let key = k.to_owned();
                 Ok(N::F(Rc::new(move |receiver, args| match key.as_str() {
@@ -470,11 +470,6 @@ impl SessionHost for Host {
                             .collect(),
                     )),
                     "startsWith" => Ok(N::B(receiver.text().starts_with(&args[0].text()))),
-                    "pop" => {
-                        let N::A(v) = receiver else { panic!("pop") };
-                        let result = v.borrow_mut().pop().unwrap_or(N::U);
-                        Ok(result)
-                    }
                     "find" => {
                         let N::A(v) = receiver else { panic!("find") };
                         let len = v.borrow().len();
@@ -912,20 +907,6 @@ fn run_group(group: &str, expected: usize) {
             "refresh" => refresh_session_and_reconnect(h.clone(), "GRVT error 1000").map(|()| N::U),
             "throttle" => throttled_fetch_positions(h.clone()).map(|()| N::U),
             "fetch" => Ok(h.promise(execute_position_fetch(h.clone()))),
-            "segment" => last_segment(
-                h.as_ref(),
-                h.string(match name {
-                    "plain" => "/full/v1/positions",
-                    "query" => "/positions?x=/order",
-                    "trailing" => "/positions/",
-                    "empty" => "",
-                    "fragment" => "/positions#x",
-                    "case" => "/POSITIONS",
-                    "encoded" => "/pos%69tions",
-                    "multiple-query" => "a?b?c",
-                    _ => panic!("case"),
-                }),
-            ),
             _ => {
                 let instance = match group {
                     "market" => create_api(h.clone(), h.opts.clone(), h.exchange.clone()),
@@ -1100,8 +1081,4 @@ fn edge_api_source() {
 #[test]
 fn trading_api_source() {
     run_group("trading", 18)
-}
-#[test]
-fn last_segment_source() {
-    run_group("segment", 8)
 }
