@@ -1218,3 +1218,9 @@ It rejects signs inside radix digits (for example `0x+1`) and preserves the shar
 full-string, whitespace and arbitrary-length binary64 rounding rules. The native
 host `js_string_number` target compares 93 Node results through installed Number,
 including signed radix refusals, large values, overflow and signed zero.
+
+The JS Number `toFixed` builtin delegates to `safe_cex_num::js_to_fixed` after
+ordinary digits coercion. Exact binary ties round away from zero; negative zero,
+nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
+`tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
+Polymarket's concrete binding witness checks the resulting signed order amounts.

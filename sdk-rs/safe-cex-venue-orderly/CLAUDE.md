@@ -1,5 +1,10 @@
 # Orderly venue port
 
+`classes::construct` is the constructor used by the production binding and the
+source-oracle class tests. Test-only convenience constructor wrappers were removed.
+`scripts/classes-controls.py` checks normalization and all family tags against
+those class tests and the real Exchange/signing binding, restoring exact source.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/orderly/CLAUDE.md).
 
 `types.rs` mirrors the ten runtime constants from `orderly.types.ts`. Ordered
@@ -204,3 +209,11 @@ preimages for all six names. The native registry shares hosted HTTP signing and 
 availability. Source private HTTP still signs locally before the hosted adapter;
 private WS never reads remoteSigner. Empty secrets retain the source HTTP error
 and the already approved shared WS onOpen recovery. See HOSTED_SIGNER_EVIDENCE.md.
+
+Public trait cancellation invokes the existing Orderly cancel-all/symbol members.
+Both ordinary and algo endpoints are attempted in source order, even with an empty
+Store or a failed first request; source errors are emitted and swallowed. The real
+binding target checks both trait paths, signed symbol queries and continuation.
+Private execution and position frames assert Store changes and actual fill events.
+Orderly subscribes to executionreport, algoexecutionreportv2 and position only;
+balance comes from the REST fetchPositions path, not a private balance topic.

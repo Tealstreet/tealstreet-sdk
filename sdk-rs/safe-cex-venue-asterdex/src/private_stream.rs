@@ -119,9 +119,6 @@ impl WsProtocol for Protocol {
     fn on_message(&self, _: &Rc<BaseWebSocket>, frame: &SocketFrame) -> Result<(), ExchangeError> {
         self.0.upgrade().map_or(Ok(()), |s| s.on_message(frame))
     }
-    fn resyncs_private_state_on_reopen(&self) -> Option<bool> {
-        Some(false)
-    }
 }
 fn coercion(error: safe_cex_num::JsCoercionError) -> ExchangeError {
     let mut e = ExchangeError::new(error.message);

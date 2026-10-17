@@ -343,9 +343,12 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
                     .iter()
                     .any(|p| p.segments.last().unwrap().ident == "Deserialize")
                 });
-            let expected = matches!(file, "types" | "cutover")
+            // The runtime portfolio projection reads uuid/type and retains unused
+            // metadata; the independent declaration DTO keeps its strict decoder.
+            let expected = (matches!(file, "types" | "cutover")
                 && (types[&name] || name == "CoinbaseStarbaseFalse")
-                && !retained_numeric_struct(file, &name);
+                && !retained_numeric_struct(file, &name))
+                || (file == "portfolios_balances" && name == "PortfolioState");
             assert_eq!(
                 derived, expected,
                 "{file}::{name}: derived/strict/serialize-only classification"
