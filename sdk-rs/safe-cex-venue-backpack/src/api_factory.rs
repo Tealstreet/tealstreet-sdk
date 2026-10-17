@@ -14,14 +14,7 @@ pub struct Config {
     pub skip_remote_signing: bool,
     pub extra: Vec<(String, JsJsonValue)>,
 }
-#[derive(Clone)]
-pub struct Options {
-    pub testnet: bool,
-    pub recv_window: Option<f64>,
-    pub tunnel: bool,
-    pub key: String,
-    pub secret: String,
-}
+pub type Options = safe_cex_types::ExchangeOptions;
 #[derive(Clone)]
 pub struct Response {
     pub data: JsJsonValue,
@@ -133,12 +126,18 @@ pub fn create_api<H: Host>(
     let o = options.borrow();
     let base_url = crate::constants::BASE_URLS
         .iter()
-        .find(|(k, _)| *k == if o.testnet { "TESTNET" } else { "PRODUCTION" })
+        .find(|(k, _)| {
+            *k == if o.testnet == Some(true) {
+                "TESTNET"
+            } else {
+                "PRODUCTION"
+            }
+        })
         .expect("source base URL")
         .1;
-    let auth_window = api::resolve_backpack_auth_window(o.recv_window);
-    let timeout = o
-        .recv_window
+    let recv_window = o.extra.as_ref().and_then(|extra| extra.recv_window);
+    let auth_window = api::resolve_backpack_auth_window(recv_window);
+    let timeout = recv_window
         .filter(|n| *n != 0.0 && !n.is_nan())
         .unwrap_or(30000.0);
     drop(o);
@@ -155,7 +154,7 @@ pub fn create_api<H: Host>(
     let client = host.borrow_mut().create(config, options.clone())?;
     let condition = host.borrow_mut().read_retry_condition()?;
     host.borrow_mut().retry(&client, 3, condition)?;
-    if options.borrow().tunnel {
+    if options.borrow().tealstreet_tunnel == Some(true) {
         host.borrow_mut()
             .install_transport(&client, options.clone())?;
     }

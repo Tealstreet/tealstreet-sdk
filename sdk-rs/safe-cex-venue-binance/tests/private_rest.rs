@@ -410,39 +410,11 @@ impl SnapshotBindings for Bind {
         if s.name() == "map-fail" {
             return Err(s.error.clone());
         }
-        let input = wire(&data);
-        let row = input.as_object().expect("authored decoded history object");
-        let mapped = safe_cex_venue_binance::order_history::map_binance_historical_order_typed(row)
-            .expect("authored fixture opts into the typed HistoricalOrder projection");
-        Ok(match mapped {
-            None => EventValue::Null,
-            Some(o) => record([
-                ("id", string(o.id)),
-                ("side", EventValue::enum_value(PrivateEnum::Side(o.side))),
-                ("type", EventValue::enum_value(PrivateEnum::Type(o.r#type))),
-                (
-                    "status",
-                    EventValue::enum_value(PrivateEnum::Status(o.status)),
-                ),
-                (
-                    "price",
-                    o.price.map(number).unwrap_or(EventValue::Undefined),
-                ),
-                ("amount", number(o.amount)),
-                ("filled", number(o.filled)),
-                (
-                    "reduceOnly",
-                    o.reduce_only
-                        .map(EventValue::Bool)
-                        .unwrap_or(EventValue::Undefined),
-                ),
-                ("createdTime", number(o.created_time)),
-                (
-                    "updatedTime",
-                    o.updated_time.map(number).unwrap_or(EventValue::Undefined),
-                ),
-            ]),
-        })
+        safe_cex_venue_binance::order_history::map_binance_historical_order(
+            &data,
+            &safe_cex_num::PrototypeRealm::current(),
+        )
+        .map(|value| value.unwrap_or(EventValue::Null))
     }
 }
 fn method(m: SnapshotMethod) -> &'static str {

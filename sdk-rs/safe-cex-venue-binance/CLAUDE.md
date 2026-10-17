@@ -480,3 +480,12 @@ The same native host fixtures deliver private orders/fills/positions/balance
 frames through the assembled private binding and assert real Store and emitted
 fill contents, including the source's ignored derivative balance rows and Spot's
 absence of a derivative-position topic.
+
+
+The unused `private_order_logic` JSON classifier and the opt-in typed historical
+mapper are removed. The production socket and its event tests share
+`private_events::get_order_reject_reason`; history orchestration tests consume
+the same native mapper as the actual exchange. Keep the canonical history source
+corpus in `history_native` and the production private-topic regressions in
+`private_classes --features native`; do not restore a parallel typed mapper to
+make a test host easier to implement.

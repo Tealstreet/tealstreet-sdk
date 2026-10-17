@@ -620,13 +620,13 @@ fn api_factory_native_configuration_and_hooks() {
             response: None,
             error_config: None,
         }));
-        let opts = Rc::new(RefCell::new(api::Options {
-            testnet: i == 1,
-            recv_window: [None, Some(0.0), Some(100000.0), Some(-3.0)][i],
-            tunnel: i == 2,
-            key: "key".into(),
-            secret: "secret".into(),
-        }));
+        let mut options: api::Options = serde_json::from_value(json!({
+            "key":"key", "secret":"secret", "testnet":i == 1, "tealstreetTunnel":i == 2,
+        }))
+        .unwrap();
+        options.extra = [None, Some(0.0), Some(100000.0), Some(-3.0)][i]
+            .map(|window| serde_json::from_value(json!({"recvWindow":window})).unwrap());
+        let opts = Rc::new(RefCell::new(options));
         api::create_api(h.clone(), opts).unwrap();
         {
             let h = h.borrow();
