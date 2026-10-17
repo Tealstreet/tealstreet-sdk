@@ -1,7 +1,5 @@
 //! Intrinsic language operations from the actual constructed WOO host.
-#[path = "binding_harness.rs"]
-#[allow(dead_code)]
-mod harness;
+use crate::binding_test_harness as harness;
 use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_types::ExchangeName;
 use std::{cell::Cell, rc::Rc};
