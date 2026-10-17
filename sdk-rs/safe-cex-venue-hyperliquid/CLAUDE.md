@@ -390,3 +390,12 @@ retains23 source cases across8 files after removing only7 API cases and1 source.
 The public socket subscription bodies live only in ws_emission.rs and are installed
 by public_class.rs on the production Realm. The unused ws_public prepared-value
 copy and its standalone tests/oracle were removed; real listener coverage remains.
+
+The production orderRequestToOrderWire import reads native Realm fields directly.
+It formats price, size and trigger price before the HTTP JSON boundary, so NaN
+and infinities become the maintained wire strings rather than null. floatToWire
+uses the installed numeric/string operations, including source exponent-zero
+stripping; order-type limit objects and undefined fields retain their identities.
+The separate prepared signing API keeps its documented typed snapshot boundary.
+The actual constructed Exchange placement regression and native/source import
+matrix cover this adapter; no shared body or Realm carrier migration is implied.
