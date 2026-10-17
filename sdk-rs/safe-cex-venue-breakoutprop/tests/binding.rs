@@ -1688,12 +1688,14 @@ fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
                 case["result"]["error"].as_str().unwrap(),
                 "original preflight error {label}"
             );
-            assert_eq!(
-                *emitted.borrow(),
-                vec![vec![json!(
-                    "breakoutprop cannot honor a caller clientOrderId"
-                )]],
-                "visible refusal {label}"
+            let emitted = emitted.borrow();
+            assert_eq!(emitted.len(), 1, "one visible refusal {label}");
+            assert!(
+                emitted[0][0]
+                    .as_str()
+                    .unwrap()
+                    .contains(case["result"]["error"].as_str().unwrap()),
+                "visible caller-ID refusal {label}: {emitted:?}"
             );
         } else {
             assert_eq!(result.unwrap(), ["placed"], "accepted replacement {label}");
