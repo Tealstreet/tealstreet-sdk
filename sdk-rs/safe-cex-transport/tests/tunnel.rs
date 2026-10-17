@@ -30,6 +30,8 @@ struct FakeVenue {
     lost_latency_response: Cell<bool>,
     reorder_responses: Cell<bool>,
     response_data: RefCell<Option<Value>>,
+    response_data_json: RefCell<Option<String>>,
+    raw_response_body: RefCell<Option<String>>,
     fail_next_ping: Cell<bool>,
     fail_auth: Cell<bool>,
     auth_delay: Cell<u64>,
@@ -97,10 +99,20 @@ impl TunnelSocket for FakeVenue {
                 Some("rpc.http") => {
                     self.requests.borrow_mut().push(value.clone());
                     if !self.lost_response.get() {
+                        if let Some(body) = self.response_data_json.borrow().as_ref() {
+                            let nonce = serde_json::to_string(&value["nonce"]).unwrap();
+                            let frame = format!(
+                                r#"{{"type":"rpc.http","nonce":{nonce},"data":{{"config":{{}},"status":200,"status_text":"OK","headers":{{}},"data":{body}}}}}"#
+                            );
+                            self.frames
+                                .borrow_mut()
+                                .push_back((self.now.get(), Ok(SocketFrame::Text(frame))));
+                            return Ok(());
+                        }
                         self.enqueue(json!({"type":"rpc.http", "nonce":value["nonce"], "data": {
                             "config":{"url":value["arg"]["url"]}, "status":403, "status_text":"Forbidden",
                             "headers":{"X-Quota":"12"}, "data":self.response_data.borrow().clone().unwrap_or_else(|| json!({"accepted":value["arg"]["url"]})),
-                            "data_raw": if value["format"] == "raw" { Some("{\"id\":9007199254740993}") } else { None }
+                            "data_raw": if value["format"] == "raw" { Some(self.raw_response_body.borrow().clone().unwrap_or_else(|| "{\"id\":9007199254740993}".into())) } else { None }
                         }}));
                         if self.reorder_responses.get() {
                             let delay = if self.requests.borrow().len() == 1 {
@@ -2974,4 +2986,64 @@ fn relay_constructor_preserves_source_url_error_classes_and_query_bytes() {
         observed, expected,
         "real relay constructor must preserve source URL errors and query encoding"
     );
+}
+
+fn surrogate_source() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/how-surrogate-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "actual HOW source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+// Diagnostic admission witnesses for the proposed retained response-carrier
+// cutover. Payload code-unit assertions require the approved canonical API.
+#[test]
+fn how_lone_surrogate_ordinary_frame_settles_the_real_request() {
+    let source = surrogate_source();
+    assert_eq!(source["delivered"], 1);
+    assert_eq!(source["ordinary"]["label"], json!([116, 112, 32, 0xd800]));
+    let host = FakeHost::new();
+    *host.venue.response_data_json.borrow_mut() = Some(source["body"].as_str().unwrap().into());
+    let adapter = HowRestAdapter::new(host.clone(), None, false).unwrap();
+    let result = host.run(leaf_error(adapter.execute(request("/surrogate"))));
+    assert!(
+        result.is_ok(),
+        "valid source HOW UTF-16 response must settle instead of timing out: {result:?}"
+    );
+}
+#[test]
+fn how_lone_surrogate_raw_parser_returns_the_complete_object() {
+    use safe_cex_transport::how_config::CreateAxiosHttpOverWebsocketAdapterOptions;
+    let source = surrogate_source();
+    assert_eq!(source["raw"]["rows"], 2);
+    let host = FakeHost::new();
+    *host.venue.raw_response_body.borrow_mut() = Some(source["body"].as_str().unwrap().into());
+    let adapter = HowRestAdapter::with_options(
+        host.clone(),
+        CreateAxiosHttpOverWebsocketAdapterOptions {
+            region: None,
+            custom_parser: Some(Rc::new(|text| {
+                Ok(safe_cex_transport::how::json_parse(text))
+            })),
+        },
+    )
+    .unwrap();
+    let response = host
+        .run(leaf_error(adapter.execute(request("/surrogate-raw"))))
+        .unwrap();
+    let value = response.body.json_value().unwrap();
+    assert!(
+        value.is_object(),
+        "valid source raw parser result must remain an object, got {value:?}"
+    );
+    assert_eq!(value["list"], json!([1, 2]), "complete raw response rows");
 }
