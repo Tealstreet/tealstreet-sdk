@@ -1379,3 +1379,10 @@ message deletion, coercion failures and lone surrogates. It inspects real native
 Prop descriptors directly because Object.getOwnPropertyDescriptor is not bound;
 constructor.prototype/stack reflection is outside this instance-property repair.
 An actual installed AxiosError supplies the separate custom descriptor witness.
+
+Shared console.info/debug route to the native runtime console sink and return
+undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
+output in a child process and compares its payloads with Node, including exact
+info/debug severity dispatch. The original shared globals compile but fail at
+console.info before either host output can be observed. Console.log is handled
+by its separate source-binding change.
