@@ -183,7 +183,7 @@ fn malformed_reduce_only_case(private_frame: bool) {
                 orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
                 ["rest-before", "rest-after"]
             );
-            assert!(orders.iter().all(|order| !order.reduce_only));
+            assert!(orders.iter().all(|order| order.reduce_only == false));
             let warnings = h.runtime.console.borrow().clone();
             assert_eq!(
                 warnings
