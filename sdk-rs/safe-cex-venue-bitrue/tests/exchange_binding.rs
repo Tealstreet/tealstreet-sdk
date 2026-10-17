@@ -947,6 +947,99 @@ fn malformed_balance_upnl_refuses_only_its_account_row() {
     }
 }
 
+#[test]
+fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/composition-streams-oracle.cjs"
+        ))
+        .arg("--book-pairs")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let source = source["rows"]["book"].as_array().unwrap();
+    assert_eq!(source.len(), 3);
+    assert_eq!(source[2]["error"], json!({"undefined":true}));
+    for (index, pair) in [json!({"0":2,"1":3}), json!(2)].into_iter().enumerate() {
+        assert_eq!(
+            source[index]["error"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry[0] == "name")
+                .unwrap()[1],
+            "TypeError"
+        );
+        let f = PrivateFixture::new();
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let sink = books.clone();
+        let cleanup = f
+            .venue
+            .listen_order_book(
+                "E-BTC-USDT".into(),
+                Rc::new(move |book| sink.borrow_mut().push(book)),
+            )
+            .unwrap();
+        f.runtime.pump();
+        f.runtime.advance(100.0);
+        let public = f
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("listenKey="))
+            .unwrap()
+            .1
+            .clone();
+        assert!(
+            public
+                .sent
+                .borrow()
+                .iter()
+                .any(|raw| raw.contains("market_e_btcusdt_simple_depth_step0"))
+        );
+        let push = |buys: Value, asks: Value| {
+            public.events.borrow_mut().push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                safe_cex_transport::socket::SocketFrame::Text(json!({
+                    "channel":"market_e_btcusdt_simple_depth_step0","tick":{"buys":buys,"asks":asks}
+                }).to_string())));
+            f.runtime.pump();
+        };
+        push(json!([pair]), json!([]));
+        assert!(
+            books.borrow().is_empty(),
+            "source refuses noniterable book row {index}"
+        );
+        push(json!([[2, 3]]), json!([[4, 5]]));
+        let books = books.borrow();
+        assert_eq!(books.len(), 1, "next valid snapshot recovers after refusal");
+        assert_eq!(
+            (
+                books[0].bids[0].price,
+                books[0].bids[0].amount,
+                books[0].bids[0].total
+            ),
+            (2.0, 3.0, 3.0)
+        );
+        assert_eq!(
+            (
+                books[0].asks[0].price,
+                books[0].asks[0].amount,
+                books[0].asks[0].total
+            ),
+            (4.0, 5.0, 5.0)
+        );
+        drop(books);
+        cleanup().unwrap();
+    }
+}
+
 #[path = "../../parity/test-support/ticker_coercion.rs"]
 mod ticker_coercion;
 
