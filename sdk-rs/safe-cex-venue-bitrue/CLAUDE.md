@@ -233,3 +233,10 @@ maintained TS exchange and actual TS DefaultStore produce the comparison values;
 eleven native number fields are checked before JSON. The shared ticker census
 records the witness; `parity/scripts/ticker-native-controls.py bitrue` compiles
 a production binding fault, requires the named assertion, restores and reruns.
+
+The constructed public candle witness compares all six native fields against
+maintained `mapKline` with installed Day.js, including Singapore wall-clock time,
+subsecond precision, epoch zero, invalid-date NaN and signed zero. Both the real
+socket witness and an independent installed-library probe fail on master without
+`utcOffset` and pass with the shared #453 implementation. Callback cleanup is
+observed; typed Candle still has its separately declared retained-object limits.
