@@ -427,3 +427,18 @@ endpoint and cancel-all endpoint. Each leaves its corresponding retired-copy
 tests passing but fails the constructed witness. Exact restoration passes all
 three constructed tests. This is deletion of unused code, not an algorithm
 cutover or a resolution of shared typed projection/identity policy.
+
+
+## Production account-copy cleanup (2026-10-18 SGT)
+
+The unused typed accounts module and its exclusive response_default parser are
+retired, with their three account/validation/notification test targets and
+source-only oracles. Earlier measurements of those copies are historical. The
+constructed Futures and Spot exchanges already use the retained native account
+modules; their existing component/source cases remain. The venue oracle command
+now includes exchange_trait. Changing only the production futures userId read
+to referrerUserId compiles and leaves all eight old typed account tests passing,
+but fails futures_binds_all_sixteen_defaults at empty ID versus user-1. Exact
+restoration passes. The actual constructed test and its runtime fixture are
+unchanged, preserving concurrent private-topic work. Canonical shared transport
+parsing and all shared body/API/representation policies remain unchanged.
