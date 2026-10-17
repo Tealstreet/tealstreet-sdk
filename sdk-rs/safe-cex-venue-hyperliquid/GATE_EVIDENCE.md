@@ -1,3 +1,65 @@
+# Twenty parent and collection record reviews
+
+This cohort reviews twenty concrete maintained records against the actual TS
+members, native field types and private remote rename/presence attributes.
+`tests/fixtures/accepted_nested_record_schema.json` is the manually reviewed
+mapping table and body-pin ledger; it grants no scanner or policy permission.
+The production decoder bodies and all private schema attributes are unchanged.
+
+| Native owner | Reviewed structure |
+| --- | --- |
+| `UserFills` | Both maintained merged interface declarations; all 13 native fill members |
+| `WsFill` | Required fill strings, bool and exact numeric bits |
+| `Candle` | Required OHLCV strings, distinct `t`/`T` native members and counters |
+| `HyperliquidCandle` | Its own concrete candle members and decoder |
+| `WsUserFill` | Its own concrete user-fill members and decoder |
+| `LimitOrderType` | Required Tif string tag plus actual native enum variant identity |
+| `TriggerOrderType` | Trigger numeric bits, boolean and native Tpsl identity |
+| `CancelByCloidRequest` | Distinct native coin and Cloid string |
+| `ClearinghouseStateAssetPositionsItemPosition` | Every scalar and nested funding/leverage member |
+| `ClearinghouseStateAssetPositionsItem` | Native position object and type string |
+| `ClearinghouseState` | Ordered position collection, both margin records, time and raw strings |
+| `WsOrder` | Native order object, status, timestamp bits and user |
+| `WsUserFills` | Snapshot bool, ordered fill collection and user |
+| `WsUserFundings` | Snapshot bool, ordered funding collection and user |
+| `WsUserNonFundingLedgerUpdate` | Time bits, coin/usdc and all four native ledger variants |
+| `WsUserNonFundingLedgerUpdates` | Snapshot bool, ordered ledger collection and user |
+| `WsBook` | Coin/time and independently observed bid/ask collections |
+| `L2Book` | Actual distinct bid/ask tuple members with element order/cardinality |
+| `WsBbo` | Both independently nullable book slots, coin and time bits |
+| `SpotClearinghouseBalance` | Required strings and optional token/entryNtl presence; present null refused |
+
+All 1,519 expected cases were authored from the reviewed declarations and values,
+without candidate decoder outputs. Each actual maintained adapter reads typed
+native members recursively before owner serialization. It records binary64 bits,
+native enum variants, Option presence and every sequence element in order. Values
+vary individually at each primitive leaf as well as together; collection witnesses
+use distinct elements, multiple lengths, empty collections and reversed order.
+The corpus independently checks every object member's omission/null/wrong shape,
+string versus tagged enum shapes, valid complete declaration-order arrays at
+nested map boundaries, wrong tuple lengths, scalar roots, negative zero, positive
+overflow and negative underflow. Both nullable bid/ask slots vary independently;
+optional spot members admit omission and reject present null.
+
+The installed twenty literal contract adapters pass twenty actual native tests,
+1,519 cases through six public Serde/shared ingress routes: 9,114 observations.
+The single-field LimitOrderType projection reads the actual tag and Rust variant;
+L2Book reads the actual two tuple members. These are native values, not echoed
+inputs or success/cardinality placeholders.
+
+Each public map guard was removed independently while preserving JsNumberInput capture and all private wire attributes. All twenty compiled mutations failed the named complete-valid-array native assertion. Separate mutations removed only token or entryNtl present-value admission; both compiled and failed their named present-null assertion. The entire production source was restored byte-for-byte after every mutation. The final restored replay passes all twenty native tests / 1,519 cases / 9,114 observations.
+
+After inheriting current master and merged #382, strict native all-target clippy, formatting and parity pass. parity:check indexes 7459 rows and 17214 public Rust items. Static compiler checks authenticate all reviewed native field identities (including the twenty roots and nine reused child records), exact owner APIs, unchanged public decoder and private wire bodies, and every original census key.
+
+All 82 master contracts are preserved unchanged, with only these twenty new rows appended. The actual inventory remains 534 owners, 36 aliases and two construction obligations (572 total). This branch has 93 reviewed owners, nine aliases and two construction reviews: 104 reviewed, 468 remaining.
+
+The ordinary package gate retains `rate_limit.rs::LOCAL_FUNCTION:text: decoder helper requires its inventoried production decoder`. That existing policy points at non-indexed raw_number; its caller/native-evidence review is separate. This batch does not change local-helper policies or grant a preflight exception.
+
+This reviews only the twenty concrete native/default owners. Child owners,
+private companions, local helpers, aliases, dependencies, serializers and the
+remaining target/feature matrix retain their own obligations. No whole-package
+acceptance is claimed.
+
 # Three fixed future and callback alias reviews
 
 The ordinary package preflight previously stopped at

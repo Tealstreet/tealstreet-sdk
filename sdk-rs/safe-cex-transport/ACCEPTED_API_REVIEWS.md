@@ -78,3 +78,45 @@ the maintained TypeScript function, seven raw query inputs against engine JSON
 parsing and six projection cases against engine JSON.stringify. It observes
 numeric bits and key order before encoding its report. The two stock native
 F64Deserializer event cases remain native witnesses.
+
+## Body phases and secondary options
+
+This selected follow-up reviews five owners. `RestBody` (four APIs),
+`RestRequest` (two) and `RestResponseBody` (five) execute every compiler-listed
+method. The secondary-options conversion also executes; the proxy fallback
+helper has its own specific selector classification. No production code or
+shared policy changes are part of this review.
+
+The 58 native observations inspect actual values before JSON output:
+
+| Owner | Observed contract |
+| --- | --- |
+| `RestBody` | Borrowed payload identity, encoded signing refusal, signed-data phase, retry identity, case-sensitive content type, JSON parse-before-trim and actual form/wire bytes |
+| `RestRequest` | Ordered case-insensitive header merge with first spelling/last value, control filtering, both mutated retry and returned wire config, null versus absent body, retained native query bits and adapter extensions |
+| `RestResponseBody` | Raw lossy UTF-8 input, current parser data, callback count and original error identity, explicit transformed provenance, physical-only BOM removal, JSON numeric bits and reserved-looking own keys, valid unrepresentable JSON refusal |
+| `apply_secondary_options` | Exact credential and proxy overlay, absent versus empty secondary values, unchanged primary input and retained nested credential/native signer-type bits |
+| `secondary_proxy` | Reviewed selector body plus actual 729-case TypeScript/native constructor witness, including provider fallback and factory/limiter order; this classification is not a runtime decoder receipt |
+
+`RestResponseBody::json_value` parses encoded JSON for a model read, without
+consuming a response transform. `into_data` instead supplies raw decoded text
+from physical bytes. `transform` and `try_transform` always invoke the selected
+callback on current data, including a string returned by an earlier parser.
+The contracts observe these operations separately rather than reconstructing
+phase from serialized output.
+
+`scripts/accepted-body-source.mjs` executes installed Axios directly: 11 request
+transform/byte cases, five response transforms and six actual dispatch adapter
+observations. The native witnesses separately cover Rust's UTF-8 refusal,
+remote adapter phases and fallible callback identity. The existing secondary
+source oracle checks all 729 credential/proxy combinations and observes native
+JavaScript signer numbers before fixture encoding.
+
+Run `scripts/accepted-body-native.mjs --inventory=FILE --out=FILE` with actual
+compiler inventory. `scripts/accepted-body-controls.py` discovers fresh owners,
+then disconnects each of the eleven body APIs and the secondary native-number
+copy independently. Every fault must compile, return named output mismatches,
+and pass all five selected receipts after exact restoration. Two body faults
+also affect the request that consumes them; the controller requires exactly
+those declared dependent failures. The selector's separate fallback fault must
+fail the named maintained-source constructor test, then restore all 729 cases.
+Run these source-sensitive controls serially with all other compiler probes.
