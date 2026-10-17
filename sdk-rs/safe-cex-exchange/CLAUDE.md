@@ -1510,3 +1510,11 @@ js_number_safe_integer witness compares239 raw-bit inputs and13 argument types
 with Node, including poisonous objects. WOO’s constructed client-ID rule compares
 26 actual maintained-source cases through this shared builtin. Both regressions
 compile and fail when the static binding is absent.
+
+String uppercase/lowercase conversion maps whole valid Unicode runs and preserves
+unpaired UTF-16 units verbatim. Context-sensitive lowercase mappings keep their
+valid-run context. Trim slices the original units using the shared RegExp
+whitespace predicate. `tests/js_string_utf16.rs` compares 4,109 Node cases per
+method through the installed String builtin on NativeRuntime, including every
+surrogate unit, paired astral letters, Greek sigma and whitespace boundaries.
+All three regressions compile and fail against the original production bodies.
