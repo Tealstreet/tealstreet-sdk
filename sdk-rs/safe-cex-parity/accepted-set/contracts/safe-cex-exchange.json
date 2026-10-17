@@ -32975,9 +32975,9 @@
     "entrypoints": []
   },
   "safe_cex_exchange::store_delivery::StoreFrame": {
-    "category": "non-decoder",
-    "evidence": "Relocated canonical StoreFrame declaration is mapped to ExchangeWorker._throttledStoreUpdate. The accepted-set compiler alias target and raw-construction probes remain enabled.",
-    "reason": "Rc<RefCell<StoreData>> holds the already typed mutable store frame shared by throttle/postprocessor callbacks. Cloning retains the same frame; borrowing accesses existing native data. This alias adds no parsing, detached snapshot, validation authority or raw decoder.",
+    "category": "decoder",
+    "shape": "map",
+    "evidence": "Canonical StoreFrame is an Rc<RefCell<StoreData>> alias with the existing StoreData Deserialize implementation. Compiled raw-trait probes detected that decoder, so it is explicitly classified here rather than exempted. Two direct decoded-field observations inspect numeric bits, typed fields and shared Rc mutation; the StoreData owner retains its broader field corpus. No type widening or new parsing implementation.",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -33011,6 +33011,273 @@
           }
         }
       }
+    },
+    "entrypoints": [],
+    "sample": {
+      "latency": 9,
+      "balance": {
+        "used": 1,
+        "free": 2,
+        "total": 3,
+        "upnl": -4,
+        "info": {
+          "tag": "balance-info"
+        },
+        "currencies": {},
+        "coins": {}
+      },
+      "markets": [],
+      "tickers": [],
+      "orders": [],
+      "positions": [],
+      "loaded": {
+        "balance": true,
+        "orders": false,
+        "markets": true,
+        "tickers": false,
+        "positions": true
+      },
+      "options": {
+        "isHedged": true
+      },
+      "userData": {
+        "tag": "user-data-A"
+      },
+      "fetchedLeverage": {
+        "left": {
+          "buyLeverage": 7,
+          "sellLeverage": 8,
+          "marginType": "isolated",
+          "positionMode": "hedged",
+          "isFetching": false
+        },
+        "right": {
+          "buyLeverage": 17,
+          "sellLeverage": 18,
+          "marginType": "isolated",
+          "positionMode": "hedged",
+          "isFetching": false
+        }
+      },
+      "starkConfig": {
+        "tag": "stark-A"
+      },
+      "zkLinkConfig": {
+        "tag": "zk-A"
+      },
+      "displayedPositions": [],
+      "displayedMargin": {
+        "longExposure": 41,
+        "shortExposure": 42,
+        "totalNotional": 43
+      },
+      "ordersRisk": [],
+      "activeChasers": [],
+      "activeTWAPs": [],
+      "updateIds": {
+        "positions": 61,
+        "orders": 62
+      },
+      "messageHandlerStats": {
+        "tag": "handler-A"
+      },
+      "requestStats": {
+        "ok": 71,
+        "rateLimit": 72,
+        "auth": 73,
+        "network": 74,
+        "other": 75
+      },
+      "socketHealth": {
+        "tag": "socket-A"
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(frame)=>{ let sibling=frame.clone(); let (latency,free,hedged,orders,markets)={let native=frame.borrow();(native.latency,native.balance.free,native.options.is_hedged,native.orders.len(),native.markets.len())}; frame.borrow_mut().latency=latency+1.0; serde_json::json!({\"ok\":true,\"latencyBits\":latency.to_bits().to_string(),\"freeBits\":free.to_bits().to_string(),\"hedged\":hedged,\"orders\":orders,\"markets\":markets,\"shared\":std::rc::Rc::ptr_eq(&frame,&sibling),\"afterBits\":sibling.borrow().latency.to_bits().to_string()}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "latency": 9.0,
+            "balance": {
+              "used": 1,
+              "free": 2.0,
+              "total": 3,
+              "upnl": -4,
+              "info": {
+                "tag": "balance-info"
+              },
+              "currencies": {},
+              "coins": {}
+            },
+            "markets": [],
+            "tickers": [],
+            "orders": [],
+            "positions": [],
+            "loaded": {
+              "balance": true,
+              "orders": false,
+              "markets": true,
+              "tickers": false,
+              "positions": true
+            },
+            "options": {
+              "isHedged": true
+            },
+            "userData": {
+              "tag": "user-data-A"
+            },
+            "fetchedLeverage": {
+              "left": {
+                "buyLeverage": 7,
+                "sellLeverage": 8,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              },
+              "right": {
+                "buyLeverage": 17,
+                "sellLeverage": 18,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              }
+            },
+            "starkConfig": {
+              "tag": "stark-A"
+            },
+            "zkLinkConfig": {
+              "tag": "zk-A"
+            },
+            "displayedPositions": [],
+            "displayedMargin": {
+              "longExposure": 41,
+              "shortExposure": 42,
+              "totalNotional": 43
+            },
+            "ordersRisk": [],
+            "activeChasers": [],
+            "activeTWAPs": [],
+            "updateIds": {
+              "positions": 61,
+              "orders": 62
+            },
+            "messageHandlerStats": {
+              "tag": "handler-A"
+            },
+            "requestStats": {
+              "ok": 71,
+              "rateLimit": 72,
+              "auth": 73,
+              "network": 74,
+              "other": 75
+            },
+            "socketHealth": {
+              "tag": "socket-A"
+            }
+          },
+          "output": {
+            "ok": true,
+            "latencyBits": "4621256167635550208",
+            "freeBits": "4611686018427387904",
+            "hedged": true,
+            "orders": 0,
+            "markets": 0,
+            "shared": true,
+            "afterBits": "4621819117588971520"
+          }
+        },
+        {
+          "input": {
+            "latency": 33.5,
+            "balance": {
+              "used": 1,
+              "free": -7.0,
+              "total": 3,
+              "upnl": -4,
+              "info": {
+                "tag": "balance-info"
+              },
+              "currencies": {},
+              "coins": {}
+            },
+            "markets": [],
+            "tickers": [],
+            "orders": [],
+            "positions": [],
+            "loaded": {
+              "balance": true,
+              "orders": false,
+              "markets": true,
+              "tickers": false,
+              "positions": true
+            },
+            "options": {
+              "isHedged": false
+            },
+            "userData": {
+              "tag": "user-data-A"
+            },
+            "fetchedLeverage": {
+              "left": {
+                "buyLeverage": 7,
+                "sellLeverage": 8,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              },
+              "right": {
+                "buyLeverage": 17,
+                "sellLeverage": 18,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              }
+            },
+            "starkConfig": {
+              "tag": "stark-A"
+            },
+            "zkLinkConfig": {
+              "tag": "zk-A"
+            },
+            "displayedPositions": [],
+            "displayedMargin": {
+              "longExposure": 41,
+              "shortExposure": 42,
+              "totalNotional": 43
+            },
+            "ordersRisk": [],
+            "activeChasers": [],
+            "activeTWAPs": [],
+            "updateIds": {
+              "positions": 61,
+              "orders": 62
+            },
+            "messageHandlerStats": {
+              "tag": "handler-A"
+            },
+            "requestStats": {
+              "ok": 71,
+              "rateLimit": 72,
+              "auth": 73,
+              "network": 74,
+              "other": 75
+            },
+            "socketHealth": {
+              "tag": "socket-A"
+            }
+          },
+          "output": {
+            "ok": true,
+            "latencyBits": "4629911523169402880",
+            "freeBits": "13842939354630062080",
+            "hedged": false,
+            "orders": 0,
+            "markets": 0,
+            "shared": true,
+            "afterBits": "4630052260657758208"
+          }
+        }
+      ]
     }
   },
   "safe_cex_exchange::message_stats::assign": {
