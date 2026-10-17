@@ -10,6 +10,7 @@ use support::{Harness, harness, options};
 include!("support/binding_streams.rs");
 include!("support/binding_failures.rs");
 include!("support/binding_factory.rs");
+include!("support/private_lifecycle.rs");
 include!("support/placement_parity.rs");
 
 fn raw_order() -> Value {
