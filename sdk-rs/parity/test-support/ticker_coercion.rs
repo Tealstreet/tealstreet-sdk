@@ -34,6 +34,9 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
                     format!("{asset}USDT"),
                 ),
                 "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
+                "blofin" => (format!("{asset}-USDT"), format!("{asset}USDT")),
+                "cryptocom" => (format!("{asset}USD-PERP"), format!("{asset}USD-PERP")),
+                "coinbase" => (format!("{asset}-USDC"), format!("{asset}-USDC")),
                 "hyperliquid" => (asset.to_string(), format!("{asset}/USDC")),
                 "hyperliquidspot" => (
                     format!(
