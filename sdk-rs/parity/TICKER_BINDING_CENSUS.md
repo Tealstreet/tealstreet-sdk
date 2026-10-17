@@ -42,14 +42,14 @@ satisfy this corpus.
 | Hyperliquid Spot | hyperliquid/hyperliquidspot.ws-public.ts | Numeric coercion | Pending; prioritize missing ticker binding corpus |
 | Kraken futures | kraken/kraken.ws-public.ts | Numeric coercion, including fundingTime helper | Pending complete coercion corpus |
 | Kraken Spot | kraken/krakenspot.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| KuCoin futures | kucoin/kucoin.ws-public.ts | Numeric coercion | Pending; prioritize missing ticker binding corpus |
-| KuCoin Spot | kucoin/kucoinspot.ws-public.ts | Numeric coercion | Pending; prioritize missing ticker binding corpus |
+| KuCoin futures | kucoin/kucoin.ws-public.ts | Truthy tickerV2 fallback; nullish snapshot/instrument guards with parseFloat | Native proven: safe-cex-venue-kucoin/tests/exchange_trait.rs::production_ticker_coercion_futures_matches_constructed_typescript; 72 cases / 216 frames across tickerV2, snapshot and instrument |
+| KuCoin Spot | kucoin/kucoinspot.ws-public.ts | Finite parseFloat after nullish-to-empty conversion; nonfinite values leave prior fields | Native proven: safe-cex-venue-kucoin/tests/exchange_trait.rs::production_ticker_coercion_spot_matches_constructed_typescript; 256 cases / 768 symbol and ticker-all frames, including every nullish numeric alias |
 | Lighter | lighter/lighter.ws-public.ts | parseLighterWsNumber and funding normalization | Pending; prioritize missing ticker binding corpus |
 | MEXC | mexc/mexc.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | OKX | okx/okx.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Orderly | orderly/orderly.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal; funding parsed | Pending complete coercion corpus; row policy #803 |
 | Paradex | paradex/paradex.ws-public.ts | parseFloat/Number finite handling | Pending complete coercion corpus |
-| Phemex | phemex/phemex.ws-public.ts | Packed ticker numeric parsing/arithmetic | Pending; prioritize missing ticker binding corpus |
+| Phemex | phemex/phemex.ws-public.ts | Packed parseFloat/arithmetic; truthy bid/ask guards | Native proven: safe-cex-venue-phemex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 72 three-row packed frames |
 | Polymarket | polymarket/polymarket.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | WEEX | weex/weex.ws-public.ts | toNumber finite fallback; bounded fractional percentage scaling | Native proven: safe-cex-venue-weex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 96 cases / 288 frames, object and one-element array payloads |
 | WOO | woo/woo.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal | Pending complete coercion corpus; row policy #789/#814 |
