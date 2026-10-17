@@ -814,3 +814,7 @@ Spot and inverse install the same native recent-order recorder: cache the order
 and optionally publish Brazil REST fallback without primary reconciliation timers.
 Spot previously inherited the primary recorder; its compiled master-red HTTP
 probe regression now passes, with inverse and primary/demo timer controls.
+
+The unused typed local_order_cache facade, its fake-host oracle and its mutation
+runner are removed. Spot/inverse cache manifest rows name the live native
+lifecycle handlers; the canonical PrimaryOrderState owns the actual cache.

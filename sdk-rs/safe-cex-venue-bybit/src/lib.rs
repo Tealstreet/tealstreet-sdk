@@ -67,8 +67,6 @@ pub mod variant_accessors;
 
 pub mod failure_diagnostics;
 
-pub mod local_order_cache;
-
 pub mod execution_guards;
 
 pub mod account_readers;
