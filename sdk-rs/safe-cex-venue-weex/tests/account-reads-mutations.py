@@ -9,7 +9,7 @@ source = root / 'sdk-rs/safe-cex-venue-weex/src/account_reads.rs'
 out = root / 'sdk-rs/target/weex-account-reads-gates'
 out.mkdir(parents=True, exist_ok=True)
 sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
-command = ['cargo', 'test', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-weex', '--jobs', '2', '--test', 'account_reads']
+command = ['cargo', 'test', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-weex', '--jobs', '1', '--test', 'account_reads']
 env = dict(os.environ, SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript')
 controls = [
     ('max-default', 'fetch_symbol_max_leverage', '(rt.to_number)(host, &max, 1.0)?', '(rt.to_number)(host, &max, 2.0)?', 'native_result::max_default'),
@@ -19,8 +19,11 @@ controls = [
     ('algo-page', 'fetch_open_order_rows', '                1.0\n', '                2.0\n', 'native_requests::rows_algo_page'),
     ('normal-filter', 'fetch_normal_orders', '.filter(rt.truthy)', '.filter(|_| true)', 'native_result::normal_orders'),
     ('algo-hole', 'fetch_algo_orders', 'if (rt.present)(host, &normalized, index)?', 'if true', 'native_result::algo_sparse_flatten'),
-    ('order-failure-report', 'fetch_orders', 'Err(error) => (rt.report_order_error)(host, &error),', 'Err(error) => { drop(error); }', 'native_order_failures_visible::orders_normal_failure'),
+    ('order-source-order', 'fetch_orders', 'for orders in [normal, algo].into_iter().flatten()', 'for orders in [algo, normal].into_iter().flatten()', 'native_result::orders_unique'),
 ]
+selected = os.environ.get('WEEX_ACCOUNT_READ_CONTROL')
+controls = [control for control in controls if selected is None or control[0] == selected]
+assert controls, ('unknown control', selected)
 results = []
 for name, function, before, after, assertion in controls:
     original = source.read_bytes()

@@ -800,7 +800,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::set_online_status"
 status = "ported"
-note = ""
+note = "The offline-to-online transition invokes shared socket offline recovery, clearing failure pauses, backoff and reconnect counters before resuming pending reconnects."
 
 [[symbol]]
 ts = "BaseExchange.reconnect"

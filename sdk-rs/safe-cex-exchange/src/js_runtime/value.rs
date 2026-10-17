@@ -1180,36 +1180,7 @@ pub fn array_index(key: &[u16]) -> Option<usize> {
 
 /// StringToNumber per ECMAScript (whitespace trim, hex/octal/binary, Infinity).
 pub fn string_to_number(text: &str) -> f64 {
-    let t = safe_cex_num::js_trim(text);
-    if t.is_empty() {
-        return 0.0;
-    }
-    for (prefix, radix) in [
-        ("0x", 16),
-        ("0X", 16),
-        ("0o", 8),
-        ("0O", 8),
-        ("0b", 2),
-        ("0B", 2),
-    ] {
-        if let Some(digits) = t.strip_prefix(prefix) {
-            return u128::from_str_radix(digits, radix)
-                .map(|v| v as f64)
-                .unwrap_or(f64::NAN);
-        }
-    }
-    match t {
-        "Infinity" | "+Infinity" => return f64::INFINITY,
-        "-Infinity" => return f64::NEG_INFINITY,
-        _ => {}
-    }
-    let valid = t
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'));
-    if !valid || t.contains("inf") {
-        return f64::NAN;
-    }
-    t.parse::<f64>().unwrap_or(f64::NAN)
+    safe_cex_num::number_from_string(text)
 }
 
 /// serde_json::Value -> fresh native value (objects/arrays are new allocations).
