@@ -325,3 +325,9 @@ does. It allows the unreached part rather than pruning its half: keeping the two
 copies textually identical is the point of copying, and `V::Hole`/`V::U`/`V::Null`
 are the missing/undefined/null trichotomy the wire decoders turn on, so a harness
 that cannot spell null is weaker than its sibling in a way nothing would flag.
+
+The public `cancel_symbol_orders` trait hook invokes the assembled family member.
+Classic and USDC retain both the inner cancellation emission and the outer symbol
+catch emission before propagating the original refusal; inverse retains its inner
+swallowing behavior. The cancellation binding tests assert that distinction and
+the selected symbol/order IDs through the actual signed client.

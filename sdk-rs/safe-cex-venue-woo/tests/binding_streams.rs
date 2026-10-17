@@ -864,3 +864,135 @@ fn shared_order_boundary_partial_ioc_must_emit_fill() {
         "PARTIAL IOC must pass shared Store before emitting fill"
     );
 }
+
+fn journal_order(id: &str, side: &str, at: f64, pnl: Option<f64>) -> Value {
+    let mut row = json!({"order_id":id,"symbol":"PERP_BTC_USDT","side":side,
+        "type":"MARKET","status":"FILLED","quantity":"2","executed":"2",
+        "average_executed_price":if side=="BUY" {"100"} else {"110"},
+        "created_time":at,"updated_time":at,"total_fee":"0.1","fee_asset":"USDT"});
+    if let Some(pnl) = pnl {
+        row["realized_pnl"] = json!(pnl);
+    }
+    row
+}
+
+fn historical_positions(rows: Value, from: f64) -> (Harness, Vec<Value>) {
+    let h = harness(ExchangeName::Woo, options(), |http| {
+        public_routes(http);
+        http.route(
+            "GET",
+            ORDERS,
+            200.0,
+            json!({"success":true,"rows":rows,"meta":{"total":2,"records_per_page":100}}),
+        );
+    });
+    h.drive(h.venue().refresh_markets()).unwrap();
+    let result = h
+        .drive(h.venue().fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "journal-fixture".into(),
+                from: Some(from),
+                to: Some(1_700_000_100_000.0),
+            },
+        ))
+        .expect("WOO journal must read historical orders through the production binding");
+    (h, result)
+}
+
+#[test]
+fn real_journal_folds_historical_orders_with_reported_pnl() {
+    let (h, records) = historical_positions(
+        json!([
+            journal_order("entry", "BUY", 1_699_999_900.0, Some(0.0)),
+            journal_order("exit", "SELL", 1_700_000_000.0, Some(20.0)),
+        ]),
+        1_699_999_800_000.0,
+    );
+    assert_eq!(
+        records.len(),
+        1,
+        "real WOO order history must produce the closed round trip"
+    );
+    let r = &records[0];
+    assert_eq!(r["account"], "journal-fixture");
+    assert_eq!(r["symbol"], "BTCUSDT");
+    assert_eq!(r["settleCurrency"], "USDT");
+    assert_eq!(r["openedAt"], 1_699_999_900_000.0);
+    assert_eq!(r["closedAt"], 1_700_000_000_000.0);
+    assert_eq!(r["realizedPnl"], 20.0);
+    assert_eq!(r["fees"], 0.2);
+    assert_eq!(r["avgEntryPrice"], 100.0);
+    assert_eq!(r["avgExitPrice"], 110.0);
+    assert_eq!(r["provenance"], "derived");
+    let calls = h.http.calls(ORDERS);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["start_t"], "1699999800000");
+    assert_eq!(calls[0].params["end_t"], "1700000100000");
+    assert_eq!(calls[0].params["realized_pnl"], "true");
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_journal_refuses_missing_close_pnl_and_filters_older_closes() {
+    for (pnl, from) in [
+        (None, 1_699_999_800_000.0),
+        (Some(20.0), 1_700_000_001_000.0),
+    ] {
+        let (h, records) = historical_positions(
+            json!([
+                journal_order("entry", "BUY", 1_699_999_900.0, Some(0.0)),
+                journal_order("exit", "SELL", 1_700_000_000.0, pnl),
+            ]),
+            from,
+        );
+        assert!(
+            records.is_empty(),
+            "missing close PnL and closes before the requested window do not produce journal records"
+        );
+        assert_eq!(h.http.calls(ORDERS).len(), 1);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn real_journal_does_not_report_an_open_interval() {
+    let (h, records) = historical_positions(
+        json!([journal_order("entry", "BUY", 1_699_999_900.0, Some(0.0))]),
+        1_699_999_800_000.0,
+    );
+    assert!(
+        records.is_empty(),
+        "an open interval is not a closed journal record"
+    );
+    assert_eq!(h.http.calls(ORDERS).len(), 1);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_journal_default_window_uses_the_runtime_clock() {
+    let h = harness(ExchangeName::Woo, options(), |http| {
+        http.route("GET", ORDERS, 200.0, json!({"success":true,"rows":[]}));
+    });
+    let now = h.runtime.now.get();
+    let records = h
+        .drive(h.venue().fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "journal-fixture".into(),
+                from: None,
+                to: None,
+            },
+        ))
+        .expect("default WOO journal window must reach the production order reader");
+    assert!(records.is_empty());
+    let calls = h.http.calls(ORDERS);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].params["end_t"],
+        safe_cex_num::js_number_string(now)
+    );
+    assert_eq!(
+        calls[0].params["start_t"],
+        safe_cex_num::js_number_string(now - 30.0 * 24.0 * 60.0 * 60.0 * 1000.0)
+    );
+    h.venue().dispose().unwrap();
+}
