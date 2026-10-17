@@ -419,6 +419,11 @@ fn observed_error_code(
     code: &Option<safe_cex_exchange::js_runtime::value::Js>,
 ) -> Option<serde_json::Value> {
     code.as_ref().map(|value| {
-        safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
     })
 }
