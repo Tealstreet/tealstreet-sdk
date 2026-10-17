@@ -859,6 +859,38 @@ fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
 }
 
 #[test]
+fn fetch_ohlcv_returns_source_rows_reversed_oldest_first() {
+    // orderly.exchange.ts:617-641 maps newest-first rows then returns `candles.reverse()`.
+    let (venue, rt, _, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    wire.responses.borrow_mut().insert(
+        "/v1/kline".into(),
+        json!({"success":true,"data":{"rows":[
+            {"start_timestamp":1700000120000u64,"open":103,"high":105,"low":102,"close":104,"volume":3},
+            {"start_timestamp":1700000060000u64,"open":102,"high":104,"low":101,"close":103,"volume":2},
+            {"start_timestamp":1700000000000u64,"open":101,"high":103,"low":100,"close":102,"volume":1}
+        ]}}),
+    );
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol":"BTCUSDC","interval":"1m","limit":3})).unwrap();
+    let candles = drive(&rt, venue.fetch_ohlcv(opts)).expect("fetchOHLCV binding");
+    assert_eq!(
+        serde_json::to_value(&candles).unwrap(),
+        json!([
+            {"timestamp":1700000000.0,"open":101.0,"high":103.0,"low":100.0,"close":102.0,"volume":1.0},
+            {"timestamp":1700000060.0,"open":102.0,"high":104.0,"low":101.0,"close":103.0,"volume":2.0},
+            {"timestamp":1700000120.0,"open":103.0,"high":105.0,"low":102.0,"close":104.0,"volume":3.0}
+        ])
+    );
+    let request = wire.requests.borrow().last().unwrap().url.clone();
+    assert!(request.starts_with("/v1/kline?"), "{request}");
+    assert!(request.contains("symbol=PERP_BTC_USDC"), "{request}");
+    venue.dispose().unwrap();
+}
+
+#[test]
 fn private_balance_topic_preserves_rest_owned_account_for_each_subclass() {
     for name in private_topic_names() {
         let (venue, rt, store, wire) = support::fixture_for(

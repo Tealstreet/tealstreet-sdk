@@ -321,6 +321,19 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
             }
             Ok(Js::Number(items(&this).len() as f64))
         }),
+        "pop" => method(name, move |_| {
+            let Js::Array(cells) = &this else {
+                return Ok(Js::Undefined);
+            };
+            Ok(cells.borrow_mut().pop().flatten().unwrap_or(Js::Undefined))
+        }),
+        // Holes stay holes at their mirrored index, as the spec's HasProperty swaps do.
+        "reverse" => method(name, move |_| {
+            if let Js::Array(cells) = &this {
+                cells.borrow_mut().reverse();
+            }
+            Ok(this.clone())
+        }),
         "includes" => method(name, move |a| {
             let needle = arg(&a, 0);
             Ok(Js::Bool(items(&this).iter().any(|v| {
