@@ -173,7 +173,7 @@ impl DataHost for Host {
         Host::emit(self, m)
     }
     fn emit_candle_error(&mut self, m: Js) -> Result<(), Thrown> {
-        self.call("emit", vec![Js::str("error"), m])?;
+        Host::get(self, "emitter")?.call_method("emit", vec![Js::str("error"), m])?;
         Ok(())
     }
     fn now(&mut self) -> Result<Js, Thrown> {

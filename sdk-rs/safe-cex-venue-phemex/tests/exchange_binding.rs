@@ -161,6 +161,32 @@ fn bound_daily_chart_history_ends_at_previous_utc_midnight() {
     );
 }
 #[test]
+fn bound_chart_history_failure_emits_venue_message_and_returns_no_candles() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = chart_venue();
+    seed(&h);
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let seen = errors.clone();
+    h.venue().base().on(
+        "error",
+        Rc::new(move |_, v| {
+            seen.borrow_mut().push(v.clone());
+            Ok(())
+        }),
+    );
+    h.http.route(
+        "GET",
+        "/exchange/public/md/v2/kline/list",
+        400.0,
+        json!({"code":10001,"msg":"kline backend busy"}),
+    );
+    let opts = serde_json::from_value(json!({"symbol":SYMBOL,"interval":"1m"})).unwrap();
+    // TS catch: this.emitter.emit('error', err?.response?.data?.msg || err.message); return [].
+    let candles = h.drive(h.venue().fetch_ohlcv(opts)).unwrap();
+    assert!(candles.is_empty());
+    assert_eq!(*errors.borrow(), vec![json!("kline backend busy")]);
+}
+#[test]
 fn bound_chart_candles_subscribe_deliver_and_unsubscribe() {
     use std::{cell::RefCell, rc::Rc};
     let h = chart_venue();
