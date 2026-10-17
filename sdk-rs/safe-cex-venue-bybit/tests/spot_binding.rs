@@ -411,3 +411,32 @@ fn split_spot_orders_omit_brackets_only_after_the_first_lot() {
     }
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn trailing_order_without_ticker_keeps_the_source_error() {
+    let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let options = serde_json::from_value::<safe_cex_types::PlaceOrderOpts>(json!({
+        "symbol":"BTCUSDT", "side":"sell", "type":"trailing_stop_market", "amount":0.01, "price":24000
+    })).unwrap();
+    let error = h
+        .drive(Box::pin(h.venue().base().place_order(h.venue(), options)))
+        .expect_err("source rejects missing ticker before sending a trailing order");
+    assert_eq!(error.name, "Error");
+    assert_eq!(
+        error.message, "Ticker BTCUSDT not found",
+        "actual Spot binding keeps the source error"
+    );
+    assert!(h.wire.calls("/v5/position/trading-stop").is_empty());
+    assert!(h.wire.calls("/v5/order/create").is_empty());
+    h.venue().dispose().unwrap();
+}

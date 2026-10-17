@@ -380,6 +380,69 @@ fn place_order_signs_an_attributed_create_order() {
     assert_eq!(ids, vec![info["ClientOrderIndex"].to_string()]);
 }
 
+fn assert_rejected_placement(code: i64, message: &str, expected: &str) {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(method, path, _)| method != "POST" || path != SEND_TX);
+    h.http
+        .ok("POST", SEND_TX, json!({"code": code, "message": message}));
+    let error = h
+        .drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
+        ))
+        .expect_err("venue rejected the real signed transaction");
+    assert_eq!(
+        h.http.calls(SEND_TX).len(),
+        1,
+        "one signed transaction reached the venue"
+    );
+    assert_eq!(
+        error.message, expected,
+        "production order rejection retains source guidance"
+    );
+    assert!(
+        h.runtime
+            .reports
+            .borrow()
+            .iter()
+            .any(|report| report.contains(expected)),
+        "normalized venue rejection reaches the real error reporter: {:?}",
+        h.runtime.reports.borrow()
+    );
+}
+
+#[test]
+fn partner_tier_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21520,
+        "venue tier refused",
+        "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.",
+    );
+}
+
+#[test]
+fn partner_approval_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21149,
+        "venue approval refused",
+        "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.",
+    );
+}
+
+#[test]
+fn ordinary_order_rejection_keeps_source_message() {
+    assert_rejected_placement(
+        29999,
+        "venue rejected this order",
+        "venue rejected this order",
+    );
+}
+
 #[test]
 fn place_order_refuses_a_caller_client_order_id_before_any_request() {
     let h = harness(ExchangeName::Lighter, options(), lighter);

@@ -1388,3 +1388,10 @@ Property access and string-hint conversion failures propagate after the source's
 empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
 24 maintained Store cases through the production facade, including numeric keys,
 primitive elements, nullish elements and throwing getters/conversions.
+
+Shared console.info/debug route to the native runtime console sink and return
+undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
+output in a child process and compares its payloads with Node, including exact
+info/debug severity dispatch. The original shared globals compile but fail at
+console.info before either host output can be observed. Console.log is handled
+by its separate source-binding change.
