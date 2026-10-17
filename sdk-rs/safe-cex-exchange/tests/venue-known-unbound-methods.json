@@ -37,7 +37,6 @@
     "freeze",
     "hasOwn",
     "is",
-    "isSafeInteger",
     "pop"
   ]
 }
