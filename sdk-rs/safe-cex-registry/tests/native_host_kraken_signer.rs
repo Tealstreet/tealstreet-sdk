@@ -53,7 +53,13 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserRelay {
         assert_eq!(request.account_name.as_deref(), Some(ACCOUNT));
         let (path, body) = if spot {
             assert_eq!(request.config.url, "/0/private/Balance");
-            assert_eq!(request.config.data, Some(json!({})));
+            assert_eq!(
+                request.config.data,
+                Some(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({}))
+                        .unwrap()
+                )
+            );
             (request.config.url, format!("nonce={NONCE}"))
         } else {
             assert_eq!(request.config.url, "/v3/accounts");
@@ -76,7 +82,11 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserRelay {
             config: Some(SignedConfig {
                 url: None,
                 params: None,
-                data: spot.then(|| json!(body)),
+                data: spot.then(|| {
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        body.encode_utf16().collect(),
+                    )
+                }),
                 headers,
             }),
             error: None,
