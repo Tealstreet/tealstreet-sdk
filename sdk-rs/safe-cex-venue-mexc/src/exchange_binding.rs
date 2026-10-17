@@ -115,7 +115,7 @@ pub(crate) fn thrown(error: ExchangeError) -> Thrown {
         let _ = value.define("response", from_json(response));
     }
     if let Some(code) = &error.code {
-        let _ = value.define("code", from_json(code));
+        let _ = value.define("code", code.clone());
     }
     Thrown {
         value,

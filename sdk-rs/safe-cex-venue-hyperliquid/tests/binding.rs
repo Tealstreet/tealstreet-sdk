@@ -894,6 +894,7 @@ fn production_import_live_fills_emit_each_fill_update_later_positions_and_refres
     f.exchange.base().on(
         "fill",
         Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
             observed.borrow_mut().push(event.clone());
             Ok(())
         }),
@@ -1319,6 +1320,7 @@ fn seam_observe_fills(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
     f.exchange.base().on(
         "fill",
         Rc::new(move |_, event| {
+            let event = safe_cex_exchange::js_runtime::value::to_json(event).unwrap();
             observed.borrow_mut().push(event.clone());
             Ok(())
         }),

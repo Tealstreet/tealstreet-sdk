@@ -47,9 +47,10 @@ fn enhanced_error_causal_status_and_config_projection() {
         json!({"baseURL":"https://venue","timeout":20000,"headers":{"Authorization":"secret","Content-Type":"application/json"},"params":{"key":"secret"}}),
     );
     error.original_error = Some(json!({"message":"original"}));
-    let result = format_error_for_sentry(&error);
+    let result =
+        safe_cex_exchange::js_runtime::value::to_json(&format_error_for_sentry(&error)).unwrap();
     assert_eq!(result["tags"]["errorType"], "network");
-    assert_eq!(result["tags"]["statusCode"], 403);
+    assert_eq!(result["tags"]["statusCode"].as_f64(), Some(403.));
     assert_eq!(result["extra"]["originalMessage"], "original");
     assert_eq!(
         result["extra"]["config"]["headers"],
@@ -243,7 +244,9 @@ fn base_error_events_match_live_typescript_oracle() {
             Rc::new(move |event, data| {
                 {
                     let mut row = vec![json!(event)];
-                    row.extend(data.iter().cloned());
+                    row.extend(data.iter().map(|value| {
+                        safe_cex_exchange::js_runtime::value::to_json(value).unwrap()
+                    }));
                     captured.borrow_mut().push(serde_json::Value::Array(row));
                 };
                 Ok(())

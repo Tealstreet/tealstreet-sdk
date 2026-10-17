@@ -639,7 +639,13 @@ impl PrivateStreamHost for SocketHost {
                 |message| {
                     self.host
                         .base()
-                        .emit_args("warning", &[json!(message), json!({"forceToast": true})])
+                        .emit_args(
+                            "warning",
+                            &[
+                                Js::str(message),
+                                Js::object(vec![("forceToast", Js::Bool(true))]),
+                            ],
+                        )
                         .map_err(failure)
                 },
             )
