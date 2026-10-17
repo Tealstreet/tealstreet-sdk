@@ -22,19 +22,16 @@
     "intrinsic Number.isFinite",
     "intrinsic Promise.resolve",
     "intrinsic RegExp",
-    "intrinsic Set",
     "intrinsic String",
     "intrinsic construct",
     "intrinsic destructure three",
     "intrinsic instanceof Error",
     "intrinsic iterable spread",
     "intrinsic less than",
-    "intrinsic missingTicker",
     "intrinsic new Map",
     "intrinsic new Set",
     "intrinsic property in",
     "intrinsic select:aggregateBybitClosedPnl",
-    "intrinsic select:mapBybitHistoricalOrder",
     "intrinsic super.dispose",
     "intrinsic super.mapPosition",
     "intrinsic throw value",
@@ -65,10 +62,7 @@
   ],
   "safe-cex-venue-kraken": [],
   "safe-cex-venue-kucoin": [],
-  "safe-cex-venue-lighter": [
-    "global isLighterPartnerAttributionApprovalMissingRejection",
-    "global isLighterPartnerAttributionTierRejection"
-  ],
+  "safe-cex-venue-lighter": [],
   "safe-cex-venue-mexc": [
     "global bigIntAsStringJsonParse",
     "global isMexcControlChannel"

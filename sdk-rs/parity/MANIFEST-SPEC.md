@@ -1579,12 +1579,14 @@ production JavaScript/transport/Store assembly.
 `fetchOrders` discards rejected normal/algo legs without reporting, matching the
 maintained Promise.allSettled body. Its constructed HTTP regression observes
 successful orders and zero error events after an algo endpoint rejection.
-The three private refresh callbacks and public depth-gap recovery still report
-failures discarded by source; those separate porting findings remain open.
+The three private refresh callbacks silently catch fetch and Store-update failures,
+matching source. A constructed account frame with a rejected REST balance refresh
+retains the old balance without reporting a host exception. Public depth-gap
+recovery still reports failures discarded by source, a separate open finding.
 
 The returned `fetchOrders` future owns its aggregation/dedup continuation;
-refresh futures own update/report continuations. Dropping one can omit those
-outcomes, even when host-started
+refresh futures own update continuations. Dropping one can omit those outcomes,
+even when host-started
 requests survive. This bounds abandoned native work instead of requiring every
 borrowed host context to survive an unobserved Promise. Public snapshot observers
 are different: `observe_snapshot` must retain its callbacks and receiver until
@@ -1593,7 +1595,7 @@ not a cancellation proof from a recording fixture.
 
 The imported `settled` capability supplies Promise.allSettled reaction semantics
 and peer retention. Refresh reactions suspend after a ready fetch result before
-checking disposal or applying/reporting it. These boundaries do not implement an
+checking disposal or applying it. These boundaries do not implement an
 entire JavaScript microtask scheduler. Shared pager ownership and callback costs
 remain at [exchange-runtime-callback-choice](#exchange-runtime-callback-choice)
 and [shared-handler-and-ledger-choice](#shared-handler-and-ledger-choice).
