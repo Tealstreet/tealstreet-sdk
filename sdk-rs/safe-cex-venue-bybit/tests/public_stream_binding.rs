@@ -289,3 +289,232 @@ fn malformed_book_levels_preserve_source_type_error() {
     cleanup().unwrap();
     h.venue().dispose().unwrap();
 }
+
+fn single_candle(name: ExchangeName) {
+    let spot = name == ExchangeName::Bybitspot;
+    let (h, socket, symbol) = setup(name);
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":symbol,"interval":"1m"})).unwrap(),
+            Rc::new(move |candle| sink.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "single candle listener must reach real public frame"
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("publicTrade.{symbol}"),"data":[{"T":1700000045000u64,"p":"104","v":"208","S":"Sell"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 2);
+    assert_eq!(seen.borrow()[1].close, 104.0);
+    assert_eq!(seen.borrow()[1].volume, 9.0);
+    assert_eq!(
+        seen.borrow()[1].last_side,
+        if spot {
+            None
+        } else {
+            Some(safe_cex_types::OrderSide::Sell)
+        }
+    );
+    cleanup().unwrap();
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 2);
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn primary_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybit);
+}
+#[test]
+fn demo_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybitdemo);
+}
+#[test]
+fn spot_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybitspot);
+}
+#[test]
+fn inverse_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybitinverse);
+}
+#[test]
+fn primary_single_candle_cleanup_cancels_pending_subscription_retry() {
+    let h = support::harness(support::options(), |_| {});
+    let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(),
+            Rc::new(|_| panic!("cleaned candle callback")),
+        )
+        .unwrap();
+    cleanup().unwrap();
+    socket.connect_and_subscribe(false).unwrap();
+    h.runtime.pump();
+    h.runtime.now.set(h.runtime.now.get() + 100.);
+    h.runtime.pump();
+    assert_eq!(sent_topics(&h, "subscribe", "kline.1.BTCUSDT"), 0);
+    assert_eq!(sent_topics(&h, "subscribe", "publicTrade.BTCUSDT"), 0);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn dedicated_single_candle_cleanup_retains_source_pending_retry() {
+    for (name, slot, symbol) in [
+        (ExchangeName::Bybitspot, SocketSlot::Public, "BTCUSDT"),
+        (
+            ExchangeName::Bybitinverse,
+            SocketSlot::PublicSecondary,
+            "BTCUSD",
+        ),
+    ] {
+        let h = support::harness_as(name, support::options(), |_| {});
+        let socket = h.venue().base().get_socket(slot).unwrap();
+        let cleanup = h
+            .venue()
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":symbol,"interval":"1m"})).unwrap(),
+                Rc::new(|_| {}),
+            )
+            .unwrap();
+        cleanup().unwrap();
+        socket.connect_and_subscribe(false).unwrap();
+        h.runtime.pump();
+        assert_eq!(
+            sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+            0
+        );
+        h.runtime.now.set(h.runtime.now.get() + 100.);
+        h.runtime.pump();
+        assert_eq!(
+            sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+            1
+        );
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn primary_single_candle_silence_recovers_and_cleanup_stops_watchdog() {
+    let (h, socket, symbol) = setup(ExchangeName::Bybit);
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":symbol,"interval":"1m"})).unwrap(),
+            Rc::new(|_| {}),
+        )
+        .unwrap();
+    let topic = format!("kline.1.{symbol}");
+    assert_eq!(sent_topics(&h, "subscribe", &topic), 1);
+    h.runtime.now.set(h.runtime.now.get() + 24_999.);
+    h.runtime.pump();
+    assert_eq!(sent_topics(&h, "subscribe", &topic), 1);
+    h.runtime.now.set(h.runtime.now.get() + 1.);
+    h.runtime.pump();
+    assert_eq!(sent_topics(&h, "subscribe", &topic), 2);
+    assert_eq!(sent_topics(&h, "unsubscribe", &topic), 1);
+    cleanup().unwrap();
+    let subscriptions = sent_topics(&h, "subscribe", &topic);
+    h.runtime.now.set(h.runtime.now.get() + 25_000.);
+    h.runtime.pump();
+    assert_eq!(sent_topics(&h, "subscribe", &topic), subscriptions);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+#[ignore = "requires workspace Node; mandatory venue-oracle:bybit"]
+fn single_candle_sequences_match_maintained_source() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/single-candle-fixtures.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 12);
+    for (index, case) in cases.iter().enumerate() {
+        let name = match case["variant"].as_str().unwrap() {
+            "bybitspot" => ExchangeName::Bybitspot,
+            "bybitinverse" => ExchangeName::Bybitinverse,
+            _ => ExchangeName::Bybit,
+        };
+        let (h, socket, symbol) = setup(name);
+        let seen = Rc::new(RefCell::new(vec![]));
+        let sink = seen.clone();
+        let cleanup = h
+            .venue()
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":symbol,"interval":case["interval"]}))
+                    .unwrap(),
+                Rc::new(move |candle| sink.borrow_mut().push(candle)),
+            )
+            .unwrap();
+        for (step, row) in case["rows"].as_array().unwrap().iter().enumerate() {
+            let before = seen.borrow().len();
+            let mut frame = row["frame"].clone();
+            let wire = if case["interval"] == "1w" { "W" } else { "1" };
+            frame["topic"] = json!(if row["kind"] == "kline" {
+                format!("kline.{wire}.{symbol}")
+            } else {
+                format!("publicTrade.{symbol}")
+            });
+            socket
+                .on_message(&SocketFrame::Text(frame.to_string()))
+                .unwrap();
+            let expected = &case["outcomes"][step];
+            if expected.is_null() {
+                assert_eq!(
+                    seen.borrow().len(),
+                    before,
+                    "source sequence {index}/{step}"
+                );
+                continue;
+            }
+            assert_eq!(
+                seen.borrow().len(),
+                before + 1,
+                "source sequence {index}/{step}"
+            );
+            let seen = seen.borrow();
+            let candle = seen.last().unwrap();
+            let mut actual = serde_json::to_value(candle).unwrap();
+            let mut expected = expected.clone();
+            for (field, value) in [
+                ("timestamp", candle.timestamp),
+                ("open", candle.open),
+                ("high", candle.high),
+                ("low", candle.low),
+                ("close", candle.close),
+                ("volume", candle.volume),
+            ] {
+                actual[field] = if value.is_nan() {
+                    json!("NaN")
+                } else if value == f64::INFINITY {
+                    json!("Infinity")
+                } else if value == f64::NEG_INFINITY {
+                    json!("-Infinity")
+                } else if value == 0. && value.is_sign_negative() {
+                    json!("-0")
+                } else {
+                    json!(value)
+                };
+                if let Some(number) = expected[field].as_f64() {
+                    expected[field] = json!(number);
+                }
+            }
+            assert_eq!(actual, expected, "source sequence {index}/{step}");
+        }
+        cleanup().unwrap();
+        h.venue().dispose().unwrap();
+    }
+}
