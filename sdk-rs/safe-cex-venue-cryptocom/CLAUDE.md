@@ -355,3 +355,11 @@ WS_RECORD_CONTRACT_REVIEW.md and scripts/ws-record-contracts.mjs for independent
 field/presence/bit/cardinality cases and mutation controls. This is the declared
 static projection boundary, with no JSON/property binding or live alias claim.
 Other owners, aliases, construction and full discovery/matrix remain owed.
+
+The twenty-owner helper batch reviews three enum-returning mapping decoders and
+seventeen specific comparison/rendering/dispatch/state roles. Every owner has a
+direct native witness and individual compiling body control; compiler
+classification receipts remain separate from executed evidence. See
+HELPER_BATCH_CONTRACT_REVIEW.md and scripts/helper-batch-contracts.mjs. Supplied
+host parsers, generic Clone behavior, downstream decoders, aliases and the full
+discovery/feature/target matrix remain independent obligations.

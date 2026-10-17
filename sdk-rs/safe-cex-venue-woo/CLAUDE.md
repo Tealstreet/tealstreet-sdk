@@ -398,3 +398,10 @@ private remote schema as `v3_contracts`. See
 [accepted contract review and focused commands](ACCEPTED_CONTRACT_REVIEW.md).
 The focused runner retains full compiler discovery and selected-source scope
 checks; it does not classify the remaining Woo owners or aliases.
+
+The next accepted-set batch reviews thirty concrete declaration records, with
+native views of all fields and separate raw/owned/borrowed/qualified ingress.
+The V3 public mapper's five numeric validations are expanded from their former
+local macro so source discovery can inspect ordinary Rust. Its existing typed
+candle-sort helper retains its reviewed local role and exact source pin. See
+[record review and focused controls](ACCEPTED_RECORD_REVIEW.md).
