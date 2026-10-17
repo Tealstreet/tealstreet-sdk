@@ -199,6 +199,7 @@ fn actual_typescript_rest_reads() {
                     || vec![cached_market.clone()],
                     read,
                     |_: &ReadError| reports += 1,
+                    |message| panic!("source corpus has no typed asset refusals: {message}"),
                 ));
                 assert_eq!(
                     native.len(),

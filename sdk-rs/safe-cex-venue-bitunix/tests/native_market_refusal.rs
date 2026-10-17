@@ -4,7 +4,7 @@
 mod support;
 use safe_cex_exchange::exchange::Exchange;
 use safe_cex_store::{Store, StoreUpdate};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{
     future::Future,
     task::{Context, Poll, Waker},
@@ -23,7 +23,7 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
 }
 
 #[test]
-fn typed_market_refusal_logs_cause_at_error_level_and_keeps_cached_fallback() {
+fn typed_market_refusal_reports_the_base_and_omits_the_row() {
     for empty_cache in [false, true] {
         let (venue, rt, store, wire) = support::fixture();
         if empty_cache {
@@ -43,17 +43,103 @@ fn typed_market_refusal_logs_cause_at_error_level_and_keeps_cached_fallback() {
             json!({"code":0,"data":[{"base":false,"symbol":"BTCUSDT","quote":"USDT","symbolStatus":"OPEN","isApiSupported":true}]}),
         );
         let markets = drive(&rt, venue.fetch_markets()).unwrap();
+        assert!(
+            markets.is_empty(),
+            "all refused rows produce an empty fresh result"
+        );
         assert_eq!(
-            markets, cached,
-            "refusal retains the existing typed fallback"
+            store.markets().as_ref(),
+            cached.as_slice(),
+            "fetch does not mutate the Store"
         );
         let logs = rt.console.borrow();
         assert!(
-            logs.iter().any(|(severity, cause)| severity == "error"
-                && cause.contains("Market base must be a string")),
-            "typed market refusal must be visible at error level with its original cause: {logs:?}"
+            logs.iter().any(|(severity, cause)| severity == "warning"
+                && cause.contains("Refused Bitunix market row")
+                && cause.contains("base=false")),
+            "typed market refusal must visibly report its original base value: {logs:?}"
         );
         drop(logs);
         venue.dispose().unwrap();
     }
+}
+
+fn instrument(symbol: &str, base: &str) -> serde_json::Value {
+    json!({"symbol":symbol,"base":base,"quote":"USDT","symbolStatus":"OPEN",
+        "isApiSupported":true,"basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":100})
+}
+
+#[test]
+fn mixed_market_rows_keep_valid_siblings_and_report_each_base_refusal() {
+    for value in [
+        Some(json!(false)),
+        Some(json!({"asset":"wrong"})),
+        Some(Value::Null),
+        Some(json!(17)),
+        None,
+    ] {
+        let (venue, rt, _, wire) = support::fixture();
+        let mut bad = instrument("BADUSDT", "BAD");
+        if let Some(value) = &value {
+            bad["base"] = value.clone();
+        } else {
+            bad.as_object_mut().unwrap().remove("base");
+        }
+        wire.bodies.lock().unwrap().insert(
+            "/api/v1/futures/market/trading_pairs".into(),
+            json!({"code":0,"data":[instrument("BTCUSDT","BTC"),bad,instrument("ETHUSDT","ETH")]}),
+        );
+        let markets = drive(&rt, venue.fetch_markets()).unwrap();
+        assert_eq!(
+            markets
+                .iter()
+                .map(|m| m.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["BTCUSDT", "ETHUSDT"],
+            "one refused base must not replace fresh siblings with cached markets"
+        );
+        let logs = rt.console.borrow();
+        let report = logs
+            .iter()
+            .find(|(_, line)| line.contains("Refused Bitunix market row"))
+            .expect("the row refusal must be visible");
+        assert_eq!(report.0, "warning");
+        assert!(
+            report.1.contains("BADUSDT") && report.1.contains("base="),
+            "{report:?}"
+        );
+        let expected = value
+            .as_ref()
+            .map_or_else(|| "undefined".into(), serde_json::Value::to_string);
+        assert!(report.1.contains(&expected), "{report:?}");
+        drop(logs);
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn market_refresh_commits_valid_rows_around_a_refused_base() {
+    let (venue, rt, store, wire) = support::fixture();
+    let mut bad = instrument("BADUSDT", "BAD");
+    bad["base"] = json!(false);
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/futures/market/trading_pairs".into(),
+        json!({"code":0,"data":[instrument("BTCUSDT","BTC"),bad,instrument("ETHUSDT","ETH")]}),
+    );
+    drive(&rt, venue.refresh_markets()).unwrap();
+    assert_eq!(
+        store
+            .markets()
+            .iter()
+            .map(|m| m.symbol.as_str())
+            .collect::<Vec<_>>(),
+        ["BTCUSDT", "ETHUSDT"]
+    );
+    assert!(
+        rt.console
+            .borrow()
+            .iter()
+            .any(|(_, line)| line.contains("Refused Bitunix market row"))
+    );
+    venue.dispose().unwrap();
 }
