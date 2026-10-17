@@ -369,3 +369,25 @@ Use the TypeScript package directory with axios and axios-retry installed beside
 it: the complete fetchMarkets source oracle executes the real request factories.
 All 34 targeted native/source tests pass, including the direct reentrant Store
 regression; these are separate from the 22-function contract baseline.
+
+Twenty-two individual production mutations compile and fail their intended
+native output assertions; exact restoration passes each complete function
+contract. They cover lookup/cache keys, independent default reads, book prices,
+singleton filters, ticker fields, late account reads, market casing/endpoints,
+cancellation payload and scope, ordinary-error continuation, authentic Builder
+termination, retained listeners, candle/book ordering, metadata-only refresh,
+leverage values and the cache-before-position-read sequence. Compiler failures
+do not count as controls, and all four production files are restored exactly.
+
+The complete stored union now contains 134 owners, preserving the previous 112
+rows unchanged. Fresh native and actual target-specific Wasm execution each pass
+117 runtime receipts and seventeen explicit classifications, including all
+nineteen reviewed aliases, with zero failed owners. All 268 selected receipts
+pass the scoped ratchet; the standing ledger is unchanged. The remaining 67
+compiler nominal/function owners still require individual review, alongside the
+previously stated local, feature and executable-host obligations.
+
+Strict host all-target/all-feature and Wasm library all-feature Clippy pass, as
+do crate formatting and the parity invention/status gate (7,459 rows and 17,214
+public Rust items). These checks followed the fresh compiler inventory and both
+complete stored-contract runs after merging current master.
