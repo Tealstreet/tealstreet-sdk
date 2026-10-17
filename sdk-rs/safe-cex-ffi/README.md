@@ -120,3 +120,18 @@ the native registry path. Both use loopback HTTP.
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
+
+The parity manifest records native Store delivery as worker split members:
+construction reuses `_throttledStoreUpdate`, subscribed updates follow
+`_setupExchangeEventListeners`, snapshots follow `sendSnapshot`, and teardown
+follows `_clearRuntimePipeline`. The native host shares the worker throttle and
+payload preparer; its weak owners and owned Store frames retain the documented
+native ownership boundary. `NativeAccountFuture` remains part of the native
+registry host mapping after its rename from `JsonFuture`.
+
+The individually listed native-boundary exemptions cover `OwnedJsValue` and its
+registry alias, the `JsData` napi codec, host callback handles/settlement glue,
+and the owned callback/std-error origin carriers. They name ABI representations
+with no separate TypeScript SDK declarations. They preserve the explicit tree
+cycle/depth and callback-inspection limits; they do not exempt Store delivery,
+exchange policy or worker algorithms from their source mappings and binding tests.
