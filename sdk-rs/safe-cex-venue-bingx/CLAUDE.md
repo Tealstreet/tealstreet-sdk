@@ -223,3 +223,10 @@ writes, terminal fill emission/status, and position writes before REST healing.
 Balance-only account rows remain ignored as in TS; this socket has no balance
 handler and the REST balance stays unchanged. Refused typed market rows emit an
 error containing their cause and retain the stored market snapshot.
+
+The concrete API serializer forwards the source's repeat-array and pinned
+localeCompare sort options to the shared qs binding for both signing and final
+wire serialization. The final sort includes the newly appended signature key.
+`safe-cex-registry/tests/native_host_bingx.rs` proves the account GET sends
+signature before timestamp and independently verifies its HMAC. Shared option
+corpora cover nested and 12-element array key sorting and comma/form encoding.

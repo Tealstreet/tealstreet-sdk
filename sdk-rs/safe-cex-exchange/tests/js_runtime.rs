@@ -3646,6 +3646,20 @@ fn virtual_clock_global_preserves_synced_time_without_changing_date_now() {
         actual >= before && actual <= after,
         "JS virtualClock must retain server offset"
     );
+    let before = VIRTUAL_CLOCK.get_current_time();
+    let actual = shared
+        .globals
+        .get("virtualClock")
+        .unwrap()
+        .call_method("getCurrentTime", vec![])
+        .unwrap()
+        .to_number()
+        .unwrap();
+    let after = VIRTUAL_CLOCK.get_current_time();
+    assert!(
+        actual >= before && actual <= after,
+        "dayjs virtualClock must retain server offset"
+    );
     assert_eq!(
         shared
             .globals

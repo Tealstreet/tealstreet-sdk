@@ -298,7 +298,6 @@ impl RustVenueHost for NativeVenueHost {
             },
         )
     }
-    #[expect(clippy::arc_with_non_send_sync)]
     fn orderly(
         &self,
         name: safe_cex_types::ExchangeName,
@@ -306,7 +305,6 @@ impl RustVenueHost for NativeVenueHost {
         let runtime = self.runtime.clone();
         let adapter = self.adapter.clone();
         let remote = self.remote.clone();
-        let events = self.http_events.clone();
         Ok(
             safe_cex_venue_orderly::native_exchange::OrderlyDependencies {
                 runtime: self.runtime.clone(),
@@ -318,13 +316,7 @@ impl RustVenueHost for NativeVenueHost {
                     }
                     let http = safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                         runtime.clone(),
-                        Arc::new(SourceApiRest {
-                            name: name.clone(),
-                            runtime: runtime.clone(),
-                            events: events.clone(),
-                            adapter: adapter.clone(),
-                            options: options.clone(),
-                        }),
+                        adapter()?,
                         remote.clone(),
                     );
                     http.configure_exchange(name.clone())
@@ -336,14 +328,12 @@ impl RustVenueHost for NativeVenueHost {
         )
     }
 
-    #[expect(clippy::arc_with_non_send_sync)]
     fn asterdex(
         &self,
     ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
         let runtime = self.runtime.clone();
         let adapter = self.adapter.clone();
         let remote = self.remote.clone();
-        let events = self.http_events.clone();
         Ok(
             safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies {
                 runtime: self.runtime.clone(),
@@ -355,13 +345,7 @@ impl RustVenueHost for NativeVenueHost {
                     }
                     let http = safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                         runtime.clone(),
-                        Arc::new(SourceApiRest {
-                            name: safe_cex_types::ExchangeName::Asterdex,
-                            runtime: runtime.clone(),
-                            events: events.clone(),
-                            adapter: adapter.clone(),
-                            options: options.clone(),
-                        }),
+                        adapter()?,
                         remote.clone(),
                     );
                     http.configure_exchange(safe_cex_types::ExchangeName::Asterdex)
@@ -376,7 +360,6 @@ impl RustVenueHost for NativeVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.remote.clone()
     }
-    #[expect(clippy::arc_with_non_send_sync)]
     fn breakoutprop(
         &self,
         options: &safe_cex_types::ExchangeOptions,
@@ -386,25 +369,13 @@ impl RustVenueHost for NativeVenueHost {
                 "remoteSigner is not wired for Breakout Prop DXtrade login on the native host",
             ));
         }
-        let installed = Rc::new(Cell::new(false));
-        let install = installed.clone();
         Ok(safe_cex_venue_breakoutprop::host::BreakoutDependencies {
             runtime: self.runtime.clone(),
             http: safe_cex_exchange::js_runtime::client::rest_http_host(
                 self.runtime.clone(),
-                Arc::new(BreakoutRest {
-                    runtime: self.runtime.clone(),
-                    events: self.http_events.clone(),
-                    adapter: self.adapter.clone(),
-                    options: options.clone(),
-                    installed,
-                }),
+                (self.adapter)()?,
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
-            install_transport: Rc::new(move |_| {
-                install.set(true);
-                Ok(())
-            }),
             // The shared native JS realm explicitly uses UTC for local dates.
             // Embeddings with another timezone supply their own dependency.
             local_to_utc: Rc::new(|ms| ms),
@@ -761,90 +732,6 @@ impl RestAdapter for HyperliquidHttp {
     ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
         request.base_url = None;
         Box::pin(self.0.execute_with_receipt(request))
-    }
-}
-
-// The source API factory supplies its base URL after choosing primary/secondary
-// options. Route the final post-signing request through the shared HTTP stack.
-struct SourceApiRest {
-    name: safe_cex_types::ExchangeName,
-    runtime: Rc<dyn WsRuntime>,
-    events: NativeHttpEvents,
-    adapter: AdapterFactory,
-    options: safe_cex_types::ExchangeOptions,
-}
-impl RestAdapter for SourceApiRest {
-    fn execute(
-        &self,
-        mut request: safe_cex_transport::RestRequest,
-    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
-        Box::pin(async move {
-            let client = native_client(
-                &self.runtime,
-                &self.adapter,
-                self.name.clone(),
-                &self.options,
-                request.clone(),
-                None,
-                None,
-                &self.events,
-            )
-            .map_err(|error| {
-                safe_cex_transport::RestFailure::pre_transmit(error.message, request.clone())
-            })?;
-            safe_cex_exchange::http::install_transport_adapter(
-                &client,
-                &safe_cex_transport::TransportRegistry::default(),
-                &self.options,
-                Some(&self.runtime.transport()),
-                safe_cex_transport::RestAdapterVariant::Default,
-            );
-            request.base_url = None;
-            client.execute(request).await
-        })
-    }
-}
-
-// DXtrade installs its tunnel adapter only at the source factory hook. The
-// final request keeps source auth headers and the transport-resolved baseURL.
-struct BreakoutRest {
-    runtime: Rc<dyn WsRuntime>,
-    events: NativeHttpEvents,
-    adapter: AdapterFactory,
-    options: safe_cex_types::ExchangeOptions,
-    installed: Rc<Cell<bool>>,
-}
-impl RestAdapter for BreakoutRest {
-    fn execute(
-        &self,
-        mut request: safe_cex_transport::RestRequest,
-    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
-        Box::pin(async move {
-            let client = native_client(
-                &self.runtime,
-                &self.adapter,
-                safe_cex_types::ExchangeName::Breakoutprop,
-                &self.options,
-                request.clone(),
-                None,
-                None,
-                &self.events,
-            )
-            .map_err(|error| {
-                safe_cex_transport::RestFailure::pre_transmit(error.message, request.clone())
-            })?;
-            if self.installed.get() {
-                safe_cex_exchange::http::install_transport_adapter(
-                    &client,
-                    &safe_cex_transport::TransportRegistry::default(),
-                    &self.options,
-                    Some(&self.runtime.transport()),
-                    safe_cex_transport::RestAdapterVariant::Default,
-                );
-            }
-            request.base_url = None;
-            client.execute(request).await
-        })
     }
 }
 

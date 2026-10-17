@@ -149,15 +149,6 @@ fn construct_with<H: ClassHost>(
     h.set(&receiver, &units("privateWebsocket"), private)?;
     Ok(receiver)
 }
-pub fn constructor<H: ClassHost>(
-    h: &H,
-    name: Value<H>,
-    options: Value<H>,
-    store: Value<H>,
-) -> Result<H, Value<H>> {
-    prepare(h);
-    construct_with(h, Kind::Orderly, name, options, store)
-}
 pub fn construct<H: ClassHost>(h: &H, kind: Kind, args: Vec<Value<H>>) -> Result<H, Value<H>> {
     prepare(h);
     let name = args.first().cloned().unwrap_or_else(|| h.undefined());
@@ -168,27 +159,6 @@ pub fn construct<H: ClassHost>(h: &H, kind: Kind, args: Vec<Value<H>>) -> Result
         h.define(receiver.clone(), "orderlyExchangeName", text(h, tag))?;
     }
     Ok(receiver)
-}
-pub fn orderly<H: ClassHost>(h: &H, args: Vec<Value<H>>) -> Result<H, Value<H>> {
-    construct(h, Kind::Orderly, args)
-}
-pub fn kodiakfi<H: ClassHost>(h: &H, args: Vec<Value<H>>) -> Result<H, Value<H>> {
-    construct(h, Kind::KodiakFI, args)
-}
-pub fn mode<H: ClassHost>(h: &H, args: Vec<Value<H>>) -> Result<H, Value<H>> {
-    construct(h, Kind::Mode, args)
-}
-pub fn salsadex<H: ClassHost>(h: &H, args: Vec<Value<H>>) -> Result<H, Value<H>> {
-    construct(h, Kind::SalsaDEX, args)
-}
-pub fn tealstreet_dex<H: ClassHost>(h: &H, args: Vec<Value<H>>) -> Result<H, Value<H>> {
-    construct(h, Kind::TealstreetDEX, args)
-}
-pub fn what<H: ClassHost>(h: &H, args: Vec<Value<H>>) -> Result<H, Value<H>> {
-    construct(h, Kind::What, args)
-}
-pub fn woofi<H: ClassHost>(h: &H, args: Vec<Value<H>>) -> Result<H, Value<H>> {
-    construct(h, Kind::Woofi, args)
 }
 pub fn definitions() -> &'static [Definition] {
     &[

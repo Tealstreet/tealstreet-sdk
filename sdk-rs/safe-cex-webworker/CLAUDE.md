@@ -19,7 +19,8 @@ only weak references, so discarded host tasks cannot retain the manager.
 Worker payloads preserve missing versus explicit-null data. Incoming/outgoing op
 sets are pinned against the live TypeScript unions. Store payloads reuse the
 existing StoreUpdate directly, including PackedTickerDelta, rather than duplicate
-that contract. Serde's owned JSON boundary replaces structured-clone identity.
+that contract. Ordinary worker payloads retain their owned JSON boundary; native book and
+Error post capabilities bypass that projection.
 
 The CLI executor is injected and owns its emitted handled results; the handler
 never manufactures success from a resolved void future. Missing/rejected executors
@@ -33,7 +34,15 @@ Market-load buffering uses separate 500ms self-rescheduling checks and a 30s
 deadline. Timeout reports are cooled down for five minutes and contain only
 bounded telemetry; loaded markets reset the episode. Timer guards are created
 before spawn, release only their own slots, and never retain the handler.
-The JSON post callback carries error name/message rather than a JS Error object.
+Timeout Error construction and post are required fallible host capabilities.
+WorkerErrorPost keeps the Error opaque; its Wasm binding creates a real Error at
+the report point and posts it without JSON conversion. Structured clone retains
+the stack and Error identity while resetting the custom name. Creation/post
+failure reports through the runtime without committing cooldown or clearing pending.
+A fired deadline stays registered after a throw until markets flush or dispose;
+new subscriptions cannot arm a replacement deadline during that failed episode.
+The concrete Wasm host witness uses examples/worker_error_host.rs, wasm-bindgen
+and tests/worker-error-host.cjs; it does not claim browser startup composition.
 
 Sentry worker errors read only nonempty string message/name/stack properties;
 plain structured-clone objects work, primitive rejections use the supplied
@@ -652,3 +661,7 @@ cover all option terms, price minimum and Order.clientOrderId. Fixed inventories
 include 36 market-identity cases, 59/43 TWAP option cases/leaves, 56/41 TWAP state
 cases/leaves and 3960 numeric comparisons; future source additions still fail
 closed instead of shrinking the compared fields.
+
+Command dispatch rejects missing, null and primitive payloads before looking up
+or calling its executor; arrays retain the source object admission. Position
+failure replies use JavaScript Error string rules for empty names and messages.
