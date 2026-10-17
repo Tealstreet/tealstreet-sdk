@@ -1391,3 +1391,8 @@ output in a child process and compares its payloads with Node, including exact
 info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
+
+Error prototype thread-local storage stays inside its sole private accessor.
+Module-level item macros are rejected by the parity indexer. The focused
+`safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
+module graph and requires the public Error factory to remain discoverable.
