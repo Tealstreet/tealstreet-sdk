@@ -53,7 +53,7 @@ fn update_public_tickers(
             "data.forEach is not a function"
         })
     })?;
-    let mut refusal = None;
+    let mut refusals = Vec::new();
     'rows: for row in rows {
         if row.is_null() {
             return Err(type_error(
@@ -89,13 +89,14 @@ fn update_public_tickers(
         };
         let mut patch = ModelPatch::default();
         for (target, source) in fields {
-            // Defer the typed refusal: a later source error must still win.
-            // The unrepresentable patch itself is a declared lost mutation;
-            // this never reports successful application of a subset.
+            // Preserve later source/store errors ahead of typed row reports.
             let Some(value) = row.get(*source).filter(|v| v.is_number()) else {
-                refusal.get_or_insert_with(|| {
-                    ExchangeError::new(format!("typed ticker field {target} requires a number"))
-                });
+                let value = row
+                    .get(*source)
+                    .map_or_else(|| "undefined".into(), serde_json::Value::to_string);
+                refusals.push(format!(
+                    "Refused WOO ticker row symbol={symbol:?}: {target}={value}: expected number"
+                ));
                 continue 'rows;
             };
             let number = safe_cex_num::numeric_ingress::js_value_as_f64(value)
@@ -106,7 +107,11 @@ fn update_public_tickers(
         let updated: Result<(), StoreMutationError> = store.update_ticker(&id, &patch);
         updated.map_err(|error: StoreMutationError| ExchangeError::from(error))?;
     }
-    refusal.map_or(Ok(()), Err)
+    if refusals.is_empty() {
+        Ok(())
+    } else {
+        Err(ExchangeError::new(refusals.join("; ")))
+    }
 }
 
 fn type_error(message: &str) -> ExchangeError {

@@ -205,6 +205,7 @@ fn venue_with_runtime_and_key(
         capabilities: ExchangeCapabilities::default(),
         xhr: Rc::new(NoRequests),
         local_to_utc: Rc::new(|v| v),
+        current_time_ms: Rc::new(move || time),
         placed: RefCell::new(BTreeMap::from([
             ("placed".into(), 1.0),
             ("seen".into(), 1.0),

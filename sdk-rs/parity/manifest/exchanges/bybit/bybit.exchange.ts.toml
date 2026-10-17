@@ -960,7 +960,7 @@ kind = "field-fn"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Single-order adjusted price/trigger truthiness is repaired in binding/members/orders.rs::place_order: four compiled primary/demo master-red real-binding controls, plus raw option-gate payload and NaN-adjusted trigger controls in adjusted_order_binding. This narrow branch repair does not claim the entire pending placement method."
 
 [[symbol]]
 ts = "BybitExchange#assertOptionOrderPlaceable"

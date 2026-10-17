@@ -1063,3 +1063,84 @@ fn private_balance_topics_preserve_the_rest_owned_store() {
         "totalAccountValue":999999,"freeCollateral":888888,"totalCollateral":777777}),
     );
 }
+
+fn ticker_row_refusals(topic: &str, source: &str, target: &str) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let h = started(json!({"publicDataOnly":true}), public_routes);
+    let template = h.store.tickers()[0].clone();
+    let mut tickers = vec![];
+    for symbol in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "LTCUSDT"] {
+        let mut row = template.clone();
+        row.id = symbol.into();
+        row.symbol = symbol.into();
+        tickers.push(row);
+    }
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let public = socket(&h, PUBLIC_URL);
+    let frame_row = |asset: &str, value: Value| {
+        let mut row = json!({"symbol":format!("PERP_{asset}_USDT"),"close":10,"amount":20,
+            "volume":30,"bid":40,"ask":50,"price":60});
+        row[source] = value;
+        row
+    };
+    push(
+        &h,
+        &public,
+        json!({"topic":topic,"data":[
+            frame_row("BTC",Value::Null),frame_row("ETH",json!(123)),
+            frame_row("SOL",json!("unparsed")),frame_row("LTC",json!(456))
+        ]}),
+    );
+    let rows = json_of(&*h.store.tickers());
+    let field = |symbol: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["symbol"] == symbol)
+            .unwrap()[target]
+            .clone()
+    };
+    assert_eq!(field("ETHUSDT"), 123.);
+    assert_eq!(field("LTCUSDT"), 456.);
+    let original = serde_json::to_value(&template).unwrap()[target].clone();
+    assert_eq!(field("BTCUSDT"), original);
+    assert_eq!(field("SOLUSDT"), original);
+    let reports = h.runtime.reports.borrow().join("\n");
+    for (symbol, value) in [("BTCUSDT", "null"), ("SOLUSDT", "unparsed")] {
+        assert!(
+            reports.contains(symbol),
+            "missing refused row identity: {reports}"
+        );
+        assert!(reports.contains(target), "missing refused field: {reports}");
+        assert!(
+            reports.contains(value),
+            "missing original refused value: {reports}"
+        );
+    }
+    assert_eq!(
+        reports.matches("Refused WOO ticker row").count(),
+        2,
+        "{reports}"
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn ticker_row_refusals_keep_valid_ticker_siblings_and_report_each_value() {
+    ticker_row_refusals("tickers", "close", "last");
+}
+#[test]
+fn ticker_row_refusals_keep_valid_bbo_siblings_and_report_each_value() {
+    ticker_row_refusals("bbos", "bid", "bid");
+}
+#[test]
+fn ticker_row_refusals_keep_valid_mark_siblings_and_report_each_value() {
+    ticker_row_refusals("markprices", "price", "mark");
+}

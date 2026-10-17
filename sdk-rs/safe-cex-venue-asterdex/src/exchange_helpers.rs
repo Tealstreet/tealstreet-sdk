@@ -1052,7 +1052,7 @@ pub fn transform_order(
         filled,
         remaining: amount - filled,
         status: status.into(),
-        reduce_only: order.close_position == Some(true) || order.reduce_only == Some(true),
+        reduce_only: (order.close_position == Some(true) || order.reduce_only == Some(true)).into(),
         last_update: order.time,
         info: (Some(
             retained_info(

@@ -787,3 +787,22 @@ tests including explicit discovery export, with211 creators and no open findings
 the override target passes8 tests and binding scanner25 tests. Scoped invention
 checks pass54 BreakoutProp rows/136 public items and233 num rows/193 public items.
 These counts describe the inspected native scope, not universal runtime parity.
+
+
+## Session auth queue and retry ordering
+
+Three `auth_pipeline_` tests in binding.rs compiled against master 5cce34378f
+and failed at the actual stale-token request outcome: queued invalidation sent a
+request instead of rejecting, while queued replacement and network retry both
+sent `DXAPI token` instead of `DXAPI replacement`. The native ProductionHost,
+Axios interceptor/limiter/retry implementation and real exchange session state
+run unchanged; only terminal HTTP and the deterministic timer are supplied.
+
+After moving auth into the native request interceptor, all three pass. A fourth
+control preserves overflow URL params and an untouched native Infinity field.
+Replacing retained parameter capture with JSON projection compiles and fails
+at the terminal `/users/{username}` request; exact source restoration passes all
+four. Existing 401 recovery, HTTP metadata, source order payload and the API
+source comparison pass, as does strict Clippy for both touched test targets.
+The all-features cancellation inventory passes six tests; override inventory,
+parity (7459 rows) and TS extractor check pass without unrelated pin changes.

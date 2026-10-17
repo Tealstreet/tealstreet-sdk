@@ -222,11 +222,11 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "getAccount",
-                "safe-cex-venue-kucoin/src/accounts.rs::get_account",
+                "safe-cex-venue-kucoin/src/futures_native_accounts.rs::get_account",
             ),
             (
                 "validateAccount",
-                "safe-cex-venue-kucoin/src/rest_reads.rs::validate_account",
+                "safe-cex-venue-kucoin/src/futures_native_accounts.rs::validate_account",
             ),
             (
                 "dispose",
@@ -442,11 +442,11 @@ fn initialize_spot_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) -> Re
             ),
             (
                 "getAccount",
-                "safe-cex-venue-kucoin/src/accounts.rs::get_spot_account",
+                "safe-cex-venue-kucoin/src/spot_native_accounts.rs::get_account",
             ),
             (
                 "validateAccount",
-                "safe-cex-venue-kucoin/src/accounts.rs::validate_spot_account",
+                "safe-cex-venue-kucoin/src/spot_native_accounts.rs::validate_account",
             ),
             ("start", "safe-cex-venue-kucoin/src/spot_bodies.rs::start"),
             (
@@ -484,7 +484,7 @@ fn initialize_spot_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) -> Re
             ),
             (
                 "fetchActiveOrderSymbols",
-                "safe-cex-venue-kucoin/src/spot_reads.rs::fetch_active_order_symbols",
+                "safe-cex-venue-kucoin/src/spot_native_order_reads.rs::fetch_active_order_symbols",
             ),
             (
                 "mapOrder",
@@ -500,15 +500,15 @@ fn initialize_spot_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) -> Re
             ),
             (
                 "cancelOrders",
-                "safe-cex-venue-kucoin/src/spot_writes.rs::cancel_orders",
+                "safe-cex-venue-kucoin/src/spot_native_order_reads.rs::cancel_orders",
             ),
             (
                 "cancelSymbolOrders",
-                "safe-cex-venue-kucoin/src/spot_writes.rs::cancel_symbol_orders",
+                "safe-cex-venue-kucoin/src/spot_native_order_reads.rs::cancel_symbol_orders",
             ),
             (
                 "cancelAllOrders",
-                "safe-cex-venue-kucoin/src/spot_writes.rs::cancel_all_orders",
+                "safe-cex-venue-kucoin/src/spot_native_order_reads.rs::cancel_all_orders",
             ),
             (
                 "fetchHistoricalFills",
@@ -516,11 +516,11 @@ fn initialize_spot_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) -> Re
             ),
             (
                 "fetchMarkets",
-                "safe-cex-venue-kucoin/src/spot_reads.rs::fetch_markets",
+                "safe-cex-venue-kucoin/src/spot_native_order_reads.rs::fetch_markets",
             ),
             (
                 "fetchTickers",
-                "safe-cex-venue-kucoin/src/spot_reads.rs::fetch_tickers",
+                "safe-cex-venue-kucoin/src/spot_native_order_reads.rs::fetch_tickers",
             ),
             (
                 "fetchOHLCV",

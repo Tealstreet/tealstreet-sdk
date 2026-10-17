@@ -490,7 +490,7 @@ impl ApexOmniExchange {
             amount,
             filled,
             remaining,
-            reduce_only,
+            reduce_only: reduce_only.into(),
             info: (Some(fields(row)?)).into(),
             time_in_force: time_in_force.into(),
             last_update,

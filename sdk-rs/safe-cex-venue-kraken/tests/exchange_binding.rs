@@ -599,6 +599,60 @@ fn place_order_with_stop_loss_places_the_derived_algo_order_through_place_orders
 }
 
 #[test]
+fn spot_place_order_spreads_transaction_ids_by_unicode_code_point() {
+    for (txids, expected) in [
+        (json!(["T-1", "T-2"]), vec!["T-1", "T-2"]),
+        (json!("A💰B"), vec!["A", "💰", "B"]),
+    ] {
+        let h = harness(ExchangeName::Krakenspot, options(), |http| {
+            http.ok(
+                "GET",
+                "/0/public/AssetPairs",
+                json!({"error": [], "result": {"XXBTZUSD": {
+                    "wsname": "XBT/USD", "pair_decimals": 1, "lot_decimals": 8,
+                    "ordermin": "0.0001", "status": "online", "altname": "XBTUSD"
+                }}}),
+            );
+            http.ok(
+                "POST",
+                "/0/private/AddOrder",
+                json!({"error": [], "result": {"txid": txids}}),
+            );
+        });
+        let markets = h.drive(h.venue().fetch_markets()).expect("spot markets");
+        safe_cex_store::Store::update(
+            h.store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .expect("store markets");
+        let ids = h
+            .drive(Box::pin(
+                safe_cex_exchange::exchange::Exchange::base(h.exchange.as_ref()).place_order(
+                    h.venue(),
+                    order(json!({"symbol": "XBT/USD", "type": "limit", "side": "buy",
+                    "amount": 0.5, "price": 30000})),
+                ),
+            ))
+            .expect("spot placement");
+        assert_eq!(
+            ids, expected,
+            "AddOrder txids use JavaScript string iteration"
+        );
+        let requests = h.http.calls("/0/private/AddOrder");
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0].headers["API-Sign"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+        );
+    }
+}
+
+#[test]
 fn spot_place_order_posts_add_order_with_a_module_client_id() {
     let h = harness(ExchangeName::Krakenspot, options(), |http| {
         http.ok(

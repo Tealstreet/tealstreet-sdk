@@ -1177,7 +1177,7 @@ fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
     );
     assert_eq!(order.price, 29001.5);
     assert_eq!(order.last_update, 77.0);
-    assert!(order.reduce_only);
+    assert_eq!(order.reduce_only, true);
     let advanced = stored_order(&h, "ws-advanced");
     assert_eq!(
         (advanced.r#type.unwrap(), advanced.side.unwrap()),
