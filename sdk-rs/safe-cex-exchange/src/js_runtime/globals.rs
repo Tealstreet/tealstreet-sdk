@@ -164,10 +164,14 @@ fn v8_operand(value: &Js) -> String {
     }
 }
 
-fn not_iterable(value: &Js) -> Thrown {
-    Thrown::type_error(&format!(
-        "{} is not iterable (cannot read property Symbol(Symbol.iterator))",
+pub(super) fn not_iterable(value: &Js) -> Thrown {
+    let operand = if matches!(value, Js::BigInt(_)) {
+        value.type_of().to_owned()
+    } else {
         v8_operand(value)
+    };
+    Thrown::type_error(&format!(
+        "{operand} is not iterable (cannot read property Symbol(Symbol.iterator))"
     ))
 }
 
