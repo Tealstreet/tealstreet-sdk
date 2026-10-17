@@ -21,11 +21,18 @@ pub(crate) fn capture<'de, D: serde::Deserializer<'de>>(
             "Crypto.com wire record requires an object",
         ));
     };
-    let keys = entries.iter().map(|(key, _)| key.clone()).collect();
+    let keys = entries
+        .iter()
+        .map(|(key, _)| String::from_utf16(key).map_err(D::Error::custom))
+        .collect::<Result<Vec<_>, _>>()?;
     let additional = RetainedJsonInput::Object(
         entries
             .into_iter()
-            .filter(|(key, _)| !known.contains(&key.as_str()))
+            .filter(|(key, _)| {
+                !known
+                    .iter()
+                    .any(|name| name.encode_utf16().eq(key.iter().copied()))
+            })
             .collect(),
     )
     .into_value()
@@ -38,9 +45,15 @@ fn normalize(input: RetainedJsonInput) -> RetainedJsonInput {
         RetainedJsonInput::Object(entries) => RetainedJsonInput::Object(
             entries
                 .into_iter()
-                .map(|(key, value)| (key, normalize(value)))
+                .map(|(key, value)| {
+                    (
+                        String::from_utf16(&key).expect("typed numeric capture has UTF-8 keys"),
+                        normalize(value),
+                    )
+                })
                 .collect::<JsObjectMap<_>>()
                 .into_iter()
+                .map(|(key, value)| (key.encode_utf16().collect(), value))
                 .collect(),
         ),
         RetainedJsonInput::Array(values) => {
