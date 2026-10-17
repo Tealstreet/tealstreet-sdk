@@ -731,3 +731,51 @@ fn production_seam_browser_window_guards_refuse_before_browser_globals() {
         assert!(text(&mut r, &message).contains("No Ethereum wallet detected"));
     }
 }
+
+#[test]
+fn market_host_iterator_rejects_non_callable_collection_override() {
+    use crate::market_bootstrap::MarketBootstrapHost;
+    let (mut r, _) = realm();
+    let array = r.new_array(vec![Value::Number(1.0)]);
+    let key = PropKey::Symbol(r.intrinsics().symbol_iterator.clone());
+    r.define(&array, key, Value::Null).unwrap();
+    assert!(
+        MarketBootstrapHost::iterator(&mut r, &array).is_err(),
+        "actual market host must reject a disabled collection iterator"
+    );
+}
+
+#[test]
+fn market_host_iterator_calls_override_even_with_builtin_function_name() {
+    use crate::market_bootstrap::MarketBootstrapHost;
+    let (mut r, _) = realm();
+    let array = r.new_array(vec![Value::Number(1.0)]);
+    let alternative = r.new_array(vec![Value::Number(42.0)]);
+    let override_method = r.native("[Symbol.iterator]", 0, move |r, _, _| {
+        r.get_iterator(&alternative)
+    });
+    let key = PropKey::Symbol(r.intrinsics().symbol_iterator.clone());
+    r.define(&array, key, override_method).unwrap();
+    let iterator = MarketBootstrapHost::iterator(&mut r, &array).unwrap();
+    let value = MarketBootstrapHost::next(&mut r, &iterator)
+        .unwrap()
+        .unwrap();
+    assert!(
+        value.strict_equal(&Value::Number(42.0)),
+        "actual market host must call the original iterator method regardless of its name"
+    );
+}
+
+#[test]
+fn market_host_iterator_rejects_primitive_iterator_before_first_step() {
+    use crate::market_bootstrap::MarketBootstrapHost;
+    let (mut r, _) = realm();
+    let array = r.new_array(vec![]);
+    let override_method = r.native("custom", 0, |_, _, _| Ok(Value::Number(17.0)));
+    let key = PropKey::Symbol(r.intrinsics().symbol_iterator.clone());
+    r.define(&array, key, override_method).unwrap();
+    assert!(
+        MarketBootstrapHost::iterator(&mut r, &array).is_err(),
+        "actual market host must reject a primitive iterator before reading next"
+    );
+}
