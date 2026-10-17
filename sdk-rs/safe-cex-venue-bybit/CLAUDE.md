@@ -631,9 +631,12 @@ axios-retry, plus two native clock-reentry profiles. The private adapter witness
 checks zero and omitted namespaces. `scripts/request-retry-controls.py` restores
 the fixed budget and dropped namespace independently; each must compile and fail
 its named runtime assertion, then exact restored bytes must pass. Its subprocesses
-have timeouts and private temporary logs. This evidence covers JSON-shaped retry
-configuration; it does not claim executable per-request retry callbacks or the
-source's arbitrary live Axios configuration objects.
+have timeouts and private temporary logs. The retained-config supplement now
+covers own `retries: undefined` and NaN through the constructed venue's actual TypedHttpHost, BybitApi and terminal
+adapter. Both match the maintained Axios/axios-retry one-attempt outcome; native
+NaN and own undefined are observed before any JSON projection. Missing retries
+still defaults to three. Executable per-request retry callbacks and arbitrary
+live Axios configuration objects remain outside the data-only typed profile.
 
 The Exchange cancellation surface invokes the venue `cancelSymbolOrders` member,
 so an empty local order cache still sends `/v5/order/cancel-all` through the
@@ -665,6 +668,11 @@ lots. A zero market maximum produces Infinity and no payloads, as in TypeScript.
 `tests/zero_order_max_binding.rs` drives both actual primary/demo placement paths
 in bounded child processes so the pre-fix infinite loop fails safely.
 
+The Spot binding installs its source `omit` import over native object-literal
+requests, so later split lots drop SL/TP fields without mutating the first lot.
+`spot_binding::split_spot_orders_omit_brackets_only_after_the_first_lot` proves the
+pre-fix missing-import rejection and validates both signed placement payloads.
+
 Private reopen snapshots now dispatch through the actual venue receiver for all four
 families. Primary/Demo tick uses BaseExchange's real remote-signer gate, and omitted
 fetchOrders arguments retain the source true default. `private_refresh_binding`
@@ -676,3 +684,27 @@ real snapshot/delta subscriptions: depth 200 for Spot and 1000 for derivatives.
 Core-owned retry/resync timers and retained topic maps preserve delayed connection,
 sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
 four families; the maintained source book oracle includes array-like level lists.
+
+Closed-PnL reads now dispatch through Exchange for primary/demo and dedicated
+inverse, preserving each source category/refusal policy; Spot keeps Base's empty
+history. Native mapper/iterator values survive until typed output. The actual
+signed-client tests cover windows, cursors, cap warnings, malformed rows and the
+shared signing virtual clock; do not replace it with the runtime wall clock.
+
+Bulk candle streaming now binds primary/demo and dedicated Inverse Exchange calls
+to their live public socket handlers. The maintained Spot Exchange inherits the
+base bulk no-op, although its socket declares a separate bulk member. Source
+subscriptions retain topics across reopen, replace the generic kline handler and
+send chunks of 50; delayed connections use core-owned retries. Callback metadata
+uses the shared String search position implementation. The output interval is
+ModelField<AnyTimeframe>, retaining monthly and own-undefined source values while
+public OHLCV(S) request intervals retain their existing strict type.
+
+Single-candle listeners now bind all four Exchange families to real kline/trade
+handlers. The live mapper consumes native Js values and preserves source numeric
+coercions. Primary/Demo own a shared per-socket 25-second silence watchdog and
+10-second recovery cooldown over the maintained recovery operations. Reopen
+rearms existing handlers, and final cleanup cancels the primary timer/retry.
+Dedicated Spot/Inverse retain their delayed-retry and topic/stats cleanup quirks.
+The sequence oracle replays 72 maintained source frames through actual bindings;
+the wired kline mapper retains its 2172-outcome source corpus.

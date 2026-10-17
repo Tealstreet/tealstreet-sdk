@@ -24,3 +24,7 @@ js-sys = "0.3.106"
 [[example]]
 name = "worker_error_host"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "worker_data_host"
+crate-type = ["cdylib"]

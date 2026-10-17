@@ -225,6 +225,18 @@ pub fn fixture_with(
     Rc<safe_cex_store::store::DefaultStore>,
     Arc<Wire>,
 ) {
+    fixture_with_timezone(options, configure, Rc::new(|ms| ms))
+}
+pub fn fixture_with_timezone(
+    options: Value,
+    configure: impl FnOnce(&Wire),
+    local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
+) -> (
+    Rc<safe_cex_venue_paradex::native_exchange::ParadexExchange>,
+    Rc<Runtime>,
+    Rc<safe_cex_store::store::DefaultStore>,
+    Arc<Wire>,
+) {
     use safe_cex_venue_paradex::native_exchange::{ParadexDependencies, ParadexExchange};
     let runtime = Rc::new(Runtime {
         sockets: RefCell::default(),
@@ -249,6 +261,7 @@ pub fn fixture_with(
         store.clone(),
         ParadexDependencies {
             runtime: runtime.clone(),
+            local_wall_time_to_utc,
             http: Rc::new(move |options| {
                 rt.http_options.borrow_mut().push(options.clone());
                 Ok(safe_cex_exchange::js_runtime::client::rest_http_host(

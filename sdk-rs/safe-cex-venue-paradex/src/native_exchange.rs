@@ -23,6 +23,8 @@ pub struct ParadexDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: ParadexHttpFactory,
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    /// Host timezone conversion for offset-less local Date strings.
+    pub local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
 }
 pub struct ParadexExchange {
     rt: Rt,

@@ -896,9 +896,17 @@ impl HOWWebSocket {
             if let Some(value) = request
                 .config_extensions
                 .get(property)
-                .filter(|value| js_truthy(value))
+                .map(safe_cex_num::JsJsonValue::from)
+                .filter(safe_cex_num::JsJsonValue::truthy)
             {
-                headers.insert(header.into(), value.clone());
+                let json = safe_cex_num::js_json_stringify(&value)
+                    .map_err(|error| TransportError::Host(error.to_string()))?
+                    .expect("truthy config has a JSON representation");
+                headers.insert(
+                    header.into(),
+                    serde_json::from_str(&json)
+                        .map_err(|error| TransportError::Host(error.to_string()))?,
+                );
             }
         }
         if request.params.is_some() && request.query_params.is_some() {
