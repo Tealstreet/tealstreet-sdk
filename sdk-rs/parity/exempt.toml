@@ -2237,10 +2237,6 @@ rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_change_pubkey
 reason = "C3 host ABI: sign_change_pubkey capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
 [[exempt]]
-rs = "safe-cex-venue-bybit/src/journal_fold.rs::BybitPositionContext"
-reason = "Native named shape for BybitPositionAdapterDeps.resolveContext's inline optional result; TypeScript declares no standalone context symbol. The dependency row owns the typed callback boundary; this exemption makes no additional parity claim."
-
-[[exempt]]
 rs = "safe-cex-exchange/src/position_intervals.rs::FundingRow"
 reason = "Native name for attributeFunding's inline funding-array element shape; source declares no standalone type symbol. The mapped attributeFunding row owns its use."
 

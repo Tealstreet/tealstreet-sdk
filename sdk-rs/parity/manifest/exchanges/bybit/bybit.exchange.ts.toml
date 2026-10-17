@@ -824,7 +824,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_position_rows"
 status = "ported"
-note = "Raw closed-PnL windows/paging retain original rows, limit100,20-page cap and response rejection; query helper and standard iterator/value/Promise capabilities are dependencies. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_position_rows."
+note = "Actual receiver closed-PnL windows/paging retain original rows, limit100,20-page cap and response rejection; query helper and standard iterator/value/Promise capabilities are dependencies. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_position_rows."
 
 [[symbol]]
 ts = "BybitExchange.fetchHistoricalPositions"
@@ -832,7 +832,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::fetch_historical_positions", "safe-cex-venue-bybit/src/ledger_history.rs::dispatch" ]
 status = "ported"
-note = "Retains closed/order-axis join with last-write hedge legs, normalized join failure and lexical live quote lookup; aggregate/axis bodies are explicit dependencies. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_historical_positions. Callback split: safe-cex-venue-bybit/src/ledger_history.rs::fetch_historical_positions retains the operation body; safe-cex-venue-bybit/src/ledger_history.rs::dispatch holds its lexical history_quote/history_leg callbacks plus the closed/order/income descending sort comparators registered by the sibling ledger rows."
+note = "Exchange now dispatches primary/demo through actual receiver/HTTP closed/order-axis readers into the native adapter. Retains last-write hedge legs, normalized join failure and lexical live quote lookup; dedicated Spot/Inverse keep source inherited refusal. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_historical_positions. Callback split: safe-cex-venue-bybit/src/ledger_history.rs::fetch_historical_positions retains the operation body; safe-cex-venue-bybit/src/ledger_history.rs::dispatch holds its lexical history_quote/history_leg callbacks plus the closed/order/income descending sort comparators registered by the sibling ledger rows."
 
 [[symbol]]
 ts = "BybitExchange.fetchClosedPnl"
