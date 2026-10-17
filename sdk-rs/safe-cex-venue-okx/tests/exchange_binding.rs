@@ -1149,3 +1149,122 @@ fn public_market_data_frames_reach_real_book_ticker_and_candle_bindings() {
         h.runtime.reports.borrow()
     );
 }
+
+#[test]
+fn production_retry_excludes_cancel_dns_and_certificate_errors() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let codes = [
+        "ERR_CANCELED",
+        "ECONNABORTED",
+        "ENOTFOUND",
+        "ENETUNREACH",
+        "UNABLE_TO_GET_ISSUER_CERT",
+        "UNABLE_TO_GET_CRL",
+        "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+        "UNABLE_TO_DECRYPT_CRL_SIGNATURE",
+        "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+        "CERT_SIGNATURE_FAILURE",
+        "CRL_SIGNATURE_FAILURE",
+        "CERT_NOT_YET_VALID",
+        "CERT_HAS_EXPIRED",
+        "CRL_NOT_YET_VALID",
+        "CRL_HAS_EXPIRED",
+        "ERROR_IN_CERT_NOT_BEFORE_FIELD",
+        "ERROR_IN_CERT_NOT_AFTER_FIELD",
+        "ERROR_IN_CRL_LAST_UPDATE_FIELD",
+        "ERROR_IN_CRL_NEXT_UPDATE_FIELD",
+        "OUT_OF_MEM",
+        "DEPTH_ZERO_SELF_SIGNED_CERT",
+        "SELF_SIGNED_CERT_IN_CHAIN",
+        "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+        "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+        "CERT_CHAIN_TOO_LONG",
+        "CERT_REVOKED",
+        "INVALID_CA",
+        "PATH_LENGTH_EXCEEDED",
+        "INVALID_PURPOSE",
+        "CERT_UNTRUSTED",
+        "CERT_REJECTED",
+        "HOSTNAME_MISMATCH",
+        "ECONNRESET",
+        "EPIPE",
+        "ETIMEDOUT",
+        "",
+    ];
+    assert_eq!(codes.len(), 36);
+    let inputs: Vec<_> = codes
+        .iter()
+        .map(|code| json!({"code":code,"method":"GET"}))
+        .chain(std::iter::once(
+            json!({"code":"ECONNRESET","method":"POST"}),
+        ))
+        .collect();
+    let mut child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/network-retry-binding.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&inputs).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<bool> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 37);
+    let mut failures = vec![];
+    for (index, code) in codes.into_iter().enumerate() {
+        let expected = matches!(code, "ECONNRESET" | "EPIPE" | "ETIMEDOUT");
+        assert_eq!(source[index], expected, "maintained source {code}");
+        let h = harness(ExchangeName::Okx, options(), okx);
+        loaded(&h);
+        h.http.network_failures.borrow_mut().insert(
+            BALANCE.into(),
+            std::collections::VecDeque::from([code.to_owned()]),
+        );
+        let _ = h.drive(h.venue().validate_account());
+        let count = h.http.calls(BALANCE).len();
+        let expected_count = if expected { 2 } else { 1 };
+        if count != expected_count {
+            failures.push(format!(
+                "{code}: requests {count}, expected {expected_count}"
+            ));
+        }
+    }
+    assert!(!source[36], "source writes do not retry");
+    let h = harness(ExchangeName::Okx, options(), okx);
+    loaded(&h);
+    let positions = h.drive(h.venue().fetch_positions(None)).expect("positions");
+    Store::add_or_update_positions(&*h.store, positions).expect("store positions");
+    h.http.network_failures.borrow_mut().insert(
+        SET_LEVERAGE.into(),
+        std::collections::VecDeque::from(["ECONNRESET".to_owned()]),
+    );
+    assert!(
+        h.drive(h.venue().set_leverage("BTCUSDT".into(), 5., None))
+            .is_err()
+    );
+    assert_eq!(
+        h.http.calls(SET_LEVERAGE).len(),
+        1,
+        "actual write must not retry"
+    );
+    assert!(
+        failures.is_empty(),
+        "production retry/source differences: {failures:?}"
+    );
+}
