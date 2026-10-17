@@ -28,6 +28,10 @@ positions and debounced balance refresh over real native HTTP/WebSocket servers.
 Disconnecting all four production topic routes makes all four named tests fail;
 restoring those routes and removing the duplicate bodies keeps them passing.
 
+Private login-failure diagnostics use the shared JavaScript JSON stringifier.
+The constructed venue's real private receiver covers ten numeric/key-order
+profiles, independently checked against the maintained TypeScript handler.
+
 Protocol tables are maintained in `src/types.rs` and compared in full to live
 TypeScript by `tests/tables.rs`. The envelope uses a private map-only decoder;
 absent optional fields differ from present null, while unknown data retains null.

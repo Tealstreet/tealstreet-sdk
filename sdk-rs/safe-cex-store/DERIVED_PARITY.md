@@ -183,7 +183,8 @@ supports deterministic clocks without another time model.
 batch index picks the LAST existing duplicate ID when both lists have more than
 one row, whereas the small-batch linear search picks the FIRST. The manifest row
 is divergent-style, marking deliberate bug parity rather than an improvement.
-Upserts preserve omitted optional fields. Rust owns order values and snapshot
+Order upserts preserve absent ModelField properties and overwrite own undefined
+properties, across all 15 carried fields. Rust owns order values and snapshot
 JSON copies rather than exposing mutable shared TS object references; valid
 mutation results match the live source, but reference aliasing outside the store
 is not promised. Snapshot coverage remains partial: updateIds.positions is the
