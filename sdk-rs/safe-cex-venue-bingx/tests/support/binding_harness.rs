@@ -313,6 +313,10 @@ impl JsHttpHost for Http {
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime.now.set(runtime.now.get() + self.advance_ms.get());
         }
+        if self.advance_ms.get() != 0.0 {
+            let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+            clock.sync_from_server_time(clock.get_current_time_ms() + self.advance_ms.get());
+        }
         let response = {
             let mut routes = self.routes.borrow_mut();
             routes

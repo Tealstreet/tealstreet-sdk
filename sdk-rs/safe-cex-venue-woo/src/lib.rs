@@ -85,10 +85,6 @@ pub mod legacy_order_writes;
 
 pub mod public_canonical;
 
-pub mod shadow_compare;
-
-pub mod snapshot_parity;
-
 pub mod legacy_lifecycle;
 
 pub mod public_streams;

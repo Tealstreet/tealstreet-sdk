@@ -11,6 +11,16 @@ only to executionreport/algoexecutionreportv2: fills trigger REST position refre
 and balance remains a REST read. `binding_streams` and `binding_reads` retain those
 real signed-client paths; no balance socket topic is introduced.
 
+The V3 canonical/shadow/snapshot comparison bodies were test-only: the SDK index
+exports none of them and their TS imports occur only in audit tests. Their Rust
+bodies, unused operation holders and oracle-only tests are retired; tealstreet-next
+owns the test-only TS cleanup. CanonicalOps/CanonicalCallback remain the exact
+live legacy operation shape. The independent route enum/strict union codec stays
+with its declaration witness. Legacy client-ID validation, including the
+constructed class's Number.isSafeInteger call, is retained for separate binding
+verification. Four dead-method baseline entries and five capability exemptions
+are removed with the retired bodies. No V3 route is enabled.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/woo/CLAUDE.md).
 Composition: [exchange core contract](../safe-cex-exchange/CLAUDE.md).
 
@@ -208,7 +218,7 @@ Infinity or -Infinity in these open string fields; Number::as_f64's finite-only
 projection must not erase the asset. Fourteen live-source cases pin both asset
 fields across overflow, signed zero, underflow and ordinary numbers.
 
-The three public ticker writers are callable extracted operations. Their
+The three public ticker writers run through the production socket class. Their
 87 source cases use the full production DefaultStore constructor and update
 path, tagging numeric bits before serialization. The implementation uses native
 ModelPatch numbers and drops the lookup borrow before writing; its Store result
@@ -218,12 +228,22 @@ commit-before-throw, ordered fanout abort and remaining-batch abort. Copied
 non-numeric fields remain a separate typed-output divergence. Seven compiling mutations
 pin field routing, filtering, batch continuation, deferred-refusal error priority
 and signed-zero preservation;
-live socket registration remains pending.
+real constructor/socket regressions additionally cover ticker, BBO and mark frames.
 
-A typed writer refusal is deferred until batch completion, allowing a later
-source TypeError to win with its own identity/text. The unrepresentable patch
+Typed writer reports are collected per refused row with its symbol, field and
+original value, then deferred until batch completion, allowing a later source
+TypeError to win with its own identity/text. The unrepresentable patch
 and its notification are still lost (declared); other representable writes are
 retained, and the operation never returns a successful subset.
+
+Public ticker callbacks capture the canonical RetainedJsonInput directly. Native
+number bits and UTF16 strings survive until row admission; ignored metadata cannot
+reject a frame. Symbol normalization runs on UTF16 before the final typed Store
+identifier check, so discarded surrogate segments do not reject valid targets.
+The ordinary UTF8 symbol wrapper uses the same normalizer. Six real socket
+regressions compiled and failed against master, covering all three public topics,
+ignored metadata, overflow/signed zero, and normalized identifier admission.
+Private timestamp callbacks retain their existing JSON input boundary.
 
 `private_socket` extracts the private ping and timestamp helper. Ping keeps the
 source sendWithLog wrapper: diagnostics are checked after sending, and heartbeat
@@ -463,3 +483,19 @@ retains their own null keys in info. `scripts/legacy-order-null-control.py`
 compiles a live-mapper null-refusal control that must fail its named order-count
 assertion; decoder-only tests are not evidence
 for this production path.
+
+The configured fetchOrders member admits mapped rows individually before either
+the Exchange trait or startup Store write. Order.amount/filled must be numbers;
+reduceOnly admits absent, own undefined and booleans. A malformed row emits its
+id, field and original typed value through emitAndLogError and is omitted; other
+rows keep their values and presence. This is an intentional accepted divergence
+from TypeScript retaining malformed typed fields, per shared-type decision 3.
+The raw mapAlgoOrder/fetchAlgoOrders source-value witnesses remain unchanged.
+The real mixed-row binding regression covers amount, filled and reduceOnly via
+both the public read and actual configured fetch-to-Store path.
+
+
+The constructed clientOrderIdRule retains its source Number(input) conversion and
+uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
+compares26 maintained-source identifiers, including safe-range and canonical-decimal
+boundaries, without replacing the rule or its operation table.

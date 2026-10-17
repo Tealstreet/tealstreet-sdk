@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "214 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "216 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1715,9 +1715,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "c60dc52c083e1899028d0bb2f6156be16257cbdb74b2e4355eb1e0b3faca0f17",
+      "producer_sha256": "eaed435db462b31e1fb1fa19ff845c7c4eb33dca266c28a308a499f1810e43f4",
       "classification": "no-owned-latch",
-      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits. Reviewed JSON.parse repair: its synchronous closure decodes UTF-16 directly into existing Js values, without creating any future, task, registration or shared latch. The four existing Promise boundaries and their cancellation ownership are unchanged. Reviewed canonical UTF-16 carrier extraction: the synchronous JSON.parse closure now delegates to the single lower parser and converts retained data into existing Js values. The same four Promise boundaries and cancellation ownership remain unchanged. Reviewed console.info/debug bindings: both add synchronous uses of the existing console closure, which string-coerces arguments and invokes the runtime sink. They introduce no future, registration or shared latch; the four existing Promise boundaries and ownership remain unchanged. Reviewed standard Error instance repair: constructor installation delegates to the shared synchronous error factory, with optional UTF-16 messages and stock descriptor/prototype data. Prototype stringifiers capture no runtime or scope and retain no cycle. No future, registration or latch is added; the existing four Promise boundaries keep their cancellation ownership."
+      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits. Reviewed JSON.parse repair: its synchronous closure decodes UTF-16 directly into existing Js values, without creating any future, task, registration or shared latch. The four existing Promise boundaries and their cancellation ownership are unchanged. Reviewed canonical UTF-16 carrier extraction: the synchronous JSON.parse closure now delegates to the single lower parser and converts retained data into existing Js values. The same four Promise boundaries and cancellation ownership remain unchanged. Reviewed console.info/debug bindings: both add synchronous uses of the existing console closure, which string-coerces arguments and invokes the runtime sink. They introduce no future, registration or shared latch; the four existing Promise boundaries and ownership remain unchanged. Reviewed standard Error instance repair: constructor installation delegates to the shared synchronous error factory, with optional UTF-16 messages and stock descriptor/prototype data. Prototype stringifiers capture no runtime or scope and retain no cycle. No future, registration or latch is added; the existing four Promise boundaries keep their cancellation ownership. Reviewed Number.isSafeInteger installation: the callback only matches native Number values and performs finite/integral/safe-range checks synchronously, without coercion or captures. No future, timer, task, registration or latch is introduced; the same four Promise boundaries and cancellation ownership remain unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::install_library",
@@ -2783,6 +2783,43 @@
       "producer_sha256": "ddd323bd834a008d7baa700bb3404901644a96ea74def6564d12f302a8762f1f",
       "classification": "no-owned-latch",
       "reason": "The rate-limit request interceptor returns an eager runtime-owned Promise. Its future owns config and client state, awaits the existing throttle, then returns config to the interceptor chain. No RefCell borrow spans the wait; window capacity is recorded only at successful dequeue. Dropping the JS waiter delegates to PromiseWait cleanup while the source Promise remains runtime-owned."
+    },
+    {
+      "owner": "src/throttle.rs::ThrottleManager < T >::call",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "48daf09e9220d855256146620632c77e84404de838d9d12ed030a22a2df3d2db",
+      "classification": "guarded",
+      "reason": "Relocated existing keyed throttle: TimerGuard is constructed before spawn and drops only its matching entry/task when a timer future is discarded; callbacks retain Weak manager references. Existing source orphan-tail behavior and clear/Drop cancellation are unchanged.",
+      "witnesses": [
+        "tests/keyed_throttle.rs::discarded_timer_tasks_release_the_key_without_firing_a_tail"
+      ],
+      "source_dependencies": [
+        {
+          "file": "src/throttle.rs",
+          "sha256": "a80784314e8d780e863755f7a40dda5960af32ec519845a6ed23434c05d2c23c"
+        }
+      ],
+      "guards": [
+        {
+          "type": "TimerGuard",
+          "file": "src/throttle.rs"
+        }
+      ]
+    },
+    {
+      "owner": "src/throttle.rs::symbol_metadata_throttler",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "fc9533e3f3ed154f8c5b8f4ea7e585e1408a0b0a3f4d1a71be8c9e77d8ec6b93",
+      "classification": "no-owned-latch",
+      "reason": "Relocated existing worker metadata callback spawns and awaits the venue operation without installing a waiter or reservation. Callers acknowledge immediately; detached errors are reported visibly through the exchange runtime."
     }
   ]
 }

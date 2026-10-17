@@ -1,12 +1,12 @@
+use crate::handler::BaseHandler;
+use crate::payload::StoreWorkerOp;
+use crate::payload::StoreWorkerPayload;
 use crate::{
     data_post::{WorkerDataPayload, WorkerDataPost},
     error_post::WorkerErrorPost,
 };
-use crate::{
-    handler::BaseHandler,
-    payload::{StoreWorkerOp, StoreWorkerPayload},
-    throttle::ThrottleManager,
-};
+use safe_cex_exchange::throttle::ThrottleManager;
+use safe_cex_exchange::throttle::symbol_metadata_throttler;
 use safe_cex_exchange::{
     exchange::Exchange,
     js_runtime::value::{Js, from_json, from_typed},

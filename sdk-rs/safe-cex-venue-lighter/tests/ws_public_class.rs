@@ -1369,13 +1369,13 @@ impl PublicSocketContexts for Realm {
     fn store_tickers(&self, _: AccountValue) -> SigningResult<Vec<safe_cex_types::Ticker>> {
         Ok(vec![])
     }
-    fn json_value(&self, _: &AccountValue) -> SigningResult<Option<serde_json::Value>> {
-        Ok(Some(
-            serde_json::json!({ "data": { "bids": [1], "asks": [] } }),
-        ))
+    fn parse_rest_order_book_levels(&self, value: &AccountValue) -> SigningResult<AccountValue> {
+        assert!(matches!(value, AccountValue::String(_)));
+        Ok(AccountValue::Undefined)
     }
-    fn rebuild_json(&self, value: &serde_json::Value) -> SigningResult<AccountValue> {
-        Ok(n(value.as_f64().unwrap()))
+    fn parse_rest_ticker_items(&self, value: &AccountValue) -> SigningResult<AccountValue> {
+        assert!(matches!(value, AccountValue::String(_)));
+        self.array_literal(&[])
     }
 }
 impl PublicSocketRealm for Realm {
@@ -1565,7 +1565,7 @@ fn class_defines_statics_and_constructor_initializes_fields_in_source_order() {
     let parsed = realm
         .invoke(&levels, &AccountValue::Undefined, &[s("payload")])
         .unwrap();
-    assert_eq!(realm.show(&parsed), "{bids:[1],asks:[]}");
+    assert_eq!(realm.show(&parsed), "undefined");
     let hydrated = realm.get(&owner, &s("hasHydratedTickerPrice")).unwrap();
     assert_eq!(
         realm.show(

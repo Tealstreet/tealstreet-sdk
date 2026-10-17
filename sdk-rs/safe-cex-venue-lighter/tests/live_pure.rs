@@ -1,3 +1,4 @@
+use safe_cex_exchange::js_runtime::value::{from_json, from_retained_input, to_json};
 use safe_cex_num::PrecisionInput;
 use safe_cex_transport::*;
 use safe_cex_types::{ExchangeName, ExchangeOptions, Timeframe};
@@ -384,30 +385,49 @@ fn lighter_pure_helpers_match_live_typescript() {
     );
     let mut native_totals = [0_usize; 4];
     for case in rest_cases {
-        let input = case.get("input");
-        let book = safe_cex_venue_lighter::ws_public::parse_rest_order_book_levels(input);
-        if let Some(book) = book {
+        let input = case.get("input").map(from_json);
+        let book = safe_cex_venue_lighter::ws_public::parse_rest_order_book_levels(input.as_ref())
+            .unwrap();
+        if !book.is_undefined() {
+            let bids = book.get("bids").unwrap();
+            let asks = book.get("asks").unwrap();
+            let bids = bids.array_values().unwrap();
+            let asks = asks.array_values().unwrap();
             native_totals[0] += 1;
-            native_totals[1] += book.bids.len();
-            native_totals[2] += book.asks.len();
+            native_totals[1] += bids.len();
+            native_totals[2] += asks.len();
             assert_eq!(
-                book.bids.len(),
+                bids.len(),
                 case["book"]["bids"].as_array().unwrap().len(),
                 "REST-CARDINALITY native bid count"
             );
             assert_eq!(
-                book.asks.len(),
+                asks.len(),
                 case["book"]["asks"].as_array().unwrap().len(),
                 "REST-CARDINALITY native ask count"
             );
             assert_eq!(
-                book.bids,
-                case["book"]["bids"].as_array().unwrap(),
+                bids.iter()
+                    .map(|value| to_json(value).unwrap())
+                    .collect::<Vec<_>>(),
+                case["book"]["bids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| to_json(&from_json(value)).unwrap())
+                    .collect::<Vec<_>>(),
                 "parseRestOrderBookLevels.bids native identity {case}"
             );
             assert_eq!(
-                book.asks,
-                case["book"]["asks"].as_array().unwrap(),
+                asks.iter()
+                    .map(|value| to_json(value).unwrap())
+                    .collect::<Vec<_>>(),
+                case["book"]["asks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| to_json(&from_json(value)).unwrap())
+                    .collect::<Vec<_>>(),
                 "parseRestOrderBookLevels.asks native identity {case}"
             );
         } else {
@@ -416,7 +436,10 @@ fn lighter_pure_helpers_match_live_typescript() {
                 "parseRestOrderBookLevels absent {case}"
             );
         }
-        let tickers = safe_cex_venue_lighter::ws_public::parse_rest_ticker_items(input);
+        let tickers = safe_cex_venue_lighter::ws_public::parse_rest_ticker_items(input.as_ref())
+            .unwrap()
+            .array_values()
+            .unwrap();
         native_totals[3] += tickers.len();
         assert_eq!(
             tickers.len(),
@@ -424,11 +447,15 @@ fn lighter_pure_helpers_match_live_typescript() {
             "REST-CARDINALITY native ticker count"
         );
         assert_eq!(
-            tickers,
+            tickers
+                .iter()
+                .map(|value| to_json(value).unwrap())
+                .collect::<Vec<_>>(),
             case["tickers"]
                 .as_array()
                 .unwrap()
                 .iter()
+                .map(|value| to_json(&from_json(value)).unwrap())
                 .collect::<Vec<_>>(),
             "parseRestTickerItems native item identity {case}"
         );
@@ -441,11 +468,43 @@ fn lighter_pure_helpers_match_live_typescript() {
     let rest_boundaries = oracle["publicRestBoundaries"].as_array().unwrap();
     assert_eq!(rest_boundaries.len(), 3);
     for case in rest_boundaries {
-        // CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary.
-        for field in ["inputJson", "bookJson", "tickersJson"] {
-            assert!(
-                serde_json::from_str::<Value>(case[field].as_str().unwrap()).is_err(),
-                "public REST representation refusal {field}: {case}"
+        let native = |field: &str| {
+            from_retained_input(
+                safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                    &case[field]
+                        .as_str()
+                        .unwrap()
+                        .encode_utf16()
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap(),
+            )
+        };
+        let input = native("inputJson");
+        let book =
+            safe_cex_venue_lighter::ws_public::parse_rest_order_book_levels(Some(&input)).unwrap();
+        let expected_book = native("bookJson");
+        for side in ["bids", "asks"] {
+            let actual = book.get(side).unwrap().array_values().unwrap();
+            let expected = expected_book.get(side).unwrap().array_values().unwrap();
+            assert_eq!(actual.len(), expected.len());
+            for (actual, expected) in actual.iter().zip(&expected) {
+                assert_eq!(
+                    actual.to_js_string().unwrap(),
+                    expected.to_js_string().unwrap()
+                );
+            }
+        }
+        let tickers = safe_cex_venue_lighter::ws_public::parse_rest_ticker_items(Some(&input))
+            .unwrap()
+            .array_values()
+            .unwrap();
+        let expected = native("tickersJson").array_values().unwrap();
+        assert_eq!(tickers.len(), expected.len());
+        for (actual, expected) in tickers.iter().zip(&expected) {
+            assert_eq!(
+                actual.get("symbol").unwrap().to_js_string().unwrap(),
+                expected.get("symbol").unwrap().to_js_string().unwrap()
             );
         }
     }
@@ -606,6 +665,15 @@ fn lighter_pure_helpers_match_live_typescript() {
     );
     for case in oracle["stringBoundaries"].as_array().unwrap() {
         let units: Vec<u16> = serde_json::from_value(case["inputUnits"].clone()).unwrap();
+        if case["symbol"] == "normalizeNonNegativeNumber" {
+            let value = safe_cex_exchange::js_runtime::value::Js::utf16(&units);
+            assert_eq!(
+                serde_json::json!({"okJson":safe_cex_num::js_number_string(normalize_non_negative_number(&value).unwrap())}),
+                serde_json::json!({"okJson":case["okJson"]}),
+                "native UTF16 normalization {case}",
+            );
+            continue;
+        }
         let input = serde_json::from_str::<String>(case["inputJson"].as_str().unwrap());
         if String::from_utf16(&units).is_err() {
             assert!(
@@ -651,9 +719,6 @@ fn lighter_pure_helpers_match_live_typescript() {
             }
             "isLighterL1Address" => {
                 serde_json::json!({"okJson":is_lighter_l1_address(Some(&Value::String(input))).unwrap().to_string()})
-            }
-            "normalizeNonNegativeNumber" => {
-                serde_json::json!({"okJson":safe_cex_num::js_number_string(normalize_non_negative_number(Some(&Value::String(input))).unwrap())})
             }
             other => panic!("unrecognized boundary {other}"),
         };

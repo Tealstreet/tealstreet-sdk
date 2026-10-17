@@ -40,6 +40,16 @@ pub trait OrderModelHost {
         endpoint: &'static str,
         payload: JsJsonValue,
     ) -> impl Future<Output = Result<Value, Self::Error>>;
+    fn post_limited(
+        &mut self,
+        endpoint: &'static str,
+        payload: JsJsonValue,
+    ) -> impl Future<Output = Result<Value, Self::Error>>;
+    fn update_status(&mut self, ids: &[String]) -> Result<(), Self::Error>;
+    fn place_replacement(
+        &mut self,
+        options: Value,
+    ) -> impl Future<Output = Result<Vec<String>, Self::Error>>;
     fn cached_tif(&mut self, client_id: Option<&Value>) -> Result<Option<Value>, Self::Error>;
     fn reduce_only(
         &mut self,
@@ -950,6 +960,163 @@ fn append_leg<H: OrderModelHost>(
     Ok(())
 }
 
+/// Source string classifier; only virtual attached TP/SL amendments use it.
+pub fn is_unsupported_order_operation(message: &str) -> bool {
+    message
+        .to_lowercase()
+        .contains("order does not support this operation")
+}
+
+pub fn get_internal_trigger_type(raw: Option<&Value>) -> Result<&'static str, JsCoercionError> {
+    let normalized = string(
+        raw.filter(|v| truth(Some(v)))
+            .or(Some(&Value::String(String::new()))),
+    )?
+    .to_uppercase();
+    Ok(if matches!(normalized.as_str(), "LAST" | "LAST_PRICE") {
+        "last_price"
+    } else {
+        "mark_price"
+    })
+}
+
+/// Rebuild from the reconciled amendment payload before canceling its parent.
+/// Payload fields are the strings constructed by update_order, not a wire projection.
+pub async fn recreate_attached_tpsl_parent_order<H: OrderModelHost>(
+    host: &mut H,
+    target: &Value,
+    virtual_leg: &str,
+    payload: &JsJsonValue,
+) -> Result<Vec<String>, H::Error> {
+    let field = |key: &str| match payload {
+        JsJsonValue::Object(fields) => {
+            fields
+                .iter()
+                .find(|(k, _)| k == key)
+                .and_then(|(_, v)| match v {
+                    JsJsonValue::String(text) => Some(Value::String(text.clone())),
+                    _ => None,
+                })
+        }
+        _ => None,
+    };
+    let price = crate::value_helpers::parse_finite_number(field("price").as_ref(), f64::NAN)?;
+    let amount = crate::value_helpers::parse_finite_number(field("qty").as_ref(), f64::NAN)?;
+    if !price.is_finite() || price <= 0.0 {
+        return reject(
+            host,
+            "Bitunix cancel/recreate fallback requires a valid parent LIMIT price".into(),
+        );
+    }
+    if !amount.is_finite() || amount <= 0.0 {
+        return reject(
+            host,
+            "Bitunix cancel/recreate fallback requires a valid parent quantity".into(),
+        );
+    }
+    let mut replacement = serde_json::Map::new();
+    for key in ["symbol", "type", "side", "timeInForce"] {
+        if let Some(value) = target.get(key) {
+            replacement.insert(key.into(), value.clone());
+        }
+    }
+    replacement.insert("price".into(), Value::from(price));
+    replacement.insert("amount".into(), Value::from(amount));
+    replacement.insert(
+        "reduceOnly".into(),
+        target
+            .get("reduceOnly")
+            .filter(|v| truth(Some(v)))
+            .cloned()
+            .unwrap_or(Value::Bool(false)),
+    );
+    for (prefix, trigger_key, price_key) in [
+        ("tp", "tpTriggerType", "takeProfit"),
+        ("sl", "slTriggerType", "stopLoss"),
+    ] {
+        let trigger = crate::value_helpers::parse_finite_number(
+            field(&format!("{prefix}Price")).as_ref(),
+            f64::NAN,
+        )?;
+        if !trigger.is_finite() || trigger <= 0.0 {
+            continue;
+        }
+        let order_type = field(&format!("{prefix}OrderType"));
+        let order_type = string(
+            order_type
+                .as_ref()
+                .filter(|v| truth(Some(v)))
+                .or(Some(&Value::String("MARKET".into()))),
+        )?
+        .to_uppercase();
+        if order_type != "MARKET" {
+            return reject(
+                host,
+                format!(
+                    "Bitunix cannot cancel/recreate attached {} with LIMIT execution semantics",
+                    prefix.to_uppercase()
+                ),
+            );
+        }
+        replacement.insert(price_key.into(), Value::from(trigger));
+        replacement.insert(
+            trigger_key.into(),
+            Value::String(
+                get_internal_trigger_type(field(&format!("{prefix}StopType")).as_ref())?.into(),
+            ),
+        );
+    }
+    if !replacement.contains_key("takeProfit") && !replacement.contains_key("stopLoss") {
+        return reject(
+            host,
+            "Bitunix cancel/recreate fallback requires at least one attached TP/SL leg".into(),
+        );
+    }
+    let parent_id = string(target.get("id"))?;
+    let response = host
+        .post_limited(
+            endpoint("CANCEL_ORDER"),
+            object(vec![
+                ("symbol", j(target.get("symbol"))),
+                (
+                    "orderList",
+                    JsJsonValue::Array(vec![object(vec![("orderId", s(&parent_id))])]),
+                ),
+            ]),
+        )
+        .await?;
+    let body = response.get("data");
+    let code = body.and_then(|d| d.get("code"));
+    if number(code)? != 0.0 {
+        let message = body
+            .and_then(|d| d.get("msg"))
+            .filter(|v| truth(Some(v)))
+            .map_or_else(
+                || {
+                    string(code)
+                        .map(|code| s(format!("Bitunix cancel order failed with code {code}")))
+                },
+                |msg| Ok(j(Some(msg))),
+            )?;
+        return Err(host.error(message)?);
+    }
+    let prefix = format!("{parent_id}__");
+    let ids = host
+        .orders()?
+        .iter()
+        .filter_map(|order| order.get("id").and_then(Value::as_str))
+        .filter(|id| *id == parent_id || id.starts_with(&prefix))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    host.update_status(&ids)?;
+    let replacement_ids = host.place_replacement(Value::Object(replacement)).await?;
+    Ok(replacement_ids
+        .first()
+        .filter(|id| !id.is_empty())
+        .map(|id| vec![format!("{id}__{virtual_leg}")])
+        .unwrap_or_default())
+}
+
 pub async fn update_order<H: OrderModelHost>(
     host: &mut H,
     order: &Value,
@@ -1164,7 +1331,7 @@ pub async fn update_order<H: OrderModelHost>(
         }
     }
     let result = async {
-        let reply = host.post(endpoint("MODIFY_ORDER"), payload).await?;
+        let reply = host.post(endpoint("MODIFY_ORDER"), payload.clone()).await?;
         let body = reply.get("data");
         let code = body.and_then(|d| d.get("code"));
         if number(code)? != 0.0 {
@@ -1200,6 +1367,20 @@ pub async fn update_order<H: OrderModelHost>(
         Ok(ids) => Ok(ids),
         Err(error) => {
             let message = host.reason(&error, Some("Bitunix modify order failed"))?;
+            if let (Some(leg), JsJsonValue::String(text)) = (virtual_leg, &message)
+                && is_unsupported_order_operation(text)
+            {
+                return match recreate_attached_tpsl_parent_order(host, &target, leg, &payload).await
+                {
+                    Ok(ids) => Ok(ids),
+                    Err(error) => {
+                        let message =
+                            host.reason(&error, Some("Bitunix cancel/recreate fallback failed"))?;
+                        host.emit(message.clone())?;
+                        Err(host.error(message)?)
+                    }
+                };
+            }
             host.emit(message.clone())?;
             Err(host.error(message)?)
         }

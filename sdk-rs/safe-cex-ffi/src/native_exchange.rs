@@ -10,7 +10,6 @@ use napi::{
     bindgen_prelude::{JsObjectValue, Promise, PromiseRaw, ToNapiValue, Unknown},
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
-use napi_derive::napi;
 use safe_cex_registry::native_account::{
     NativeAccount, NativeAccountFuture, NativeAccountSpec, native_account_call,
     native_account_watch, open_native_account,
@@ -32,7 +31,7 @@ type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false
 type Reply<T> = oneshot::Sender<Result<T, Value>>;
 
 /// A structured options object plus the account's name for remote signing.
-#[napi(object)]
+#[napi_derive::napi(object)]
 pub struct NativeAccountInit {
     pub exchange: String,
     pub options: JsData,
@@ -313,7 +312,7 @@ fn settle<'env, T: Send + ToNapiValue + 'static>(
 /// Opens an account. `sign(request)` resolves structured data; `proxyToken()` a string.
 /// `onEvent` receives `{event, data}` and `onStore` receives worker Store payloads.
 /// Rejections preserve the source error’s name, message and optional code.
-#[napi]
+#[napi_derive::napi]
 pub fn native_account_open<'env>(
     env: &'env Env,
     init: NativeAccountInit,
@@ -333,7 +332,7 @@ pub fn native_account_open<'env>(
 }
 
 /// Calls an Exchange method with structured JS arguments and results.
-#[napi]
+#[napi_derive::napi]
 pub fn native_account_call_method<'env>(
     env: &'env Env,
     id: u32,
@@ -354,7 +353,7 @@ pub fn native_account_call_method<'env>(
 }
 
 /// ts: RemoteSigner.onAvailabilityChange, pushed from the host's signer session.
-#[napi(js_name = "nativeAccountSignerAvailable")]
+#[napi_derive::napi(js_name = "nativeAccountSignerAvailable")]
 pub fn signer_available(env: &Env, id: u32, available: bool) -> napi::Result<()> {
     commands()
         .send(Command::SignerAvailable { id, available })
@@ -362,7 +361,7 @@ pub fn signer_available(env: &Env, id: u32, available: bool) -> napi::Result<()>
 }
 
 /// Stops forwarding and resolves after disposal; disposal errors reject.
-#[napi]
+#[napi_derive::napi]
 pub fn native_account_close<'env>(env: &'env Env, id: u32) -> napi::Result<PromiseRaw<'env, ()>> {
     settle(env, move |reply| Command::Close { id, reply })
 }

@@ -584,6 +584,18 @@
     ]
   },
   {
+    "file": "safe-cex-exchange/src/throttle.rs",
+    "function": "symbol_metadata_throttler",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "update_symbol_metadata",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-exchange/src/websocket.rs",
     "function": "dispose",
     "edges": [
@@ -6628,7 +6640,7 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "name",
-        "count": 1
+        "count": 2
       }
     ]
   },

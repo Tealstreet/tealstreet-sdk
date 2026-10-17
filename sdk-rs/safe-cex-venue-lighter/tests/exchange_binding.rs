@@ -978,12 +978,12 @@ fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
     h.venue().dispose().unwrap();
 }
 
-#[test]
-fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+fn private_account_frame_for_deployment(name: ExchangeName) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
     use std::{cell::RefCell, rc::Rc};
-    let h = harness(ExchangeName::Lighter, options(), lighter);
+    let h = harness(name.clone(), options(), lighter);
+    assert_eq!(h.venue().base().name, name);
     h.drive(h.venue().start()).unwrap();
     // The source suppresses fills for five seconds after its real VirtualClock connect.
     std::thread::sleep(std::time::Duration::from_millis(5100));
@@ -1012,9 +1012,9 @@ fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers()
     socket.events.borrow_mut().push_back(WsEvent::Message(SocketFrame::Text(json!({
         "channel":"account_all:42","type":"update/account_all",
         "orders":{"1":[order]},"positions":{"1":[position]},
-        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get()}]},
+        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get(),"ignored":"SURROGATE_FIELD"}]},
         "account":{"collateral":"1000"}
-    }).to_string())));
+    }).to_string().replace("\"SURROGATE_FIELD\"", "\"\\ud800\""))));
     h.runtime.pump();
     assert!(
         h.store.orders().iter().any(|order| order.id == "888"),
@@ -1047,4 +1047,139 @@ fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers()
         h.runtime.reports.borrow()
     );
     h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_fill_timestamp_types_match_the_maintained_handler() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, process::Command, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/fill-timestamps-oracle.cjs"
+        ))
+        .arg(h.runtime.now.get().to_string())
+        .output()
+        .expect("maintained Lighter handler oracle");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 15);
+    // The production socket uses real VirtualClock time for its connect grace period.
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            observed.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    for case in cases {
+        fills.borrow_mut().clear();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({
+                    "channel":"account_all:42", "type":"update/account_all",
+                    "data":{"fills":[{"orderId":case["label"], "side":"BUY", "symbol":"BTC",
+                        "price":"49000", "size":"0.1", "timestamp":case["timestamp"]}]}
+                })
+                .to_string(),
+            )));
+        h.runtime.pump();
+        let mut expected = case["expected"].as_array().unwrap().clone();
+        for fill in &mut expected {
+            for field in ["price", "amount"] {
+                fill[field] = json!(fill[field].as_f64().unwrap());
+            }
+        }
+        assert_eq!(*fills.borrow(), expected, "real private frame: {case}");
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+    for name in [ExchangeName::Lighter, ExchangeName::LighterRobinhood] {
+        private_account_frame_for_deployment(name);
+    }
+}
+
+#[test]
+fn attributed_placement_preserves_nonfinite_tier_alias_precedence() {
+    use std::process::Command;
+    let source = Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args(["-e", r#"
+const fs=require('node:fs'),vm=require('node:vm');
+const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
+const exports={};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('packages/safe-cex/src/exchanges/lighter/lighter.account-tier.ts','utf8'),
+ {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{exports});
+process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
+ const wire=`{"code":200,"user_tier_name":${raw},"user_tier":"standard"}`;
+ const tier=exports.extractLighterAccountTierFromPayload(JSON.parse(wire));
+ return {wire,allowed:!tier||exports.isLighterAccountTierEligibleForPartnerAttribution(tier)};
+})));
+"#]).output().expect("maintained account-tier module");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 3);
+    for case in cases {
+        let h = harness(ExchangeName::Lighter, options(), lighter);
+        loaded(&h);
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != LIMITS);
+        h.http.ok(
+            "GET",
+            LIMITS,
+            serde_json::from_str(case["wire"].as_str().unwrap()).unwrap(),
+        );
+        let result = h.drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
+        ));
+        assert_eq!(
+            result.is_ok(),
+            case["allowed"].as_bool().unwrap(),
+            "real placement: {case}; {result:?}"
+        );
+        assert_eq!(h.http.calls(LIMITS).len(), 1, "actual tier lookup");
+        if case["allowed"] == true {
+            let ids = result.unwrap();
+            assert_eq!(ids.len(), 1);
+            let txs = sent_txs(&h, 0);
+            assert_eq!(txs.len(), 1, "one real signed placement");
+            assert_signed_by_account(&txs[0].1);
+        } else {
+            assert_eq!(result.unwrap_err().message,
+                safe_cex_venue_lighter::account_tier::LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
+            assert!(
+                h.http.calls(SEND_TX).is_empty(),
+                "known Standard tier blocks transaction send"
+            );
+        }
+    }
 }
