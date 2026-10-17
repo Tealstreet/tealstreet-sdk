@@ -1217,18 +1217,7 @@ fn native_rest_boundaries() {
             requests: RefCell::new(Vec::new()),
             variant: 1,
         };
-        if index == 0 {
-            // ts: the row maps with contractSize NaN and info.contractValue NaN.
-            let actual = ready(fetch_markets(&s, &adapter, &h, || "cache-id".into())).unwrap();
-            assert_eq!(actual.len(), 1);
-            assert_eq!(actual[0].id, "BTC-USDT");
-            assert!(actual[0].contract_size.unwrap().is_nan());
-            assert!(actual[0].limits.amount.min.is_nan());
-            assert_eq!(
-                actual[0].info.as_ref().unwrap()["contractValue"],
-                Value::Null
-            );
-        } else if index == 1 {
+        if index < 2 {
             let actual = ready(fetch_markets(&s, &adapter, &h, || "cache-id".into())).unwrap();
             assert_eq!(actual.len(), 1);
             assert_eq!(actual[0].id, models["market"]["id"]);
@@ -1244,8 +1233,8 @@ fn native_rest_boundaries() {
     }
     assert_eq!(
         logs.borrow().len(),
-        2,
-        "each remaining boundary is explicit, not silently normalized"
+        3,
+        "each boundary is explicit, not silently normalized"
     );
     let sort_input = json!({"body":{"data":[["3000","1","2","0","1","x","y","3"],["2000","1","2","0","1","x","y","3"],["bad","1","2","0","1","x","y","3"],["1000","1","2","0","1","x","y","3"]]}});
     let adapter = ReadAdapter {
