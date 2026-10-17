@@ -358,9 +358,10 @@ fn run_lifecycle(name: &str) {
         };
         let actual = futures::executor::block_on(async {
             match name {
-                "validateAccount" => {
-                    obj(vec![("error", s(venue.validate_account().await.unwrap()))])
-                }
+                "validateAccount" => obj(vec![(
+                    "error",
+                    J::from(venue.validate_account().await.unwrap().into_value()),
+                )]),
                 "start" => {
                     venue.start().await.unwrap();
                     J::Undefined
