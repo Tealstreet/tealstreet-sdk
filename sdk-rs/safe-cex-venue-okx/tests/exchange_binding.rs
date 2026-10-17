@@ -815,3 +815,48 @@ fn fetch_income_history_maps_a_nonempty_bills_page() {
     assert_eq!(records[0].income, -0.1);
     assert_eq!(records[0].symbol, "BTCUSDT");
 }
+
+// ts: okx.ws-business.ts resyncsPrivateStateOnReopen -> base.ws.ts trackConnected runs
+// fetchAndSetPrivateSnapshot when only the business (algo orders) socket re-opens.
+#[test]
+fn business_socket_reopen_alone_resyncs_the_private_snapshot() {
+    use safe_cex_exchange::websocket::WsEvent;
+    let h = harness(ExchangeName::Okx, options(), okx);
+    h.drive(h.venue().start()).expect("start");
+    for _ in 0..100 {
+        h.runtime.advance(50.0);
+    }
+    let business = |h: &Harness| {
+        h.runtime
+            .sockets
+            .borrow()
+            .iter()
+            .filter(|(url, _)| url.ends_with("/ws/v5/business"))
+            .count()
+    };
+    assert_eq!(business(&h), 1, "one business socket after start");
+    let before = h.http.calls(ALGO_ORDERS).len();
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/v5/business"))
+        .expect("business socket")
+        .1
+        .clone();
+    socket.closed.set(true);
+    socket.events.borrow_mut().push_back(WsEvent::Close {
+        code: Some(1006),
+        reason: "abnormal".into(),
+    });
+    for _ in 0..200 {
+        h.runtime.advance(50.0);
+    }
+    assert_eq!(business(&h), 2, "business socket re-dialled");
+    assert!(
+        h.http.calls(ALGO_ORDERS).len() > before,
+        "business re-open fetched the private snapshot ({before} algo reads before)"
+    );
+    h.venue().dispose().expect("dispose");
+}
