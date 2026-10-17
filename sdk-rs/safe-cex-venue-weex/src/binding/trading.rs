@@ -161,7 +161,7 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 leverage.to_number()?,
             ))
         },
-        extract_array: |h, value| v::extract(h, value, &["items", "list", "rows"]),
+        extract_array: |h, value| v::extract(h, value, &[]),
         join: |_, value, sep| value.call_method("join", std::vec![Js::str(sep)]),
         unique_id: |h, value| {
             h.global("uniqBy")?
