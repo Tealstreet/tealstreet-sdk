@@ -835,10 +835,20 @@ fn check(oracle: Value) {
     ] {
         let mut projected = baseline.clone();
         projected.as_object_mut().unwrap().remove(field);
-        assert!(
-            serde_json::from_value::<safe_cex_types::Order>(projected).is_err(),
-            "CHOSEN shared Order contract refuses omitted undefined {name}"
-        );
+        let decoded = serde_json::from_value::<safe_cex_types::Order>(projected);
+        if field == "id" {
+            assert!(decoded.is_err(), "shared Order still requires id");
+        } else {
+            let decoded = decoded.expect("optional enum accepts an omitted JSON field");
+            assert!(
+                match field {
+                    "status" => decoded.status.is_absent(),
+                    "type" => decoded.r#type.is_absent(),
+                    _ => unreachable!(),
+                },
+                "JSON omission decodes as absent: {name}"
+            );
+        }
     }
 
     for (i, c) in oracle["strategyOptsCases"]

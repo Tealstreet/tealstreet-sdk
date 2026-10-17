@@ -115,6 +115,12 @@ whole mapping result, not just a field; source callable omission and prototype
 object serialization remain separate witnesses. `info` is an owned snapshot,
 with both directions of source alias mutation pinned independently of NaN loss.
 
+Missing Order status/type/side table entries project to own `ModelField::Undefined`;
+JSON omits those fields while the native Store retains their presence. Inherited
+values, unsupported raw side values and missing required IDs still refuse at the
+final projection. `algo_frame_binding` covers real private frames and REST pages
+across linear, USDC and inverse bindings, including later-row evaluation order.
+
 **Inverse order mapper:** `orders::map_inverse_order` is a distinct source body,
 not the linear mapper with a product flag. Keep its narrower aliases, absent
 unknown-type strategy recovery and optional-method reduceOnly call (booleans do
