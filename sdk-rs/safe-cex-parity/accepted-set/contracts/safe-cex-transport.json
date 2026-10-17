@@ -64,7 +64,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data,\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "headers",
         "method",
@@ -305,7 +305,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data,\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "configUrl",
         "data",
@@ -1313,7 +1313,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{match serde_json::from_str::<$type>($value.as_str().expect(\"raw protocol input\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerRequest::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"account\":row.account_name,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"method\":row.config.method,\"url\":row.config.url,\"baseURL\":row.config.base_url,\"headers\":row.config.headers.iter().collect::<Vec<_>>(),\"paramsPresent\":row.config.params.is_some(),\"paramsNull\":row.config.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":row.config.params.as_ref().and_then(|p|p.get(\"limit\")).map(|n|safe_cex_num::js_number(Some(n)).expect(\"number\").to_bits().to_string()),\"dataPresent\":row.config.data.is_some(),\"dataNull\":row.config.data.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null))}),Ok(crate::signing::RemoteSignerRequest::WsAuth{exchange_name,account_name,request})=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"account\":account_name,\"isBybit\":exchange_name==safe_cex_types::ExchangeName::Bybit,\"idPresent\":request.id.is_some(),\"idNull\":request.id.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"requestType\":request.request_type.as_ref().map(|r|r.get()),\"payloadPresent\":request.ws_auth.is_some(),\"toSign\":request.ws_auth.as_ref().and_then(|a|a.to_sign.as_deref()),\"outputFormat\":request.ws_auth.as_ref().and_then(|a|a.output_format.as_ref()),\"extraPresent\":request.ws_auth.as_ref().is_some_and(|a|a.extra_data.is_some()),\"extraRaw\":request.ws_auth.as_ref().and_then(|a|a.extra_data.as_ref()).map(|r|r.get())})}}",
+      "call": "{match serde_json::from_str::<$type>($value.as_str().expect(\"raw protocol input\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerRequest::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"account\":row.account_name,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"method\":row.config.method,\"url\":row.config.url,\"baseURL\":row.config.base_url,\"headers\":row.config.headers.iter().collect::<Vec<_>>(),\"paramsPresent\":row.config.params.is_some(),\"paramsNull\":row.config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.config.params.as_ref().and_then(|p|p.get(\"limit\")).map(|n|safe_cex_num::js_number(Some(n)).expect(\"number\").to_bits().to_string()),\"dataPresent\":row.config.data.is_some(),\"dataNull\":row.config.data.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null))}),Ok(crate::signing::RemoteSignerRequest::WsAuth{exchange_name,account_name,request})=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"account\":account_name,\"isBybit\":exchange_name==safe_cex_types::ExchangeName::Bybit,\"idPresent\":request.id.is_some(),\"idNull\":request.id.as_ref().is_some_and(serde_json::Value::is_null),\"requestType\":request.request_type.as_ref().map(|r|r.get()),\"payloadPresent\":request.ws_auth.is_some(),\"toSign\":request.ws_auth.as_ref().and_then(|a|a.to_sign.as_deref()),\"outputFormat\":request.ws_auth.as_ref().and_then(|a|a.output_format.as_ref()),\"extraPresent\":request.ws_auth.as_ref().is_some_and(|a|a.extra_data.is_some()),\"extraRaw\":request.ws_auth.as_ref().and_then(|a|a.extra_data.as_ref()).map(|r|r.get())})}}",
       "nativeFields": [
         "kind",
         "account"
@@ -1449,7 +1449,7 @@
           "id",
           "error"
         ],
-        "call": "{let origin:$type=serde_json::from_value($value[\"request\"].clone()).expect(\"typed origin arrangement\");match origin.decode_response($value[\"response\"].as_str().expect(\"response wire\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerResponse::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"error\":row.error,\"configPresent\":row.config.is_some(),\"url\":row.config.as_ref().and_then(|c|c.url.as_deref()),\"headers\":row.config.as_ref().map(|c|c.headers.iter().collect::<Vec<_>>())}),Ok(crate::signing::RemoteSignerResponse::WsAuth(row))=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"idPresent\":row.id.is_some(),\"idNull\":row.id.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"id\":row.id,\"error\":row.error,\"signature\":row.ws_auth_signature})}}",
+        "call": "{let origin:$type=serde_json::from_value($value[\"request\"].clone()).expect(\"typed origin arrangement\");match origin.decode_response($value[\"response\"].as_str().expect(\"response wire\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerResponse::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"error\":row.error,\"configPresent\":row.config.is_some(),\"url\":row.config.as_ref().and_then(|c|c.url.as_deref()),\"headers\":row.config.as_ref().map(|c|c.headers.iter().collect::<Vec<_>>())}),Ok(crate::signing::RemoteSignerResponse::WsAuth(row))=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"idPresent\":row.id.is_some(),\"idNull\":row.id.as_ref().is_some_and(serde_json::Value::is_null),\"id\":row.id,\"error\":row.error,\"signature\":row.ws_auth_signature})}}",
         "cases": [
           {
             "input": {
@@ -1621,7 +1621,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "url",
         "paramsPresent",
@@ -1692,7 +1692,7 @@
       "baseURL": "https://one.invalid"
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers,\"method\":row.method,\"baseURL\":row.base_url}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers,\"method\":row.method,\"baseURL\":row.base_url}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "url",
         "paramsPresent",
@@ -5452,11 +5452,11 @@
       },
       {
         "input": "%FF",
-        "output": "\ufffd"
+        "output": "�"
       },
       {
         "input": "%E2%82%AC",
-        "output": "\u20ac"
+        "output": "€"
       }
     ]
   },
@@ -7431,7 +7431,7 @@
       }
     ],
     "instantiation": "HttpRequestArgsMapVisitor<serde_json::Value>",
-    "call": "{ let visitor: $type = super::HttpRequestArgsMapVisitor(std::marker::PhantomData); let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "call": "{ let visitor: $type = super::HttpRequestArgsMapVisitor(std::marker::PhantomData); let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data,\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {
@@ -7791,7 +7791,7 @@
         "reason": "Consumes the supplied MapAccess and delegates the unchanged private remote frame schema; genuine frame decoder with actual native field observations at the concrete serde_json::Value map instantiation."
       }
     ],
-    "call": "{ let visitor: $type = super::ResponseDataMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "call": "{ let visitor: $type = super::ResponseDataMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data,\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {
@@ -9539,7 +9539,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "isBinance",
@@ -9625,7 +9625,7 @@
       "error": null
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "config",
@@ -9862,7 +9862,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "isBinance",
@@ -9948,7 +9948,7 @@
       "error": null
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "config",
@@ -12085,14 +12085,14 @@
               "request": [
                 [
                   "x-token",
-                  "\tlast\r\n\u0000\u007f\t"
+                  "\tlast\r\n\u0000\t"
                 ],
                 [
                   " New ",
                   " a\tb "
                 ],
                 [
-                  " \ufeff ",
+                  " ﻿ ",
                   "skip"
                 ]
               ]
@@ -12753,7 +12753,7 @@
               "calls": 1,
               "seen": {
                 "kind": "string",
-                "value": "\ufffdA"
+                "value": "�A"
               },
               "actual": {
                 "phase": "transformed",
@@ -13079,7 +13079,7 @@
                 "phase": "transformed",
                 "value": {
                   "kind": "string",
-                  "value": "\ufeff{}"
+                  "value": "﻿{}"
                 }
               }
             }
@@ -13428,7 +13428,7 @@
             },
             "output": {
               "kind": "string",
-              "value": "\ufffdA"
+              "value": "�A"
             }
           },
           {
