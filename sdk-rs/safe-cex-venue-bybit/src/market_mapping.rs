@@ -19,12 +19,9 @@ pub(crate) fn map_market(
     family: Family,
 ) -> Result<Result<Market, String>, String> {
     let spot = matches!(family, Family::Spot);
-    let text = |key: &str| {
-        raw.get(key)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| format!("Bybit typed Market requires string {key}"))
-    };
+    if raw.is_null() {
+        return Err("Cannot read properties of null (reading 'symbol')".into());
+    }
     let nested = |parent: &str, key: &str| -> Result<f64, String> {
         let object = raw
             .get(parent)
@@ -47,13 +44,20 @@ pub(crate) fn map_market(
             if candidate.is_null() {
                 return Err("Cannot read properties of null (reading 'symbol')".into());
             }
-            if candidate.get("symbol") == raw.get("symbol") {
+            let same_symbol = match (candidate.get("symbol"), raw.get("symbol")) {
+                (Some(Value::Array(_) | Value::Object(_)), _)
+                | (_, Some(Value::Array(_) | Value::Object(_))) => false,
+                (Some(Value::Number(left)), Some(Value::Number(right))) => {
+                    left.as_f64() == right.as_f64()
+                }
+                (left, right) => left == right,
+            };
+            if same_symbol {
                 fee = Some(candidate);
                 break;
             }
         }
     }
-    let id = text("symbol")?;
     let precision = MarketPrecision {
         amount: nested("lotSizeFilter", "qtyStep")?,
         price: nested("priceFilter", "tickSize")?,
@@ -89,6 +93,14 @@ pub(crate) fn map_market(
     let maker_fee = fee
         .map(|f| parse_float(f.get("makerFeeRate")))
         .transpose()?;
+    let Some(id) = raw.get("symbol").and_then(Value::as_str) else {
+        let value = raw
+            .get("symbol")
+            .map_or_else(|| "undefined".into(), Value::to_string);
+        return Ok(Err(format!(
+            "Refused Bybit market row id={value} symbol={value}: expected strings"
+        )));
+    };
     let (Some(base), Some(quote)) = (
         raw.get("baseCoin").and_then(Value::as_str),
         raw.get("quoteCoin").and_then(Value::as_str),
@@ -106,8 +118,8 @@ pub(crate) fn map_market(
     };
     // Preserve raw instrument metadata independently of typed asset admission.
     Ok(Ok(Market {
-        id: id.clone(),
-        symbol: id,
+        id: id.into(),
+        symbol: id.into(),
         base: base.into(),
         quote: quote.into(),
         active: raw["status"] == "Trading" || (!spot && raw["status"] == "PreLaunch"),
