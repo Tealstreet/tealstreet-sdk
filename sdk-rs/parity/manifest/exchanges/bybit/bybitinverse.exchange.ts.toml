@@ -478,9 +478,9 @@ note = "Exact synchronous BybitInverseExchange body: resolves publicInverseWebso
 ts = "BybitInverseExchange.listenOHLCVs"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs" ]
 status = "ported"
-note = "Exact synchronous BybitInverseExchange bulk candle wrapper: forwards original options and callback to publicInverseWebsocket.listenOHLCVs, deliberately discards the method return and propagates original lookup/call/callback errors. Native unit corresponds to source undefined. Receiver replacement and argument mutation are checked; full class/socket composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs."
+note = "Concrete Exchange bulk listener selects the maintained category socket and installs the live public kline handler. Real binding regressions fail on master and cover callback metadata, source topic grouping, replacement, reconnect and delayed connection. Strict public interval inputs remain unchanged. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs."
 
 [[symbol]]
 ts = "BybitInverseExchange.listenOrderBook"

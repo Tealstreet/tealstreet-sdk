@@ -289,3 +289,257 @@ fn malformed_book_levels_preserve_source_type_error() {
     cleanup().unwrap();
     h.venue().dispose().unwrap();
 }
+
+fn bulk_candles(name: ExchangeName) {
+    let (h, socket, symbol) = setup(name);
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(move |candle| sink.borrow_mut().push(candle)),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":"7"}]}).to_string())).unwrap();
+    let seen = seen.borrow();
+    assert_eq!(
+        seen.len(),
+        1,
+        "bulk candle listener must reach real public frame"
+    );
+    assert_eq!(seen[0].candle.timestamp, 1700000040.0);
+    assert_eq!(seen[0].candle.close, 103.0);
+    assert_eq!(seen[0].candle.volume, 7.0);
+    assert_eq!(seen[0].symbol, symbol);
+    assert_eq!(serde_json::to_value(&seen[0].interval).unwrap(), "1m");
+    assert_eq!(
+        sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+        1
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn primary_bulk_candles_reach_real_socket() {
+    bulk_candles(ExchangeName::Bybit);
+}
+#[test]
+fn demo_bulk_candles_reach_real_socket() {
+    bulk_candles(ExchangeName::Bybitdemo);
+}
+#[test]
+fn spot_bulk_candles_preserve_inherited_noop() {
+    let (h, socket, symbol) = setup(ExchangeName::Bybitspot);
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(|_| panic!("Spot inherits BaseExchange.listenOHLCVs")),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"1","high":"2","low":"0","close":"1","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(
+        sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+        0
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn inverse_bulk_candles_reach_real_socket() {
+    bulk_candles(ExchangeName::Bybitinverse);
+}
+
+#[test]
+fn bulk_candle_subscription_preserves_source_family_chunk_sizes() {
+    for name in [
+        ExchangeName::Bybit,
+        ExchangeName::Bybitdemo,
+        ExchangeName::Bybitinverse,
+    ] {
+        let (h, _, _) = setup(name);
+        let symbols: Vec<_> = (0..51).map(|i| format!("ASSET{i}USDT")).collect();
+        h.venue().listen_ohlcvs(
+            serde_json::from_value(json!({"symbols":symbols,"interval":"1m"})).unwrap(),
+            Rc::new(|_| {}),
+        );
+        let batches: Vec<serde_json::Value> = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .flat_map(|(_, socket)| socket.sent.borrow().clone())
+            .map(|raw| serde_json::from_str::<serde_json::Value>(&raw).unwrap())
+            .filter(|v| {
+                v["op"] == "subscribe"
+                    && v["args"].as_array().is_some_and(|a| {
+                        a.first()
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| s.starts_with("kline."))
+                    })
+            })
+            .collect();
+        let lengths: Vec<_> = batches
+            .iter()
+            .map(|v| v["args"].as_array().unwrap().len())
+            .collect();
+        assert_eq!(lengths, vec![50, 1]);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn replacing_bulk_candle_listener_keeps_topics_and_replaces_prefix_handler() {
+    let (h, socket, symbol) = setup(ExchangeName::Bybit);
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(|_| panic!("replaced bulk listener")),
+    );
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":["ETHUSDT"],"interval":"15m"})).unwrap(),
+        Rc::new(move |candle| sink.borrow_mut().push(candle)),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"1","high":"2","low":"0","close":"1","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 1);
+    assert_eq!(seen.borrow()[0].symbol, symbol);
+    assert_eq!(
+        serde_json::to_value(&seen.borrow()[0].interval).unwrap(),
+        "1m"
+    );
+    h.drive(Box::pin(socket.on_open())).unwrap();
+    h.runtime.pump();
+    assert_eq!(
+        sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+        2
+    );
+    assert_eq!(sent_topics(&h, "subscribe", "kline.15.ETHUSDT"), 2);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn bulk_candle_listener_waits_for_the_source_connection_retry() {
+    let h = support::harness(support::options(), |_| {});
+    let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":["BTCUSDT"],"interval":"1m"})).unwrap(),
+        Rc::new(|_| {}),
+    );
+    socket.connect_and_subscribe(false).unwrap();
+    h.runtime.pump();
+    let subscriptions = sent_topics(&h, "subscribe", "kline.1.BTCUSDT");
+    h.runtime.now.set(h.runtime.now.get() + 99.0);
+    h.runtime.pump();
+    assert_eq!(
+        sent_topics(&h, "subscribe", "kline.1.BTCUSDT"),
+        subscriptions
+    );
+    h.runtime.now.set(h.runtime.now.get() + 1.0);
+    h.runtime.pump();
+    assert_eq!(
+        sent_topics(&h, "subscribe", "kline.1.BTCUSDT"),
+        subscriptions + 1
+    );
+    h.venue().dispose().unwrap();
+}
+
+fn bulk_candle_interval(wire: &str, expected: Option<&str>) {
+    let (h, socket, symbol) = setup(ExchangeName::Bybit);
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(move |candle| sink.borrow_mut().push(candle)),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.{wire}.{symbol}"),"data":[{"start":1700000040000u64,"open":"1","high":"2","low":"0","close":"1","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 1);
+    let native = safe_cex_exchange::js_runtime::value::from_typed(&seen.borrow()[0]).unwrap();
+    let interval_key: Vec<u16> = "interval".encode_utf16().collect();
+    assert!(
+        native
+            .own_keys()
+            .iter()
+            .any(|key| key.as_ref() == interval_key.as_slice())
+    );
+    let serialized = serde_json::to_value(&seen.borrow()[0]).unwrap();
+    if let Some(expected) = expected {
+        assert_eq!(serialized["interval"], expected);
+    } else {
+        assert!(serialized.get("interval").is_none());
+        assert!(native.get("interval").unwrap().is_undefined());
+    }
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn bulk_candle_month_interval_reaches_native_callback() {
+    bulk_candle_interval("M", Some("1M"));
+}
+#[test]
+fn bulk_candle_unknown_interval_reaches_callback_as_own_undefined() {
+    bulk_candle_interval("999", None);
+}
+
+#[test]
+fn primary_bulk_candles_route_inverse_symbols_to_secondary_socket() {
+    let (h, socket, symbol) = setup_for(ExchangeName::Bybit, true);
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(move |candle| sink.borrow_mut().push(candle)),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 1);
+    assert_eq!(seen.borrow()[0].symbol, symbol);
+    assert_eq!(
+        sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+        1
+    );
+    assert!(
+        h.venue()
+            .base()
+            .get_socket(SocketSlot::Public)
+            .unwrap()
+            .message_handlers
+            .borrow()
+            .get("kline")
+            .is_none()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn bulk_candle_malformed_data_preserves_source_type_errors() {
+    for name in [
+        ExchangeName::Bybit,
+        ExchangeName::Bybitdemo,
+        ExchangeName::Bybitinverse,
+    ] {
+        let (h, socket, symbol) = setup(name);
+        h.venue().listen_ohlcvs(
+            serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+            Rc::new(|_| panic!("malformed candle must not emit")),
+        );
+        for (data, message) in [
+            (
+                json!({}),
+                "object is not iterable (cannot read property Symbol(Symbol.iterator))",
+            ),
+            (
+                json!(false),
+                "boolean false is not iterable (cannot read property Symbol(Symbol.iterator))",
+            ),
+            (
+                json!(42),
+                "number 42 is not iterable (cannot read property Symbol(Symbol.iterator))",
+            ),
+            (
+                json!(null),
+                "Cannot destructure property 'Symbol(Symbol.iterator)' of 'object null' as it is null.",
+            ),
+        ] {
+            let error = socket
+                .on_message(&SocketFrame::Text(
+                    json!({"topic":format!("kline.1.{symbol}"),"data":data}).to_string(),
+                ))
+                .unwrap_err();
+            assert_eq!(error.name, "TypeError");
+            assert_eq!(error.message, message);
+        }
+        h.venue().dispose().unwrap();
+    }
+}

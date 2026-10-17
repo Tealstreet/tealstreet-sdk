@@ -681,3 +681,12 @@ real snapshot/delta subscriptions: depth 200 for Spot and 1000 for derivatives.
 Core-owned retry/resync timers and retained topic maps preserve delayed connection,
 sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
 four families; the maintained source book oracle includes array-like level lists.
+
+Bulk candle streaming now binds primary/demo and dedicated Inverse Exchange calls
+to their live public socket handlers. The maintained Spot Exchange inherits the
+base bulk no-op, although its socket declares a separate bulk member. Source
+subscriptions retain topics across reopen, replace the generic kline handler and
+send chunks of 50; delayed connections use core-owned retries. Callback metadata
+uses the shared String search position implementation. The output interval is
+ModelField<AnyTimeframe>, retaining monthly and own-undefined source values while
+public OHLCV(S) request intervals retain their existing strict type.
