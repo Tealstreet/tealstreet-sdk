@@ -2545,7 +2545,7 @@ fn exchange_class_sdk_external_listener_setup_and_cleanup_keep_errors() {
     let owner = class_owner(Venue::Futures, Rc::new(Imports::default()), runtime);
     let exchange = sdk_class(Venue::Futures, owner.clone());
     let mut error = ExchangeError::new("authored external listener error");
-    error.code = Some(json!(731));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(731)));
     let provider = Rc::new(ThrowingExternal {
         error: error.clone(),
         setup_fails: Cell::new(false),
@@ -3450,6 +3450,7 @@ fn native_fill_events(owner: &ExchangeOwner) -> Rc<RefCell<Vec<Value>>> {
     owner.base.on(
         "fill",
         Rc::new(move |_, payload| {
+            let payload = safe_cex_exchange::js_runtime::value::to_json(payload).unwrap();
             saved.borrow_mut().push(payload.clone());
             Ok(())
         }),

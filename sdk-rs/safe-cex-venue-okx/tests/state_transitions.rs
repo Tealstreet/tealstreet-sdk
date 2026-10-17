@@ -41,7 +41,9 @@ fn state_transitions_native_before_source() {
                         let release = Cell::new(false);
                         let mut cause = ExchangeError::new("state callback failure");
                         cause.name = "TypeError".into();
-                        cause.code = Some(json!("STATE"));
+                        cause.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                            "STATE"
+                        )));
                         cause.store_subscriber_ids = vec![7, 3];
                         let error = Rc::new(cause);
                         let get_config = |value| {

@@ -220,7 +220,10 @@ fn private_start_signs_jwt_and_subscribes_only_after_the_matching_auth_reply() {
     );
     venue
         .base()
-        .emit("fill", json!({"source":"disposal witness"}))
+        .emit(
+            "fill",
+            safe_cex_exchange::js_runtime::value::from_json(&json!({"source":"disposal witness"})),
+        )
         .unwrap();
     assert_eq!(
         calls.get(),

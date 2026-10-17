@@ -114,7 +114,9 @@ fn listen(h: &Harness, event: &str) -> Rc<RefCell<Vec<Value>>> {
     h.venue().base().on(
         event,
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.clone());
+            sink.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(data).expect("finite fixture event"),
+            );
             Ok(())
         }),
     );

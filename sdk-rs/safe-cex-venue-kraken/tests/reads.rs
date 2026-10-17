@@ -91,7 +91,7 @@ fn request(params: JsJsonValue) -> Value {
 fn response(case: &Value) -> Result<Option<JsNumberInput>, Box<dyn Error>> {
     if case["fail"] == true {
         let mut error = ExchangeError::new("read failure");
-        error.metadata.code = Some("EPRIVATE".into());
+        error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str("EPRIVATE"));
         error.metadata.store_subscriber_ids = vec![13, 29];
         error.metadata.response = Some(json!({"status":429}));
         return Err(Box::new(error));
@@ -111,9 +111,13 @@ fn error(error: Box<dyn Error>, identity: Option<*const ExchangeError>) -> Value
             [13, 29],
             "read failure inner-to-outer subscriber metadata retained"
         );
-        assert_eq!(
-            native.metadata.code,
-            Some(json!("EPRIVATE")),
+        assert!(
+            native
+                .metadata
+                .code
+                .as_ref()
+                .unwrap()
+                .strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("EPRIVATE")),
             "read failure metadata retained"
         );
         assert_eq!(

@@ -339,7 +339,7 @@ fn rejected_order_leg_keeps_successful_orders_without_error_event() {
     let captured = errors.clone();
     h.venue().base().on(
         "error",
-        std::rc::Rc::new(move |_, value: &Value| {
+        std::rc::Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
             captured.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -701,7 +701,9 @@ fn private_fill_reaches_emitter_and_disposal_cancels_refresh_timers() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
-            delivered.borrow_mut().push(value.clone());
+            delivered.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(value).expect("finite fixture fill"),
+            );
             Ok(())
         }),
     );
@@ -1150,7 +1152,10 @@ fn gap_snapshot_rejection_is_silent_and_keeps_the_existing_book() {
     h.venue().base().on(
         "log",
         Rc::new(move |_, message| {
-            delivered.borrow_mut().push(message.clone());
+            delivered.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(message)
+                    .expect("finite fixture event"),
+            );
             Ok(())
         }),
     );

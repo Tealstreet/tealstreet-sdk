@@ -38,7 +38,8 @@ fn watch(venue: &AsterDEXExchange, event: &str) -> Rc<RefCell<Vec<Value>>> {
     venue.base().on(
         event,
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value)?);
             Ok(())
         }),
     );
@@ -63,10 +64,17 @@ fn native_private_order_and_fill_have_source_event_arguments() {
         let sink = posts.clone();
         safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
             venue.base(),
-            Rc::new(move |payload| {
-                sink.borrow_mut().push(payload);
+            safe_cex_webworker::data_post::WorkerDataPost::new(Rc::new(move |payload| {
+                sink.borrow_mut()
+                    .push(safe_cex_webworker::payload::StoreWorkerPayload {
+                        op: payload.op,
+                        instance_id: None,
+                        data: Some(safe_cex_exchange::js_runtime::value::to_json(
+                            &payload.data,
+                        )?),
+                    });
                 Ok(())
-            }),
+            })),
         );
         frame(
             &venue,
@@ -109,10 +117,17 @@ fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
         let sink = posts.clone();
         safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
             venue.base(),
-            Rc::new(move |payload| {
-                sink.borrow_mut().push(payload);
+            safe_cex_webworker::data_post::WorkerDataPost::new(Rc::new(move |payload| {
+                sink.borrow_mut()
+                    .push(safe_cex_webworker::payload::StoreWorkerPayload {
+                        op: payload.op,
+                        instance_id: None,
+                        data: Some(safe_cex_exchange::js_runtime::value::to_json(
+                            &payload.data,
+                        )?),
+                    });
                 Ok(())
-            }),
+            })),
         );
         let emitter = venue.rt.this.get("emitter").unwrap();
         for expected in [
@@ -151,7 +166,10 @@ fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
                 ],
             )
             .unwrap();
-        venue.base().emit("positions", json!(["a", "b"])).unwrap();
+        venue
+            .base()
+            .emit("positions", from_json(&json!(["a", "b"])))
+            .unwrap();
         assert_eq!(*calls.borrow(), vec![json!([["a", "b"]])]);
     });
 }
@@ -205,5 +223,51 @@ fn native_private_position_frame_commits_store_and_emits_one_positions_array() {
             *positions.borrow(),
             vec![serde_json::to_value(store.positions().to_vec()).unwrap()]
         );
+    });
+}
+
+#[test]
+fn native_private_fill_keeps_infinite_price_through_event_and_worker_post() {
+    run(|venue, _| {
+        let received = Rc::new(RefCell::new(Vec::new()));
+        let sink = received.clone();
+        venue.base().on(
+            "fill",
+            Rc::new(move |_, value| {
+                sink.borrow_mut().push(value.clone());
+                Ok(())
+            }),
+        );
+        let posts = Rc::new(RefCell::new(Vec::new()));
+        let sink = posts.clone();
+        safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
+            venue.base(),
+            safe_cex_webworker::data_post::WorkerDataPost::new(Rc::new(move |payload| {
+                if payload.op == safe_cex_webworker::payload::StoreWorkerOp::Fill {
+                    sink.borrow_mut().push(payload.data);
+                }
+                Ok(())
+            })),
+        );
+        frame(
+            &venue,
+            json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"NEW","s":"BTCUSDT","o":"LIMIT","S":"BUY","p":"100","q":"2","z":"0","T":1700000000000u64}}),
+        );
+        frame(
+            &venue,
+            json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"FILLED","s":"BTCUSDT","S":"BUY","q":"2","z":"2","l":"2","L":"Infinity","T":1700000000001u64}}),
+        );
+        assert_eq!(received.borrow().len(), 1);
+        assert_eq!(posts.borrow().len(), 1);
+        let fill = received.borrow()[0].clone();
+        assert!(
+            matches!(fill.get("price").unwrap(), Js::Number(value) if value == f64::INFINITY),
+            "EMITTER-PRODUCTION native fill Infinity survives"
+        );
+        assert!(
+            posts.borrow()[0].same_reference(&fill),
+            "EMITTER-PRODUCTION worker post reads original fill object"
+        );
+        assert!(fill.get("orderId").unwrap().strict_equals(&Js::str("7")));
     });
 }

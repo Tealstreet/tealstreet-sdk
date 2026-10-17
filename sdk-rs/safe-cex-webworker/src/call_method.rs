@@ -9,7 +9,7 @@ use crate::{
 };
 use safe_cex_exchange::{
     exchange::Exchange,
-    js_runtime::value::{Js, from_json, from_typed},
+    js_runtime::value::{Js, from_typed},
     runtime::{ExchangeError, ExchangeFuture},
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -176,7 +176,7 @@ impl CallMethodHandler {
                     ]);
                     if let Some(code) = &error.code {
                         serialized
-                            .define("code", from_json(code))
+                            .define("code", code.clone())
                             .expect("fresh error data");
                     }
                     if let Err(error) = reply.send(false, Some(serialized)) {

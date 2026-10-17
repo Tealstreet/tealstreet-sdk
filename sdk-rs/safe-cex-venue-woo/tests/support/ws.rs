@@ -287,7 +287,7 @@ fn parent_hooks_retain_injected_failure_identity() {
     let parent = Parent::new();
     let mut cause = ExchangeError::new("subscriber failure");
     cause.name = "SubscriberError".into();
-    cause.code = Some(serde_json::json!(731));
+    cause.code = Some(safe_cex_exchange::js_runtime::value::Js::Number(731.0));
     for hook in ["log", "emit", "health", "latency", "reconnected", "error"] {
         *parent.hook_failure.borrow_mut() = Some((hook, cause.clone()));
         let result = match hook {

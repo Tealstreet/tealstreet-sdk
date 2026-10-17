@@ -37,6 +37,14 @@ pub trait ExchangeWorkerHost: WorkerPortTimers + 'static {
     fn chaser_supervisor(&self) -> Rc<dyn ChaserSupervisor>;
     fn report_timer_error(&self, error: &ExchangeError);
 }
+pub trait StoreUpdateThrottleHost: WorkerPortTimers + 'static {
+    fn report_store_timer_error(&self, error: &ExchangeError);
+}
+impl<H: ExchangeWorkerHost> StoreUpdateThrottleHost for H {
+    fn report_store_timer_error(&self, error: &ExchangeError) {
+        self.report_timer_error(error);
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerHandlerKind {
     OHLCV,
@@ -68,13 +76,13 @@ struct ThrottleState<T> {
 /// lodash throttle with default leading=true, trailing=true, maxWait=wait.
 /// Its callback reaches the real worker store_update through Weak, not a second
 /// keyed throttle. Binary64 timer delays and wall-clock rollback are preserved.
-pub struct StoreUpdateThrottle<H: ExchangeWorkerHost> {
+pub struct StoreUpdateThrottle<H: StoreUpdateThrottleHost> {
     host: Rc<H>,
     pub wait_ms: f64,
     state: RefCell<ThrottleState<H::Timer>>,
     callback: Rc<dyn Fn(StoreFrame) -> Result<(), ExchangeError>>,
 }
-impl<H: ExchangeWorkerHost> StoreUpdateThrottle<H> {
+impl<H: StoreUpdateThrottleHost> StoreUpdateThrottle<H> {
     pub fn new(
         host: Rc<H>,
         wait: f64,
@@ -108,7 +116,7 @@ impl<H: ExchangeWorkerHost> StoreUpdateThrottle<H> {
             Rc::new(move || {
                 if let Some(throttle) = weak.upgrade() {
                     if let Err(error) = throttle.timer_expired() {
-                        throttle.host.report_timer_error(&error);
+                        throttle.host.report_store_timer_error(&error);
                     }
                 }
             }),
@@ -188,7 +196,7 @@ impl<H: ExchangeWorkerHost> StoreUpdateThrottle<H> {
         s.timer = None;
     }
 }
-impl<H: ExchangeWorkerHost> Drop for StoreUpdateThrottle<H> {
+impl<H: StoreUpdateThrottleHost> Drop for StoreUpdateThrottle<H> {
     fn drop(&mut self) {
         if let Some(timer) = self.state.get_mut().timer.take() {
             self.host.clear_timeout(&timer);

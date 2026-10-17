@@ -114,7 +114,9 @@ impl Bindings {
     fn new(c: Value) -> Self {
         let mut e = ExchangeError::new("public fixture");
         e.name = "RangeError".into();
-        e.code = Some(json!("fixture-code"));
+        e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "fixture-code"
+        )));
         e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
         Self {
             public_only: c["name"] == "public-only",
@@ -135,10 +137,10 @@ impl Bindings {
         self.trace.borrow_mut().push(v)
     }
     fn failure_wire(&self, error: &Failure) -> Value {
-        json!({"original":Rc::ptr_eq(error,&self.error),"name":error.name,"message":error.message,"code":opt(error.code.as_ref()),"response":opt(error.response.as_ref())})
+        json!({"original":Rc::ptr_eq(error,&self.error),"name":error.name,"message":error.message,"code":opt(observed_error_code(&error.code).as_ref()),"response":opt(error.response.as_ref())})
     }
     fn emissions_wire(&self) -> Vec<Value> {
-        self.emissions.iter().map(|e|match e{ErrorEmission::Error(e,prefix)=>json!({"kind":"error","original":Rc::ptr_eq(e,&self.error),"prefix":prefix,"message":null,"errorName":e.name,"errorMessage":e.message,"errorCode":opt(e.code.as_ref()),"errorResponse":opt(e.response.as_ref())}),ErrorEmission::Message(message)=>json!({"kind":"message","original":false,"prefix":null,"message":opt(message.as_ref()),"errorName":null,"errorMessage":null,"errorCode":null,"errorResponse":null})}).collect()
+        self.emissions.iter().map(|e|match e{ErrorEmission::Error(e,prefix)=>json!({"kind":"error","original":Rc::ptr_eq(e,&self.error),"prefix":prefix,"message":null,"errorName":e.name,"errorMessage":e.message,"errorCode":opt(observed_error_code(&e.code).as_ref()),"errorResponse":opt(e.response.as_ref())}),ErrorEmission::Message(message)=>json!({"kind":"message","original":false,"prefix":null,"message":opt(message.as_ref()),"errorName":null,"errorMessage":null,"errorCode":null,"errorResponse":null})}).collect()
     }
     fn wire(&self, value: Option<Value>, fallback: bool, error: Option<&Failure>) -> Value {
         json!({"name":self.name(),"trace":*self.trace.borrow(),"emissions":self.emissions_wire(),"fallback":fallback,"value":value,"failure":error.map(|e|self.failure_wire(e))})
@@ -351,7 +353,7 @@ fn assert_original(e: &Failure, b: &Bindings, label: &str) {
         "{label}: native original message"
     );
     assert_eq!(
-        e.code,
+        observed_error_code(&e.code),
         Some(json!("fixture-code")),
         "{label}: native original code"
     );
@@ -388,7 +390,11 @@ fn emission(b: &Bindings, v: RestVenue, original: bool, expected_message: &str, 
                     e.message, expected_message,
                     "{label}: native generated message"
                 );
-                assert_eq!(e.code, None, "{label}: native generated code");
+                assert_eq!(
+                    observed_error_code(&e.code),
+                    None,
+                    "{label}: native generated code"
+                );
                 assert_eq!(e.response, None, "{label}: native generated response");
             }
             assert_eq!(
@@ -1013,7 +1019,11 @@ fn ohlcv_test(v: RestVenue) {
                     };
                     assert_eq!(e.name, name_e, "{label}: native generated name");
                     assert_eq!(e.message, msg, "{label}: native generated message");
-                    assert_eq!(e.code, None, "{label}: native generated code");
+                    assert_eq!(
+                        observed_error_code(&e.code),
+                        None,
+                        "{label}: native generated code"
+                    );
                     assert_eq!(e.response, None, "{label}: native generated response");
                 }
                 projected.push(b.wire(None, false, Some(&e)));
@@ -1113,4 +1123,17 @@ fn pm_ohlcv() {
 #[ignore = "requires direct TypeScript oracle"]
 fn spot_ohlcv() {
     ohlcv_test(RestVenue::Spot)
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

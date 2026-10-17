@@ -104,7 +104,10 @@ fn run(row: &Value) -> Value {
         venue.base.on(
             event,
             Rc::new(move |event, data| {
-                events.borrow_mut().push(json!([event, data]));
+                events.borrow_mut().push(json!([
+                    event,
+                    safe_cex_exchange::js_runtime::value::to_json(data).unwrap()
+                ]));
                 if mutate {
                     options.borrow_mut().symbol = if event == "log" {
                         "from-log"

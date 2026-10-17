@@ -130,7 +130,10 @@ pub fn log(
 ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
     instance.exchange.base().emit(
         "log",
-        serde_json::Value::String(format!("[CHASER{}] {message}", instance.id())),
+        safe_cex_exchange::js_runtime::value::Js::str(&format!(
+            "[CHASER{}] {message}",
+            instance.id()
+        )),
     )
 }
 
@@ -241,7 +244,9 @@ pub fn find_best_price(
         let symbol = instance.options().borrow().symbol.clone();
         instance.exchange.base().emit(
             "error",
-            serde_json::Value::String(format!("Chaser no market or ticker found for {symbol}")),
+            safe_cex_exchange::js_runtime::value::Js::str(&format!(
+                "Chaser no market or ticker found for {symbol}"
+            )),
         )?;
         let symbol = instance.options().borrow().symbol.clone();
         return Err(ExchangeError::new(format!(
@@ -399,10 +404,10 @@ impl ChaserOrderManager {
             if !instance.is_stopped() {
                 instance.mark_complete(Some(&format!("Chaser {phase} failed")));
             }
-            instance
-                .exchange
-                .base()
-                .emit("error", serde_json::Value::String(message))?;
+            instance.exchange.base().emit(
+                "error",
+                safe_cex_exchange::js_runtime::value::Js::str(&message),
+            )?;
             Ok::<_, ExchangeError>(supervisor.construct_cleanup(self.clone(), instance))
         })();
         Box::pin(async move { prefix?.await })
@@ -428,7 +433,7 @@ impl ChaserOrderManager {
                     reason.unwrap_or("Exchange disposed while chase was active"),
                 ));
                 let symbol = instance.options().borrow().symbol.clone();
-                exchange.base().emit("warning", serde_json::Value::String(format!(
+                exchange.base().emit("warning", safe_cex_exchange::js_runtime::value::Js::str(&format!(
                     "Chaser for {symbol} was stopped because the exchange connection was disposed"
                 )))?;
             }

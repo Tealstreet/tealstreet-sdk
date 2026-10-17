@@ -170,7 +170,9 @@ fn local_order_cache_native_source_parity() {
             let expected = &step["result"];
             let mut host_error = ExchangeError::new("store callback failed");
             host_error.name = "StoreError".into();
-            host_error.code = Some(serde_json::json!(41));
+            host_error.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+                &serde_json::json!(41),
+            ));
             let site_state = RefCell::new(command.get("site").cloned());
             let store_state = RefCell::new(
                 command["store"]

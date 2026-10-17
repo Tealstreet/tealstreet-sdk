@@ -47,7 +47,9 @@ fn oracle() -> Value {
 fn error(name: &str, message: &str, code: &str, detail: &str, status: u16) -> ExchangeError {
     let mut error = ExchangeError::new(message);
     error.name = name.into();
-    error.code = Some(json!(code));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        code
+    )));
     error.response = Some(json!({"status":status,"data":{"msg":detail}}));
     error
 }
@@ -166,7 +168,10 @@ fn disposal(variant: &str) {
                 );
                 assert_eq!(actual.name, case["error"]["name"].as_str().unwrap());
                 assert_eq!(actual.message, case["error"]["message"].as_str().unwrap());
-                assert_eq!(actual.code.as_ref(), case["error"].get("code"));
+                assert_eq!(
+                    observed_error_code(&actual.code).as_ref(),
+                    case["error"].get("code")
+                );
                 assert_eq!(actual.response.as_ref(), case["error"].get("response"));
                 assert_eq!(case["error"]["same"], true);
             }
@@ -348,7 +353,7 @@ fn futures_margin_type_matches_source() {
                 "MARGIN case {index} native source error message"
             );
             assert_eq!(
-                actual.code.as_ref(),
+                observed_error_code(&actual.code).as_ref(),
                 case["error"].get("code").filter(|v| !v.is_null()),
                 "MARGIN case {index} native source error code"
             );
@@ -468,4 +473,17 @@ fn margin_waits_for_post_before_emission() {
         );
         assert_eq!(calls.get(), 1, "native margin no retry");
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

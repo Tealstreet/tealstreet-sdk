@@ -24,16 +24,50 @@ fn failure(value: JsValue) -> ExchangeError {
 fn string(units: &[u16]) -> JsValue {
     js_sys::JsString::from_char_code(units).into()
 }
-fn property(object: &Object, key: &JsValue, value: &JsValue) -> Result<(), ExchangeError> {
+fn property(
+    object: &Object,
+    key: &JsValue,
+    value: &JsValue,
+    enumerable: bool,
+) -> Result<(), ExchangeError> {
     let descriptor = Object::new();
     Reflect::set(&descriptor, &JsValue::from_str("value"), value).map_err(failure)?;
-    for key in ["enumerable", "writable", "configurable"] {
+    Reflect::set(
+        &descriptor,
+        &JsValue::from_str("enumerable"),
+        &JsValue::from_bool(enumerable),
+    )
+    .map_err(failure)?;
+    for key in ["writable", "configurable"] {
         Reflect::set(&descriptor, &JsValue::from_str(key), &JsValue::TRUE).map_err(failure)?;
     }
     if !Reflect::define_property(object, key, &descriptor).map_err(failure)? {
         return Err(ExchangeError::new("Worker DATA property definition failed"));
     }
     Ok(())
+}
+fn error_instance(value: &Js) -> Result<Object, ExchangeError> {
+    let prototype = match value {
+        Js::Object(object) => object.proto.borrow().clone(),
+        _ => None,
+    };
+    let name = prototype
+        .as_ref()
+        .unwrap_or(value)
+        .get("name")
+        .map_err(|e| e.to_exchange_error())?;
+    let name = name
+        .as_str()
+        .and_then(|units| String::from_utf16(units).ok());
+    Ok(match name.as_deref() {
+        Some("TypeError") => Object::from(js_sys::TypeError::new("")),
+        Some("SyntaxError") => Object::from(js_sys::SyntaxError::new("")),
+        Some("RangeError") => Object::from(js_sys::RangeError::new("")),
+        Some("ReferenceError") => Object::from(js_sys::ReferenceError::new("")),
+        Some("EvalError") => Object::from(js_sys::EvalError::new("")),
+        Some("URIError") => Object::from(js_sys::UriError::new("")),
+        _ => Object::from(js_sys::Error::new("")),
+    })
 }
 // Typed result graphs contain primitives, arrays and enumerable object data.
 // Cache objects before walking children so shared references and cycles survive.
@@ -71,11 +105,36 @@ fn materialize(value: &Js, seen: &mut Vec<(Js, JsValue)>) -> Result<JsValue, Exc
             if let Some((_, v)) = seen.iter().find(|(old, _)| old.strict_equals(value)) {
                 return Ok(v.clone());
             }
-            let object = Object::new();
+            let error = matches!(value, Js::Object(object) if object.class == "Error");
+            let object = if error {
+                error_instance(value)?
+            } else {
+                Object::new()
+            };
             let output: JsValue = object.clone().into();
             seen.push((value.clone(), output.clone()));
+            if error {
+                for key in ["name", "message", "stack", "cause"] {
+                    if value.has_own(key) {
+                        let child = value.get(key).map_err(|e| e.to_exchange_error())?;
+                        property(
+                            &object,
+                            &JsValue::from_str(key),
+                            &materialize(&child, seen)?,
+                            false,
+                        )?;
+                    } else if ["message", "stack"].contains(&key)
+                        && !Reflect::delete_property(&object, &JsValue::from_str(key))
+                            .map_err(failure)?
+                    {
+                        return Err(ExchangeError::new(
+                            "Worker DATA Error property deletion failed",
+                        ));
+                    }
+                }
+            }
             for (key, child) in value.own_entries().map_err(|e| e.to_exchange_error())? {
-                property(&object, &string(&key), &materialize(&child, seen)?)?;
+                property(&object, &string(&key), &materialize(&child, seen)?, true)?;
             }
             Ok(output)
         }

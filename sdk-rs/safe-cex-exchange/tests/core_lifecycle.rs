@@ -175,7 +175,9 @@ fn signer_wait_starts_before_first_poll_and_unpolled_drop_cleans_up() {
     base.on(
         "remoteSignerStatus",
         Rc::new(move |_, value| {
-            recorded.borrow_mut().push(value.clone());
+            recorded
+                .borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value).unwrap());
             Ok(())
         }),
     );
@@ -210,7 +212,9 @@ fn signer_wait_disconnect_callback_settles_once_and_unsubscribes() {
     base.on(
         "remoteSignerStatus",
         Rc::new(move |_, value| {
-            recorded.borrow_mut().push(value.clone());
+            recorded
+                .borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value).unwrap());
             Ok(())
         }),
     );
@@ -324,7 +328,9 @@ fn capture_request(base: &BaseExchange, event: &str) -> Rc<RefCell<Vec<Value>>> 
     base.on(
         event,
         Rc::new(move |_, value| {
-            recorded.borrow_mut().push(value.clone());
+            recorded
+                .borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value).unwrap());
             Ok(())
         }),
     );
@@ -346,7 +352,9 @@ fn worker_correlation_ignores_wrong_request_and_dispatches_override_without_sock
         .base
         .emit(
             "callMethod:done",
-            json!({"requestId":"wrong","success":true,"result":99}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"requestId":"wrong","success":true,"result":99}),
+            ),
         )
         .unwrap();
     assert!(poll(request.as_mut()).is_pending());
@@ -355,13 +363,15 @@ fn worker_correlation_ignores_wrong_request_and_dispatches_override_without_sock
         .base
         .emit(
             "callMethod:done",
-            json!({"requestId":id,"success":true,"result":[1,2]}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"requestId":id,"success":true,"result":[1,2]}),
+            ),
         )
         .unwrap();
-    assert!(matches!(poll(request.as_mut()), Poll::Ready(Ok(value)) if value == json!([1,2])));
+    assert!(matches!(poll(request.as_mut()), Poll::Ready(Ok(value)) if value == json!([1.0,2.0])));
     assert_eq!(
         *venue.hooks.borrow(),
-        vec![(json!([1, 2]), json!("fetchOrders"), vec![json!("BTC")])]
+        vec![(json!([1.0, 2.0]), json!("fetchOrders"), vec![json!("BTC")])]
     );
 }
 
@@ -401,7 +411,9 @@ fn worker_timeout_removes_listener_and_releases_pending_waker() {
         .base
         .emit(
             "callMethod:done",
-            json!({"requestId":id,"success":true,"result":42}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"requestId":id,"success":true,"result":42}),
+            ),
         )
         .unwrap();
     assert_eq!(
@@ -422,13 +434,17 @@ fn update_positions_worker_correlates_and_preserves_reason() {
     let id = requests.borrow()[0]["requestId"].clone();
     base.emit(
         "updatePositions:done",
-        json!({"requestId":"wrong","success":true}),
+        safe_cex_exchange::js_runtime::value::from_json(
+            &json!({"requestId":"wrong","success":true}),
+        ),
     )
     .unwrap();
     assert!(poll(request.as_mut()).is_pending());
     base.emit(
         "updatePositions:done",
-        json!({"requestId":id,"success":false,"reason":"retry_too_soon"}),
+        safe_cex_exchange::js_runtime::value::from_json(
+            &json!({"requestId":id,"success":false,"reason":"retry_too_soon"}),
+        ),
     )
     .unwrap();
     assert!(
@@ -625,7 +641,9 @@ fn dropping_worker_waiter_releases_its_listener_and_waker() {
         .base
         .emit(
             "callMethod:done",
-            json!({"requestId":requests.borrow()[0]["requestId"],"success":true,"result":42}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"requestId":requests.borrow()[0]["requestId"],"success":true,"result":42}),
+            ),
         )
         .unwrap();
     assert_eq!(wake.0.load(Ordering::SeqCst), 0);
@@ -641,7 +659,9 @@ fn cancelled_signer_waits_release_subscription_and_ignore_late_callbacks() {
     base.on(
         "remoteSignerStatus",
         Rc::new(move |_, value| {
-            recorded.borrow_mut().push(value.clone());
+            recorded
+                .borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value).unwrap());
             Ok(())
         }),
     );
@@ -711,7 +731,7 @@ fn signer_listener_throw_keeps_source_settled_but_unresolved_state() {
     base.on(
         "remoteSignerStatus",
         Rc::new(move |_, value| {
-            if value == "connected" {
+            if value.strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("connected")) {
                 Err(error.clone())
             } else {
                 Ok(())
@@ -791,7 +811,7 @@ fn signer_listener_throw_order_matches_actual_source() {
 fn successful_worker_reply_rejects_when_concrete_after_hook_fails() {
     let venue = venue(Rc::new(Runtime::default()));
     let mut original = ExchangeError::new("authored worker confirmation error");
-    original.code = Some(json!(731));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(731)));
     original.store_subscriber_ids = vec![17];
     *venue.hook_error.borrow_mut() = Some(original.clone());
     let requests = capture_request(&venue.base, "callMethod");
@@ -809,7 +829,9 @@ fn successful_worker_reply_rejects_when_concrete_after_hook_fails() {
         .base
         .emit(
             "callMethod:done",
-            json!({"requestId":id,"success":true,"result":73}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"requestId":id,"success":true,"result":73}),
+            ),
         )
         .unwrap();
     let outcome = poll(operation.as_mut());

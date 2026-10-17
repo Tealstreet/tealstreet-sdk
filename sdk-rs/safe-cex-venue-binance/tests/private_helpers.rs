@@ -26,7 +26,9 @@ fn encoded(value: Option<u64>) -> Value {
 fn error() -> Failure {
     let mut e = ExchangeError::new("original helper failure");
     e.name = "RangeError".into();
-    e.code = Some(json!("fixture-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "fixture-code"
+    )));
     Rc::new(e)
 }
 fn original(result: &Result<(), Failure>, failure: bool, e: &Failure) {

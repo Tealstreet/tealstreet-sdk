@@ -1,3 +1,4 @@
+use crate::js_runtime::value::Js;
 use std::{future::Future, pin::Pin, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -44,7 +45,7 @@ impl PartialEq for ExchangeErrorOrigin {
 }
 impl Eq for ExchangeErrorOrigin {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ExchangeErrorMetadata {
     /// Opaque local origin. This makes ExchangeError local-thread, matching its
     /// runtime callbacks and Store subscriber causes; it is not Send or Sync.
@@ -66,8 +67,33 @@ pub struct ExchangeErrorMetadata {
     pub url: Option<String>,
     pub method: Option<String>,
     pub original_error: Option<serde_json::Value>,
-    pub code: Option<serde_json::Value>,
+    pub code: Option<Js>,
 }
+impl PartialEq for ExchangeErrorMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        let code_equal = match (&self.code, &other.code) {
+            (None, None) => true,
+            (Some(Js::Number(a)), Some(Js::Number(b))) => a.to_bits() == b.to_bits(),
+            (Some(a), Some(b)) => a.strict_equals(b),
+            _ => false,
+        };
+        code_equal
+            && self.origin == other.origin
+            && self.store_subscriber_ids == other.store_subscriber_ids
+            && self.store_subscriber_cause == other.store_subscriber_cause
+            && self.is_axios_error == other.is_axios_error
+            && self.request == other.request
+            && self.stack == other.stack
+            && self.response == other.response
+            && self.context == other.context
+            && self.config == other.config
+            && self.enhanced_message == other.enhanced_message
+            && self.url == other.url
+            && self.method == other.method
+            && self.original_error == other.original_error
+    }
+}
+impl Eq for ExchangeErrorMetadata {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExchangeError {
     pub message: String,
@@ -164,16 +190,24 @@ impl From<safe_cex_num::JsCoercionError> for ExchangeError {
 }
 impl From<safe_cex_transport::RestFailure> for ExchangeError {
     fn from(error: safe_cex_transport::RestFailure) -> Self {
+        if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            error.transport_error.as_deref()
+            && let Some(cause) = origin
+                .error()
+                .downcast_ref::<crate::js_runtime::value::owned::OwnedCallbackError>()
+        {
+            let mut projected =
+                crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error();
+            projected.origin = Some(ExchangeErrorOrigin::new(error));
+            return projected;
+        }
         let mut projected = Self::new(error.message.clone());
         if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =
             error.transport_error.as_deref()
         {
             projected.name = cause.name.into();
         }
-        projected.code = error
-            .code
-            .as_ref()
-            .map(|code| serde_json::Value::String(code.clone()));
+        projected.code = error.code.as_ref().map(|code| Js::str(code));
         projected.context = error.context.as_deref().cloned();
         projected.response = error.response.as_ref().map(|response| {
             // Existing JSON consumers receive a view. The retained RestFailure
@@ -204,9 +238,9 @@ impl From<safe_cex_transport::RestFailure> for ExchangeError {
     }
 }
 pub type ExchangeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ExchangeError>> + 'a>>;
-pub type Listener = Rc<dyn Fn(&str, &serde_json::Value) -> Result<(), ExchangeError>>;
+pub type Listener = Rc<dyn Fn(&str, &Js) -> Result<(), ExchangeError>>;
 /// The actual emitted argument list, including zero arguments and array values.
-pub type ArgsListener = Rc<dyn Fn(&str, &[serde_json::Value]) -> Result<(), ExchangeError>>;
+pub type ArgsListener = Rc<dyn Fn(&str, &[Js]) -> Result<(), ExchangeError>>;
 pub type Cleanup = Box<dyn FnOnce()>;
 /// Cleanup of an event subscription can itself emit and fail.
 pub type ListenerCleanup = Box<dyn FnOnce() -> Result<(), ExchangeError>>;

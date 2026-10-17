@@ -12,7 +12,9 @@ type Error = Rc<ExchangeError>;
 fn error() -> Error {
     let mut e = ExchangeError::new("conversion failure");
     e.name = "TypeError".into();
-    e.code = Some(json!("CONVERT"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "CONVERT"
+    )));
     e.store_subscriber_ids = vec![7, 3];
     Rc::new(e)
 }

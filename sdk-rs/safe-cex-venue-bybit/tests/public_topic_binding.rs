@@ -121,7 +121,7 @@ fn primary_public_topics_stay_category_wide_and_follow_market_refreshes() {
             before,
             "primary has no active-symbol callback"
         );
-        h.venue().base().emit("markets:changed",json!({"added":[market("NEW-L","USDT",false),market("NEW-I","BTC",false),market("OPT","USDT",true)],"removed":[]})).unwrap();
+        h.venue().base().emit("markets:changed",safe_cex_exchange::js_runtime::value::from_json(&json!({"added":[market("NEW-L","USDT",false),market("NEW-I","BTC",false),market("OPT","USDT",true)],"removed":[]}))).unwrap();
         assert_eq!(
             subscriptions(&h).last().unwrap(),
             &[if category == "linear" {
@@ -192,7 +192,7 @@ fn spot_public_topics_use_active_selection_and_keep_prior_subscriptions() {
         .base()
         .emit(
             "markets:changed",
-            json!({"added":[market("NEW","USDT",false),market("NEW","USDT",false)],"removed":[]}),
+            safe_cex_exchange::js_runtime::value::from_json(&json!({"added":[market("NEW","USDT",false),market("NEW","USDT",false)],"removed":[]})),
         )
         .unwrap();
     assert_eq!(
@@ -302,7 +302,9 @@ fn native(input: &Value) -> Value {
                 .base()
                 .emit(
                     "markets:changed",
-                    json!({"added":action["added"],"removed":[]}),
+                    safe_cex_exchange::js_runtime::value::from_json(
+                        &json!({"added":action["added"],"removed":[]}),
+                    ),
                 )
                 .unwrap(),
             "dispose" => socket.dispose(),
@@ -373,7 +375,12 @@ fn disposal_drops_pending_public_subscription_tails_and_weak_venue_references() 
                 .collect();
             h.venue()
                 .base()
-                .emit("markets:changed", json!({"added":added,"removed":[]}))
+                .emit(
+                    "markets:changed",
+                    safe_cex_exchange::js_runtime::value::from_json(
+                        &json!({"added":added,"removed":[]}),
+                    ),
+                )
                 .unwrap();
             assert_eq!(subscriptions(&h).last().unwrap().len(), 10);
         } else {

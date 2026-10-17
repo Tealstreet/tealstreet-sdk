@@ -532,7 +532,10 @@ fn exchange_listener_error_rearms_interval_and_releases_timeout() {
         let weak_capture = Rc::downgrade(&capture);
         let callback = move || {
             let _capture = &capture;
-            weak_base.upgrade().unwrap().emit("fill", Value::Null)
+            weak_base
+                .upgrade()
+                .unwrap()
+                .emit("fill", crate::js_runtime::value::Js::Null)
         };
         let operation = if repeat {
             base.start_interval(5, callback)

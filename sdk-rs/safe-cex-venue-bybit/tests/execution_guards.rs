@@ -95,7 +95,9 @@ fn json_value(actual: &Value, expected: &Value) {
 fn error(name: &str, message: &str) -> Rc<ExchangeError> {
     let mut error = ExchangeError::new(message);
     error.name = name.into();
-    error.code = Some(serde_json::json!(37));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+        &serde_json::json!(37),
+    ));
     Rc::new(error)
 }
 fn assert_error(actual: &Rc<ExchangeError>, expected: &Value) {
@@ -363,7 +365,7 @@ fn execution_guards_native_source_parity() {
                     "GUARD native execution error identity"
                 );
                 assert_eq!(
-                    actual.code,
+                    observed_error_code(&actual.code),
                     Some(serde_json::json!(37)),
                     "GUARD native error metadata"
                 );
@@ -413,4 +415,17 @@ fn execution_guards_native_source_parity() {
             "GUARD native execution callback order"
         );
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

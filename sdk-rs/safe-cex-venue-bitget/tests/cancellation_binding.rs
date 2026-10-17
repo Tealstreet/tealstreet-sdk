@@ -174,6 +174,7 @@ fn real_cancel_all_emits_and_swallows_venue_failure() {
     h.venue().base().on(
         "error",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -221,6 +222,7 @@ fn real_symbol_cancel_emits_its_outer_error_and_rethrows_for_classic_families() 
         h.venue().base().on(
             "error",
             Rc::new(move |_, value| {
+                let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
                 observed.borrow_mut().push(value.clone());
                 Ok(())
             }),
@@ -263,6 +265,7 @@ fn real_inverse_symbol_cancel_preserves_the_inner_swallowed_refusal() {
     h.venue().base().on(
         "error",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),

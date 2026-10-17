@@ -89,7 +89,7 @@ fn private_parent_hook_errors_abort_at_the_original_call_and_preserve_committed_
             }),
         );
         let mut original = ExchangeError::new("private parent hook failure");
-        original.code = Some(json!(919));
+        original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(919)));
         original.origin = Some(ExchangeErrorOrigin::new(HookOrigin(919)));
         let rejected = Rc::new(RefCell::new(Vec::<(String, f64)>::new()));
         let seen = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -163,7 +163,10 @@ fn private_parent_hook_errors_abort_at_the_original_call_and_preserve_committed_
         );
         assert_eq!(error.name, "Error");
         assert_eq!(error.message, "private parent hook failure");
-        assert_eq!(error.code.as_ref().unwrap().as_u64(), Some(919));
+        assert_eq!(
+            observed_error_code(&error.code).as_ref().unwrap().as_u64(),
+            Some(919)
+        );
         assert_eq!(
             store.market_reads.get(),
             2,
@@ -311,4 +314,17 @@ fn private_parent_hook_errors_abort_at_the_original_call_and_preserve_committed_
         assert_eq!(row["later"], if kind == "order" { 3 } else { 0 });
         assert_eq!(row["error"]["code"], 919);
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

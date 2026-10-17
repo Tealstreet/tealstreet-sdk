@@ -404,7 +404,10 @@ impl PrivateEventHost for Host {
         Ok(())
     }
     fn emit_fill(&self, payload: Value) -> Result<(), ExchangeError> {
-        self.base().emit("fill", payload)
+        self.base().emit(
+            "fill",
+            safe_cex_exchange::js_runtime::value::from_json(&payload),
+        )
     }
     fn report_exception(&self, e: &ExchangeError) {
         self.report(e)

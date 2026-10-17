@@ -62,7 +62,9 @@ fn number_is(v: EventValue, n: f64, label: &str) {
 fn error() -> Failure {
     let mut e = ExchangeError::new("session fixture");
     e.name = "RangeError".into();
-    e.code = Some(json!(-1000));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        -1000
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"session detail"}}));
     Rc::new(e)
 }
@@ -72,7 +74,7 @@ fn assert_error(r: &Result<(), Failure>, wanted: bool, e: &Failure, label: &str)
         assert!(Rc::ptr_eq(x, e), "{label}: original native error identity");
         assert_eq!(x.name, "RangeError");
         assert_eq!(x.message, "session fixture");
-        assert_eq!(x.code, Some(json!(-1000)));
+        assert_eq!(observed_error_code(&x.code), Some(json!(-1000)));
         assert_eq!(
             x.response,
             Some(json!({"status":503,"data":{"msg":"session detail"}})),
@@ -1329,4 +1331,17 @@ fn confirmed_mode_cases() {
         cases("mode", 8).iter().map(|c| mode_case(c)).collect(),
         8,
     )
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

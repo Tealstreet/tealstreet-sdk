@@ -18,3 +18,25 @@ assert(received[0].data.map instanceof Map);assert(Number.isNaN(received[0].data
 assert(received[0].data.set instanceof Set);assert(received[0].data.set.has(clone));
 assert.throws(()=>wasm.post_worker_data(()=>{throw new TypeError('post rejected');}),/post rejected/);
 console.log('WORKER-DATA actual WASM materialization + native structuredClone: numeric bits, undefined, UTF16, proto property, aliases/cycles, Map/Set and host failure PASS');
+let event, eventClone;
+wasm.post_worker_error_data(value => { event=value; eventClone=structuredClone(value); });
+const nativeError=event.data[1].sentryData.error, clonedError=eventClone.data[1].sentryData.error;
+assert(nativeError instanceof Error, 'WORKER-EVENT native Error identity before post');
+assert.equal(nativeError.name,'AxiosError'); assert.equal(nativeError.message,'retained event error');
+assert.equal(nativeError.code,Infinity); assert.equal(nativeError.stack,'original event stack\n    at source-event');
+assert(clonedError instanceof Error, 'WORKER-EVENT Error survives structured clone');
+assert.equal(clonedError.name,'Error'); assert.equal(clonedError.message,nativeError.message);
+assert.equal(clonedError.stack,nativeError.stack); assert(!Object.hasOwn(clonedError,'code'));
+const typedError=event.data[1].sentryData.typedError, typedClone=eventClone.data[1].sentryData.typedError;
+const sourceTyped=new TypeError('\ud800typed event'); sourceTyped.stack='original typed stack';
+const sourceClone=structuredClone(sourceTyped);
+assert(typedError instanceof TypeError, 'WORKER-EVENT standard Error prototype before post');
+assert.equal(Object.hasOwn(typedError,'name'),Object.hasOwn(sourceTyped,'name'));
+assert.equal(Object.getOwnPropertyDescriptor(typedError,'message').enumerable,
+ Object.getOwnPropertyDescriptor(sourceTyped,'message').enumerable);
+for(const [actual,expected] of [[typedError,sourceTyped],[typedClone,sourceClone]]) {
+ assert(actual instanceof TypeError, 'WORKER-EVENT TypeError survives structured clone');
+ assert.equal(actual.name,expected.name); assert.equal(actual.message,expected.message);
+ assert.equal(actual.stack,expected.stack);
+}
+console.log('WORKER-EVENT actual WASM Error identity/stack and native structuredClone PASS');

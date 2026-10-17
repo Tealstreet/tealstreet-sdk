@@ -55,6 +55,7 @@ fn connected(name: ExchangeName) -> (Harness, Rc<Socket>, Rc<RefCell<Vec<Value>>
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -192,6 +193,10 @@ fn real_private_write_timeout_emits_forced_toast_once_until_recovery() {
         h.venue().base().on_args(
             "warning",
             Rc::new(move |_, args| {
+                let args: Vec<serde_json::Value> = args
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 seen.borrow_mut().push(args.to_vec());
                 Ok(())
             }),
@@ -313,9 +318,9 @@ fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str)
             "log",
             Rc::new(move |_, message| {
                 if fault == "log"
-                    && message
-                        .as_str()
-                        .is_some_and(|m| m.contains("Coinbase private WS is not receiving"))
+                    && message.as_str().is_some_and(|m| {
+                        String::from_utf16_lossy(m).contains("Coinbase private WS is not receiving")
+                    })
                 {
                     Err(log_error.clone())
                 } else {
@@ -368,10 +373,10 @@ fn real_auth_failure_log_callback_reaches_socket_host() {
         h.venue().base().on(
             "log",
             Rc::new(move |_, message| {
-                if message
-                    .as_str()
-                    .is_some_and(|m| m.contains("Coinbase private WS authentication failed"))
-                {
+                if message.as_str().is_some_and(|m| {
+                    String::from_utf16_lossy(m)
+                        .contains("Coinbase private WS authentication failed")
+                }) {
                     Err(injected.clone())
                 } else {
                     Ok(())

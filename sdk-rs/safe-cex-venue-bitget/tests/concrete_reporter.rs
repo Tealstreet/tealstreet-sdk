@@ -68,7 +68,7 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
     marker.name = "ReporterMarkerError".into();
     marker.is_axios_error = true;
     marker.request = Some(json!({"requestMarker":73}));
-    marker.code = Some(json!(79));
+    marker.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(79)));
     marker.response = Some(json!({"status":429,"data":{"code":71}}));
     marker.context = Some(json!({"marker":"native-listener"}));
     let expected_metadata = marker.metadata.clone();
@@ -79,6 +79,7 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
     base.on(
         "error",
         Rc::new(move |event, payload| {
+            let payload = safe_cex_exchange::js_runtime::value::to_json(payload).unwrap();
             assert_eq!(event, "error", "concrete reporter event");
             assert_eq!(
                 payload, "Exchange Error: page failure",

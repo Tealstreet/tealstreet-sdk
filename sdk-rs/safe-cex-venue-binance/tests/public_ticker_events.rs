@@ -402,7 +402,9 @@ fn check(lane: &str) {
         let current = Cell::new(10);
         let mut error = ExchangeError::new("ticker fixture");
         error.name = "RangeError".into();
-        error.code = Some(json!("fixture-code"));
+        error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "fixture-code"
+        )));
         let error = Rc::new(error);
         let capture = || {
             capture_count.set(capture_count.get() + 1);
@@ -681,7 +683,7 @@ fn check(lane: &str) {
                     );
                     assert_eq!(e.name, "RangeError");
                     assert_eq!(e.message, "ticker fixture");
-                    assert_eq!(e.code, Some(json!("fixture-code")));
+                    assert_eq!(observed_error_code(&e.code), Some(json!("fixture-code")));
                 } else {
                     assert!(generated_failure);
                     assert_eq!(e.name, "TypeError");
@@ -775,4 +777,17 @@ fn spot_ticker() {
 #[ignore = "requires configured local TypeScript"]
 fn spot_book() {
     check("spot_book");
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

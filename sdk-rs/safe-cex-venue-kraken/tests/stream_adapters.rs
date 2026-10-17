@@ -161,7 +161,7 @@ impl Host {
     fn failure(&self) -> ExchangeError {
         let mut error = ExchangeError::new("stream failure");
         error.name = "StreamError".into();
-        error.metadata.code = Some(Value::String("original".into()));
+        error.metadata.code = Some(safe_cex_exchange::js_runtime::value::Js::str("original"));
         self.pointer.set((&*error.metadata as *const _) as usize);
         error
     }
@@ -364,7 +364,9 @@ fn compare(family: &str) {
                         "STREAM native original error identity"
                     );
                     if original {
-                        assert_eq!(error.metadata.code.as_ref().unwrap(), "original")
+                        assert!(error.metadata.code.as_ref().unwrap().strict_equals(
+                            &safe_cex_exchange::js_runtime::value::Js::str("original")
+                        ))
                     }
                 }
             }
