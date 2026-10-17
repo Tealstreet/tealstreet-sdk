@@ -1352,7 +1352,7 @@ impl BaseWebSocket {
                     }
                     match event {
                         Ok(WsEvent::Open) => {
-                            owner.dispatch_open(generation);
+                            owner.dispatch_open(generation).await;
                         }
                         Ok(WsEvent::Message(frame)) => {
                             owner.direct_fallback.borrow_mut().on_message();
@@ -1529,7 +1529,7 @@ impl BaseWebSocket {
                             Some(Ok(RelayEvent::Open)) => {
                                 opened_at = Some(socket.now());
                                 socket.state.borrow_mut().relay_open = true;
-                                socket.dispatch_open(generation);
+                                socket.dispatch_open(generation).await;
                             }
                             Some(Ok(RelayEvent::Message(frame))) => {
                                 socket.direct_fallback.borrow_mut().on_message();
@@ -2438,10 +2438,10 @@ impl BaseWebSocket {
         }
         operation
     }
-    fn dispatch_open(self: &Rc<Self>, generation: u64) {
+    async fn dispatch_open(self: &Rc<Self>, generation: u64) {
         self.track_connected();
         let weak = Rc::downgrade(self);
-        self.spawn_owned(Box::pin(async move {
+        let mut opening = Box::pin(async move {
             let Some(socket) = weak.upgrade() else {
                 return;
             };
@@ -2475,7 +2475,13 @@ impl BaseWebSocket {
             {
                 socket.report_callback_result(socket.handle_web_socket_error(&error.to_string()));
             }
-        }));
+        });
+        let completed =
+            std::future::poll_fn(|cx| std::task::Poll::Ready(opening.as_mut().poll(cx).is_ready()))
+                .await;
+        if !completed {
+            self.spawn_owned(opening);
+        }
     }
     fn cancel(&self, timer: Timer) {
         let task = {
@@ -3774,7 +3780,7 @@ mod tests {
         let weak = Rc::downgrade(&socket);
         protocol.pending_open.set(true);
         let generation = socket.state.borrow().generation;
-        socket.dispatch_open(generation);
+        run(socket.dispatch_open(generation));
         runtime.pump();
         assert_eq!(socket.owned_tasks.len(), 1);
         socket.dispose();

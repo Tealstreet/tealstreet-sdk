@@ -2427,15 +2427,18 @@
     {
       "owner": "src/websocket.rs::BaseWebSocket::dispatch_open",
       "boundaries": [
-        "owned-or-host-spawn",
+        "async-function",
         "async-block",
         "await",
-        "poll-fn"
+        "poll-fn",
+        "await",
+        "poll-fn",
+        "owned-or-host-spawn"
       ],
-      "producer_sha256": "964a2062d138c9eec18fb0da2617879228a745cd12f76336c304f46f160174bf",
+      "producer_sha256": "7d65e8f3c8ad38b60ad340d7ed8127d8e41d7087498b8da2cc14344d1591b710",
       "classification": "delegated",
       "delegate": "src/websocket.rs::BaseWebSocket::spawn_owned_kind",
-      "reason": "dispatch_open uses the existing socket-owned operation; TASK cancellation/registration remains with spawn_owned_kind, never a venue-local handle."
+      "reason": "dispatch_open uses the existing socket-owned operation; TASK cancellation/registration remains with spawn_owned_kind, never a venue-local handle. The receive task polls the open callback once with its real waker before reading another event; that poll always returns Ready to dispatch, while a pending callback moves into spawn_owned. There is no new registration or detached callback path."
     },
     {
       "owner": "src/websocket.rs::BaseWebSocket::on_open",
@@ -2455,9 +2458,10 @@
         "await",
         "owned-or-host-spawn",
         "async-block",
+        "await",
         "await"
       ],
-      "producer_sha256": "3515cefe9652785a7d53e1f57731b65d5ff4e7b6424a54ebba14ace125b6f48a",
+      "producer_sha256": "d92b59d3ea1734718e79493a95f94bd0645b781ad1c5e372b948fb2ac84b5f7a",
       "classification": "delegated",
       "delegate": "WsRuntime::dial / BaseWebSocket::start_managed_relay / BaseWebSocket::spawn_owned_kind",
       "reason": "The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged."
@@ -2505,7 +2509,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "006e40bca6d1e2a6e69be765feecb520126383e4c37d0449ae855d7e1d5b78bb"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2550,7 +2554,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "006e40bca6d1e2a6e69be765feecb520126383e4c37d0449ae855d7e1d5b78bb"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2575,9 +2579,10 @@
         "await",
         "await",
         "poll-fn",
+        "await",
         "await"
       ],
-      "producer_sha256": "6803042314ca324403f5a2cc5f3d649178942d4bf85cccfeaef4cf7201ffb347",
+      "producer_sha256": "6d23cc4aecd250afaa47057e02e8f24a0cdbbe18ae936c6779a6339ab7ba34f7",
       "classification": "delegated",
       "delegate": "src/websocket.rs::BaseWebSocket::spawn_owned_kind",
       "reason": "Managed relay work remains owned by SocketTaskGuard/OwnedTasks. The merged close-event path calls synchronous transport_close after the state mutation borrow ends; no new await, registration or guard is introduced."
@@ -2654,7 +2659,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "006e40bca6d1e2a6e69be765feecb520126383e4c37d0449ae855d7e1d5b78bb"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2698,7 +2703,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "006e40bca6d1e2a6e69be765feecb520126383e4c37d0449ae855d7e1d5b78bb"
         }
       ],
       "guards": [
