@@ -520,8 +520,15 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(snapshot::fetch_and_set_private_snapshot_helper(
             h(rt),
             rt.this.clone(),
-            arg(&a, 0).truthy(),
+            arg(&a, 0).is_undefined() || arg(&a, 0).truthy(),
         ))
+    });
+    method(&this, rt, "waitForRemoteSigner", |rt, _| {
+        let rt = rt.clone();
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let venue = venue(&rt)?;
+            Ok(Js::Bool(venue.base.wait_for_remote_signer().await?))
+        })))
     });
     method(&this, rt, "tick", |rt, _| {
         Ok(snapshot::tick(h(rt), rt.this.clone()))

@@ -863,8 +863,8 @@ fn canceled_prefix_effects_precede_later_order_faults() {
         }
         assert_eq!(
             runtime.now_calls.get(),
-            parent_clocks,
-            "{marker} native parent virtual clocks"
+            0,
+            "{marker} parent virtual clock must not read the raw runtime"
         );
         assert_eq!(
             host.virtual_calls.get(),

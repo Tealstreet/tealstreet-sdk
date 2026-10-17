@@ -359,3 +359,11 @@ undefined properties and native scalar numbers. Opaque info retains its JSON
 boundary. REST order reconciliation must clear an undefined mapped timeInForce
 once; repeating the same snapshot must not notify or advance the order revision.
 The production binding regression covers this path, including cloid restoration.
+
+The realm's imported `virtualClock.getCurrentTimeMs` reads the shared synced
+singleton for both family constructors, matching TS. Realm `Date.now`, nonce
+helpers that explicitly use it, and monotonic pacing keep their runtime clocks.
+Registry `native_host_hyperliquid_clock` performs a real signed leverage update,
+checks the transmitted action/signature, and requires its nonce to reflect a
+90-second server correction. The binding schedule-cancel fixture uses a deadline
+relative to that synced clock; the fractional Date nonce regression stays raw.

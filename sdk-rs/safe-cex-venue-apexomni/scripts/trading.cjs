@@ -27,7 +27,7 @@ new vm.Script(`(function(require,exports){${mathCode}\n})`).runInNewContext()(na
 const sourceModel=load(path.join(root,'utils/createPositionId.ts'));
 const context={exports:{},...enums,...tables,BaseExchange:Base,ApexOmniPublicWebsocket:PublicSocket,ApexOmniPrivateWebsocket:PrivateSocket,TextEncoder,
   rateLimit:(api,opts)=>{record('rateLimit',opts.maxRPS);return api;},createAPI:(opts,parent)=>{record('api:create');return makeApi();},patternClientOrderIdRule:(...args)=>args,
-  virtualClock:{getCurrentTimeMs:()=>clock},Date:class extends Date{static now(){return clock;}},v,
+  virtualClock:{getCurrentTimeMs:()=>Number(process.env.SAFE_CEX_VIRTUAL_TIME ?? clock)},Date:class extends Date{static now(){return clock;}},v,
   createPositionId:sourceModel.createPositionId,...mathModule.exports,
   uniqBy:dependency('lodash/uniqBy'),chunk:dependency('lodash/chunk'),forEachSeries:dependency('p-iteration').forEachSeries,sleep:async ms=>{record('sleep',ms);},
   omitUndefined:load(path.join(root,'utils/omitUndefined.ts')).omitUndefined,

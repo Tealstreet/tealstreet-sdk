@@ -538,6 +538,9 @@ impl Exchange for BybitExchange {
         let a = args!(opt_js(symbols));
         self.invoke("fetchPositions", a)
     }
+    fn fetch_and_set_private_snapshot(&self, _tries: u32) -> ExchangeFuture<'_, ()> {
+        self.invoke_unit("fetchAndSetPrivateSnapshot", vec![])
+    }
     fn fetch_orders(&self, _symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
         // ts: BybitExchange.fetchOrders takes no argument.
         self.invoke("fetchOrders", vec![])

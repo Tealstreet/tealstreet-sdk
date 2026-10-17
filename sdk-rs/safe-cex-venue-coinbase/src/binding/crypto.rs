@@ -59,7 +59,7 @@ impl CdpSigningHost for CryptoHost {
         Ok(Promise::resolved(result))
     }
     fn current_time_ms(&self) -> Result<f64, PortfolioFailure> {
-        Ok(self.runtime.now_ms())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn uuid(&self) -> Result<String, PortfolioFailure> {
         Ok(self.runtime.unique_id())
@@ -228,6 +228,9 @@ mod tests {
                 "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
                 STANDARD.encode(bytes)
             );
+            let before = (safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+                / 1000.0)
+                .floor();
             let token = drive(
                 runtime.as_ref(),
                 cdp_signing::sign(
@@ -239,11 +242,29 @@ mod tests {
             )
             .unwrap();
             let (payload, signature) = token.rsplit_once('.').unwrap();
+            let after = (safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+                / 1000.0)
+                .floor();
+            let encoding = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+            let (header, body) = payload.split_once('.').unwrap();
+            let claims: Value = serde_json::from_slice(&encoding.decode(body).unwrap()).unwrap();
+            let nbf = claims["nbf"].as_f64().unwrap();
+            assert!(
+                (before..=after).contains(&nbf),
+                "{label} synced clock JWT nbf"
+            );
             let expected: Vec<u8> = serde_json::from_value(case["payload"].clone()).unwrap();
+            let expected = String::from_utf8(expected).unwrap();
+            let (source_header, source_body) = expected.split_once('.').unwrap();
+            let mut source_claims: Value =
+                serde_json::from_slice(&encoding.decode(source_body).unwrap()).unwrap();
+            source_claims["nbf"] = json!(nbf as u64);
+            source_claims["exp"] = json!(nbf as u64 + 120);
+            assert_eq!(header, source_header, "{label} exact source JWT header");
             assert_eq!(
-                payload.as_bytes(),
-                expected,
-                "{label} exact source JWT preimage"
+                encoding.decode(body).unwrap(),
+                serde_json::to_vec(&source_claims).unwrap(),
+                "{label} exact source claims with synced time"
             );
             let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .decode(signature)
