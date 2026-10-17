@@ -1012,9 +1012,9 @@ fn private_account_frame_for_deployment(name: ExchangeName) {
     socket.events.borrow_mut().push_back(WsEvent::Message(SocketFrame::Text(json!({
         "channel":"account_all:42","type":"update/account_all",
         "orders":{"1":[order]},"positions":{"1":[position]},
-        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get()}]},
+        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get(),"ignored":"SURROGATE_FIELD"}]},
         "account":{"collateral":"1000"}
-    }).to_string())));
+    }).to_string().replace("\"SURROGATE_FIELD\"", "\"\\ud800\""))));
     h.runtime.pump();
     assert!(
         h.store.orders().iter().any(|order| order.id == "888"),
