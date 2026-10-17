@@ -76,6 +76,7 @@ struct Wire {
     requests: RefCell<Vec<Value>>,
     faults: RefCell<VecDeque<(String, u16, Value)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
+    candle_response: RefCell<Option<Value>>,
 }
 fn instrument() -> Value {
     json!({"type":"FOREX","symbol":"BTCUSD","version":1,"description":"Bitcoin","priceIncrement":0.1,"pipSize":0.01,"currency":"USD","lotSize":1,"multiplier":1,"firstCurrency":"BTC"})
@@ -131,7 +132,8 @@ impl JsHttpHost for Wire {
                 }
                 ("GET", "accounts/default:A/portfolio") => portfolio(),
                 ("POST", "marketdata") => {
-                    json!({"events":[{"symbol":"BTCUSD","type":"Quote","bid":99,"ask":101,"time":"2026-01-01T00:00:00Z"}]})
+                    self.candle_response.borrow().clone().unwrap_or_else(||
+                        json!({"events":[{"symbol":"BTCUSD","type":"Quote","bid":99,"ask":101,"time":"2026-01-01T00:00:00Z"}]}))
                 }
                 ("POST", "accounts/default:A/orders") => json!({"orderId":"placed"}),
                 ("DELETE", path) if path.starts_with("accounts/default:A/orders/") => json!({}),
@@ -990,4 +992,200 @@ fn generated_order_code_strips_nanoid_separators() {
         "production UUID strips both nanoid separators before prefixing"
     );
     assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
+}
+
+#[test]
+fn real_trait_candles_reach_signed_post_and_preserve_both_rows() {
+    let f = fixture();
+    f.fetch_markets();
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[
+        {"symbol":"BTCUSD","type":"Candle","candleType":"m","open":11,"high":15,"low":10,"close":14,"volume":7,"time":"2024-01-01T00:00:00Z"},
+        {"symbol":"BTCUSD","type":"Candle","candleType":"m","open":21,"high":25,"low":20,"close":24,"volume":9,"time":"2024-01-01T00:01:00Z"}
+    ]}));
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let rows=f.run(venue.fetch_ohlcv(serde_json::from_value(json!({"symbol":"BTCUSD","interval":"1m","from":1704067200123.0,"to":1704067260456.0,"limit":1})).unwrap())).unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "source ignores limit and retains all returned candles"
+    );
+    assert_eq!(
+        (
+            rows[0].timestamp,
+            rows[0].open,
+            rows[0].high,
+            rows[0].low,
+            rows[0].close,
+            rows[0].volume
+        ),
+        (1704067200.0, 11.0, 15.0, 10.0, 14.0, 7.0)
+    );
+    assert_eq!(
+        (rows[1].timestamp, rows[1].close, rows[1].volume),
+        (1704067260.0, 24.0, 9.0)
+    );
+    let request = f.request("POST", "marketdata");
+    let body: Value =
+        serde_json::from_str(request["data"].as_str().expect("encoded candle JSON")).unwrap();
+    assert_eq!(
+        body,
+        json!({"eventTypes":[{"type":"Candle","candleType":"m","fromTime":"2024-01-01T00:00:00.123Z","toTime":"2024-01-01T00:01:00.456Z"}],"symbols":["BTCUSD"],"account":"default:A"})
+    );
+    assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_candles_propagate_original_http_failure() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "marketdata".into(),
+        400,
+        json!({"msg":"candle refusal"}),
+    ));
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let error = f
+        .run(venue.fetch_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSD","interval":"1m"})).unwrap(),
+        ))
+        .expect_err("source rethrows the candle refusal");
+    assert_eq!(
+        error.response.as_ref().unwrap()["status"].as_f64(),
+        Some(400.0)
+    );
+    assert_eq!(
+        error.response.as_ref().unwrap()["data"]["msg"],
+        "candle refusal"
+    );
+    assert_eq!(error.config.as_ref().unwrap()["url"], "marketdata");
+    f.exchange.dispose().unwrap();
+}
+
+fn advance_real_poll(f: &Fixture) {
+    for _ in 0..24 {
+        f.runtime.advance(f.runtime.now.get() + 500);
+    }
+}
+
+#[test]
+fn real_trait_book_receives_polling_ticks_then_cleanup_removes_handler() {
+    let f = fixture();
+    let seen = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let sink = seen.clone();
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let cleanup = venue
+        .listen_order_book(
+            "BTCUSD".into(),
+            Rc::new(move |book| sink.borrow_mut().push(book)),
+        )
+        .unwrap();
+    f.run(venue.start()).unwrap();
+    advance_real_poll(&f);
+    assert!(!seen.borrow().is_empty(), "actual quote loop delivers book");
+    let book = seen.borrow().last().unwrap().clone();
+    assert_eq!((book.bids.len(), book.asks.len()), (2, 2));
+    assert_eq!(
+        (
+            book.bids[0].price,
+            book.bids[1].price,
+            book.asks[0].price,
+            book.asks[1].price
+        ),
+        (99.0, 99.0, 101.0, 101.0)
+    );
+    assert_eq!((book.bids[0].amount, book.bids[0].total), (1.0, 1.0));
+    cleanup().unwrap();
+    let count = seen.borrow().len();
+    advance_real_poll(&f);
+    assert_eq!(
+        seen.borrow().len(),
+        count,
+        "cleanup removes the source polling parser"
+    );
+    assert!(
+        f.exchange
+            .socket()
+            .unwrap()
+            .handlers("poll_book.BTCUSD")
+            .unwrap()
+            .borrow()
+            .is_empty()
+    );
+    f.exchange.dispose().unwrap();
+    assert!(f.runtime.exceptions.borrow().is_empty());
+}
+
+#[test]
+fn real_trait_candle_listener_receives_polling_ticks_then_cleans_up() {
+    let f = fixture();
+    f.runtime.now.set(61_000);
+    let seen = Rc::new(RefCell::new(Vec::<Candle>::new()));
+    let sink = seen.clone();
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let cleanup = venue
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSD","interval":"1m"})).unwrap(),
+            Rc::new(move |row| sink.borrow_mut().push(row)),
+        )
+        .unwrap();
+    f.run(venue.start()).unwrap();
+    advance_real_poll(&f);
+    assert!(
+        !seen.borrow().is_empty(),
+        "actual quote loop delivers candle"
+    );
+    let row = seen.borrow().last().unwrap().clone();
+    assert_eq!(
+        (row.open, row.high, row.low, row.close, row.volume),
+        (99.0, 99.0, 99.0, 99.0, 0.0)
+    );
+    assert_eq!(
+        row.timestamp, 60.0,
+        "clock-aligned minute from real polling host"
+    );
+    cleanup().unwrap();
+    let count = seen.borrow().len();
+    advance_real_poll(&f);
+    assert_eq!(
+        seen.borrow().len(),
+        count,
+        "cleanup removes source candle parser"
+    );
+    assert!(
+        f.exchange
+            .socket()
+            .unwrap()
+            .handlers("poll_kline.BTCUSD")
+            .unwrap()
+            .borrow()
+            .is_empty()
+    );
+    f.exchange.dispose().unwrap();
+    assert!(f.runtime.exceptions.borrow().is_empty());
+}
+
+#[test]
+fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
+    let f = fixture();
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let error = f
+        .run(
+            venue.fetch_ohlcv(
+                serde_json::from_value(
+                    json!({"symbol":"BTCUSD","interval":"1m","from":8640000000000001.0}),
+                )
+                .unwrap(),
+            ),
+        )
+        .expect_err("source Date.toISOString refuses outside TimeClip");
+    assert_eq!(error.name, "RangeError");
+    assert_eq!(error.message, "Invalid time value");
+    assert!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .all(|request| request["url"] != "marketdata")
+    );
+    f.exchange.dispose().unwrap();
 }
