@@ -137,7 +137,7 @@ impl Exchange for Owner {
 struct Host {
     owner: std::rc::Weak<Owner>,
     trace: Rc<RefCell<Vec<String>>>,
-    responses: RefCell<Vec<Value>>,
+    responses: RefCell<Vec<safe_cex_types::retained_json::RetainedJsonInput>>,
     failures: Cell<usize>,
 }
 impl HttpHost for Host {
@@ -152,8 +152,10 @@ impl HttpHost for Host {
     }
     fn note_response(&self, response: &RestResponse, request: &RestRequest) {
         self.trace.borrow_mut().push("common-response".into());
-        let value = response.body.clone().into_data().into_value().unwrap();
-        self.responses.borrow_mut().push(value.clone());
+        self.responses
+            .borrow_mut()
+            .push(response.body.clone().into_data());
+        let value = safe_cex_exchange::runtime::response_json_view(&response.body);
         if let Some(owner) = self.owner.upgrade() {
             owner.base.note_http_response(
                 &json!({"status":response.status,"data":value}),
@@ -873,25 +875,34 @@ fn transform_cases() -> Vec<Value> {
         );
         let observation = if id == "native-lone-surrogate" {
             let error = result.unwrap_err();
+            let response = error
+                .response
+                .as_ref()
+                .expect("factory_transform_native_representation_response");
+            assert_eq!(
+                response.body.clone().into_data(),
+                safe_cex_types::retained_json::RetainedJsonInput::Text(vec![0xd800]),
+                "factory_transform_native_representation_response_units",
+            );
+            assert_eq!(
+                f.host.responses.borrow()[0],
+                response.body.clone().into_data()
+            );
             assert!(
                 error
                     .message
-                    .contains("Axios response representation refused"),
+                    .contains("Bybit response representation refused"),
                 "factory_transform_native_representation_refusal"
-            );
-            assert!(
-                error.response.is_some(),
-                "factory_transform_native_representation_response"
             );
             assert_eq!(
                 f.host.responses.borrow().len(),
-                0,
-                "factory_transform_native_refusal_before_success_hook"
+                1,
+                "factory_transform_native_refusal_after_native_response_hook"
             );
             assert_eq!(
                 f.host.failures.get(),
-                1,
-                "factory_transform_native_representation_failure_hook"
+                0,
+                "factory_transform_native_consumer_refusal_is_not_a_transport_failure"
             );
             json!({"kind":"representation-refusal"})
         } else if id == "raw-own-number-includes-throws" {
@@ -931,7 +942,7 @@ fn transform_cases() -> Vec<Value> {
             );
             assert_eq!(
                 f.host.responses.borrow()[0],
-                value,
+                execution.response.body.clone().into_data(),
                 "factory_transform_native_before_common_hook {id}"
             );
             let expected = match id {
@@ -1457,12 +1468,12 @@ fn retry_condition_cases() -> Vec<Value> {
                     Some(&json!({"retainedCause":71})),
                     "factory_condition_native_original_cause {id}"
                 );
-                assert_eq!(
-                    error.response.unwrap().body,
-                    RestResponseBody::Transformed(
-                        safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap()
-                    ),
-                    "factory_condition_native_original_payload {id}"
+                let response = error.response.unwrap();
+                assert!(matches!(response.body, RestResponseBody::Transformed(_)));
+                assert_native_json(
+                    &response.body.into_data(),
+                    &body,
+                    &format!("factory_condition_native_original_payload {id}"),
                 );
                 assert!(
                     f.owner.accesses.borrow().is_empty(),

@@ -835,3 +835,12 @@ Submission checks unknown outcome only for one payload carrying a caller client 
 The real HTTP regression sends a rejected first split lot with a non-coercible
 error code and verifies later lots still place; a single order without a caller
 ID also skips classification, while a caller-ID control still reaches it.
+
+The retained HTTP body carries lone UTF-16 surrogate units through the common
+response hook. The legacy api_factory typed response view still refuses those
+strings visibly under the strict-output decision; its RestFailure retains the
+original response and effective request. This is a post-response consumer
+refusal, not a network failure. The native factory observer records canonical
+retained input, and its compiled control fails if the original response is lost.
+Numeric fixture comparisons check exact binary64 bits and source JSON spelling,
+rather than serde number lexemes.

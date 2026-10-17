@@ -221,7 +221,7 @@ pub fn collect_native() -> Vec<Value> {
                     "factory_params_native_no_failure_hook {carrier}/{id}"
                 );
                 assert_eq!(f.host.responses.borrow().len(), 1);
-                assert_json_numbers(
+                assert_native_json(
                     &f.host.responses.borrow()[0],
                     &json!({"retCode":0,"retMsg":"OK"}),
                     &format!("factory_params_native_common_response {carrier}/{id}"),

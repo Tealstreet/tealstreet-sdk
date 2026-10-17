@@ -410,8 +410,14 @@ impl Client {
     ) -> Result<Execution, RestFailure> {
         let request = &execution.receipt.config;
         let response = &mut execution.receipt.response;
-        let mut data = response_data(&response.body)
-            .map_err(|error| RestFailure::pre_transmit(error.to_string(), request.clone()))?;
+        let mut data = response_data(&response.body).map_err(|error| RestFailure {
+            code: None,
+            transport_error: None,
+            message: format!("Bybit response representation refused: {error}"),
+            response: Some(Box::new(response.clone())),
+            request: Box::new(request.clone()),
+            context: None,
+        })?;
         let meta = get_bybit_response_meta(&data);
         if !meta.has_explicit_status && response.status >= 400 {
             let blocked = crate::api_request::blocked_by_cdn(&data);
