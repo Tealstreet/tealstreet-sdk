@@ -21,7 +21,7 @@ satisfy this corpus.
 
 | Venue path | TS source | Numeric policy from source census | Native witness |
 | --- | --- | --- | --- |
-| ApexOmni | apexomni/apexomni.ws-public.ts | Coercion with parseFloat | Pending; prioritize missing ticker binding corpus |
+| ApexOmni | apexomni/apexomni.ws-public.ts | Truthy-gated parseFloat; missing mark falls back to index | Native proven: safe-cex-venue-apexomni/tests/binding.rs::production_ticker_coercion_matches_constructed_typescript; 64 three-row frames |
 | AsterDEX | asterdex/asterdex.ws-public.ts | Coercion except copied truthy fundingTime; decision-3 row refusal | Pending complete coercion corpus; row policy #807 |
 | Backpack | backpack/backpack.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Binance futures | binance/binance.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
@@ -51,5 +51,5 @@ satisfy this corpus.
 | Paradex | paradex/paradex.ws-public.ts | parseFloat/Number finite handling | Pending complete coercion corpus |
 | Phemex | phemex/phemex.ws-public.ts | Packed ticker numeric parsing/arithmetic | Pending; prioritize missing ticker binding corpus |
 | Polymarket | polymarket/polymarket.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| WEEX | weex/weex.ws-public.ts | toNumber | Pending; prioritize missing ticker binding corpus |
+| WEEX | weex/weex.ws-public.ts | toNumber finite fallback; bounded fractional percentage scaling | Native proven: safe-cex-venue-weex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 96 cases / 288 frames, object and one-element array payloads |
 | WOO | woo/woo.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal | Pending complete coercion corpus; row policy #789/#814 |

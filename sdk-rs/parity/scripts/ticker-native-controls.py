@@ -7,6 +7,8 @@ root = Path(__file__).resolve().parents[3]
 cases = {
     "bitunix": ("sockets.rs", "native_identity", "patch.set_number(*k, *n);", "patch.set_number(*k, if n.is_nan() { 0.0 } else { *n });"),
     "bitrue": ("public_bodies.rs", "exchange_binding", "let last = h.unary_plus(close)?;", "let _original = h.unary_plus(close)?; let last = h.number(0.0);"),
+    "apexomni": ("ws_public.rs", "binding", '("p", "last"),', '("mp", "last"),'),
+    "weex": ("public_feed.rs", "exchange_binding", 'let last = get("c", "last")?;', 'let last = get("m", "mark")?;'),
 }
 selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
