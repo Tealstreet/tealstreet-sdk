@@ -66,7 +66,7 @@ fn base_order(id: String, symbol: String, row: &Map<String, Value>) -> Order {
         amount: 0.0,
         filled: 0.0,
         remaining: 0.0,
-        reduce_only: false,
+        reduce_only: false.into(),
         close: (None).into(),
         info: (Some(Value::Object(row.clone()))).into(),
         time_in_force: (None).into(),
@@ -130,7 +130,7 @@ pub fn map_order(
     order.amount = multiply(size, contract_size);
     order.filled = multiply(filled, contract_size);
     order.remaining = multiply(remaining, contract_size);
-    order.reduce_only = row.get("reduceOnly") == Some(&Value::Bool(true));
+    order.reduce_only = (row.get("reduceOnly") == Some(&Value::Bool(true))).into();
     let time_in_force = lookup(types::TIME_IN_FORCE, row.get("timeInForce"), || {
         OrderTimeInForce::GoodTillCancel
     })?;
@@ -207,7 +207,7 @@ pub fn map_order(
             };
             attached.r#type = (kind).into();
             attached.price = (number(Some(value))?).into();
-            attached.reduce_only = true;
+            attached.reduce_only = true.into();
             orders.push(attached);
         }
     }

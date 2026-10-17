@@ -2587,7 +2587,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"id\":decoded.id,\"amountBits\":decoded.amount.to_bits().to_string(),\"priceBits\":decoded.price.value().map(|value| value.to_bits().to_string()),\"priceAbsent\":decoded.price.is_absent(),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"statusOpen\":matches!(decoded.status,crate::ModelField::Value(crate::OrderStatus::Open))}), Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"id\":decoded.id,\"amountBits\":decoded.amount.to_bits().to_string(),\"priceBits\":decoded.price.value().map(|value| value.to_bits().to_string()),\"priceAbsent\":decoded.price.is_absent(),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"statusOpen\":matches!(decoded.status,crate::ModelField::Value(crate::OrderStatus::Open))}), Err(_) => serde_json::json!({\"ok\": false}) } }",
       "nativeFields": [
         "id",
         "amountBits",
@@ -2596,7 +2596,10 @@
         "typeAbsent",
         "typeLimit",
         "sideBuy",
-        "statusOpen"
+        "statusOpen",
+        "reduceOnlyAbsent",
+        "reduceOnlyUndefined",
+        "reduceOnly"
       ],
       "cases": [
         {
@@ -2618,7 +2621,10 @@
             "sideBuy": false,
             "statusOpen": false,
             "amountBits": "4619567317775286272",
-            "priceBits": null
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
           }
         },
         {
@@ -2643,7 +2649,10 @@
             "sideBuy": false,
             "statusOpen": false,
             "amountBits": "4619567317775286272",
-            "priceBits": null
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
           }
         },
         {
@@ -2669,7 +2678,10 @@
             "sideBuy": true,
             "statusOpen": true,
             "amountBits": "4623507967449235456",
-            "priceBits": "4629489310704336896"
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
           }
         },
         {
@@ -2698,7 +2710,10 @@
             "sideBuy": true,
             "statusOpen": true,
             "amountBits": "4623507967449235456",
-            "priceBits": "4629489310704336896"
+            "priceBits": "4629489310704336896",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
           }
         },
         {
@@ -2752,6 +2767,122 @@
             "remaining": 5,
             "reduceOnly": false,
             "price": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": null
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": true,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false,
+            "reduceOnly": true
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": "true",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": 1,
             "lastUpdate": 1700000000000
           },
           "output": {
@@ -48570,7 +48701,7 @@
   "safe_cex_types::prepared_order::PreparedOrderOpts": {
     "shape": "union",
     "evidence": "Actual prepared amendment decoder and private wire companion; fixed ordinary JSON corpus and independent native field identities, not a public placement or arbitrary generic claim.",
-    "instantiation": "PreparedOrderOpts<String, f64, Option<bool>>",
+    "instantiation": "PreparedOrderOpts<String, f64, crate::ModelField<bool>>",
     "positive": [
       {
         "symbol": "left",
@@ -48693,7 +48824,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnly\":decoded.reduce_only,\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "symbol",
         "amountBits",
@@ -48703,7 +48834,9 @@
         "sideBuy",
         "triggerPrice",
         "reduceOnly",
-        "clientOrderId"
+        "clientOrderId",
+        "reduceOnlyAbsent",
+        "reduceOnlyUndefined"
       ],
       "cases": [
         {
@@ -48721,7 +48854,9 @@
             "sideBuy": false,
             "triggerPrice": null,
             "reduceOnly": null,
-            "clientOrderId": null
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
           }
         },
         {
@@ -48745,7 +48880,9 @@
             "sideBuy": true,
             "triggerPrice": 47.5,
             "reduceOnly": true,
-            "clientOrderId": "client-right"
+            "clientOrderId": "client-right",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
           }
         },
         {
@@ -48793,6 +48930,98 @@
             "symbol": "left",
             "amount": 7,
             "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": false
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": false,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": true
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": true,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": "true"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": 1
           },
           "output": {
             "ok": false
@@ -48844,7 +49073,7 @@
     ],
     "entrypoints": [],
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnly\":decoded.reduce_only,\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnlyAbsent\":decoded.reduce_only.is_absent(),\"reduceOnlyUndefined\":decoded.reduce_only.is_undefined(),\"reduceOnly\":decoded.reduce_only.value().copied(),\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "symbol",
         "amountBits",
@@ -48854,7 +49083,9 @@
         "sideBuy",
         "triggerPrice",
         "reduceOnly",
-        "clientOrderId"
+        "clientOrderId",
+        "reduceOnlyAbsent",
+        "reduceOnlyUndefined"
       ],
       "cases": [
         {
@@ -48872,7 +49103,9 @@
             "sideBuy": false,
             "triggerPrice": null,
             "reduceOnly": null,
-            "clientOrderId": null
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
           }
         },
         {
@@ -48896,7 +49129,9 @@
             "sideBuy": true,
             "triggerPrice": 47.5,
             "reduceOnly": true,
-            "clientOrderId": "client-right"
+            "clientOrderId": "client-right",
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
           }
         },
         {
@@ -48944,6 +49179,98 @@
             "symbol": "left",
             "amount": 7,
             "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": true,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": false
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": false,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": true
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": true,
+            "clientOrderId": null,
+            "reduceOnlyAbsent": false,
+            "reduceOnlyUndefined": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": "true"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "reduceOnly": 1
           },
           "output": {
             "ok": false

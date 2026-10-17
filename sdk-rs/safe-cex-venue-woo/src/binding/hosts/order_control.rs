@@ -317,9 +317,60 @@ fn unit(task: Task<(), Thrown>) -> Task<Js, Thrown> {
     Box::pin(async move { task.await.map(|()| Js::Undefined) })
 }
 
+// The public native Order contract keeps numeric/bool fields strict. Validate
+// each mapped row before fetchOrders can feed either the trait or Store facade.
+// Keep the original Js row so admitted values and property presence are retained.
+fn admit_order_rows(rt: &Rt, rows: Js) -> Result<Js, Thrown> {
+    let rows = rows
+        .array_values()
+        .ok_or_else(|| Thrown::type_error("WOO orders must be an array"))?;
+    let mut admitted = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut refusal = None;
+        for field in ["amount", "filled", "reduceOnly"] {
+            let value = row.get(field)?;
+            let valid = if field == "reduceOnly" {
+                value.is_undefined() || matches!(value, Js::Bool(_))
+            } else {
+                matches!(value, Js::Number(_))
+            };
+            if !valid {
+                refusal = Some(format!(
+                    "WOO order {} refused {field}={value:?}: expected {}",
+                    row.get("id")?.to_display(),
+                    if field == "reduceOnly" {
+                        "boolean or undefined"
+                    } else {
+                        "number"
+                    }
+                ));
+                break;
+            }
+        }
+        if refusal.is_none()
+            && let Err(error) = crate::binding::value::to_typed::<safe_cex_types::Order>(&row)
+        {
+            refusal = Some(format!(
+                "WOO order {} refused: {error:?}; row={row:?}",
+                row.get("id")?.to_display()
+            ));
+        }
+        if let Some(message) = refusal {
+            rt.call_path("emitAndLogError", vec![Js::str(&message)])?;
+        } else {
+            admitted.push(row);
+        }
+    }
+    Ok(Js::array(admitted))
+}
+
 pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
     let member = match name {
-        "fetchOrders" => async_member(rt, name, |h, _| body::fetch_orders(h)),
+        "fetchOrders" => async_member(rt, name, |h, _| {
+            let rt = h.borrow().rt.clone();
+            let task = body::fetch_orders(h);
+            Box::pin(async move { admit_order_rows(&rt, task.await?) })
+        }),
         "fetchLimitOrders" => async_member(rt, name, |h, _| body::fetch_limit_orders(h)),
         "fetchAlgoOrders" => async_member(rt, name, |h, _| body::fetch_algo_orders(h)),
         "cancelOrders" => async_member(rt, name, |h, a| unit(body::cancel_orders(h, arg(&a, 0)))),

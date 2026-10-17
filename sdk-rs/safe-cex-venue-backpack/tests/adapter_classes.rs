@@ -93,7 +93,7 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
         trigger_price: None,
         take_profit: Some(11.0),
         stop_loss: None,
-        reduce_only: false,
+        reduce_only: false.into(),
         time_in_force: None,
         tp_trigger_type: None,
         sl_trigger_type: None,

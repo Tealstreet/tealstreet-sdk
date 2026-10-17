@@ -671,7 +671,7 @@ fn amendment_precision_keeps_amount_execution_and_trigger_axes_distinct() {
     let mut stop = reconciled_order();
     stop.id = "native-stop".into();
     stop.r#type = (safe_cex_types::OrderType::StopLoss).into();
-    stop.reduce_only = true;
+    stop.reduce_only = true.into();
     stop.price = (99.37).into();
     stop.info = (Some(
         json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}),

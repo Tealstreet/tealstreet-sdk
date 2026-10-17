@@ -126,7 +126,7 @@ fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
         amount: order.amount,
         filled: order.filled,
         remaining: order.remaining,
-        reduce_only: order.reduce_only,
+        reduce_only: order.reduce_only.into(),
         close: (None).into(),
         info: (Some(info.clone())).into(),
         time_in_force: typed(order.time_in_force, "timeInForce")?,

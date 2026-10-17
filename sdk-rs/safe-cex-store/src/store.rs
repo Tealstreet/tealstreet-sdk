@@ -498,6 +498,9 @@ fn merge_order(target: &mut Order, incoming: Order) {
     if target.price.is_absent() {
         target.price = old.price;
     }
+    if target.reduce_only.is_absent() {
+        target.reduce_only = old.reduce_only;
+    }
     if target.close.is_absent() {
         target.close = old.close;
     }

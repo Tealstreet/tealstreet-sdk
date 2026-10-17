@@ -45,6 +45,70 @@ impl crate::signing::SigningInput for SignedView {
     }
 }
 
+// Source signing helpers operate on native values before the HTTP JSON boundary.
+fn order_wire_float(r: &mut Realm, value: Value) -> Result<Value, Thrown> {
+    let rounded = r.call_method(&value, "toFixed", &[Value::Number(8.)])?;
+    let parse = r.global_binding("parseFloat")?;
+    let parsed = r.call(&parse, &Value::Undefined, std::slice::from_ref(&rounded))?;
+    let difference = r.binary("-", &parsed, &value)?;
+    if r.to_number(&difference)?.abs() >= 1e-9 {
+        let value = r.to_rust_string(&value)?;
+        return Err(r.error_of("Error", &format!("floatToWire causes rounding: {value}")));
+    }
+    let suffix = r.regexp(r"/\.?0+$/")?;
+    let normalized = r.call_method(&rounded, "replace", &[suffix, Value::str("")])?;
+    Ok(if normalized.strict_equal(&Value::str("-0")) {
+        Value::str("0")
+    } else {
+        normalized
+    })
+}
+fn order_wire_type(r: &mut Realm, order_type: Value) -> Result<Value, Thrown> {
+    if r.get_str(&order_type, "limit")?.truthy() {
+        let limit = r.get_str(&order_type, "limit")?;
+        return Ok(r.object_from(vec![("limit", limit)]));
+    }
+    if r.get_str(&order_type, "trigger")?.truthy() {
+        let trigger = r.get_str(&order_type, "trigger")?;
+        let is_market = r.get_str(&trigger, "isMarket")?;
+        let trigger = r.get_str(&order_type, "trigger")?;
+        let price = r.get_str(&trigger, "triggerPx")?;
+        let price = order_wire_float(r, price)?;
+        let trigger = r.get_str(&order_type, "trigger")?;
+        let tpsl = r.get_str(&trigger, "tpsl")?;
+        let trigger = r.object_from(vec![
+            ("isMarket", is_market),
+            ("triggerPx", price),
+            ("tpsl", tpsl),
+        ]);
+        return Ok(r.object_from(vec![("trigger", trigger)]));
+    }
+    Err(r.error_of("Error", "Invalid order type"))
+}
+fn order_request_to_wire(r: &mut Realm, order: Value, asset: Value) -> Result<Value, Thrown> {
+    let buy = r.get_str(&order, "is_buy")?;
+    let price = r.get_str(&order, "limit_px")?;
+    let price = order_wire_float(r, price)?;
+    let size = r.get_str(&order, "sz")?;
+    let size = order_wire_float(r, size)?;
+    let reduce_only = r.get_str(&order, "reduce_only")?;
+    let order_type = r.get_str(&order, "order_type")?;
+    let order_type = order_wire_type(r, order_type)?;
+    let wire = r.object_from(vec![
+        ("a", asset),
+        ("b", buy),
+        ("p", price),
+        ("s", size),
+        ("r", reduce_only),
+        ("t", order_type),
+    ]);
+    if !matches!(r.get_str(&order, "cloid")?, Value::Undefined) {
+        let cloid = r.get_str(&order, "cloid")?;
+        r.set_str(&wire, "c", cloid)?;
+    }
+    Ok(wire)
+}
+
 /// `class HyperliquidUnreadableOrderResponseError extends Error`.
 fn unreadable_error_class(realm: &Realm) -> Value {
     realm.singleton("HyperliquidUnreadableOrderResponseError", |realm| {
@@ -361,12 +425,7 @@ pub(crate) fn bind(realm: &Realm) {
         Ok(wallet)
     });
     b("orderRequestToOrderWire", 2, |r, a| {
-        let order = r.to_serde(&arg(a, 0))?;
-        let asset = num(r, &arg(a, 1))?;
-        let payload = crate::signing::order_request_to_order_wire(&order, asset)
-            .map_err(|e| r.error_of(e.name, &e.message))?;
-        use crate::signing::SigningInput;
-        Ok(r.from_js_json(&payload.encoding_view()))
+        order_request_to_wire(r, arg(a, 0), arg(a, 1))
     });
     for (name, grouping) in [
         ("orderWiresToOrderAction", "na"),

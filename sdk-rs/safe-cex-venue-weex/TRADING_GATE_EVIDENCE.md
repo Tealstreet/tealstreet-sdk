@@ -65,3 +65,26 @@ Read-only sub-agent review checked the nine mappings, source evaluation order, h
 Preparatory failures before the frozen SHA: oracle fixture floor initially found 72 of the planned 76 cases (four real cases were added); two scoped test attempts exited 101 on compiler errors, which were corrected. These are not successful gates at the frozen SHA.
 
 Not run: full WEEX test suite, workspace compilation, full monorepo suite/build, host clippy, wasm clippy, live venue calls, CI reruns or a PR creation/merge.
+
+## Production batch order-ID admission (2026-10-18)
+
+The earlier generic-host source corpus used the correct positive-decimal predicate,
+but the assembled production host accepted any nonempty string. The public
+ValidatedBatch -> Exchange -> installed placeOrders/placeRegularOrderBatch
+regression compiled and failed against master28b7c69d65: successful orderId
+"0" returned ["0"] where the maintained source rejects it.
+
+The production callback now checks the exact /^[1-9]\d*$/ ASCII rule. Fourteen
+actual-source cases cover11 malformed strings and3 valid IDs, including a valid
+ID beyond the safe-integer range. They compare returned IDs or Error name/message,
+exactly one visible refusal, and unchanged Store TIF on refusal versus the source
+PostOnly patch on acceptance. Terminal HTTP is scripted; production handlers,
+formatters and Store are used. The oracle supplement leaves the original76-case
+corpus unchanged. The older default batch fixture now uses valid1008 instead of
+invalid placed-8; single-order fallback behavior remains unchanged.
+
+Final normal-master integration c64f62e04b: binding53 +original source corpus1
+(76cases) pass; strict native/Wasm all-target Clippy, formatting/diff checks,
+all-feature cancellation7/override8/binding25, parity7459/16619 and extraction0
+pass. Logs /tmp/weex-batch-id-{master-red,fixed,native,inventories,native-clippy,
+wasm-clippy,parity,extract}.log. No shared body API, model carrier or pin changed.

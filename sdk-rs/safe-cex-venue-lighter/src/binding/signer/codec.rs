@@ -40,12 +40,6 @@ fn as_number(key: &str, value: Js) -> Result<f64, Thrown> {
         other => Err(mismatch(key, "a number", &other)),
     }
 }
-fn as_bool(key: &str, value: Js) -> Result<bool, Thrown> {
-    match value {
-        Js::Bool(b) => Ok(b),
-        other => Err(mismatch(key, "a boolean", &other)),
-    }
-}
 fn as_text(key: &str, value: Js) -> Result<Vec<u16>, Thrown> {
     match value {
         Js::String(s) => Ok(s.to_vec()),
@@ -96,37 +90,60 @@ const TIME_IN_FORCE: [(&str, CreateOrderTimeInForce); 4] = [
     ("PostOnly", CreateOrderTimeInForce::PostOnly),
 ];
 
+pub(super) struct OrderFlagValues {
+    pub is_buy: Js,
+    pub post_only: Js,
+    pub reduce_only: Js,
+}
+
 // ts: CreateOrderParams
-pub(super) fn create_order(params: &Js) -> Result<CreateOrderParams, Thrown> {
-    Ok(CreateOrderParams {
-        order_id: big(params, "orderId")?,
-        market_id: number(params, "marketId")?,
-        is_buy: as_bool("isBuy", params.get("isBuy")?)?,
-        price: big(params, "price")?,
-        amount: big(params, "amount")?,
-        post_only: optional(params, "postOnly", as_bool)?,
-        reduce_only: optional(params, "reduceOnly", as_bool)?,
-        order_type: optional(params, "orderType", |_, value| {
-            Ok(literal(value, &ORDER_KINDS, CreateOrderKind::Limit))
-        })?,
-        trigger_price: nullish_bigint(params, "triggerPrice")?,
-        order_expiry: nullish_bigint(params, "orderExpiry")?,
-        expired_at: nullish_bigint(params, "expiredAt")?,
-        time_in_force: optional(params, "timeInForce", |_, value| {
-            Ok(literal(
-                value,
-                &TIME_IN_FORCE,
-                CreateOrderTimeInForce::GoodTillCancel,
-            ))
-        })?,
-        integrator_account_index: optional(params, "integratorAccountIndex", as_big)?,
-        integrator_maker_fee: optional(params, "integratorMakerFee", as_number)?,
-        integrator_taker_fee: optional(params, "integratorTakerFee", as_number)?,
-    })
+pub(super) fn create_order(params: &Js) -> Result<(CreateOrderParams, OrderFlagValues), Thrown> {
+    let order_id = big(params, "orderId")?;
+    let market_id = number(params, "marketId")?;
+    let is_buy = params.get("isBuy")?;
+    let price = big(params, "price")?;
+    let amount = big(params, "amount")?;
+    let post_only = params.get("postOnly")?;
+    let reduce_only = params.get("reduceOnly")?;
+    let flags = OrderFlagValues {
+        is_buy,
+        post_only,
+        reduce_only,
+    };
+    Ok((
+        CreateOrderParams {
+            order_id,
+            market_id,
+            is_buy: flags.is_buy.truthy(),
+            price,
+            amount,
+            post_only: (!flags.post_only.is_undefined()).then(|| flags.post_only.truthy()),
+            reduce_only: (!flags.reduce_only.is_undefined()).then(|| flags.reduce_only.truthy()),
+            order_type: optional(params, "orderType", |_, value| {
+                Ok(literal(value, &ORDER_KINDS, CreateOrderKind::Limit))
+            })?,
+            trigger_price: nullish_bigint(params, "triggerPrice")?,
+            order_expiry: nullish_bigint(params, "orderExpiry")?,
+            expired_at: nullish_bigint(params, "expiredAt")?,
+            time_in_force: optional(params, "timeInForce", |_, value| {
+                Ok(literal(
+                    value,
+                    &TIME_IN_FORCE,
+                    CreateOrderTimeInForce::GoodTillCancel,
+                ))
+            })?,
+            integrator_account_index: optional(params, "integratorAccountIndex", as_big)?,
+            integrator_maker_fee: optional(params, "integratorMakerFee", as_number)?,
+            integrator_taker_fee: optional(params, "integratorTakerFee", as_number)?,
+        },
+        flags,
+    ))
 }
 
 // ts: CreateGroupedOrdersParams
-pub(super) fn create_grouped_orders(params: &Js) -> Result<CreateGroupedOrdersParams, Thrown> {
+pub(super) fn create_grouped_orders(
+    params: &Js,
+) -> Result<(CreateGroupedOrdersParams, Vec<OrderFlagValues>), Thrown> {
     let orders = params.get("orders")?;
     let values = orders
         .array_values()
@@ -190,19 +207,23 @@ pub(super) fn create_grouped_orders(params: &Js) -> Result<CreateGroupedOrdersPa
             ));
         }
     };
-    let orders = orders
+    let decoded = orders
         .array_values()
         .ok_or_else(|| mismatch("orders", "an array", &orders))?
         .iter()
         .map(create_order)
-        .collect::<Result<_, _>>()?;
-    Ok(CreateGroupedOrdersParams {
-        grouping_type,
-        orders,
-        integrator_account_index: optional(params, "integratorAccountIndex", as_big)?,
-        integrator_maker_fee: optional(params, "integratorMakerFee", as_number)?,
-        integrator_taker_fee: optional(params, "integratorTakerFee", as_number)?,
-    })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (orders, flags): (Vec<_>, Vec<_>) = decoded.into_iter().unzip();
+    Ok((
+        CreateGroupedOrdersParams {
+            grouping_type,
+            orders,
+            integrator_account_index: optional(params, "integratorAccountIndex", as_big)?,
+            integrator_maker_fee: optional(params, "integratorMakerFee", as_number)?,
+            integrator_taker_fee: optional(params, "integratorTakerFee", as_number)?,
+        },
+        flags,
+    ))
 }
 
 // ts: CancelOrderParams
@@ -326,16 +347,16 @@ fn header(kind: TransactionKind, h: &TransactionHeader, details: (&str, Js)) -> 
 }
 
 // ts: L2CreateOrderTxInfo
-pub(super) fn create_order_tx(tx: &L2CreateOrderTxInfo) -> Js {
+pub(super) fn create_order_tx(tx: &L2CreateOrderTxInfo, flags: &OrderFlagValues) -> Js {
     let d = &tx.order_details;
     let details = Js::object(vec![
         ("orderId", bigint(&d.order_id)),
         ("marketId", Js::Number(d.market_id)),
-        ("isBuy", Js::Bool(d.is_buy)),
+        ("isBuy", flags.is_buy.clone()),
         ("price", bigint(&d.price)),
         ("amount", bigint(&d.amount)),
-        ("postOnly", opt(d.post_only, Js::Bool)),
-        ("reduceOnly", opt(d.reduce_only, Js::Bool)),
+        ("postOnly", flags.post_only.clone()),
+        ("reduceOnly", flags.reduce_only.clone()),
         ("orderTypeValue", opt(d.order_type_value, Js::Number)),
         ("timeInForceValue", opt(d.time_in_force_value, Js::Number)),
         ("triggerPrice", opt(d.trigger_price.as_ref(), bigint)),
@@ -360,14 +381,14 @@ pub(super) fn create_order_tx(tx: &L2CreateOrderTxInfo) -> Js {
     )
 }
 
-fn grouped_order(d: &LighterGroupedOrderDetails) -> Js {
+fn grouped_order(d: &LighterGroupedOrderDetails, flags: &OrderFlagValues) -> Js {
     Js::object(vec![
         ("orderId", bigint(&d.order_id)),
         ("marketId", Js::Number(d.market_id)),
-        ("isBuy", Js::Bool(d.is_buy)),
+        ("isBuy", flags.is_buy.clone()),
         ("price", bigint(&d.price)),
         ("amount", bigint(&d.amount)),
-        ("reduceOnly", opt(d.reduce_only, Js::Bool)),
+        ("reduceOnly", flags.reduce_only.clone()),
         ("orderTypeValue", opt(d.order_type_value, Js::Number)),
         ("timeInForceValue", opt(d.time_in_force_value, Js::Number)),
         ("triggerPrice", opt(d.trigger_price.as_ref(), bigint)),
@@ -376,13 +397,23 @@ fn grouped_order(d: &LighterGroupedOrderDetails) -> Js {
 }
 
 // ts: L2CreateGroupedOrdersTxInfo
-pub(super) fn create_grouped_orders_tx(tx: &L2CreateGroupedOrdersTxInfo) -> Js {
+pub(super) fn create_grouped_orders_tx(
+    tx: &L2CreateGroupedOrdersTxInfo,
+    flags: &[OrderFlagValues],
+) -> Js {
     let d = &tx.grouped_order_details;
+    assert_eq!(d.orders.len(), flags.len());
     let details = Js::object(vec![
         ("groupingType", Js::Number(d.grouping_type.value())),
         (
             "orders",
-            Js::array(d.orders.iter().map(grouped_order).collect()),
+            Js::array(
+                d.orders
+                    .iter()
+                    .zip(flags)
+                    .map(|(d, flags)| grouped_order(d, flags))
+                    .collect(),
+            ),
         ),
         (
             "integratorAccountIndex",
@@ -478,8 +509,31 @@ pub(super) fn approve_integrator_tx(tx: &L2ApproveIntegratorTxInfo) -> Js {
 
 pub(super) fn transaction_ref(tx: &TransactionRef) -> Js {
     match tx {
-        TransactionRef::CreateOrder(v) => create_order_tx(&v.borrow()),
-        TransactionRef::CreateGroupedOrders(v) => create_grouped_orders_tx(&v.borrow()),
+        TransactionRef::CreateOrder(v) => {
+            let tx = v.borrow();
+            create_order_tx(
+                &tx,
+                &OrderFlagValues {
+                    is_buy: Js::Bool(tx.order_details.is_buy),
+                    post_only: opt(tx.order_details.post_only, Js::Bool),
+                    reduce_only: opt(tx.order_details.reduce_only, Js::Bool),
+                },
+            )
+        }
+        TransactionRef::CreateGroupedOrders(v) => {
+            let tx = v.borrow();
+            let flags = tx
+                .grouped_order_details
+                .orders
+                .iter()
+                .map(|d| OrderFlagValues {
+                    is_buy: Js::Bool(d.is_buy),
+                    post_only: Js::Undefined,
+                    reduce_only: opt(d.reduce_only, Js::Bool),
+                })
+                .collect::<Vec<_>>();
+            create_grouped_orders_tx(&tx, &flags)
+        }
         TransactionRef::CancelOrder(v) => cancel_order_tx(&v.borrow()),
         TransactionRef::Transfer(v) => transfer_tx(&v.borrow()),
         TransactionRef::UpdateLeverage(v) => update_leverage_tx(&v.borrow()),
@@ -487,6 +541,15 @@ pub(super) fn transaction_ref(tx: &TransactionRef) -> Js {
     }
 }
 
-pub(super) fn create_order_txs(txs: &[Shared<L2CreateOrderTxInfo>]) -> Js {
-    Js::array(txs.iter().map(|tx| create_order_tx(&tx.borrow())).collect())
+pub(super) fn create_order_txs(
+    txs: &[Shared<L2CreateOrderTxInfo>],
+    flags: &[OrderFlagValues],
+) -> Js {
+    assert_eq!(txs.len(), flags.len());
+    Js::array(
+        txs.iter()
+            .zip(flags)
+            .map(|(tx, flags)| create_order_tx(&tx.borrow(), flags))
+            .collect(),
+    )
 }

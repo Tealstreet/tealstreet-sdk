@@ -810,6 +810,13 @@ This intentionally differs from TS retaining malformed string fields. Fee joins 
 JSON objects/arrays never match by contents. Source numeric/property errors retain
 priority over typed row refusals.
 
+Primary/demo single-order routing rechecks truthiness after price/trigger rounding.
+A conditional trigger rounded to zero rejects before placement; a zero-rounded
+conditional price selects Market and omits price/TIF. Adjusted NaN also skips
+trigger-direction ticker reads. Raw option gates still send
+zero-rounded bracket/trigger strings, and plain limit orders retain price zero.
+`adjusted_order_binding` covers both real class bindings and those payload controls.
+
 Submission checks unknown outcome only for one payload carrying a caller client ID.
 The real HTTP regression sends a rejected first split lot with a non-coercible
 error code and verifies later lots still place; a single order without a caller

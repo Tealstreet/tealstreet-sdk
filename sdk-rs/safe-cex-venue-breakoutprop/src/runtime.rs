@@ -136,7 +136,7 @@ pub fn prepare_update_order(order: &Order, update: OrderUpdate) -> PreparedOrder
         trigger_price: None,
         stop_loss: order.stop_loss.into_value(),
         take_profit: order.take_profit.into_value(),
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: order.time_in_force.into_value(),
         trigger_type: order.trigger_type.into_value(),
         tp_trigger_type: order.tp_trigger_type.into_value(),
