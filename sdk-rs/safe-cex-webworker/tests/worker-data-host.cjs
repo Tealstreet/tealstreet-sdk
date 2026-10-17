@@ -18,6 +18,28 @@ assert(received[0].data.map instanceof Map);assert(Number.isNaN(received[0].data
 assert(received[0].data.set instanceof Set);assert(received[0].data.set.has(clone));
 assert.throws(()=>wasm.post_worker_data(()=>{throw new TypeError('post rejected');}),/post rejected/);
 console.log('WORKER-DATA actual WASM materialization + native structuredClone: numeric bits, undefined, UTF16, proto property, aliases/cycles, Map/Set and host failure PASS');
+const constructors=[Error,TypeError,SyntaxError,RangeError];
+const expectedErrors=constructors.map(Constructor=>{
+ const error=new Constructor('getter must stay unread');
+ Object.defineProperty(error,'code',{enumerable:true,get(){throw new Error('source custom Error getter was read');}});
+ error.custom=()=>{};
+ return structuredClone(error);
+});
+let getterPayload;
+assert.equal(wasm.post_worker_error_getter_data(value=>{getterPayload=value;structuredClone(value);}),0,
+ 'WORKER-ERROR custom enumerable getters stay unread');
+assert.equal(getterPayload.data.length,constructors.length);
+for(let index=0;index<constructors.length;index++) {
+ const actual=getterPayload.data[index], cloned=structuredClone(actual), expected=expectedErrors[index];
+ for(const value of [actual,cloned]) {
+  assert(value instanceof constructors[index], 'WORKER-ERROR preserves standard subtype');
+  assert.equal(value.name,expected.name);assert.equal(value.message,expected.message);
+  assert(!Object.hasOwn(value,'code'), 'WORKER-ERROR custom code is dropped');
+  assert(!Object.hasOwn(value,'custom'), 'WORKER-ERROR uncloneable custom value is ignored');
+ }
+}
+console.log('WORKER-ERROR actual WASM materialization matches native Error structuredClone: four subtypes, unread throwing getters, ignored custom functions PASS');
+
 let event, eventClone;
 wasm.post_worker_error_data(value => { event=value; eventClone=structuredClone(value); });
 const nativeError=event.data[1].sentryData.error, clonedError=eventClone.data[1].sentryData.error;
