@@ -1384,7 +1384,10 @@ fn order_book_rows_require_iterable_pairs_through_real_socket() {
             errors
                 .borrow()
                 .iter()
-                .any(|e| e.to_string().contains("TypeError")),
+                .any(|e| {
+                    e.as_str()
+                        .is_some_and(|text| String::from_utf16_lossy(text).contains("TypeError"))
+                }),
             "pair refusal must retain a visible TypeError cause: {:?}",
             errors.borrow()
         );
