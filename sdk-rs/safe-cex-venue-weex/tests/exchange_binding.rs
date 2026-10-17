@@ -1196,3 +1196,85 @@ fn gap_snapshot_rejection_is_silent_and_keeps_the_existing_book() {
     cleanup().unwrap();
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn private_fill_frame_emits_and_reconciles_the_real_order_store() {
+    use std::{cell::Cell, rc::Rc};
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let before = h.store.orders().to_vec();
+    assert_eq!(
+        before
+            .iter()
+            .find(|order| order.id == "native-9")
+            .unwrap()
+            .filled,
+        0.25
+    );
+    let fills = Rc::new(Cell::new(0usize));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    let mut refreshed = raw_order();
+    refreshed["status"] = json!("PARTIALLY_FILLED");
+    refreshed["executedQty"] = json!("0.75");
+    h.http
+        .replace("GET", endpoint("OPEN_ORDERS"), json!([refreshed]));
+    let reads = h.http.calls(endpoint("OPEN_ORDERS")).len();
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("private"))
+        .unwrap()
+        .1
+        .clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(
+                json!({"e":"fill","d":[{
+            "id":"fill-after-partial","orderId":"native-9","orderSide":"SELL","symbol":"BTCUSDT",
+            "fillValue":"50.625","fillSize":"0.5","fillFee":"0.1","realizePnl":"3.5",
+            "createdTime":1700000000000.0}]})
+                .to_string(),
+            ),
+        ));
+    h.runtime.pump();
+    assert_eq!(
+        fills.get(),
+        1,
+        "queued frame must reach the production fill emitter"
+    );
+    assert_eq!(
+        h.store.orders().to_vec(),
+        before,
+        "source waits for REST order reconciliation"
+    );
+    h.runtime.advance(249.0);
+    assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), reads);
+    h.runtime.advance(1.0);
+    assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), reads + 1);
+    let orders = h.store.orders();
+    let actual = orders.iter().find(|order| order.id == "native-9").unwrap();
+    assert_eq!(actual.filled, 0.75);
+    assert_eq!(actual.remaining, 1.25);
+    assert_eq!(actual.price, 101.5);
+    assert_eq!(actual.status.value(), Some(&OrderStatus::Open));
+    drop(orders);
+    assert_eq!(
+        fills.get(),
+        1,
+        "REST reconciliation must not duplicate fills"
+    );
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.venue().dispose().unwrap();
+}
