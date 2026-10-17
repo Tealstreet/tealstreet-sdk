@@ -377,6 +377,12 @@ fn signature_refusal_replays_serialized_write_once() {
         let calls = h.http.calls(ORDER);
         assert_eq!(calls.len(), 2);
         assert_ne!(calls[0].data["timestamp"], calls[1].data["timestamp"]);
+        assert!(
+            calls[1].data["timestamp"].as_f64().unwrap()
+                - calls[0].data["timestamp"].as_f64().unwrap()
+                >= 2_000.0,
+            "retry signing must observe the deterministic two-second clock step"
+        );
         assert_ne!(calls[0].data["signature"], calls[1].data["signature"]);
         for call in calls {
             assert!(call.data_raw.is_string());
@@ -462,6 +468,17 @@ fn retryable_read_gets_a_fresh_signature() {
     let calls = h.http.calls(BALANCE);
     assert_eq!(calls.len(), 2);
     assert_ne!(calls[0].params["timestamp"], calls[1].params["timestamp"]);
+    let timestamp = |index: usize| {
+        calls[index].params["timestamp"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()
+    };
+    assert!(
+        timestamp(1) - timestamp(0) >= 2_000.0,
+        "read retry signing must observe the deterministic two-second clock step"
+    );
     assert_ne!(calls[0].params["signature"], calls[1].params["signature"]);
     done(&h);
 }
