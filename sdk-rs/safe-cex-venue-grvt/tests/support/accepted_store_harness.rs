@@ -114,13 +114,21 @@ pub fn error(name: &str, message: &str) -> ExchangeError {
     error.origin = Some(ExchangeErrorOrigin::new(std::io::Error::other(
         "fixed native origin",
     )));
-    error.code = Some(json!(55));
+    error.code = Some(safe_cex_exchange::js_runtime::value::Js::Number(55.0));
     error.response = Some(json!({"native":true}));
     error.stack = Some("native stack".into());
     error
 }
 pub fn view_error(error: &ExchangeError) -> Value {
-    json!({"name":error.name,"message":error.message,"code":error.code,"response":error.response,"stack":error.stack,
+    let code = error.code.as_ref().map(|code| {
+        let profile =
+            safe_cex_exchange::js_runtime::value::to_js_json(code).expect("finite fixture code");
+        let text = safe_cex_num::js_json_stringify(&profile)
+            .expect("source JSON observation")
+            .expect("defined fixture code");
+        serde_json::from_str::<Value>(&text).expect("finite fixture JSON")
+    });
+    json!({"name":error.name,"message":error.message,"code":code,"response":error.response,"stack":error.stack,
         "origin":error.origin.is_some(),"subscriber":error.store_subscriber_cause.is_some(),"subscriber_ids":error.store_subscriber_ids.len()})
 }
 pub fn log(

@@ -16,7 +16,7 @@ fn units(s: &str) -> Vec<u16> {
 fn error() -> Error {
     let mut e = ExchangeError::new("routing failure");
     e.name = "TypeError".into();
-    e.code = Some(json!("ROUTE"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::Js::str("ROUTE"));
     e.store_subscriber_ids = vec![7, 3];
     Rc::new(e)
 }

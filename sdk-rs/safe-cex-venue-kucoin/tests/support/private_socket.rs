@@ -11,7 +11,9 @@ use std::{
 fn failure() -> ExchangeError {
     let mut error = ExchangeError::new("private operation failure");
     error.name = "TypeError".into();
-    error.code = Some(json!("PRIVATE_SEND"));
+    error.code = Some(safe_cex_exchange::js_runtime::value::Js::str(
+        "PRIVATE_SEND",
+    ));
     error.context = Some(json!({"retained":17}));
     error.store_subscriber_ids = vec![7, 3];
     error

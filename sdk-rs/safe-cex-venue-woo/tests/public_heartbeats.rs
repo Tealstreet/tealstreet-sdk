@@ -95,7 +95,7 @@ fn pong_propagates_parent_latency_failure() {
     let socket = BaseWebSocket::new(1, parent.clone(), runtime.clone(), Rc::new(Protocol));
     let mut cause = safe_cex_exchange::runtime::ExchangeError::new("latency listener failed");
     cause.name = "LatencyNotificationError".into();
-    cause.code = Some(json!(732));
+    cause.code = Some(safe_cex_exchange::js_runtime::value::Js::Number(732.0));
     *parent.hook_failure.borrow_mut() = Some(("latency", cause.clone()));
     runtime.monotonic.set(7.0);
     socket.mark_ping_sent();

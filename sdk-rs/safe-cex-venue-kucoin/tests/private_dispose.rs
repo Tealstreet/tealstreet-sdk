@@ -61,7 +61,7 @@ fn private_dispose_native_slots_before_source() {
                     let clears = Cell::new(0);
                     let mut cause = ExchangeError::new("dispose callback failure");
                     cause.name = "TypeError".into();
-                    cause.code = Some(json!("CLEAR"));
+                    cause.code = Some(safe_cex_exchange::js_runtime::value::Js::str("CLEAR"));
                     cause.store_subscriber_ids = vec![7, 3];
                     let error = Rc::new(cause);
                     let clear = |value: Handle| {

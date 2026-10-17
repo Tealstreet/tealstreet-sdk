@@ -95,7 +95,7 @@ fn a_failed_history_read_is_reported_and_yields_no_fills() {
     h.venue().base().on(
         "error",
         std::rc::Rc::new(move |_, payload| {
-            sink.borrow_mut().push(payload.to_string());
+            sink.borrow_mut().push(payload.to_display());
             Ok(())
         }),
     );
