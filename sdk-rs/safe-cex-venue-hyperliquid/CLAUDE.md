@@ -353,3 +353,9 @@ The accepted request-weight contract includes cancelByCloid batches of 39, 40 an
 weights and the production ApiClient.prepare_request limiter reservations. The
 cloid-weight binding control deletes each classifier arm independently, requires
 a compiled pacing assertion failure, restores exact bytes and reruns the witness.
+
+The realm Store patch bridge uses the existing ModelPatch carrier for own
+undefined properties and native scalar numbers. Opaque info retains its JSON
+boundary. REST order reconciliation must clear an undefined mapped timeInForce
+once; repeating the same snapshot must not notify or advance the order revision.
+The production binding regression covers this path, including cloid restoration.
