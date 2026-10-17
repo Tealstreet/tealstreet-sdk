@@ -236,3 +236,7 @@ wire serialization. The final sort includes the newly appended signature key.
 `safe-cex-registry/tests/native_host_bingx.rs` proves the account GET sends
 signature before timestamp and independently verifies its HMAC. Shared option
 corpora cover nested and 12-element array key sorting and comma/form encoding.
+
+Signature-predicate coercion failures retain their TypeError name and unprefixed
+message through the shared ExchangeError conversion. The real native receiver
+regressions cover both resolved and rejected HTTP responses without a resend.

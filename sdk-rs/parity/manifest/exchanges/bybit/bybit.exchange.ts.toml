@@ -934,9 +934,9 @@ note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::list
 ts = "BybitExchange.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_order_book"
+rs = ["safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_order_book", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book"]
 status = "ported"
-note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_order_book. Routes through publicSocketFor(symbol) and returns the socket method result."
+note = "Rust rename: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_order_book preserves source socket selection; safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book wires the real public subscription. All four families have compiled master-fail socket regressions and live snapshot/delta, retry, reconnect and cleanup witnesses."
 
 [[symbol]]
 ts = "BybitExchange._hasFullSizedPositionOppositeSide"
