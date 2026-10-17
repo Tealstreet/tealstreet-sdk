@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs", "safe-cex-venue-bybit/src/binding/members/history.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -837,10 +837,10 @@ note = "Retains closed/order-axis join with last-write hedge legs, normalized jo
 [[symbol]]
 ts = "BybitExchange.fetchClosedPnl"
 kind = "field-fn"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_pnl"
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_pnl", "safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_pnl_for_category", "safe-cex-venue-bybit/src/binding/members/history.rs::fetch_closed_pnl" ]
 status = "ported"
-note = "Retains pre-catch bounds, per-window response stop/cap warning, original mapped rows and descending closed-time sorting; mapper is a named maintained dependency. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_pnl."
+note = "Exchange dispatches through the real receiver, native iterator protocol, signed HTTP client and closed-PnL mapper. Preserves category/refusal differences, seven-day windows, cursor paging, 20-page warning, descending sort and catch diagnostics. Three compiled master-fail production binding controls cover primary/demo/inverse. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_pnl; safe-cex-venue-bybit/src/ledger_history.rs::fetch_closed_pnl_for_category; safe-cex-venue-bybit/src/binding/members/history.rs::fetch_closed_pnl."
 
 [[symbol]]
 ts = "BybitExchange.fetchOHLCV"
@@ -893,18 +893,18 @@ note = "Retains split windows,50-row/20-page paging, first-id dedupe, final-wind
 [[symbol]]
 ts = "BybitExchange.fetchIncomeHistory"
 kind = "field-fn"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history"
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history", "safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history" ]
 status = "ported"
-note = "Retains eager context/option forwarding and original returned-Promise adoption; validated composing the two owned income bodies through their host capabilities. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history."
+note = "Exchange dispatches through the actual receiver, source income context, shared transaction-log helper and native mapper. Six compiled master-fail production binding controls cover both methods on primary/demo/inverse; Spot preserves inherited defaults. Additional signed-HTTP witnesses cover category sort/limit, paging, range boundaries and malformed-row diagnostics. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history; safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history."
 
 [[symbol]]
 ts = "BybitExchange.fetchIncomeHistoryRange"
 kind = "field-fn"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range"
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range", "safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range" ]
 status = "ported"
-note = "Retains context/start/end/type forwarding and returned-Promise adoption; tested with the owned income range/body composition. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range."
+note = "Exchange dispatches through the actual receiver, source income context, shared transaction-log helper and native mapper. Six compiled master-fail production binding controls cover both methods on primary/demo/inverse; Spot preserves inherited defaults. Additional signed-HTTP witnesses cover category sort/limit, paging, range boundaries and malformed-row diagnostics. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range; safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range."
 
 [[symbol]]
 ts = "BybitExchange.get incomeContexts"

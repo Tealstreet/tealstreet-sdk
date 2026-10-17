@@ -482,7 +482,8 @@ async fn dispatch_request(
 ) -> Result<Js, Thrown> {
     throttle(host, state).await?;
     let adapter = config.get("adapter")?;
-    let response = if adapter.is_callable() {
+    let custom_adapter = adapter.is_callable();
+    let response = if custom_adapter {
         await_js(adapter.call(Js::Undefined, vec![config.clone()])?).await?
     } else {
         host.send(config.clone()).await?
@@ -491,9 +492,13 @@ async fn dispatch_request(
         response.define("config", config.clone())?;
     }
     transform_response(&response, &config)?;
-    let status = response.get("status")?.to_number().unwrap_or(200.0);
-    if !(200.0..300.0).contains(&status) {
-        return Err(axios_error(&response, &config)?);
+    // Axios custom adapters settle their own responses. HOW deliberately
+    // fulfills every HTTP status; only the default HTTP host settles here.
+    if !custom_adapter {
+        let status = response.get("status")?.to_number().unwrap_or(200.0);
+        if !(200.0..300.0).contains(&status) {
+            return Err(axios_error(&response, &config)?);
+        }
     }
     Ok(response)
 }
