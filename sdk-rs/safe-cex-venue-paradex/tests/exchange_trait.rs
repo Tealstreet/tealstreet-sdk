@@ -829,3 +829,71 @@ fn numeric_created_at_survives_constructed_fetch_orders() {
     );
     venue.dispose().unwrap();
 }
+
+#[test]
+fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    assert!(store.orders().is_empty());
+    let venue: &dyn Exchange = venue.as_ref();
+    drive(&runtime, venue.cancel_all_orders()).unwrap();
+    let requests = wire.requests.borrow();
+    let deletes: Vec<_> = requests.iter().filter(|r| r.method == "delete").collect();
+    assert_eq!(
+        deletes.len(),
+        1,
+        "cancel-all must reach venue with an empty Store"
+    );
+    assert_eq!(deletes[0].url, "/orders");
+    assert!(deletes[0].params.is_none());
+    assert!(store.orders().is_empty());
+}
+
+#[test]
+fn cancel_symbol_orders_reaches_venue_even_when_store_is_empty() {
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    assert!(store.orders().is_empty());
+    let venue: &dyn Exchange = venue.as_ref();
+    drive(&runtime, venue.cancel_symbol_orders("BTC-USD-PERP".into())).unwrap();
+    let requests = wire.requests.borrow();
+    let deletes: Vec<_> = requests.iter().filter(|r| r.method == "delete").collect();
+    assert_eq!(
+        deletes.len(),
+        1,
+        "symbol cancellation must reach venue with an empty Store"
+    );
+    assert_eq!(deletes[0].url, "/orders?market=BTC-USD-PERP");
+    assert!(deletes[0].params.is_none());
+    assert!(store.orders().is_empty());
+}
+
+#[test]
+fn venue_wide_cancellations_propagate_http_errors() {
+    for symbol_scoped in [false, true] {
+        let (venue, runtime, store, wire) =
+            support::fixture_with(private_options(), private_script);
+        drive(&runtime, venue.start()).unwrap();
+        assert!(store.orders().is_empty());
+        wire.statuses.borrow_mut().insert("/orders".into(), 400);
+        let venue: &dyn Exchange = venue.as_ref();
+        let result = if symbol_scoped {
+            drive(&runtime, venue.cancel_symbol_orders("BTC-USD-PERP".into()))
+        } else {
+            drive(&runtime, venue.cancel_all_orders())
+        };
+        assert!(
+            result.is_err(),
+            "venue cancellation must propagate a rejected DELETE"
+        );
+        assert_eq!(
+            wire.requests
+                .borrow()
+                .iter()
+                .filter(|r| r.method == "delete")
+                .count(),
+            1
+        );
+        assert!(store.orders().is_empty());
+    }
+}
