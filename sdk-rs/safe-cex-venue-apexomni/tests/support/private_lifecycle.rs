@@ -13,8 +13,9 @@ fn started_private(h: &Harness) -> std::rc::Rc<support::Socket> {
 
 #[test]
 fn private_reopen_refreshes_positions_orders_and_balance() {
-    let h = fixture();
+    let h = fixture_with_tick_interval(Some(60_000.0));
     let private = started_private(&h);
+    h.runtime.advance(1_000.0);
     h.http.routes.borrow_mut().retain(|(method, path, _)| {
         method != "GET" || !["/v3/account", "/v3/account-balance"].contains(&path.as_str())
     });
@@ -34,10 +35,14 @@ fn private_reopen_refreshes_positions_orders_and_balance() {
     }
     assert!(
         !h.http.calls("/v3/account").is_empty(),
-        "reopen must dispatch the source position snapshot override"
+        "reopen must dispatch the source position snapshot override; calls={:?}, reports={:?}, console={:?}",
+        h.http.requests.borrow(),
+        h.runtime.reports.borrow(),
+        h.runtime.console.borrow()
     );
     assert!(!h.http.calls("/v3/open-orders").is_empty());
-    assert_eq!(h.store.balance().total, 777.0);
+    assert_eq!(h.store.balance().total, 1269.0);
+    assert_eq!(h.store.balance().upnl, -492.0);
     assert_eq!(h.store.balance().free, 666.0);
     assert_eq!(
         h.store
@@ -107,5 +112,98 @@ fn private_close_cancels_self_heal_while_replacement_dial_is_pending() {
         "closed socket must not run the self-heal callback: {:?}",
         h.runtime.console.borrow()
     );
+    done(&h);
+}
+
+#[test]
+fn private_terminal_order_updates_store_and_emits_fill() {
+    let h = fixture();
+    let private = started_private(&h);
+    let fills = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, value| {
+            sink.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    h.runtime.advance(6_000.0);
+    let mut row = raw_order();
+    row["status"] = json!("FILLED");
+    row["cumSuccessFillSize"] = json!("1.234");
+    row["updatedAt"] = json!(h.runtime.now.get());
+    frame(
+        &private,
+        json!({"topic":"ws_zk_accounts_v3","contents":{"orders":[row]}}),
+    );
+    h.runtime.pump();
+    let orders = h.store.orders();
+    let order = orders.iter().find(|o| o.id == "order-1").unwrap();
+    assert_eq!(order.status, OrderStatus::Closed);
+    assert_eq!(order.filled, 1.234);
+    assert_eq!(fills.borrow().len(), 1);
+    assert_eq!(fills.borrow()[0]["id"], "order-1");
+    assert_eq!(fills.borrow()[0]["symbol"], "BTCUSDC");
+    assert_eq!(fills.borrow()[0]["price"], 100.12);
+    drop(orders);
+    done(&h);
+}
+
+#[test]
+fn private_fill_topic_retains_execution_for_history_reads() {
+    let h = fixture();
+    let private = started_private(&h);
+    let orders = h.store.orders().to_vec();
+    let balance = h.store.balance().clone();
+    h.http.ok("GET", "/v3/fills", json!([]));
+    h.http.ok("GET", "/v3/history-trades", json!([]));
+    frame(
+        &private,
+        json!({"topic":"ws_zk_accounts_v3","contents":{"fills":[{"symbol":"BTC-USDC","side":"BUY","createdAt":h.runtime.now.get(),"price":"123.25","size":"2.5","fee":"-0.125","orderId":"ws-fill-1","token":"USDC"}]}}),
+    );
+    h.runtime.pump();
+    assert_eq!(h.store.orders().as_ref(), orders.as_slice());
+    assert_eq!(*h.store.balance(), balance);
+    let executions = h
+        .drive(h.venue().fetch_historical_fills(
+            serde_json::from_value(json!({"symbol":"BTCUSDC","limit":10})).unwrap(),
+        ))
+        .unwrap();
+    let execution = executions
+        .iter()
+        .find(|e| e.order_id.as_deref() == Some("ws-fill-1"))
+        .unwrap();
+    assert_eq!(execution.symbol, "BTCUSDC");
+    assert_eq!(execution.price, 123.25);
+    assert_eq!(execution.qty, 2.5);
+    assert_eq!(execution.commission, Some(0.125));
+    assert_eq!(execution.commission_asset.as_deref(), Some("USDC"));
+    done(&h);
+}
+
+#[test]
+fn private_wallet_only_frame_preserves_rest_owned_balance() {
+    let h = fixture();
+    let private = started_private(&h);
+    let balance = h.store.balance().clone();
+    let orders = h.store.orders().to_vec();
+    let positions = h.store.positions().to_vec();
+    frame(
+        &private,
+        json!({"topic":"ws_zk_accounts_v3","contents":{"wallets":[{"token":"USDC","balance":"9999"}]},"op":"ping","args":["wallet-frame"]}),
+    );
+    h.runtime.pump();
+    assert_eq!(*h.store.balance(), balance);
+    assert_eq!(h.store.orders().as_ref(), orders.as_slice());
+    assert_eq!(h.store.positions().as_ref(), positions.as_slice());
+    assert!(
+        private
+            .sent
+            .borrow()
+            .iter()
+            .any(|text| text.contains("wallet-frame"))
+    );
+    assert!(h.runtime.reports.borrow().is_empty());
     done(&h);
 }

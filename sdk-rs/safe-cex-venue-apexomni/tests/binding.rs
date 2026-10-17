@@ -20,7 +20,12 @@ fn contract() -> Value {
     json!({"symbol":"BTC-USDC","crossSymbolName":"BTCUSDC","baseTokenId":"BTC","settleAssetId":"USDC","l2PairId":"11","enableTrade":true,"stepSize":"0.001","tickSize":"0.01","minOrderSize":"0.001","maxOrderSize":"1000","displayMinLeverage":"1","displayMaxLeverage":"50","initialMarginRate":"0.1"})
 }
 fn fixture() -> Harness {
+    fixture_with_tick_interval(None)
+}
+fn fixture_with_tick_interval(tick_interval: Option<f64>) -> Harness {
     let mut opts = options();
+    opts.extra = tick_interval
+        .map(|interval| serde_json::from_value(json!({"tickInterval": interval})).unwrap());
     opts.omni_key_seed = Some(format!("0x{}1b", "01".repeat(64)));
     opts.passphrase = Some("fixture-passphrase".into());
     let h = harness(ExchangeName::Apexomni, opts, |http| {
