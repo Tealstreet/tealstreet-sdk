@@ -24,7 +24,7 @@ strings through the union's serde boundary before calling the cache.
 Backend interface methods return owned futures; optional read/clear methods use
 `Option<Future>` to preserve method absence and fallback behavior. In-memory
 chunks preserve first-timestamp deduplication and hydration/read-through merge
-precedence. JSON payloads cross the existing typed Candle boundary; invalid
+precedence. Persistent null OHLC/volume values decode to NaN at the backend codec; invalid
 object-shaped matching candles are skipped individually, so valid cached siblings survive
 and fetch fills only the missing gap. Adapter I/O errors still propagate in
 read-through mode. Consult the manifest note for unchecked-TS representation
@@ -254,8 +254,18 @@ The narrowed monthly chart operations now use the same Date/TimeClip semantics
 as the millisecond helpers. `tests/monthly_behavior.rs` independently covers all
 four operations, including original-year remapping before close-month rollover.
 
-The final shared-type decision retains typed Candle as an accepted cache residual.
-Malformed persisted fields miss and refetch; they must not turn into a request
-error or an invented numeric value. The 48-case native miss/refetch regression,
-source residual witness and compiled error-propagation control are documented in
-GATE_EVIDENCE.md.
+The final decision retains typed f64 Candle. KV keeps its JSON null encoding for
+nonfinite OHLC/volume; the read codec restores null to native NaN as a cache hit.
+IndexedDB writes/reads native numeric fields directly, preserving NaN through
+structured clone and accepting previously persisted null numerics as NaN. Timestamp
+null, missing required fields and wrong kinds remain structural misses. The revised
+38-case structural miss/refetch regression and its compiled error control retain
+that policy; null-numeric slots instead have positive real persistence tests.
+
+`tests/runtime_backends.rs` persists NaN in every OHLC/volume field through actual
+filesystem/KV storage and reopens it under both read modes, asserting zero venue
+fetches and native field values. The compiled Wasm `nan_codec_probe` runs against
+real Chrome IndexedDB with 26 profiles (NaN writes, preexisting null numerics,
+structural misses, both read modes). Its separate runner executes the maintained
+TS backends too; browser availability for this probe does not imply the older
+fault/rollback probes were rerun. See GATE_EVIDENCE.md for commands and RED/GREEN.
