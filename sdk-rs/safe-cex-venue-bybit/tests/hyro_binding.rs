@@ -1409,3 +1409,135 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     assert_eq!(h.wire.requests.borrow().len(), requests);
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn hyro_option_reads_reject_with_inherited_source_guard() {
+    if configured_child("hyro_option_reads_reject_with_inherited_source_guard") {
+        return;
+    }
+    let mut options = support::options();
+    options.enable_option_markets = Some(true);
+    let h = support::harness_as(ExchangeName::Hyrotrader, options, |_| {});
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/hyro_option_refusal_source.cjs"
+        ))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["calls"], 0);
+    let mut failures = vec![];
+    for dynamic in [false, true] {
+        let v = h.venue();
+        let query = serde_json::from_value(json!({"underlying":"BTC"})).unwrap();
+        let results = [
+            h.drive(if dynamic {
+                v.capabilities().fetch_option_chain(v, query)
+            } else {
+                v.fetch_option_chain(query)
+            })
+            .map(|_| ()),
+            h.drive(if dynamic {
+                v.capabilities().fetch_option_expiries(v, "BTC".into())
+            } else {
+                v.fetch_option_expiries("BTC".into())
+            })
+            .map(|_| ()),
+            h.drive(if dynamic {
+                v.capabilities().fetch_account_greeks(v)
+            } else {
+                v.fetch_account_greeks()
+            })
+            .map(|_| ()),
+        ];
+        for (result, row) in results
+            .into_iter()
+            .zip(expected["rows"].as_array().unwrap())
+        {
+            let error =
+                result.expect_err("Hyro source disables options even when inherited methods exist");
+            if error.name != row["name"].as_str().unwrap()
+                || error.message != row["message"].as_str().unwrap()
+            {
+                failures.push(format!(
+                    "dynamic={dynamic} {}: {}: {}; expected {row}",
+                    row["method"], error.name, error.message
+                ));
+            }
+        }
+    }
+    assert!(
+        h.wire.requests.borrow().is_empty(),
+        "source guard must reject before HTTP"
+    );
+    h.venue().dispose().unwrap();
+    assert!(
+        failures.is_empty(),
+        "Hyro inherited option refusals: {}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
+    if configured_child("hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events")
+    {
+        return;
+    }
+    use std::{cell::Cell, rc::Rc};
+    let (h, private, _) = start_private();
+    ack_private(&h, &private, "auth");
+    ack_private(&h, &private, "subscribe");
+    let before = h.store.balance().clone();
+    assert_eq!(before.upnl, 5.0);
+    let fills = Rc::new(Cell::new(0));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    let mut row = private_position("12");
+    row["unrealisedPnl"] = json!("17.25");
+    row["size"] = json!("0.75");
+    let requests = h.wire.requests.borrow().len();
+    feed_private(&h, &private, json!({"topic":"position","data":[row]}));
+    assert_eq!(h.store.positions()[0].contracts, 0.75);
+    assert_eq!(h.store.positions()[0].leverage, 12.0);
+    assert_eq!(h.store.positions()[0].unrealized_pnl, 17.25);
+    let mut expected = before;
+    expected.upnl = 17.25;
+    assert_eq!(
+        *h.store.balance(),
+        expected,
+        "acknowledged Hyro position frame updates only the unified balance PnL"
+    );
+    feed_private(
+        &h,
+        &private,
+        json!({"topic":"wallet","data":[{
+        "accountType":"UNIFIED","totalEquity":"999999","totalPerpUPL":"999"}]}),
+    );
+    assert_eq!(
+        *h.store.balance(),
+        expected,
+        "source does not subscribe to wallet updates"
+    );
+    assert_eq!(fills.get(), 0, "position and wallet frames emit no fills");
+    assert_eq!(
+        h.wire.requests.borrow().len(),
+        requests,
+        "private frame values did not come from REST"
+    );
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.venue().dispose().unwrap();
+}

@@ -51,6 +51,7 @@ pub(super) fn error(e: Thrown) -> ExchangeError {
 }
 pub(super) struct Host {
     pub scope: Rc<Shared>,
+    pub local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
     pub inner: RefCell<Weak<Bodies>>,
     pub public: Js,
     pub private: Js,
@@ -103,6 +104,7 @@ impl Host {
             public,
             private,
             scope,
+            local_wall_time_to_utc: deps.local_wall_time_to_utc,
             inner: RefCell::default(),
             clients: RefCell::default(),
             next: Rc::new(Cell::new(0)),
@@ -274,7 +276,7 @@ impl HistoryHost for Host {
             .map_err(error)
     }
     fn local_to_utc(&self, ms: f64) -> f64 {
-        ms
+        (self.local_wall_time_to_utc)(ms)
     }
     fn is_public_data_only(&self) -> bool {
         ExchangeHost::is_public_data_only(self, self.base())
