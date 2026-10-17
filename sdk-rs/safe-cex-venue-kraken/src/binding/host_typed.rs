@@ -205,8 +205,9 @@ impl TickHost for Rt {
         )))
     }
     fn promise_all(&self, tasks: Vec<Js>) -> Result<ExchangeFuture<'static, ()>, ExchangeError> {
+        let promise = all(&self.exchange_runtime(), tasks);
         Ok(Box::pin(async move {
-            all(tasks).await.map_err(ex)?;
+            promise.wait().await.map_err(ex)?;
             Ok(())
         }))
     }

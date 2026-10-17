@@ -1765,6 +1765,12 @@
       "witnesses": [
         "tests/js_microtasks.rs::native_host_discard_releases_polled_and_unpolled_promise_jobs",
         "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver"
+      ],
+      "guards": [
+        {
+          "type": "Driver",
+          "file": "src/js_runtime/jobs.rs"
+        }
       ]
     },
     {
@@ -1792,6 +1798,12 @@
       "witnesses": [
         "tests/js_microtasks.rs::native_host_discard_releases_polled_and_unpolled_promise_jobs",
         "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver"
+      ],
+      "guards": [
+        {
+          "type": "Driver",
+          "file": "src/js_runtime/jobs.rs"
+        }
       ]
     },
     {
@@ -1935,6 +1947,12 @@
       "witnesses": [
         "tests/js_microtasks.rs::native_host_discard_releases_polled_and_unpolled_promise_jobs",
         "tests/js_microtasks.rs::native_cleared_timer_releases_its_callback_and_idle_driver"
+      ],
+      "guards": [
+        {
+          "type": "Driver",
+          "file": "src/js_runtime/jobs.rs"
+        }
       ]
     },
     {
