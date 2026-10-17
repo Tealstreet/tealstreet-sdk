@@ -2035,3426 +2035,6 @@
     "accepted": true
   },
   {
-    "name": "WOOX_ORDER",
-    "label": "valid declaration",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": true
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "symbol.null",
-    "input": {
-      "symbol": null,
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "symbol.missing",
-    "input": {
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "status.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": null,
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "status.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "side.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": null,
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "side.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "created_time.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": null,
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "created_time.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "updated_time.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": null,
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "updated_time.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "order_id.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": null,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "order_id.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "order_tag.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": null,
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "order_tag.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "price.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": null,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "price.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "type.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": null,
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "type.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "quantity.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": null,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "quantity.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "amount.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": null,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "amount.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "visible.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": null,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "visible.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "executed.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": null,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "executed.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "total_fee.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": null,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "total_fee.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "fee_asset.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": null,
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "fee_asset.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "total_rebate.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": null,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "total_rebate.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "rebate_asset.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": null,
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "rebate_asset.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "client_order_id.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": null,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "client_order_id.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "reduce_only.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": null,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "reduce_only.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "realized_pnl.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": null,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "realized_pnl.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "average_executed_price": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "average_executed_price.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": null,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "average_executed_price.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "position_side": "field-﻿-"
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "position_side.null",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25,
-      "position_side": null
-    },
-    "accepted": false
-  },
-  {
-    "name": "WOOX_ORDER",
-    "label": "position_side.missing",
-    "input": {
-      "symbol": "field-﻿-",
-      "status": "field-﻿-",
-      "side": "field-﻿-",
-      "created_time": "field-﻿-",
-      "updated_time": "field-﻿-",
-      "order_id": 123.25,
-      "order_tag": "field-﻿-",
-      "price": 123.25,
-      "type": "field-﻿-",
-      "quantity": 123.25,
-      "amount": 123.25,
-      "visible": 123.25,
-      "executed": 123.25,
-      "total_fee": 123.25,
-      "fee_asset": "field-﻿-",
-      "total_rebate": 123.25,
-      "rebate_asset": "field-﻿-",
-      "client_order_id": 123.25,
-      "reduce_only": true,
-      "realized_pnl": 123.25,
-      "average_executed_price": 123.25
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "valid declaration",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": true
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "success.null",
-    "input": {
-      "success": null,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "success.missing",
-    "input": {
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.null",
-    "input": {
-      "success": true,
-      "meta": null,
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.missing",
-    "input": {
-      "success": true,
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.total.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": null,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.total.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.records_per_page.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": null,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.records_per_page.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.current_page.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": null
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "meta.current_page.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": null
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      }
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.symbol.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": null,
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.symbol.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.status.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": null,
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.status.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.side.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": null,
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.side.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.created_time.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": null,
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.created_time.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.updated_time.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": null,
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.updated_time.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.order_id.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": null,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.order_id.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.order_tag.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": null,
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.order_tag.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.price.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": null,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.price.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.type.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": null,
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.type.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.quantity.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": null,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.quantity.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.amount.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": null,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.amount.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.visible.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": null,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.visible.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.executed.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": null,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.executed.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.total_fee.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": null,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.total_fee.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.fee_asset.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": null,
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.fee_asset.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.total_rebate.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": null,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.total_rebate.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.rebate_asset.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": null,
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.rebate_asset.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.client_order_id.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": null,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.client_order_id.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.reduce_only.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": null,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.reduce_only.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.realized_pnl.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": null,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.realized_pnl.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "average_executed_price": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.average_executed_price.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": null,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.average_executed_price.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "position_side": "field-﻿-"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.position_side.null",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25,
-          "position_side": null
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "name": "FETCH_ORDER_RESPONSE",
-    "label": "rows.0.position_side.missing",
-    "input": {
-      "success": true,
-      "meta": {
-        "total": 123.25,
-        "records_per_page": 123.25,
-        "current_page": 123.25
-      },
-      "rows": [
-        {
-          "symbol": "field-﻿-",
-          "status": "field-﻿-",
-          "side": "field-﻿-",
-          "created_time": "field-﻿-",
-          "updated_time": "field-﻿-",
-          "order_id": 123.25,
-          "order_tag": "field-﻿-",
-          "price": 123.25,
-          "type": "field-﻿-",
-          "quantity": 123.25,
-          "amount": 123.25,
-          "visible": 123.25,
-          "executed": 123.25,
-          "total_fee": 123.25,
-          "fee_asset": "field-﻿-",
-          "total_rebate": 123.25,
-          "rebate_asset": "field-﻿-",
-          "client_order_id": 123.25,
-          "reduce_only": true,
-          "realized_pnl": 123.25,
-          "average_executed_price": 123.25
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
     "name": "GET_FUTURES_LEVERAGE_RESPONSE",
     "label": "valid declaration",
     "input": {
