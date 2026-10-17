@@ -314,7 +314,11 @@ fn mexc_factory_live_shared_http_composition() {
                 signing_now: Arc::new(|| 0),
             },
             &TransportRegistry::default(),
-            runtime,
+            runtime.clone(),
+            {
+                let runtime = runtime.clone();
+                Rc::new(move || ExchangeRuntime::now_ms(runtime.as_ref()))
+            },
         )
         .unwrap();
         let config = &scenario["config"];
@@ -518,6 +522,10 @@ fn mexc_rich_factory_preserves_native_values_before_signing_and_wire() {
             },
             &TransportRegistry::default(),
             runtime.clone(),
+            {
+                let runtime = runtime.clone();
+                Rc::new(move || ExchangeRuntime::now_ms(runtime.as_ref()))
+            },
         )
         .unwrap();
         assert_eq!(
@@ -854,6 +862,10 @@ fn mexc_factory_native_utf8_refusal_and_response_projection() {
             },
             &TransportRegistry::default(),
             runtime.clone(),
+            {
+                let runtime = runtime.clone();
+                Rc::new(move || ExchangeRuntime::now_ms(runtime.as_ref()))
+            },
         )
         .unwrap();
         let response = futures::executor::block_on(api.execute(RestRequest {
@@ -988,7 +1000,11 @@ fn rich_api(
             signing_now: Arc::new(|| 0),
         },
         &TransportRegistry::default(),
-        runtime,
+        runtime.clone(),
+        {
+            let runtime = runtime.clone();
+            Rc::new(move || ExchangeRuntime::now_ms(runtime.as_ref()))
+        },
     )
     .unwrap()
 }
@@ -1290,6 +1306,10 @@ fn mexc_signature_rejection_resends_once_with_a_fresh_signature() {
             },
             &TransportRegistry::default(),
             runtime.clone(),
+            {
+                let runtime = runtime.clone();
+                Rc::new(move || ExchangeRuntime::now_ms(runtime.as_ref()))
+            },
         )
         .unwrap();
         let request = if method == "get" {
