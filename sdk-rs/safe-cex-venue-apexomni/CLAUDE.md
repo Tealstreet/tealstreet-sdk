@@ -450,3 +450,20 @@ Raw Date.now remains separate for cancellation caches, fill freshness, client ID
 and zkLink transaction timestamps; ping timing remains monotonic. The isolated
 native_clock target syncs the actual singleton and covers signed REST/placement,
 socket authentication and a terminal private order frame after a clock advance.
+
+
+## Retired oracle-only transaction helpers
+
+The exemption reachability audit keeps the live `signContract`/`initSdk` route.
+The SDK index has no export for standalone order, transfer, withdrawal or
+changePubKey helpers, and repository production TS/Rust callers do not use them.
+Their Rust executable counterparts and withdrawal-only precision helper were
+removed, together with eight unused SDK host operations and four selector variants.
+The TypeScript source modules are test/oracle-only and remain tealstreet-next owned.
+Payload declarations retain their independent schema/accepted-set obligations.
+
+The maintained signing oracle keeps all six Contract cases, seven exchange
+signOrder wrapper cases and initialization; the retained outputs match the
+pre-deletion corpus. Twenty-four fake transaction orchestration cases and one
+hundred withdrawal-only precision cases were retired. Existing native placement,
+private frames, hosted signing, lifecycle, packing and signature proofs remain.
