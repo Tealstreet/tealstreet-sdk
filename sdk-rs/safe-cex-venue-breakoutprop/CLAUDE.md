@@ -56,9 +56,10 @@ conversion are host inputs. Explicitly offset RFC3339 timestamps bypass that
 local-date adapter through the shared parser. Do not substitute an unconditional
 UTC conversion in a host whose local timezone differs.
 
-Typed response validation is an explicit chosen boundary: malformed records
-refuse instead of reproducing arbitrary JavaScript property accesses. The live
-witness includes an omitted unused account field to demonstrate this difference.
+Portfolio mapping reads only the properties used by each source formatter.
+Unused declaration fields and unrelated balance/position/order collections never
+validate a response; strict declaration codecs remain separate. Actual HTTP
+binding regressions and sixty-eight maintained-source cases cover this boundary.
 Unknown side/type/status strings map to own undefined shared ModelField values,
 matching the source lookup tables; JSON omits those fields. Inherited table
 results that are functions or objects remain outside the enum representation.
