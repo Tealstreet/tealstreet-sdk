@@ -133,7 +133,7 @@ fn actual_portfolio_formatters() {
         actual.insert(
             "formatOpenPositions".into(),
             result(
-                format_open_positions(&input, &store, &|ms| ms),
+                format_open_positions(&input, &store, &|ms| ms, &log),
                 |v| {
                     v.map(|p| Value::Array(p.iter().map(position).collect()))
                         .unwrap_or(json!({"$undefined":true}))
@@ -144,7 +144,7 @@ fn actual_portfolio_formatters() {
         actual.insert(
             "formatPositions".into(),
             result(
-                format_positions(&input, &store, symbols.as_deref(), &|ms| ms),
+                format_positions(&input, &store, symbols.as_deref(), &|ms| ms, &log),
                 |p| Value::Array(p.iter().map(position).collect()),
                 &errors,
             ),
@@ -172,29 +172,15 @@ fn actual_portfolio_formatters() {
         }
         for (method, value) in actual {
             comparisons += 1;
-            if name == "missing-unused-account" {
-                assert!(
-                    value["error"]
-                        .as_str()
-                        .unwrap()
-                        .contains("missing field `account`"),
-                    "declared_record_boundary_{method}"
-                );
-                assert!(
-                    case["expected"][&method].get("ok").is_some(),
-                    "source_accepts_missing_unused_field_{method}"
-                );
-            } else {
-                assert_native_cardinality(
-                    &value,
-                    &case["expected"][&method],
-                    &format!("portfolio_{method}"),
-                );
-                assert_eq!(
-                    value, case["expected"][&method],
-                    "portfolio_{method}: {name}"
-                );
-            }
+            assert_native_cardinality(
+                &value,
+                &case["expected"][&method],
+                &format!("portfolio_{method}"),
+            );
+            assert_eq!(
+                value, case["expected"][&method],
+                "portfolio_{method}: {name}"
+            );
         }
     }
     assert_eq!(comparisons, 112, "COMPARISON-COUNT portfolio");
@@ -212,7 +198,7 @@ fn owned_info_boundary() {
                 .unwrap()
                 .info
                 .unwrap(),
-            "formatOpenPositions" => format_open_positions(&input, &store, &|ms| ms)
+            "formatOpenPositions" => format_open_positions(&input, &store, &|ms| ms, &|_| Ok(()))
                 .unwrap()
                 .unwrap()
                 .into_iter()
@@ -221,13 +207,15 @@ fn owned_info_boundary() {
                 .info
                 .unwrap(),
             "formatPositions" => {
-                format_positions(&input, &store, Some(&["BTCUSD".into()]), &|ms| ms)
-                    .unwrap()
-                    .into_iter()
-                    .next()
-                    .unwrap()
-                    .info
-                    .unwrap()
+                format_positions(&input, &store, Some(&["BTCUSD".into()]), &|ms| ms, &|_| {
+                    Ok(())
+                })
+                .unwrap()
+                .into_iter()
+                .next()
+                .unwrap()
+                .info
+                .unwrap()
             }
             "formatOrders" => format_orders(&input, &store, &|ms| ms, &|_| Ok(()))
                 .unwrap()
@@ -367,7 +355,7 @@ fn inherited_closed_output_boundary() {
             );
             let expected = format!("Unrepresentable position side: {key}");
             assert_eq!(
-                format_open_positions(&input, &store, &|ms| ms)
+                format_open_positions(&input, &store, &|ms| ms, &|_| Ok(()))
                     .unwrap_err()
                     .message,
                 expected,
@@ -381,7 +369,7 @@ fn inherited_closed_output_boundary() {
                 "inherited_formatBalance_{key}"
             );
             assert_eq!(
-                format_positions(&input, &store, None, &|ms| ms)
+                format_positions(&input, &store, None, &|ms| ms, &|_| Ok(()))
                     .unwrap_err()
                     .message,
                 expected,
@@ -428,5 +416,78 @@ fn formatter_logger_failure_preserves_metadata() {
         };
         assert_eq!(result, Err(original), "LOGGER-PROPAGATION {method}");
         assert_eq!(calls.get(), 1, "LOGGER native calls {method}");
+    }
+}
+
+#[test]
+fn source_only_fields_and_unread_collections_match_typescript() {
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/portfolio_unused_fields_oracle.cjs"
+        ))
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.as_array().unwrap().len(), 60);
+    for case in cases.as_array().unwrap() {
+        let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let store = DefaultStore::new();
+        let state: Value = serde_json::from_str(case["storeRaw"].as_str().unwrap()).unwrap();
+        let patch = StoreUpdate {
+            balance: Some(js_from_value_ref(&state["balance"]).unwrap()),
+            positions: Some(js_from_value_ref(&state["positions"]).unwrap()),
+            orders: Some(js_from_value_ref(&state["orders"]).unwrap()),
+            markets: Some(js_from_value_ref(&state["markets"]).unwrap()),
+            tickers: Some(js_from_value_ref(&state["tickers"]).unwrap()),
+            ..Default::default()
+        };
+        safe_cex_store::Store::update(&store, patch, false).unwrap();
+        let errors = RefCell::new(Vec::new());
+        let log = |message: &str| {
+            errors.borrow_mut().push(message.to_owned());
+            Ok(())
+        };
+        let method = case["method"].as_str().unwrap();
+        let actual = match method {
+            "formatBalance" => result(
+                format_balance(&input, &store, &|ms| ms, &log),
+                |b| balance(&b),
+                &errors,
+            ),
+            "formatOpenPositions" => result(
+                format_open_positions(&input, &store, &|ms| ms, &log),
+                |rows| {
+                    rows.map(|rows| Value::Array(rows.iter().map(position).collect()))
+                        .unwrap_or(json!({"$undefined":true}))
+                },
+                &errors,
+            ),
+            "formatPositions" => result(
+                format_positions(&input, &store, None, &|ms| ms, &log),
+                |rows| Value::Array(rows.iter().map(position).collect()),
+                &errors,
+            ),
+            "formatOrders" => result(
+                format_orders(&input, &store, &|ms| ms, &log),
+                |rows| {
+                    rows.map(|rows| Value::Array(rows.iter().map(order).collect()))
+                        .unwrap_or(json!({"$undefined":true}))
+                },
+                &errors,
+            ),
+            _ => panic!("source method inventory"),
+        };
+        assert_eq!(
+            actual, case["expected"],
+            "{method} malformedUnread={}",
+            case["malformedUnread"]
+        );
     }
 }

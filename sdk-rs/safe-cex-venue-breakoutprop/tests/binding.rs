@@ -1193,17 +1193,20 @@ fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
 fn source_only_portfolio() -> Value {
     json!({"portfolios":[{
         "balances":[{"currency":"USD","value":50.25}],
-        "positions":[{"symbol":"BTCUSD","side":"BUY","openPrice":100,
-            "quantity":2,"quantityNotional":200,"marginRate":0.05,
+        "positions":[{"symbol":"BTCUSD","side":"BUY","openPrice":100.0,
+            "quantity":2.0,"quantityNotional":200.0,"marginRate":0.05,
             "lastUpdateTime":"2026-01-01T00:00:00Z"}],
         "orders":[{"orderCode":"source-order","status":"WORKING","instrument":"BTCUSD",
             "type":"LIMIT","transactionTime":"2026-01-01T00:00:00Z",
-            "legs":[{"side":"BUY","price":101.25,"quantity":3,"filledQuantity":1,
-                "remainingQuantity":2,"positionEffect":"OPEN"}]}]
+            "legs":[{"side":"BUY","price":101.25,"quantity":3.0,"filledQuantity":1.0,
+                "remainingQuantity":2.0,"positionEffect":"OPEN"}]}]
     }]})
 }
 fn queue_portfolio(f: &Fixture, value: Value) {
-    f.wire.faults.borrow_mut().push_back(("accounts/default:A/portfolio".into(), 200, value));
+    f.wire
+        .faults
+        .borrow_mut()
+        .push_back(("accounts/default:A/portfolio".into(), 200, value));
 }
 #[test]
 fn portfolio_orders_ignore_unused_declaration_fields_and_unread_collections() {
@@ -1212,12 +1215,17 @@ fn portfolio_orders_ignore_unused_declaration_fields_and_unread_collections() {
     data["portfolios"][0]["balances"] = json!([null]);
     data["portfolios"][0]["positions"] = json!([null]);
     queue_portfolio(&f, data.clone());
-    let orders = f.run(f.exchange.fetch_orders(None)).expect("TS reads only orders here");
+    let orders = f
+        .run(f.exchange.fetch_orders(None))
+        .expect("TS reads only orders here");
     assert_eq!(orders.len(), 1);
     assert_eq!(orders[0].id, "source-order");
     assert_eq!(orders[0].amount, 3.0);
     assert_eq!(orders[0].price.value(), Some(&101.25));
-    assert_eq!(orders[0].info.value(), Some(&data["portfolios"][0]["orders"][0]));
+    assert_eq!(
+        orders[0].info.value(),
+        Some(&data["portfolios"][0]["orders"][0])
+    );
 }
 #[test]
 fn portfolio_positions_ignore_unused_declaration_fields_and_unread_collections() {
@@ -1226,12 +1234,17 @@ fn portfolio_positions_ignore_unused_declaration_fields_and_unread_collections()
     data["portfolios"][0]["balances"] = json!([null]);
     data["portfolios"][0]["orders"] = json!([null]);
     queue_portfolio(&f, data.clone());
-    let positions = f.run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()]))).expect("TS reads only positions here");
+    let positions = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .expect("TS reads only positions here");
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].symbol, "BTCUSD");
     assert_eq!(positions[0].contracts, 2.0);
     assert_eq!(positions[0].margin_size.value(), Some(&10.0));
-    assert_eq!(positions[0].info.value(), Some(&data["portfolios"][0]["positions"][0]));
+    assert_eq!(
+        positions[0].info.value(),
+        Some(&data["portfolios"][0]["positions"][0])
+    );
 }
 #[test]
 fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
@@ -1240,11 +1253,13 @@ fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
     data["portfolios"][0]["orders"] = json!([null]);
     queue_portfolio(&f, data.clone());
     queue_portfolio(&f, data.clone());
-    f.run(f.exchange.start()).expect("TS balance ignores order rows");
+    f.run(f.exchange.start())
+        .expect("TS balance ignores order rows");
     let balance = f.store.balance().clone();
-    assert_eq!(balance.total, 50.25);
+    assert_eq!(balance.total, 48.25);
+    assert_eq!(balance.upnl, -2.0);
     assert_eq!(balance.used, 10.0);
-    assert_eq!(balance.free, 40.25);
+    assert_eq!(balance.free, 38.25);
     assert_eq!(balance.info, Some(data));
     f.exchange.dispose().unwrap();
 }
