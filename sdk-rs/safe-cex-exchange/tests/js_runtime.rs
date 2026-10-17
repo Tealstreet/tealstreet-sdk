@@ -1388,7 +1388,7 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
             config_extensions: [(
                 "grvtCookie".into(),
-                safe_cex_types::retained_json::RetainedJsonInput::Text("gravity=bridge".into()),
+                safe_cex_types::retained_json::RetainedJsonInput::Text("gravity=bridge".encode_utf16().collect()),
             )]
             .into(),
             ..Default::default()

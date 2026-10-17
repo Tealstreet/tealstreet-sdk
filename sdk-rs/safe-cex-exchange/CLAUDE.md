@@ -1330,10 +1330,10 @@ still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
 the actual native runtime, factory, transport and HOW protocol against scripted
 socket I/O and compares four statuses with the maintained HOW adapter and Axios.
 
-The runtime JSON builtin and default encoded-HTTP response parser decode directly
+The runtime JSON builtin and default encoded-HTTP response parser decode through the canonical retained carrier
 into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
 including lone surrogates; object members use own data-property definition, and
-numbers retain binary64 bits. Both consumers share one private parser. Invalid
+numbers retain binary64 bits. Both consumers delegate to the canonical lower retained JSON parser. Invalid
 HTTP JSON retains Axios's existing raw-text result, while the builtin throws
 SyntaxError. tests/js_json_parse.rs compares 200 valid/invalid syntax cases and
 all 65,536 escaped units with Node and checks a real loopback HTTP response

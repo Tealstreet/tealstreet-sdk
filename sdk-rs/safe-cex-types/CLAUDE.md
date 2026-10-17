@@ -186,3 +186,12 @@ what to do with them. It does not add a permissive public placement decoder.
 `tests/support/model-field-corpus.cjs` supplies the 126-case Node presence corpus
 used by the real native bridge and account encoder tests. Store merge policy is
 a separate change; Option-like read helpers do not implement patch policy.
+
+RetainedJsonInput text and own keys use UTF-16 units. Its shared iterative parser
+serves both native JSON.parse (binary64 numbers) and raw Serde capture (numeric
+lexemes). Duplicate assignment keeps the first key position; only surviving
+values receive the lexical typed-ingress depth budget. Native parsing has no
+explicit typed depth budget. Projection to serde_json::Value remains fallible
+for lone units and nonfinite numbers; it never substitutes replacement text.
+The retained_utf16 target observes exact keys, both rows, numeric bits, reserved
+Serde-looking keys and all 65,536 raw/escaped code units before projection.

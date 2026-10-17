@@ -355,3 +355,11 @@ candle bounds; no venue-local calendar copy is introduced. `tests/date_iso.rs`
 compares 1,044 independently counted native bit inputs with actual JavaScript
 Date construction/toISOString, including fractional, nonfinite and clip-edge
 values. It does not implement object-to-primitive Date constructor coercion.
+
+The retained JSON writer traverses the canonical UTF-16 carrier directly. It
+shares the lower quotation helper and numeric/key-order primitives with prepared
+JSON rendering. Undefined and nonfinite numbers remain native until the final
+wire projection; typed Rust String/Value adapters explicitly reject lone units.
+The retained_json_writer target compares every UTF-16 unit and a native object
+containing duplicate/index/lone-unit keys, undefined, infinities and signed zero
+with Node JSON.stringify. It also observes the retained input after rendering.

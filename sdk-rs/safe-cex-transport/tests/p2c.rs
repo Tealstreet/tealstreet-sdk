@@ -1760,24 +1760,24 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
                 (
                     "grvtCookie".into(),
                     safe_cex_types::retained_json::RetainedJsonInput::Text(
-                        "gravity=retained".into(),
+                        "gravity=retained".encode_utf16().collect(),
                     ),
                 ),
                 (
                     "nativeConfig".into(),
                     safe_cex_types::retained_json::RetainedJsonInput::Object(vec![
                         (
-                            "missing".into(),
+                            "missing".encode_utf16().collect(),
                             safe_cex_types::retained_json::RetainedJsonInput::Undefined,
                         ),
                         (
-                            "nan".into(),
+                            "nan".encode_utf16().collect(),
                             safe_cex_types::retained_json::RetainedJsonInput::Float(
                                 f64::from_bits(0x7ff8000000000042),
                             ),
                         ),
                         (
-                            "negativeZero".into(),
+                            "negativeZero".encode_utf16().collect(),
                             safe_cex_types::retained_json::RetainedJsonInput::Float(-0.0),
                         ),
                     ]),
@@ -1819,12 +1819,12 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
                 panic!("native config object");
             };
             assert_eq!(fields.len(), 3, "hosted config retains every data field");
-            assert!(matches!(&fields[0], (key, Input::Undefined) if key == "missing"));
+            assert!(matches!(&fields[0], (key, Input::Undefined) if key == &"missing".encode_utf16().collect::<Vec<_>>()));
             assert!(
-                matches!(&fields[1], (key, Input::Float(value)) if key == "nan" && value.to_bits() == 0x7ff8000000000042)
+                matches!(&fields[1], (key, Input::Float(value)) if key == &"nan".encode_utf16().collect::<Vec<_>>() && value.to_bits() == 0x7ff8000000000042)
             );
             assert!(
-                matches!(&fields[2], (key, Input::Float(value)) if key == "negativeZero" && value.to_bits() == (-0.0_f64).to_bits())
+                matches!(&fields[2], (key, Input::Float(value)) if key == &"negativeZero".encode_utf16().collect::<Vec<_>>() && value.to_bits() == (-0.0_f64).to_bits())
             );
         }
         assert_eq!(
