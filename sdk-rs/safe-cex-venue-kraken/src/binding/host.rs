@@ -1028,14 +1028,6 @@ impl ConstructorHost for Rt {
             vec![(*name).clone(), (*options).clone(), (*store).clone()],
         )?))
     }
-    fn initialize(&self, venue: Venue, receiver: Handle<Self>) -> ReadResult<Self, ()> {
-        let kind = match venue {
-            Venue::Futures => crate::classes::Kind::FuturesExchange,
-            Venue::Spot => crate::classes::Kind::SpotExchange,
-        };
-        crate::classes::initialize(self, kind, receiver)
-    }
-    // ts: BaseExchange.createXhrWithSecondaryKey(opts, createAPI, { rateLimit }).
     fn secondary_client<'a>(
         &'a self,
         options: Handle<Self>,
