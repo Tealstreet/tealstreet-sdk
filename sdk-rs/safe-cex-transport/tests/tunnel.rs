@@ -2853,3 +2853,56 @@ fn how_consumes_grvt_config_extensions_like_actual_source() {
         );
     }
 }
+
+#[test]
+fn relay_constructor_preserves_source_url_error_classes_and_query_bytes() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let urls = [
+        "relative",
+        "wss://[",
+        "wss://tunnel.test/a",
+        "wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue",
+        "wss://tunnel.test/a?tag=a%20b&ts-relay=wss%3A%2F%2Fvenue&other=%7E#frag",
+    ];
+    let mut node = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/relay-url-source.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    node.stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&urls).unwrap().as_bytes())
+        .unwrap();
+    let output = node.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected.len(), urls.len());
+    let mut observed = Vec::new();
+    for url in urls {
+        let host = FakeHost::new();
+        observed.push(match RelayWebSocket::new(host, url) {
+            Ok(_) => json!({"ok":safe_cex_transport::relay::parse_relay_url(url).unwrap()}),
+            Err(TransportError::JavaScript(error)) => {
+                json!({"name":error.name,"message":error.message})
+            }
+            Err(error) => json!({"name":"Error","message":error.to_string()}),
+        });
+    }
+    assert_eq!(
+        observed, expected,
+        "real relay constructor must preserve source URL errors and query encoding"
+    );
+}
