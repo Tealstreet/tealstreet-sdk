@@ -151,22 +151,39 @@ fn plain_string_member(s: Str, name: &str) -> Option<Js> {
         "toLowerCase" => method(name, move |_| Ok(Js::str(&st.to_lowercase()))),
         "trim" => method(name, move |_| Ok(Js::str(safe_cex_num::js_trim(&st)))),
         "toString" | "valueOf" => method(name, move |_| Ok(Js::String(s.clone()))),
-        "includes" => method(name, move |a| {
-            Ok(Js::Bool(st.contains(&text(&arg(&a, 0))?)))
-        }),
-        "startsWith" => method(name, move |a| {
-            Ok(Js::Bool(st.starts_with(&text(&arg(&a, 0))?)))
-        }),
-        "endsWith" => method(name, move |a| {
-            Ok(Js::Bool(st.ends_with(&text(&arg(&a, 0))?)))
-        }),
-        "indexOf" => method(name, move |a| {
-            let needle = text(&arg(&a, 0))?;
-            Ok(Js::Number(
-                st.find(&needle)
-                    .map_or(-1.0, |i| st[..i].encode_utf16().count() as f64),
-            ))
-        }),
+        "indexOf" | "lastIndexOf" | "includes" | "startsWith" | "endsWith" => {
+            let operation = name.to_owned();
+            method(name, move |a| {
+                let needle = arg(&a, 0).to_js_string()?;
+                let position = arg(&a, 1);
+                let number = position.to_number()?;
+                let position = if (operation == "endsWith" && position.is_undefined())
+                    || (operation == "lastIndexOf" && number.is_nan())
+                {
+                    s.len()
+                } else {
+                    string_position(number, s.len())
+                };
+                Ok(match operation.as_str() {
+                    "includes" => Js::Bool(find_utf16(&s[position..], &needle).is_some()),
+                    "startsWith" => Js::Bool(s[position..].starts_with(&needle)),
+                    "endsWith" => Js::Bool(s[..position].ends_with(&needle)),
+                    "lastIndexOf" => {
+                        let found = if needle.len() > s.len() {
+                            None
+                        } else {
+                            let last = position.min(s.len() - needle.len());
+                            (0..=last).rev().find(|at| s[*at..].starts_with(&needle))
+                        };
+                        Js::Number(found.map_or(-1.0, |at| at as f64))
+                    }
+                    _ => Js::Number(
+                        find_utf16(&s[position..], &needle)
+                            .map_or(-1.0, |at| (position + at) as f64),
+                    ),
+                })
+            })
+        }
         "replace" => method(name, move |a| {
             let needle: Vec<u16> = arg(&a, 0).to_js_string()?.to_vec();
             let replacement = arg(&a, 1);
@@ -247,6 +264,14 @@ fn find_utf16(haystack: &[u16], needle: &[u16]) -> Option<usize> {
         return Some(0);
     }
     haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn string_position(value: f64, length: usize) -> usize {
+    if value.is_nan() {
+        0
+    } else {
+        value.clamp(0.0, length as f64) as usize
+    }
 }
 
 fn items(this: &Js) -> Vec<Option<Js>> {

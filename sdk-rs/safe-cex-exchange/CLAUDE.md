@@ -1305,3 +1305,10 @@ frames that the host delivers together. Scope timers use the same queue and
 drain reactions before the next timer. Other runtime embedders still control
 their host callback boundaries; the scoped native witnesses cover this native
 checkpoint, timer cancellation and host task discard.
+
+String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
+units and honor their position argument after search-string coercion. Positions
+truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
+endsWith defaults to the full length only for undefined. The native Node corpus
+covers surrogate halves, empty needles, all position boundaries and thrown
+position conversion identity.
