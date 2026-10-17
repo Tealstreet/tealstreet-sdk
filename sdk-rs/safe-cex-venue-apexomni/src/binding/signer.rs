@@ -1,15 +1,11 @@
 use crate::zklink_host::{TransactionKind, ZkLinkHandle, ZkLinkHost};
 use safe_cex_crypto::zklink::contract::{Contract, ContractSigner};
-use safe_cex_exchange::{
-    runtime::{ExchangeError, ExchangeFuture},
-    websocket::WsRuntime,
-};
+use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
 use safe_cex_num::JsJsonValue as J;
 use std::rc::Rc;
 
 pub(super) struct NativeSigner {
     signer: Option<ContractSigner>,
-    runtime: Rc<dyn WsRuntime>,
 }
 fn unavailable() -> ExchangeError {
     ExchangeError::new("ApexOmni native zkLink capability supports contracts only")
@@ -28,48 +24,21 @@ fn integer(value: &J) -> Result<u32, ExchangeError> {
     })
 }
 impl NativeSigner {
-    pub fn module(runtime: Rc<dyn WsRuntime>) -> Self {
-        Self {
-            signer: None,
-            runtime,
-        }
+    pub fn module() -> Self {
+        Self { signer: None }
     }
-    pub fn from_seed(
-        runtime: Rc<dyn WsRuntime>,
-        seed: Option<&str>,
-    ) -> Result<Self, ExchangeError> {
+    pub fn from_seed(seed: Option<&str>) -> Result<Self, ExchangeError> {
         let seed = seed.ok_or_else(|| {
             ExchangeError::new("ApexOmni requires an OmniKey seed; wallet provider unavailable")
         })?;
         Ok(Self {
             signer: Some(ContractSigner::from_signature(seed).map_err(ExchangeError::new)?),
-            runtime,
         })
     }
 }
 impl ZkLinkHost for NativeSigner {
     fn init(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(async { Ok(()) })
-    }
-    fn now_ms(&self) -> f64 {
-        self.runtime.now_ms()
-    }
-    fn pack_amount(&self, amount: &J) -> Result<J, ExchangeError> {
-        safe_cex_crypto::zklink::contract::closest_packable_amount(
-            &crate::data::string(amount).map_err(ExchangeError::new)?,
-        )
-        .map(J::String)
-        .map_err(ExchangeError::new)
-    }
-    fn pack_fee(&self, fee: &J) -> Result<J, ExchangeError> {
-        safe_cex_crypto::zklink::contract::closest_packable_fee(
-            &crate::data::string(fee).map_err(ExchangeError::new)?,
-        )
-        .map(J::String)
-        .map_err(ExchangeError::new)
-    }
-    fn pubkey_hash(&self) -> Result<J, ExchangeError> {
-        Err(unavailable())
     }
     fn builder(&self, kind: TransactionKind, args: Vec<J>) -> Result<ZkLinkHandle, ExchangeError> {
         if kind != TransactionKind::Contract || args.len() != 11 {
@@ -112,17 +81,5 @@ impl ZkLinkHost for NativeSigner {
             .sign_contract(contract)
             .map(J::from)
             .map_err(ExchangeError::new)
-    }
-    fn create_signed_order(&self, _: ZkLinkHandle) -> Result<J, ExchangeError> {
-        Err(unavailable())
-    }
-    fn sign_transfer(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        Box::pin(async { Err(unavailable()) })
-    }
-    fn sign_withdraw(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        Box::pin(async { Err(unavailable()) })
-    }
-    fn sign_change_pubkey(&self, _: ZkLinkHandle, _: bool) -> ExchangeFuture<'_, J> {
-        Box::pin(async { Err(unavailable()) })
     }
 }

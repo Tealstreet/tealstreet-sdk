@@ -196,7 +196,10 @@ control lives in the venue's scripts/registry-control.py.
 The Bybit host also constructs `Bybitspot` and `Bybitinverse` through their
 distinct retained receivers. Native Bybit loopback HTTP coverage includes both variants for local and hosted
 signing; its existing registry dependency edge and caller-owned limiter API
-remain shared across these constructors. HyroTrader awaits its binding. The Inverse registry removal control compiles,
+remain shared across these constructors. HyroTrader uses the same host edge with
+its distinct simulator receiver, source configuration refusal and acknowledged
+private session; native_host_hyrotrader verifies registry construction and signed
+HTTP reads. The Inverse registry removal control compiles,
 then fails both local and hosted construction assertions before exact restoration.
 
 ApexOmni's signed native host shares the account capability with HTTP and private

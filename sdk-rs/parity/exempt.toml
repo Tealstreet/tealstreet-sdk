@@ -1,6 +1,6 @@
 [[exempt]]
 rs = "safe-cex-crypto/src/zklink.rs::ZkLinkSignature"
-reason = "C3: named packed-byte return shape for the shared Rescue/MuSig primitive; no TypeScript packed-byte record declaration. The source TxSignature string record maps separately to safe-cex-venue-apexomni/src/transaction_records.rs::TxSignature. Packed-to-wire conversion belongs to the unfinished signing adapters, not this primitive return holder."
+reason = "C3: packed-byte return shape for the shared Rescue/MuSig primitive; no local TypeScript packed-byte declaration. The source TxSignature string record maps separately to transaction_records.rs::TxSignature. Native ContractSigner::sign_contract converts the packed result to the source hex wire signature; the constructed Apex placement test compares its complete signed body to the actual pinned SDK."
 
 [[exempt]]
 rs = "safe-cex-ffi/src/lib.rs::parity_probe"
@@ -2089,22 +2089,6 @@ rs = "safe-cex-store/src/notification.rs::StoreNotificationError::from_subscribe
 reason = "External Store implementors construct notification-origin failures with their assigned subscriber identity and original callback cause; no standalone TypeScript declaration."
 
 [[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionError"
-reason = "Adapted fallible subscription sender boundary retains shared coercion and injected ExchangeError without flattening; source throws synchronously, no separate TS error declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::active_subscriptions"
-reason = "Owned native inspection of source private activeSubscriptions Set for caller state/effect witnesses; not a new protocol operation."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput"
-reason = "Adapted caller input evaluation boundary for separate source key/envelope stringify reads; prepared JsJsonValue remains supported, general JS getter/toJSON objects are not a native JSON carrier."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput::evaluate"
-reason = "Fallible captured JSON-data read per source stringify evaluation; native adapters expose independent effects without a venue-local serializer or implicit JSON projection."
-
-[[exempt]]
 rs = "safe-cex-types/src/validation_error.rs::AccountValidationError"
 reason = "Shared runtime validation error carrier preserves source non-string JSON values without coercion; static declaration projection is recorded on ValidateAccountResult."
 
@@ -2193,22 +2177,6 @@ rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::init"
 reason = "C3 host ABI: init capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
 [[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::now_ms"
-reason = "C3 host ABI: now_ms capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pack_amount"
-reason = "C3 host ABI: pack_amount capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pack_fee"
-reason = "C3 host ABI: pack_fee capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pubkey_hash"
-reason = "C3 host ABI: pubkey_hash capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
 rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::builder"
 reason = "C3 host ABI: builder capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
@@ -2219,22 +2187,6 @@ reason = "C3 host ABI: new_transaction capability corresponds to an imported zkL
 [[exempt]]
 rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::create_signed_contract"
 reason = "C3 host ABI: create_signed_contract capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::create_signed_order"
-reason = "C3 host ABI: create_signed_order capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_transfer"
-reason = "C3 host ABI: sign_transfer capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_withdraw"
-reason = "C3 host ABI: sign_withdraw capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_change_pubkey"
-reason = "C3 host ABI: sign_change_pubkey capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
 [[exempt]]
 rs = "safe-cex-exchange/src/position_intervals.rs::FundingRow"
@@ -4826,7 +4778,7 @@ reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or Base
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::local_to_utc"
-reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or BaseWebSocket capability for ten mapped BingX REST history/listener/routing/polling/disposal bodies. No separate TS declaration. Shared public state and real private event/listen-key adapter are linked; full exchange/socket classes and constructors remain pending. No pending venue body is delegated."
+reason = "Native local-wall-time host capability for source Date parsing. The production HistoryHost delegates to required BingxDependencies.local_wall_time_to_utc; the native registry explicitly supplies its UTC profile. Real binding historical_fills_use_host_local_time_conversion compares the actual source fill mapper in Singapore and New York winter/summer and proves explicit offsets bypass the callback. No separate TS declaration."
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::loop_after"
