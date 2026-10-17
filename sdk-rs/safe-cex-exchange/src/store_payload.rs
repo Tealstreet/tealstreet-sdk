@@ -98,7 +98,7 @@ pub fn sanitize_for_post_message(
     data: &safe_cex_types::StoreData,
     omit_orders: bool,
     omit_positions: bool,
-) -> crate::payload::StoreWorkerStorePayload {
+) -> safe_cex_store::StoreUpdate {
     // Explicit destructuring makes additions to the shared store a compile error
     // until the worker's full-snapshot projection carries them too.
     let safe_cex_types::StoreData {
@@ -191,7 +191,7 @@ impl StorePayloadPreparer {
         tickers_version: f64,
         hosted_mode: bool,
         force_full_store: Option<bool>,
-    ) -> crate::payload::StoreWorkerStorePayload {
+    ) -> safe_cex_store::StoreUpdate {
         let has_active_chasers = !data.active_chasers.is_empty();
         let can_omit_orders = !has_active_chasers && !self.last_payload_had_active_chasers;
         let should_send_orders = !can_omit_orders

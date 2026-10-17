@@ -32973,5 +32973,756 @@
       ]
     },
     "entrypoints": []
+  },
+  "safe_cex_exchange::store_delivery::StoreFrame": {
+    "category": "decoder",
+    "shape": "map",
+    "evidence": "Canonical StoreFrame is an Rc<RefCell<StoreData>> alias with the existing StoreData Deserialize implementation. Compiled raw-trait probes detected that decoder, so it is explicitly classified here rather than exempted. Two direct decoded-field observations inspect numeric bits, typed fields and shared Rc mutation; the StoreData owner retains its broader field corpus. No type widening or new parsing implementation.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::store_model::StoreData",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "sample": {
+      "latency": 9,
+      "balance": {
+        "used": 1,
+        "free": 2,
+        "total": 3,
+        "upnl": -4,
+        "info": {
+          "tag": "balance-info"
+        },
+        "currencies": {},
+        "coins": {}
+      },
+      "markets": [],
+      "tickers": [],
+      "orders": [],
+      "positions": [],
+      "loaded": {
+        "balance": true,
+        "orders": false,
+        "markets": true,
+        "tickers": false,
+        "positions": true
+      },
+      "options": {
+        "isHedged": true
+      },
+      "userData": {
+        "tag": "user-data-A"
+      },
+      "fetchedLeverage": {
+        "left": {
+          "buyLeverage": 7,
+          "sellLeverage": 8,
+          "marginType": "isolated",
+          "positionMode": "hedged",
+          "isFetching": false
+        },
+        "right": {
+          "buyLeverage": 17,
+          "sellLeverage": 18,
+          "marginType": "isolated",
+          "positionMode": "hedged",
+          "isFetching": false
+        }
+      },
+      "starkConfig": {
+        "tag": "stark-A"
+      },
+      "zkLinkConfig": {
+        "tag": "zk-A"
+      },
+      "displayedPositions": [],
+      "displayedMargin": {
+        "longExposure": 41,
+        "shortExposure": 42,
+        "totalNotional": 43
+      },
+      "ordersRisk": {},
+      "activeChasers": [],
+      "activeTWAPs": [],
+      "updateIds": {
+        "positions": 61,
+        "orders": 62
+      },
+      "messageHandlerStats": {
+        "tag": "handler-A"
+      },
+      "requestStats": {
+        "ok": 71,
+        "rateLimit": 72,
+        "auth": 73,
+        "network": 74,
+        "other": 75
+      },
+      "socketHealth": {
+        "tag": "socket-A"
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(frame)=>{ let sibling=frame.clone(); let (latency,free,hedged,orders,markets)={let native=frame.borrow();(native.latency,native.balance.free,native.options.is_hedged,native.orders.len(),native.markets.len())}; frame.borrow_mut().latency=latency+1.0; serde_json::json!({\"ok\":true,\"latencyBits\":latency.to_bits().to_string(),\"freeBits\":free.to_bits().to_string(),\"hedged\":hedged,\"orders\":orders,\"markets\":markets,\"shared\":std::rc::Rc::ptr_eq(&frame,&sibling),\"afterBits\":sibling.borrow().latency.to_bits().to_string()}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "latency": 9.0,
+            "balance": {
+              "used": 1,
+              "free": 2.0,
+              "total": 3,
+              "upnl": -4,
+              "info": {
+                "tag": "balance-info"
+              },
+              "currencies": {},
+              "coins": {}
+            },
+            "markets": [],
+            "tickers": [],
+            "orders": [],
+            "positions": [],
+            "loaded": {
+              "balance": true,
+              "orders": false,
+              "markets": true,
+              "tickers": false,
+              "positions": true
+            },
+            "options": {
+              "isHedged": true
+            },
+            "userData": {
+              "tag": "user-data-A"
+            },
+            "fetchedLeverage": {
+              "left": {
+                "buyLeverage": 7,
+                "sellLeverage": 8,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              },
+              "right": {
+                "buyLeverage": 17,
+                "sellLeverage": 18,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              }
+            },
+            "starkConfig": {
+              "tag": "stark-A"
+            },
+            "zkLinkConfig": {
+              "tag": "zk-A"
+            },
+            "displayedPositions": [],
+            "displayedMargin": {
+              "longExposure": 41,
+              "shortExposure": 42,
+              "totalNotional": 43
+            },
+            "ordersRisk": {},
+            "activeChasers": [],
+            "activeTWAPs": [],
+            "updateIds": {
+              "positions": 61,
+              "orders": 62
+            },
+            "messageHandlerStats": {
+              "tag": "handler-A"
+            },
+            "requestStats": {
+              "ok": 71,
+              "rateLimit": 72,
+              "auth": 73,
+              "network": 74,
+              "other": 75
+            },
+            "socketHealth": {
+              "tag": "socket-A"
+            }
+          },
+          "output": {
+            "ok": true,
+            "latencyBits": "4621256167635550208",
+            "freeBits": "4611686018427387904",
+            "hedged": true,
+            "orders": 0,
+            "markets": 0,
+            "shared": true,
+            "afterBits": "4621819117588971520"
+          }
+        },
+        {
+          "input": {
+            "latency": 33.5,
+            "balance": {
+              "used": 1,
+              "free": -7.0,
+              "total": 3,
+              "upnl": -4,
+              "info": {
+                "tag": "balance-info"
+              },
+              "currencies": {},
+              "coins": {}
+            },
+            "markets": [],
+            "tickers": [],
+            "orders": [],
+            "positions": [],
+            "loaded": {
+              "balance": true,
+              "orders": false,
+              "markets": true,
+              "tickers": false,
+              "positions": true
+            },
+            "options": {
+              "isHedged": false
+            },
+            "userData": {
+              "tag": "user-data-A"
+            },
+            "fetchedLeverage": {
+              "left": {
+                "buyLeverage": 7,
+                "sellLeverage": 8,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              },
+              "right": {
+                "buyLeverage": 17,
+                "sellLeverage": 18,
+                "marginType": "isolated",
+                "positionMode": "hedged",
+                "isFetching": false
+              }
+            },
+            "starkConfig": {
+              "tag": "stark-A"
+            },
+            "zkLinkConfig": {
+              "tag": "zk-A"
+            },
+            "displayedPositions": [],
+            "displayedMargin": {
+              "longExposure": 41,
+              "shortExposure": 42,
+              "totalNotional": 43
+            },
+            "ordersRisk": {},
+            "activeChasers": [],
+            "activeTWAPs": [],
+            "updateIds": {
+              "positions": 61,
+              "orders": 62
+            },
+            "messageHandlerStats": {
+              "tag": "handler-A"
+            },
+            "requestStats": {
+              "ok": 71,
+              "rateLimit": 72,
+              "auth": 73,
+              "network": 74,
+              "other": 75
+            },
+            "socketHealth": {
+              "tag": "socket-A"
+            }
+          },
+          "output": {
+            "ok": true,
+            "latencyBits": "4629911523169402880",
+            "freeBits": "13842939354630062080",
+            "hedged": false,
+            "orders": 0,
+            "markets": 0,
+            "shared": true,
+            "afterBits": "4630052260657758208"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::message_stats::assign": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "assign",
+      "signature": {
+        "inputs": [
+          [
+            "store",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::store_model::StoreData",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "group",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Writes an already constructed statistics Value into the named group of typed StoreData. The object check protects the output accumulator; it parses no input into a new domain owner.",
+    "evidence": "Reviewed the unchanged message_stats body moved from webworker into exchange-core; this finite output-formatting classification is not a behavior exemption."
+  },
+  "safe_cex_exchange::message_stats::snapshot": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "snapshot",
+      "signature": {
+        "inputs": [
+          [
+            "socket",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::websocket::BaseWebSocket",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::map::Map",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Formats existing typed BaseWebSocket diagnostic counters into a JSON statistics output map. It parses no raw input or native domain owner.",
+    "evidence": "Reviewed the unchanged message_stats body moved from webworker into exchange-core; this finite output-formatting classification is not a behavior exemption."
+  },
+  "safe_cex_exchange::store_delivery::StoreUpdateThrottle": {
+    "shape": "typed",
+    "evidence": "The relocated constructor accepts an existing typed timer host, binary64 wait and store-frame callback; it stores these capabilities and initializes throttle bookkeeping without parsing raw data. Timing/cancellation behavior stays covered by the existing worker runtime tests.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "wait",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "resolved_path": {
+                                                "path": "safe_cex_exchange::store_delivery::StoreFrame",
+                                                "args": null
+                                              }
+                                            }
+                                          ],
+                                          "output": {
+                                            "resolved_path": {
+                                              "path": "core::result::Result",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "tuple": []
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Typed host/callback construction and numeric wait normalization; no raw text/JSON or untyped callback result enters the constructor."
+      }
+    ]
+  },
+  "safe_cex_exchange::throttle::ThrottleManager": {
+    "shape": "observed",
+    "instantiation": "ThrottleManager<u64>",
+    "evidence": "The existing generic keyed throttle constructor is relocated unchanged. The compiler treats the supplied get_key callback String result as a raw signature; two native constructor observations inspect stored delay/runtime/key callback and empty task/timer state for the explicit u64 instantiation. This claims neither arbitrary generic decoding nor callback execution/timer conformance.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "runtime",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "T"
+                                }
+                              ],
+                              "output": null
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    },
+                    {
+                      "outlives": "'static"
+                    }
+                  ]
+                }
+              ],
+              [
+                "delay",
+                {
+                  "primitive": "u64"
+                }
+              ],
+              [
+                "get_key",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "generic": "T"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    },
+                    {
+                      "outlives": "'static"
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Native host callback construction; execute the real constructor and inspect its stored capabilities and initial state for two distinct keys/delays."
+      }
+    ],
+    "call": "{\n    #[allow(dead_code)] mod fixture { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../safe-cex-parity/accepted-set/exchange-runtime-fixture.rs\")); }\n    let runtime=std::rc::Rc::new(fixture::Runtime::default());\n    let runtime_host:std::rc::Rc<dyn crate::runtime::ExchangeRuntime>=runtime.clone();\n    let calls=std::rc::Rc::new(std::cell::Cell::new(0u64));\n    let callback_calls=calls.clone();\n    let key=$value[\"key\"].as_str().unwrap().to_owned();\n    let owner=<$type>::new(runtime_host.clone(), move |_:u64| callback_calls.set(callback_calls.get()+1), $value[\"delay\"].as_u64().unwrap(), move |_:&u64| key.clone());\n    serde_json::json!({\"delay\":owner.delay,\"key\":owner.key(&9),\"callbacks\":calls.get(),\"entries\":owner.entries.borrow().len(),\"tasks\":owner.tasks.borrow().len(),\"timer\":owner.next_timer.get(),\"runtime\":std::rc::Rc::ptr_eq(&owner.runtime,&runtime_host)})\n}",
+    "cases": [
+      {
+        "input": {
+          "key": "first",
+          "delay": 25
+        },
+        "output": {
+          "delay": 25,
+          "key": "first",
+          "callbacks": 0,
+          "entries": 0,
+          "tasks": 0,
+          "timer": 0,
+          "runtime": true
+        }
+      },
+      {
+        "input": {
+          "key": "second",
+          "delay": 500
+        },
+        "output": {
+          "delay": 500,
+          "key": "second",
+          "callbacks": 0,
+          "entries": 0,
+          "tasks": 0,
+          "timer": 0,
+          "runtime": true
+        }
+      }
+    ]
   }
 }
