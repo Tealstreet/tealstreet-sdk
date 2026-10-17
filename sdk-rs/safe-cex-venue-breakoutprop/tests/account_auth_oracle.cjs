@@ -39,5 +39,28 @@ const names=['single','multi-first','none-valid','no-accounts','no-users','missi
  discardedEx.getSessionToken=()=>new Promise((_,r)=>{rejectValidation=r;});discardedEx.emitAndLogError=()=>{validationCalls++;};void discardedEx.validateAccount().then(()=>{validationCalls++;});rejectValidation(Error('discarded'));await new Promise(setImmediate);
  const loggerEx=new BreakoutpropExchange('breakoutprop',{},store()),shared={value:'before'};
  loggerEx.getSessionToken=async()=>{throw Object.assign(Error('alias'),{response:{data:{message:shared,msg:shared}}});};loggerEx.emitAndLogError=m=>{m.value='logged';};const loggerMutation=await loggerEx.validateAccount();
- process.stdout.write(JSON.stringify({runtime:{node:process.version,nodeMajor:+process.versions.node.split('.')[0],arch:process.arch,v8:process.versions.v8},cases,validations,invalidations,owned:{posted,calls},alias:aliasResult,validationCalls,loggerMutation}));
+ const consumed=[];
+ const minimal=()=>({userDetails:[{accounts:[{account:'default:A',accountStatus:'FULL_TRADING'}]}]});
+ for(const name of ['minimal','poisoned-unused','ignored-later','ignored-disabled','arraylike-users','null-user','null-accounts','scalar-accounts','null-account','nonstring-status','missing-status','bad-code-before-second-match']){
+  const input=minimal();
+  if(name==='poisoned-unused'){
+   Object.assign(input.userDetails[0],{login:null,domain:[],version:{},fullName:false,username:12});
+   Object.assign(input.userDetails[0].accounts[0],{owner:[],version:null,baseCurrency:{},registrationTime:false,pricingStream:12,positionBased:'unused'});
+  }
+  if(name==='ignored-later')input.userDetails.push(null,{accounts:'ignored'});
+  if(name==='ignored-disabled')input.userDetails[0].accounts.unshift({accountStatus:'DISABLED'});
+  if(name==='arraylike-users')input.userDetails={'0':input.userDetails[0]};
+  if(name==='null-user')input.userDetails=[null];
+  if(name==='null-accounts')input.userDetails[0].accounts=null;
+  if(name==='scalar-accounts')input.userDetails[0].accounts='unused';
+  if(name==='null-account')input.userDetails[0].accounts=[null];
+  if(name==='nonstring-status')input.userDetails[0].accounts[0].accountStatus=['FULL_TRADING'];
+  if(name==='missing-status')delete input.userDetails[0].accounts[0].accountStatus;
+  if(name==='bad-code-before-second-match')input.userDetails[0].accounts.unshift({accountStatus:'FULL_TRADING'});
+  const ex=new BreakoutpropExchange('breakoutprop',{key:'k',subaccount:'A'},store()),errors=[];
+  ex.getSessionToken=async()=>'';ex.xhr={get:async()=>({data:input})};ex.emitAndLogError=e=>errors.push(e);
+  let expected;try{expected={ok:await ex.getAccountCode(),errors};}catch(e){expected={error:e.message,name:e.name,errors};}
+  consumed.push({name,raw:encode(input),expected,after:ex.accountCode??null});
+ }
+ process.stdout.write(JSON.stringify({runtime:{node:process.version,nodeMajor:+process.versions.node.split('.')[0],arch:process.arch,v8:process.versions.v8},consumed,cases,validations,invalidations,owned:{posted,calls},alias:aliasResult,validationCalls,loggerMutation}));
 })().catch(e=>{console.error(e);process.exitCode=1;});
