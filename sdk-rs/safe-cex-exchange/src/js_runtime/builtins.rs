@@ -151,6 +151,12 @@ fn plain_string_member(s: Str, name: &str) -> Option<Js> {
         "toLowerCase" => method(name, move |_| Ok(Js::str(&st.to_lowercase()))),
         "trim" => method(name, move |_| Ok(Js::str(safe_cex_num::js_trim(&st)))),
         "toString" | "valueOf" => method(name, move |_| Ok(Js::String(s.clone()))),
+        "localeCompare" => method(name, move |a| {
+            let right = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
+            let collator = safe_cex_num::JsRootCollator::try_new()
+                .map_err(|error| Thrown::error(error.name, error.message))?;
+            Ok(Js::Number(collator.compare(&st, &right) as i8 as f64))
+        }),
         "indexOf" | "lastIndexOf" | "includes" | "startsWith" | "endsWith" => {
             let operation = name.to_owned();
             method(name, move |a| {
