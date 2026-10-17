@@ -8,18 +8,22 @@ import subprocess
 import sys
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 PUBLIC=ROOT/'sdk-rs/safe-cex-venue-asterdex/src/public_stream.rs'
+APPROVAL=ROOT/'sdk-rs/safe-cex-venue-asterdex/src/builder_approval.rs'
 SHA = subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip()
 subprocess.run(['git','diff','--exit-code','HEAD','--','sdk-rs/safe-cex-venue-asterdex/src','sdk-rs/safe-cex-venue-asterdex/tests','sdk-rs/safe-cex-venue-asterdex/scripts','sdk-rs/parity/manifest/exchanges/asterdex'], cwd=ROOT, check=True)
-BASELINES={p:p.read_bytes() for p in [PUBLIC]}
+BASELINES={p:p.read_bytes() for p in [PUBLIC,APPROVAL]}
 CONTROLS=[
 ('assembly',PUBLIC,'self.parent.options().testnet.unwrap_or(false),','!self.parent.options().testnet.unwrap_or(false),','construct-open-close native endpoint','live_public_stream','public_assembly_matches_source'),
 ('dispatch',PUBLIC,'json.get("id").and_then(Value::as_f64) == Some(-1.0)','json.get("id").and_then(Value::as_str) == Some("-1")','message-numeric-pong native numeric pong guard','live_public_stream','public_dispatch_matches_source'),
 ('delegates',PUBLIC,'map_timeframe(interval)','map_timeframe(if interval == Timeframe::M1 { Timeframe::H1 } else { interval })','delegate-cleanup native topics','live_public_stream','public_delegates_match_source'),
+('chain-switch',APPROVAL,'json!({"method":"wallet_switchEthereumChain","params":[{"chainId":"0x38"}]})','json!({"method":"wallet_switchEthereumChain","params":[{"chainId":"0x39"}]})','switch-ok native wallet request fields','live_builder_workflows','chain_switch_matches_source'),
+('builder-check',APPROVAL,'a + f64::EPSILON >= r','a + f64::EPSILON < r','check-approved native builder check result','live_builder_workflows','builder_check_matches_source'),
+('wallet-approval',APPROVAL,'!= Some(200.0)','!= Some(201.0)','approve-success native wallet approval result','live_builder_workflows','wallet_approval_matches_source'),
 ]
-assert len(CONTROLS)==3
+assert len(CONTROLS)==6
 PREFIX = ['/opt/homebrew/opt/rustup/bin/cargo','test','--manifest-path','sdk-rs/Cargo.toml','-p','safe-cex-venue-asterdex']
 ENV = dict(os.environ, SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript')
-record = {'input_sha': SHA, 'baseline_sha256': {str(path.relative_to(ROOT)): hashlib.sha256(data).hexdigest() for path,data in BASELINES.items()}, 'iteration': 1, 'planned': 3, 'command_prefix': PREFIX, 'controls': [], 'survivors': []}
+record = {'input_sha': SHA, 'baseline_sha256': {str(path.relative_to(ROOT)): hashlib.sha256(data).hexdigest() for path,data in BASELINES.items()}, 'iteration': 1, 'planned': 6, 'command_prefix': PREFIX, 'controls': [], 'survivors': []}
 def save():
     pathlib.Path('/tmp/asterdex-public-assembly-controls.json').write_text(json.dumps(record,indent=2)+'\n')
 def interrupted(_signal, _frame):

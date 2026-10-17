@@ -24,6 +24,7 @@ pub mod account_fetch;
 
 pub mod order_execution;
 
+pub mod builder_approval;
 pub mod private_stream;
 pub mod public_stream;
 
