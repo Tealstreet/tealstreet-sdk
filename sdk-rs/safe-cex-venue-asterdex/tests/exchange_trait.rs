@@ -707,6 +707,29 @@ fn v1_signature_rejection_resends_once_from_unsigned_parameters() {
 }
 
 #[test]
+fn amendment_omits_undefined_side_on_the_signed_wire() {
+    let (concrete, rt, _, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    let venue: Rc<dyn Exchange> = concrete;
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    let order = drive(&rt, venue.fetch_orders(None)).unwrap().remove(0);
+    let mut row = serde_json::to_value(order).unwrap();
+    row.as_object_mut().unwrap().remove("side");
+    let opts = serde_json::from_value(json!({"order":row,"update":{"price":96}})).unwrap();
+    take(&wire);
+    assert_eq!(drive(&rt, venue.update_order(opts)).unwrap(), ["1234567"]);
+    let requests = wire.requests.borrow();
+    let placed = requests
+        .iter()
+        .find(|r| r.method.eq_ignore_ascii_case("POST") && request_path(r) == "/fapi/v1/order")
+        .unwrap();
+    assert!(!signed_query_params(placed).contains_key("side"));
+    drop(requests);
+    venue.dispose().unwrap();
+}
+
+#[test]
 fn private_reopen_refreshes_orders_missed_during_disconnect() {
     let (venue, rt, store, wire) =
         support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
@@ -823,7 +846,12 @@ fn production_private_order_frame_updates_store() {
         .expect("private order in real Store");
     assert_eq!(order.symbol, "BTCUSDT");
     assert_eq!(
-        (order.price, order.amount, order.filled, order.remaining),
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
         (95.0, 3.0, 0.0, 3.0)
     );
     drop(rows);
@@ -900,5 +928,52 @@ fn production_private_balance_frame_updates_store() {
         (125.0, 110.0, 15.0)
     );
     drop(balance);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn algo_capacity_counts_raw_stop_info_when_normalized_type_is_undefined() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let (venue, rt, store, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    let venue: Rc<dyn Exchange> = venue;
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    let mut markets = store.markets().to_vec();
+    markets[0].info.as_mut().unwrap()["filters"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"filterType":"MAX_NUM_ALGO_ORDERS","limit":1}));
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let existing = serde_json::from_value(json!({
+        "id":"cached-stop","symbol":"BTCUSDT","status":"open","side":"sell",
+        "price":90,"amount":1,"filled":0,"remaining":1,"reduceOnly":true,
+        "lastUpdate":1700000000000u64,"info":{"type":"STOP"}
+    }))
+    .expect("source models admit an omitted normalized type");
+    store.add_or_update_orders(vec![existing]).unwrap();
+    take(&wire);
+    let opts: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0.01,"price":90,"reduceOnly":true})).unwrap();
+    let error = drive(&rt, venue.base().place_order(venue.as_ref(), opts))
+        .expect_err("raw STOP info still consumes the source algo capacity");
+    assert_eq!(
+        error.message,
+        "AsterDEX max algo order limit reached for BTCUSDT: 1/1 open, 1 new requested"
+    );
+    assert!(
+        !wire
+            .requests
+            .borrow()
+            .iter()
+            .any(|r| r.method.eq_ignore_ascii_case("POST") && request_path(r) == "/fapi/v1/order")
+    );
     venue.dispose().unwrap();
 }

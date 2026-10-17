@@ -171,3 +171,18 @@ without Serde Content buffering. The remote serializer companion keeps exact
 canonical field/serde metadata; optional null and duplicate-field rejection remain
 explicit. Direct raw JSON, private-companion and bounded map-seed witnesses cover
 this seam; plain serde numeric decoding still has its ordinary overflow policy.
+
+Order and Position use `ModelField<T>` for output enums, Order.price, and their
+optional fields. `Absent`, own `Undefined`, and `Value` stay distinct through the
+native model codec; JSON serialization omits the first two. Explicit JSON null
+remains invalid for non-nullable values (info may retain null). Numeric undefined
+is not NaN: arithmetic readers explicitly use `to_number()`. Copying a missing
+property into an object literal uses `into_property()` to create own undefined.
+The static TS declarations and strict public PlaceOrderOpts stay unchanged.
+
+`PreparedOrderOpts` is the one internal placement carrier for amendments copied
+from output models. Its type/side can be undefined; venue source branches decide
+what to do with them. It does not add a permissive public placement decoder.
+`tests/support/model-field-corpus.cjs` supplies the 126-case Node presence corpus
+used by the real native bridge and account encoder tests. Store merge policy is
+a separate change; Option-like read helpers do not implement patch policy.

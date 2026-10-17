@@ -38,6 +38,22 @@ use std::{
     sync::Arc,
 };
 
+// The native transport receives owned JSON params; preserve each scalar and container
+// when adapting to the shared query renderer.
+fn query(value: &serde_json::Value) -> safe_cex_types::QueryValue {
+    use safe_cex_types::QueryValue as Q;
+    match value {
+        serde_json::Value::Null => Q::Null,
+        serde_json::Value::Bool(value) => Q::Bool(*value),
+        serde_json::Value::Number(value) => Q::Number(value.as_f64().expect("JSON number")),
+        serde_json::Value::String(value) => Q::String(value.clone()),
+        serde_json::Value::Array(values) => Q::Array(values.iter().map(query).collect()),
+        serde_json::Value::Object(values) => {
+            Q::Object(values.iter().map(|(k, v)| (k.clone(), query(v))).collect())
+        }
+    }
+}
+
 pub type AdapterFactory = Rc<dyn Fn() -> Result<Arc<dyn RestAdapter>, ExchangeError>>;
 pub use safe_cex_venue_hyperliquid::rate_limit::RateLimiter as HyperliquidRateLimiter;
 
@@ -247,23 +263,6 @@ impl RustVenueHost for NativeVenueHost {
             },
             self.remote.clone(),
             Some(Arc::new(|params| {
-                fn query(value: &serde_json::Value) -> safe_cex_types::QueryValue {
-                    use safe_cex_types::QueryValue as Q;
-                    match value {
-                        serde_json::Value::Null => Q::Null,
-                        serde_json::Value::Bool(value) => Q::Bool(*value),
-                        serde_json::Value::Number(value) => {
-                            Q::Number(value.as_f64().expect("JSON number"))
-                        }
-                        serde_json::Value::String(value) => Q::String(value.clone()),
-                        serde_json::Value::Array(values) => {
-                            Q::Array(values.iter().map(query).collect())
-                        }
-                        serde_json::Value::Object(values) => {
-                            Q::Object(values.iter().map(|(k, v)| (k.clone(), query(v))).collect())
-                        }
-                    }
-                }
                 safe_cex_transport::query::render_query(
                     &query(params),
                     safe_cex_transport::query::QueryProfile {

@@ -36,16 +36,16 @@ fn obs(v: JsJsonValue) -> Value {
 }
 fn position(p: Position) -> Value {
     let mut v = json!({"id":p.id,"symbol":p.symbol,"side":p.side,"entryPrice":num(p.entry_price),"notional":num(p.notional),"leverage":num(p.leverage),"unrealizedPnl":num(p.unrealized_pnl),"contracts":num(p.contracts),"liquidationPrice":num(p.liquidation_price)});
-    if let Some(n) = p.realized_pnl {
+    if let Some(n) = p.realized_pnl.into_value() {
         v["realizedPnl"] = num(n);
     }
-    if let Some(n) = p.margin_type {
+    if let Some(n) = p.margin_type.into_value() {
         v["marginType"] = json!(n);
     }
-    if let Some(n) = p.position_mode {
+    if let Some(n) = p.position_mode.into_value() {
         v["positionMode"] = json!(n);
     }
-    if let Some(n) = p.info {
+    if let Some(n) = p.info.into_value() {
         v["info"] = obs(JsJsonValue::from(n));
     }
     assert!(
@@ -95,21 +95,21 @@ fn actual_typescript_position_reads() {
             let cached = Position {
                 id: "cached".into(),
                 symbol: "CACHED".into(),
-                side: safe_cex_types::PositionSide::Long,
+                side: (safe_cex_types::PositionSide::Long).into(),
                 entry_price: 0.,
                 notional: 0.,
                 leverage: 10.,
                 unrealized_pnl: 0.,
                 contracts: 0.,
                 liquidation_price: 0.,
-                margin_type: None,
-                position_mode: None,
-                realized_pnl: None,
-                margin_size: None,
-                info: None,
-                extra: None,
-                last_update: None,
-                option: None,
+                margin_type: (None).into(),
+                position_mode: (None).into(),
+                realized_pnl: (None).into(),
+                margin_size: (None).into(),
+                info: (None).into(),
+                extra: (None).into(),
+                last_update: (None).into(),
+                option: (None).into(),
             };
             let body = js_deserialize_passthrough(&mut serde_json::Deserializer::from_str(
                 &serde_json::to_string(&f["body"]).unwrap(),
