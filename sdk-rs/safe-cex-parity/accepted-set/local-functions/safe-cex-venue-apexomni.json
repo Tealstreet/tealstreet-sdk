@@ -6,7 +6,7 @@
   },
   "safe-cex-venue-apexomni/src/exchange.rs::LOCAL_FUNCTION:retained": {
     "category": "non-decoder",
-    "reason": "Inside fields: converts an already modeled JS JSON value into RetainedJsonInput for diagnostic field projection, refusing undefined/unsupported nodes. It projects outbound data rather than admitting a decoded shape. Reviewed source since961c095af0: base/API plumbing, log capability, ModelField conversions, synchronized-clock reads and disposal guards are outside this nested helper. This canonical carrier migration explicitly encodes existing UTF-8 prepared text/keys to units before the same fallible Value projection; filtering and numeric events are unchanged.",
-    "sourceSha256": "249fb8268a3632c624f104f323854da475ea4e1e22d1ef769a04fb4c0322e112"
+    "reason": "Inside fields: converts an already modeled JS JSON value into RetainedJsonInput for diagnostic field projection, refusing undefined/unsupported nodes. It projects outbound data rather than admitting a decoded shape. Reviewed source since961c095af0: base/API plumbing, log capability, ModelField conversions, synchronized-clock reads and disposal guards are outside this nested helper. This canonical carrier migration explicitly encodes existing UTF-8 prepared text/keys to units before the same fallible Value projection; filtering and numeric events are unchanged. Reviewed merged ModelField import and mapOrder missing-enum branches: all are outside fields/retained, whose outbound role and body are unchanged.",
+    "sourceSha256": "ee0a797e626aadfa93bf5990899fc80c61ee24e95028c0cd2f7e966e54e6be58"
   }
 }
