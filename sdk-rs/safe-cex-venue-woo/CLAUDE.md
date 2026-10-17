@@ -482,3 +482,8 @@ source BigInt throws and toJSON callbacks before any data-only transport capture
 exchange regression in `native_signing_retention` observes NaN and Infinity in
 actual HMAC preimages before the terminal wire projection. Finite JSON fixture
 views in older tests are explicit observations after signing.
+
+The constructed clientOrderIdRule retains its source Number(input) conversion and
+uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
+compares26 maintained-source identifiers, including safe-range and canonical-decimal
+boundaries, without replacing the rule or its operation table.

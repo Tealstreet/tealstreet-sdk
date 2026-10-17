@@ -910,7 +910,7 @@ pub fn extract_filter_value(
 // ts: AsterDEXExchange.transformMarket
 pub fn transform_market(
     market: &crate::types::AsterDEXMarketResponse,
-    leverage_brackets: &std::collections::BTreeMap<String, f64>,
+    leverage_brackets: &std::collections::BTreeMap<String, Js>,
 ) -> Result<safe_cex_types::Market, (&'static str, String)> {
     use safe_cex_num::{ccxt_precision::precision_to_string, parse_float};
     use safe_cex_types::{
@@ -918,11 +918,15 @@ pub fn transform_market(
     };
     let price = parse_float(&precision_to_string(market.price_precision));
     let amount = parse_float(&precision_to_string(market.quantity_precision));
-    let max_leverage = leverage_brackets
+    let max_leverage = match leverage_brackets
         .get(&market.symbol)
-        .copied()
-        .filter(|v| *v != 0.0 && !v.is_nan())
-        .unwrap_or(10.0);
+        .filter(|value| value.truthy())
+    {
+        Some(value) => value
+            .to_number()
+            .map_err(|error| ("TypeError", error.message()))?,
+        None => 10.0,
+    };
     let filters = market
         .filters
         .iter()
