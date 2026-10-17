@@ -2,7 +2,8 @@
 #[path = "support/binding_harness.rs"]
 mod support;
 use safe_cex_types::{
-    ExchangeName, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, UpdateOrderOpts,
+    ExchangeName, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, Position,
+    UpdateOrderOpts,
 };
 use serde_json::{Value, json};
 use support::{Harness, harness, options};
@@ -298,6 +299,42 @@ fn set_leverage_puts_a_clamped_preference() {
     assert!(
         body.contains("maxLeverage=50"),
         "clamped to market max: {body}"
+    );
+}
+
+#[test]
+fn change_margin_type_merges_refreshed_positions_into_the_store() {
+    let h = futures(|http| {
+        http.ok(
+            "PUT",
+            "/v3/leveragepreferences",
+            json!({"result": "success"}),
+        );
+        http.ok("GET", "/v3/openpositions", open_positions());
+    });
+    loaded(&h);
+    let mut other: Position = h
+        .drive(h.venue().fetch_positions(None))
+        .expect("fetchPositions")
+        .remove(0);
+    other.symbol = "PF_ETHUSD".into();
+    other.id = "PF_ETHUSD-long".into();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            positions: Some(vec![other]),
+            ..Default::default()
+        },
+        false,
+    )
+    .expect("seed positions");
+    h.drive(h.venue().change_margin_type(true, Some(SYMBOL.into())))
+        .expect("changeMarginType");
+    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    let symbols: Vec<&str> = positions.iter().map(|p| p.symbol.as_str()).collect();
+    assert!(
+        symbols.contains(&"PF_ETHUSD") && symbols.contains(&SYMBOL),
+        "refreshed positions must merge, not replace: {symbols:?}"
     );
 }
 

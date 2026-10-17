@@ -500,8 +500,9 @@ The override contract has two independent gates in `tests/override_contract.rs`:
 `override-inventory.cjs` resolves TypeScript class ancestry and inventories every
 callable override of a BaseExchange member; each must have a dynamic hook (or the
 explicit typed-placement binding). The Rust source audit rejects direct base
-bypasses and captured base method references, and pins hook call sites plus their
-enclosing function token fingerprints in `override-call-sites.json`. This is a
+bypasses and captured base method references, and pins each function's hook call
+edges (kind, hook, receiver base/dynamic/path, count) in `override-call-sites.json`;
+unrelated body edits keep the pin, edge changes fail. This is a
 syntax/alias audit with review-required inventory changes, not Rust type inference.
 It sees local receiver/alias syntax, not ambient type-alias or field-type changes
 outside the function; macros are unexpanded. Those still need semantic review.
@@ -1206,3 +1207,8 @@ mutation bridge. IDs cross the declared typed string boundary without lossy
 surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
 snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
 real private-frame witnesses cover the production caller and final fill ordering.
+
+`JsProtocol::resyncs_private_state_on_reopen` reads the receiver's
+`resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
+OKX's business socket defines it, so a business-only re-open runs the private
+snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
