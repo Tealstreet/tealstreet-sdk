@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_account_refresh.rs::spot_private_snapshot"
 status = "ported"
-note = "Starts the current helper with no arguments, awaits its actual settlement and returns undefined; retains original helper errors and default-argument behavior. Values/errors retain UTF-16 and binary64 values, aliases, property/call failures and original receiver identity through generic runtime capabilities. Original store/fetch/formatter/merge/clock/Promise/loop bodies remain dependencies; no full concrete class/SDK scheduler or dropped-future cancellation claim. Rename: safe-cex-venue-bybit/src/variant_account_refresh.rs::spot_private_snapshot."
+note = "Starts the current helper with no arguments, awaits its actual settlement and returns undefined; retains original helper errors and default-argument behavior. Values/errors retain UTF-16 and binary64 values, aliases, property/call failures and original receiver identity through generic runtime capabilities. Original store/fetch/formatter/merge/clock/Promise/loop bodies remain dependencies; no full concrete class/SDK scheduler or dropped-future cancellation claim. Rename: safe-cex-venue-bybit/src/variant_account_refresh.rs::spot_private_snapshot. Production Exchange dispatch now reaches this receiver member instead of the shared orders-only default; four compiled master-fail real HTTP bindings verify orders, positions and balance publication, preserving Spot's empty positions and source single-attempt behavior."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchAndSetPrivateSnapshotHelper"
