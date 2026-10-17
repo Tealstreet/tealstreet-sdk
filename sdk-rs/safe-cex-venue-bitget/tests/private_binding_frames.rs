@@ -138,7 +138,7 @@ fn real_private_fill_closes_known_order_and_emits_exact_payload() {
     assert_eq!(
         s.fills.borrow().as_slice(),
         [
-            json!([{"id":"private-native-order","side":"buy","symbol":"BTCUSDT","price":"101.25","amount":2.0}])
+            json!({"id":"private-native-order","side":"buy","symbol":"BTCUSDT","price":"101.25","amount":2.0})
         ],
         "real fill must emit exact native contents"
     );
