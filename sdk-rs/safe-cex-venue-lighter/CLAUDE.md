@@ -406,6 +406,11 @@ The constructed public class and its real operation table carry the regressions.
 The native exchange target also covers account_all orders, positions, fills and
 the source-throttled balance refresh through the real private socket.
 
+Private fill freshness uses Number.isFinite's non-coercing numeric guard before
+reading either clock. `private_fill_timestamp_types_match_the_maintained_handler`
+drives actual account_all data.fills frames against maintained TypeScript arrow
+bodies for 15 timestamp values, retaining the five-second boundary and future
+numeric timestamps while rejecting strings, arrays and other non-number inputs.
 Public REST payload parsers retain native arrays and row references. Book fallback
 selection stays lazy, ticker candidate capture stays eager, and guarded book-side
 reads occur twice as in the source. Native source tests retain UTF16 and sparse rows.
@@ -417,3 +422,7 @@ calling the live owner helper; source oracles cover identity, numeric bits and U
 Nonce retry classification reads the original error's code and message directly.
 Both String conversions precede the final OR, so matching codes still observe
 message coercion failures. Unread surrogate fields and cycles stay untouched.
+
+Signer class flag inputs use JavaScript truthiness for preimage bits and preserve
+original JS values in returned order metadata. Group validation shares one body
+with typed callers and receives strict raw-side equality from the JS binding.

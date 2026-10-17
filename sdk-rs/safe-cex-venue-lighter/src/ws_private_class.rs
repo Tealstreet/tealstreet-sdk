@@ -1308,7 +1308,9 @@ impl PrivateWebsocketMethod {
                 ))?
             }
             Self::IsRecentStreamEvent => {
-                let timestamp = number(socket.as_ref(), arg(args, 0))?;
+                let AccountValue::Number(timestamp) = arg(args, 0) else {
+                    return Ok(AccountValue::Boolean(false));
+                };
                 if !timestamp.is_finite() || timestamp <= 0.0 {
                     AccountValue::Boolean(false)
                 } else {
