@@ -1,3 +1,7 @@
+#[path = "support/error_post.rs"]
+mod error_post_support;
+#[path = "support/error_trace.rs"]
+mod error_trace;
 #[path = "support/runtime.rs"]
 mod runtime;
 #[path = "../../safe-cex-exchange/tests/support/store.rs"]
@@ -215,7 +219,7 @@ fn market_buffer_timeout_cooldown_reset_and_disposal_are_independent() {
     let handler = BaseHandler::new(
         venue,
         "OHLCVSubscriptionsHandler".into(),
-        Rc::new(move |msg| sink.borrow_mut().push(msg)),
+        error_trace::post(Rc::new(move |msg| sink.borrow_mut().push(msg))),
         Rc::new(move |msg| replay.borrow_mut().push(msg)),
     );
     let subscription = StoreWorkerPayload {
@@ -278,6 +282,7 @@ fn call_method_replies_preserve_null_undefined_unknown_and_cancellation() {
     let handler = CallMethodHandler::new(
         venue.clone(),
         Rc::new(move |message| sink.borrow_mut().push(message)),
+        error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("unknown".into(), "notAMethod".into(), vec![]));
     assert_eq!(
@@ -347,6 +352,7 @@ fn call_method_discarded_host_task_still_settles_the_waiter() {
     let handler = CallMethodHandler::new(
         venue,
         Rc::new(move |message| sink.borrow_mut().push(message)),
+        error_post_support::unexpected(),
     );
     handler.handle(StoreWorkerPayload {
         op: StoreWorkerOp::CallMethod,
@@ -551,6 +557,7 @@ fn complete_call_method_dispatch_matches_live_typescript_replies() {
     let handler = CallMethodHandler::new(
         venue.clone(),
         Rc::new(move |message| sink.borrow_mut().push(message)),
+        error_post_support::unexpected(),
     );
     for record in records {
         let method = record["method"].as_str().unwrap();
@@ -626,6 +633,7 @@ fn offline_recovery_inner_worker_route_is_admitted() {
     let handler = CallMethodHandler::new(
         venue,
         Rc::new(move |message| sink.borrow_mut().push(message)),
+        error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("recover-inner".into(), "recoverAfterOffline".into(), vec![]));
     assert_eq!(
@@ -654,6 +662,7 @@ fn offline_recovery_outer_worker_route_is_admitted() {
     let handler = CallMethodHandler::new(
         venue,
         Rc::new(move |message| sink.borrow_mut().push(message)),
+        error_post_support::unexpected(),
     );
     handler.handle(StoreWorkerPayload {
         op: StoreWorkerOp::CallMethod,
@@ -724,6 +733,7 @@ fn offline_recovery_visits_every_socket_and_preserves_false_policy() {
     let handler = safe_cex_webworker::call_method::CallMethodHandler::new(
         venue,
         Rc::new(move |message| sink.borrow_mut().push(message)),
+        error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("policy".into(), "recoverAfterOffline".into(), vec![]));
     let messages = messages.borrow();
@@ -771,6 +781,7 @@ fn offline_recovery_reports_exchange_hook_failure() {
     let handler = safe_cex_webworker::call_method::CallMethodHandler::new(
         venue,
         Rc::new(move |message| sink.borrow_mut().push(message)),
+        error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("error".into(), "recoverAfterOffline".into(), vec![]));
     let messages = messages.borrow();
@@ -880,6 +891,7 @@ fn actual_source_command_admission_and_position_error_strings() {
     for script in [
         "command-admission-source.cjs",
         "position-error-string-source.cjs",
+        "markets-error-clone-source.cjs",
     ] {
         let output = std::process::Command::new("node")
             .arg(
@@ -895,5 +907,154 @@ fn actual_source_command_admission_and_position_error_strings() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+}
+
+#[test]
+fn market_timeout_never_projects_its_error_into_the_json_post_channel() {
+    use safe_cex_webworker::error_post::{WorkerErrorHandle, WorkerErrorPost};
+    let (venue, runtime, _) = venue();
+    let posts = Rc::new(RefCell::new(Vec::new()));
+    let capture = posts.clone();
+    let native = WorkerErrorHandle::new("opaque host Error");
+    let original = native.clone();
+    let reports = Rc::new(RefCell::new(Vec::new()));
+    let sink = reports.clone();
+    let error_post = WorkerErrorPost::new(
+        Rc::new(move |name, message| {
+            assert_eq!(name, "MarketsNotLoadedError");
+            assert_eq!(
+                message,
+                "Markets still not loaded after 30s, dropping 1 pending subscriptions"
+            );
+            Ok(native.clone())
+        }),
+        Rc::new(move |report| {
+            sink.borrow_mut().push(report);
+            Ok(())
+        }),
+    );
+    let handler = safe_cex_webworker::subscriptions::OHLCVSubscriptionsHandler::new(
+        venue,
+        Rc::new(move |payload| capture.borrow_mut().push(payload)),
+        error_post,
+    );
+    handler
+        .handle(StoreWorkerPayload {
+            op: StoreWorkerOp::SubscribeOHLCV,
+            instance_id: None,
+            data: Some(json!({"symbol":"BTC","interval":"1m","subId":"s"})),
+        })
+        .unwrap();
+    runtime.advance(130_000);
+    assert!(
+        posts.borrow().is_empty(),
+        "WORKER-NATIVE-ERROR timeout Error must use the native object post capability, never JSON data"
+    );
+    let reports = reports.borrow();
+    assert_eq!(
+        reports.len(),
+        1,
+        "WORKER-NATIVE-ERROR exactly one native post"
+    );
+    assert!(
+        reports[0].error.same_object(&original),
+        "WORKER-NATIVE-ERROR original opaque handle reaches post"
+    );
+    assert_eq!(
+        reports[0].tags["worker_handler"],
+        "OHLCVSubscriptionsHandler"
+    );
+    assert_eq!(reports[0].extra["pendingCount"], 1);
+    assert!(runtime.exceptions.borrow().is_empty());
+}
+
+#[test]
+fn market_timeout_host_failures_retain_fired_deadline_until_flush() {
+    use safe_cex_webworker::{
+        error_post::{WorkerErrorHandle, WorkerErrorPost},
+        handler::BaseHandler,
+    };
+    for fail_create in [true, false] {
+        let (venue, runtime, store) = venue();
+        let calls = Rc::new(Cell::new(0));
+        let creates = calls.clone();
+        let attempts = Rc::new(RefCell::new(Vec::new()));
+        let sent = attempts.clone();
+        let error_post = WorkerErrorPost::new(
+            Rc::new(move |_, _| {
+                let call = creates.get();
+                creates.set(call + 1);
+                if fail_create && call == 0 {
+                    return Err(ExchangeError::new("native create failed"));
+                }
+                Ok(WorkerErrorHandle::new(call))
+            }),
+            Rc::new(move |report| {
+                let first = sent.borrow().is_empty();
+                sent.borrow_mut().push(report);
+                if !fail_create && first {
+                    return Err(ExchangeError::new("native post failed"));
+                }
+                Ok(())
+            }),
+        );
+        let replayed = Rc::new(Cell::new(0));
+        let replay_count = replayed.clone();
+        let handler = BaseHandler::new(
+            venue,
+            "TimeoutTest".into(),
+            error_post,
+            Rc::new(move |_| replay_count.set(replay_count.get() + 1)),
+        );
+        let payload = StoreWorkerPayload {
+            op: StoreWorkerOp::SubscribeOHLCV,
+            instance_id: None,
+            data: None,
+        };
+        handler.buffer_until_markets_loaded(payload.clone());
+        runtime.advance(130_000);
+        assert_eq!(
+            runtime.exceptions.borrow().len(),
+            1,
+            "WORKER-NATIVE-ERROR host failure is visible"
+        );
+        assert_eq!(
+            runtime.exceptions.borrow()[0].0.message,
+            if fail_create {
+                "native create failed"
+            } else {
+                "native post failed"
+            }
+        );
+        handler.buffer_until_markets_loaded(payload);
+        runtime.advance(160_000);
+        assert_eq!(
+            calls.get(),
+            1,
+            "WORKER-NATIVE-ERROR thrown callback retains fired deadline; no replacement timeout"
+        );
+        store.data.borrow_mut().markets = vec![serde_json::from_value(json!({"id":"BTC","symbol":"BTC","base":"BTC","quote":"USDT","active":true,"precision":{"amount":1,"price":1},"limits":{"amount":{"min":1,"max":5},"leverage":{"min":1,"max":100}}})).unwrap()];
+        runtime.advance(160_500);
+        assert_eq!(
+            replayed.get(),
+            2,
+            "WORKER-NATIVE-ERROR failed report keeps both pending items until flush"
+        );
+        assert_eq!(calls.get(), 1);
+        store.data.borrow_mut().markets.clear();
+        handler.buffer_until_markets_loaded(StoreWorkerPayload {
+            op: StoreWorkerOp::SubscribeOHLCV,
+            instance_id: None,
+            data: None,
+        });
+        runtime.advance(190_500);
+        assert_eq!(
+            calls.get(),
+            2,
+            "WORKER-NATIVE-ERROR loaded-market episode resets the deadline"
+        );
+        assert_eq!(attempts.borrow().last().unwrap().extra["pendingCount"], 1);
+        assert_eq!(runtime.exceptions.borrow().len(), 1);
     }
 }

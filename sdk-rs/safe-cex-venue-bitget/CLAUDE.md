@@ -14,7 +14,10 @@ The concrete binding connects both signature-rejection retry imports to the
 shared client replay path and shared request-stamp key. Non-2xx refusals stamp
 the live config; resolved refusals copy and stamp it before re-entering request
 interceptors. Tests cover all three families, writes, fresh signing timestamps,
-the single-resend limit and unrelated failures. The signature predicate uses
+the single-resend limit and unrelated failures. The write-retry witness advances the
+shared VirtualClock between actual transport attempts, separately from the runtime
+timeout clock, and verifies each observed timestamp and its exact HMAC preimage.
+It must not depend on two wall-clock milliseconds happening to differ. The signature predicate uses
 shared string-hint coercion; its source witness compares all 22 outcomes, including
 custom hooks and getter throws. Older pending notes below describe standalone
 extraction stages.

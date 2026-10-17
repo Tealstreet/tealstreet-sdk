@@ -8,6 +8,7 @@ pub mod command_handlers;
 pub mod dev;
 pub mod displayed_positions;
 pub mod error;
+pub mod error_post;
 pub mod exchange_worker;
 pub mod exchange_worker_start;
 pub mod handler;
