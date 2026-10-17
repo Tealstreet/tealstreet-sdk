@@ -19,7 +19,7 @@ function textFrame(value) {
   else { header[1] = 126; header.writeUInt16BE(body.length, 2); }
   return Buffer.concat([header, body]);
 }
-export async function openStartedAccount(t) {
+export async function openStartedAccount(t, options = {}) {
   const seen = [];
   const sockets = new Set();
   const received = [];
@@ -88,13 +88,17 @@ export async function openStartedAccount(t) {
   });
   const events = [];
   const stores = [];
-  id = await native.nativeAccountOpen({ exchange: 'binance', optionsJson: JSON.stringify({
+  id = await native.nativeAccountOpen({ exchange: 'binance', options: {
     key: 'test-key', secret: 'test-secret', publicDataOnly: true, overrideProxyUrl: `http://${origin}`,
+    ...options,
     externalPublicData: { type: 'websocket', url: `ws://${origin}/gateway`, exchangeId: 'binance' },
-  }) }, event => events.push(JSON.parse(event)), store => stores.push(JSON.parse(store)));
-  const call = async (method, ...args) => JSON.parse(await native.nativeAccountCallMethod(id, method, JSON.stringify(args)));
+  } }, event => events.push(event), store => stores.push(store));
+  const call = async (method, ...args) => await native.nativeAccountCallMethod(id, method, args);
   await call('start');
-  return { call, seen, events, stores, received, sendGateway: frame => {
+  return { call, seen, events, stores, received, close: async () => {
+    await native.nativeAccountClose(id);
+    id = undefined;
+  }, sendGateway: frame => {
     for (const socket of sockets) if (!socket.destroyed) socket.write(textFrame(frame));
   } };
 }

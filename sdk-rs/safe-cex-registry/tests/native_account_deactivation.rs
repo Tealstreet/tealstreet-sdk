@@ -26,16 +26,18 @@ async fn account() -> Rc<NativeAccount> {
     open_native_account(NativeAccountSpec {
         hyperliquid_limiter:safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange:"woofi".into(),
-        options:json!({"key":"test-orderly-key","secret":"ed25519:11111111111111111111111111111111","applicationId":"test-account","overrideProxyUrl":origin}),
+        options:json!({"key":"test-orderly-key","secret":"ed25519:11111111111111111111111111111111","applicationId":"test-account","overrideProxyUrl":origin}).into(),
         account_name:Some("test-account".into()),
-        sign:Some(Rc::new(|request|Box::pin(async move {Ok(json!({"id":request["id"],"config":request["config"]}))}))),
+        sign:Some(Rc::new(|request|Box::pin(async move {Ok(safe_cex_registry::native_value::NativeValue::object([("id",request["id"].clone()),("config",request["config"].clone())]))}))),
         proxy_token:None,
     }).unwrap()
 }
 async fn call(account: &Rc<NativeAccount>, method: &str) -> Value {
-    native_account_call(account.clone(), method.into(), vec![])
-        .await
-        .unwrap_or_else(|error| panic!("{method}: {error}"))
+    support::boundary_json(
+        native_account_call(account.clone(), method.into(), vec![])
+            .await
+            .unwrap_or_else(|error| panic!("{method}: {error}")),
+    )
 }
 #[test]
 fn expired_key_posts_worker_status_without_posting_the_disposal_reset() {
@@ -50,9 +52,9 @@ fn expired_key_posts_worker_status_without_posting_the_disposal_reset() {
             Rc::new(move |event, data| {
                 captured
                     .borrow_mut()
-                    .push((event.to_string(), data.clone()))
+                    .push((event.to_string(), support::boundary_json(data.clone())))
             }),
-            Rc::new(move |data| snapshots.borrow_mut().push(data)),
+            Rc::new(move |data| snapshots.borrow_mut().push(support::boundary_json(data))),
         );
         call(&account, "start").await;
         {
