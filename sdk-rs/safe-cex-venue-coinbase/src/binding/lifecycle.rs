@@ -265,27 +265,23 @@ impl LifecycleHost for Host {
         reason: &'static str,
         force_toast: bool,
     ) -> Result<(), PortfolioFailure> {
-        self.shared
-            .extra
-            .health
-            .mark_private_user_stream_degraded(
-                self.shared.store.as_ref(),
-                Some(reason),
-                force_toast,
-                |message, severity| {
-                    let _ = self.base().log(message, severity);
-                },
-                |message| {
-                    let _ = self.base().emit_args(
+        self.shared.extra.health.mark_private_user_stream_degraded(
+            self.shared.store.as_ref(),
+            Some(reason),
+            force_toast,
+            |message, severity| self.base().log(message, severity).map_err(failure),
+            |message| {
+                self.base()
+                    .emit_args(
                         "warning",
                         &[
                             serde_json::json!(message),
                             serde_json::json!({"forceToast": true}),
                         ],
-                    );
-                },
-            )
-            .map_err(|error| Rc::new(error.into()))
+                    )
+                    .map_err(failure)
+            },
+        )
     }
     fn merge_rest_orders_with_fresh_ws_state(
         &self,

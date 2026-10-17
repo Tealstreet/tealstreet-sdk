@@ -99,11 +99,13 @@ every notifying path must be added to STORE_NOTIFICATION_AUDIT.md.
 
 **Notification cutover.** Production helpers remain read-only. The test-only Store observer forwards all 26 notifying results as StoreMutationError and retains StoreSubscriber unchanged; fixture mutations assert success. STORE_NOTIFICATION_AUDIT.md inventories the two fixture writes separately from production reachability.
 
-**Public subscription slice.** ws_public retains insertion order in active subscriptions, inserts/deletes before the injected sender, and releases every borrow before callbacks. SubscriptionInput evaluates independently for key and envelope; prepared JsJsonValue supplies owned snapshots, while fallible adapters can expose distinct read effects. Stringify remains shared js_json_stringify. Native collision assertions inspect Number/Null and bits before wire comparisons. Prepared JsJsonValue excludes getters/toJSON/cycles; sender/diagnostic and shared socket lifecycle composition remain FINDING, not runtime parity. The source program emits all twenty-three cases in one process; native tests inspect callback-time state and synchronous reentry.
-
-**Public topic ordering.** subscribe_public_topics directly sends allMids then fastAssetCtxs, bypassing active subscription deduplication, then calls the required fallible user-topic callback. Every failure stops later effects. A separate five-case actual-source program checks repeated sends and callback-time state/reentry; concrete topic enumeration/sender/lifecycle composition remains incomplete.
-
-**User-topic dispatch.** subscribe_user_topics consumes an owned own-key snapshot before callbacks; values and dictionary-write semantics are outside this adapter. It preserves explicit Undefined for missing coin/interval, distinguishes empty segments, ignores tail segments and false returns, and propagates callback errors. Native field descriptors precede serialization; a separate 32-case source program uses the actual pinned lodash runtime beside the selected compiler. Registry and concrete socket composition remain incomplete.
+**Public subscriptions.** The production class installs ws_emission's live-receiver
+subscription bodies. They retain Set changes before sending, independent key and
+envelope stringification, fixed-feed ordering, and candle/depth/BBO enumeration.
+`finding_public_class` compares installed native arrows and state/effects against
+actual TS; `binding` covers real book/candle subscription and cleanup frames.
+The unused prepared-value adapter, its standalone tests and three source scripts
+were removed. Historical row-disposition receipts describe their earlier snapshot.
 
 **Corpus cardinality (in progress).** API field identity fixes four native cases; numeric ingress fixes53 root inventories,2380 source cases and16660 entry comparisons, with separate per-root totals. The scalar nonce target fixes15 cases and30 returned/stored bit comparisons. State tests fix533 cases across seven categories and563 native field comparisons. Placement tests fix30 cases across price/TPSL and60 native value/read-effect comparisons. Source-count assertions do not replace fixed native index coverage. Original source-first artifacts remain unchanged. Other targets and collection paths retain an open audit; do not infer whole-venue coverage from these controls.
 
@@ -117,7 +119,10 @@ retains its string value. This model read does not install a response parser.
 
 **Accepted-set receipts.** Literal and record consumers bind every root input to the unchanged source fixture and invoke fresh AST regeneration once per test binary. Record checks retain all77 qualified positional calls plus seven fixed native receipts per root; literals retain distinct accepted, rejected and qualified-rejected receipts. Counters do not replace receipt assertions or source-content checks.
 
-**Open audit inventory.** CARDINALITY_AUDIT.md lists the iteration floor and residual consumers; ROW_DISPOSITIONS.json maps all191 implemented rows to source-level four-class witnesses and preserves all13 original findings individually. Regenerate/check the inventory with Python3.11+ scripts/audit-row-dispositions.py; it never writes manifests. Accepted-set control runner mutates only test consumers, invokes Cargo sequentially, reports the literal content-guard-bypass survivor as FINDING, and measures restoration. File-level witness inventory is not per-row proof; the broad sweep remains OPEN.
+**Audit inventory.** CARDINALITY_AUDIT.md records bounded evidence and residual
+consumers. ROW_DISPOSITIONS.json and audit-row-dispositions.py preserve an earlier
+fixed manifest snapshot; they are historical receipts, not a current-master gate.
+File-level witness inventory is not per-row proof; the broader sweep remains open.
 
 **Survivor classification.** HyperliquidUserAbstractionMode empty string/null both fail actual strict declared-type assignability (2322); their values and diagnostic messages differ. The boolean rejection receipt legitimately cannot distinguish them. Keep that original survivor and its call site inventoried; the separate empty-string/unifiedAccount replacement crosses the accepted-set boundary and must fail the native rejection assertion with the content guard bypassed. literal-rejection-equivalence.cjs checks the source pair plus positive once per process; its permanent native test reads UnifiedAccount directly. Further old-row audit matrices are paused under the porting-first priority.
 
@@ -377,3 +382,7 @@ are removed. Source Spot construction imports the perp API, as does the native
 binding; the Spot API module has only a TS test consumer and no package export.
 Keep the separate RateLimiter class and its real Realm witness. spot_runtime
 retains23 source cases across8 files after removing only7 API cases and1 source.
+
+The public socket subscription bodies live only in ws_emission.rs and are installed
+by public_class.rs on the production Realm. The unused ws_public prepared-value
+copy and its standalone tests/oracle were removed; real listener coverage remains.

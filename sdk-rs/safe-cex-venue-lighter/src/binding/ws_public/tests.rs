@@ -810,3 +810,122 @@ fn dispose_clears_the_ticker_watchdog_timeout() {
     f.runtime.advance(60_000.0);
     assert_eq!(f.rest.borrow().len(), 1, "cleared watchdog never fires");
 }
+
+#[test]
+fn public_callback_iterator_closes_and_retains_original_throw() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/public-iterator-oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "actual source public iterator: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let mut observations = vec![];
+    for fails_close in [false, true] {
+        let f = fixture();
+        let original = Js::object(vec![("tag", Js::str("callback"))]);
+        let failure = original.clone();
+        let callbacks = Js::new_set();
+        callbacks
+            .call_method(
+                "add",
+                vec![Js::function("callback", move |_, _| {
+                    Err(Thrown::new(failure.clone()))
+                })],
+            )
+            .unwrap();
+        let iterator = callbacks.call_method("values", vec![]).unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let counter = closes.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |_, _| {
+                    counter.set(counter.get() + 1);
+                    if fails_close {
+                        Err(Thrown::type_error("close"))
+                    } else {
+                        Ok(Js::object(vec![("done", Js::Bool(true))]))
+                    }
+                }),
+            )
+            .unwrap();
+        f.socket
+            .get("messageHandlers")
+            .unwrap()
+            .define("order_book:1", iterator)
+            .unwrap();
+        let result = f
+            .socket
+            .call_method(
+                "onMessage",
+                vec![Js::object(vec![(
+                    "data",
+                    Js::str("{\"channel\":\"order_book:1\"}"),
+                )])],
+            )
+            .unwrap_err();
+        observations.push(json!({"failsClose":fails_close,"closes":closes.get(),"original":result.value.same_reference(&original)}));
+    }
+    assert_eq!(
+        json!(observations),
+        source,
+        "Lighter public callback IteratorClose runs once and original throw wins over close failure"
+    );
+}
+
+#[test]
+fn public_ingress_pair_uses_iterator_and_closes_after_two_values() {
+    for invalid_return in [false, true] {
+        let f = fixture();
+        let ops = crate::binding::ingress::ops(&f.realm);
+        let values = Js::new_set();
+        for value in [Js::str("topic"), Js::Number(23.0), Js::str("unused")] {
+            values.call_method("add", vec![value]).unwrap();
+        }
+        let iterator = values.call_method("values", vec![]).unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let counter = closes.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |_, _| {
+                    counter.set(counter.get() + 1);
+                    Ok(if invalid_return {
+                        Js::Number(0.0)
+                    } else {
+                        Js::object(vec![])
+                    })
+                }),
+            )
+            .unwrap();
+        let result = (ops.tuple_two)(&iterator);
+        if invalid_return {
+            assert!(
+                result.is_err(),
+                "pair IteratorClose refuses primitive return"
+            );
+        } else {
+            let (first, second) = result.unwrap();
+            assert!(
+                first.strict_equals(&Js::str("topic")),
+                "public pair consumes the iterator's first value"
+            );
+            assert!(
+                second.strict_equals(&Js::Number(23.0)),
+                "public pair consumes the iterator's second value"
+            );
+        }
+        assert_eq!(
+            closes.get(),
+            1,
+            "pair closes before exhausting its unused tail"
+        );
+    }
+}
