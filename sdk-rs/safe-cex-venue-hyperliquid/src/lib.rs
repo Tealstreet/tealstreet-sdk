@@ -75,7 +75,6 @@ pub mod placement_dispatch;
 pub mod private_class;
 pub mod public_constructor;
 pub mod spot_market_bootstrap;
-pub mod spot_rate_limiter;
 pub mod spot_runtime;
 pub mod spot_trading;
 pub mod spot_user_event;
