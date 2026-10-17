@@ -4,13 +4,14 @@ import { join, dirname } from 'path';
 import type { ExchangeAccountConfig } from '@tealstreet/cli-core';
 
 import type { FooterSegment } from './footer-segments';
+import { BRAND } from './brand';
 
 // Re-export the canonical type for convenience
 export type { ExchangeAccountConfig };
 // Alias for backwards compatibility
 export type AccountConfig = ExchangeAccountConfig;
 
-const CONFIG_DIR = join(homedir(), '.tealstreet');
+const CONFIG_DIR = join(homedir(), BRAND.configDirName);
 // Support custom config file via environment variable (used by Electron desktop app)
 const CONFIG_FILE = process.env.TEALSTREET_CONFIG_FILE || join(CONFIG_DIR, 'config.json');
 
