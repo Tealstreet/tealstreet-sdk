@@ -14,10 +14,16 @@ outputs retain own undefined keys and source property order; throwing code
 getters report their cause without recursive error projection.
 
 The constructed Aster private-frame witness is
-`safe-cex-venue-asterdex/src/native_emitter_tests.rs`:
+`safe-cex-parity/tests/aster_worker_emitter.rs`:
 `native_private_fill_keeps_infinite_price_through_event_and_worker_post`.
 It feeds actual New/Filled frames, observes Infinity in the fill event, and
 checks that the required worker DATA capability receives the same object.
+The tooling target has three integration witnesses; the Aster crate retains four
+private facade/frame witnesses without a worker dependency.
+`safe-cex-parity/tests/aster_worker_emitter_control.py` disconnects the actual
+worker fill subscription, requires the named private-frame test to fail, and
+restores exact source before all three integration tests pass. The ordinary
+integration target runs in CI Rust / test, step `Run ${{ matrix.check }}`.
 
 `safe-cex-webworker/tests/worker-data-host.cjs` executes the compiled Wasm
 browser materializer. The native Error identity assertion fails with the prior
