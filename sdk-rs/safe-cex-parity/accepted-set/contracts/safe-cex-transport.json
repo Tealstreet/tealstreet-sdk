@@ -1161,23 +1161,438 @@
     }
   },
   "safe_cex_transport::signing::RemoteSignerRequest": {
-    "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
-    "entrypoints": [],
-    "sample": {
-      "id": "sample",
-      "type": "sample",
-      "exchangeName": "apexomni",
-      "accountName": null,
-      "config": {
-        "method": "sample",
-        "url": "sample",
-        "baseUrl": "sample",
-        "params": null,
-        "data": null,
-        "headers": {}
+    "shape": "union",
+    "evidence": "The maintained remote operation union discriminates http versus ws-auth with type and a valid exchangeName. Decode the original RawValue payload without a Value roundtrip: unknown WS metadata retains overflow/deep raw lexemes, while optional id and data preserve explicit null. Error-only response decoding must use the originating native operation, never guess the union from an indistinguishable wire reply. This replaces the inherited invalid type:sample fixture; no decoder or accepted-set policy exemption.",
+    "positive": [
+      {
+        "type": "http",
+        "id": "http-one",
+        "exchangeName": "binance",
+        "accountName": "account-http",
+        "config": {
+          "method": "PATCH",
+          "url": "/native",
+          "baseURL": "https://native.invalid",
+          "headers": {
+            "X-Trace": "http"
+          },
+          "params": null,
+          "data": null
+        }
+      },
+      {
+        "type": "ws-auth",
+        "id": null,
+        "exchangeName": "bybit",
+        "accountName": "account-ws",
+        "wsAuth": {
+          "toSign": "bytes",
+          "outputFormat": "hex",
+          "extraData": null
+        }
+      },
+      {
+        "type": "ws-auth",
+        "exchangeName": "kraken",
+        "wsAuth": false
       }
-    }
+    ],
+    "negative": [
+      null,
+      true,
+      1,
+      "http",
+      [],
+      [
+        "http",
+        "http-one",
+        "binance",
+        "account-http",
+        {
+          "method": "PATCH",
+          "url": "/native",
+          "baseURL": "https://native.invalid",
+          "headers": {
+            "X-Trace": "http"
+          },
+          "params": null,
+          "data": null
+        }
+      ],
+      {
+        "type": "future-kind",
+        "id": "http-one",
+        "exchangeName": "binance",
+        "accountName": "account-http",
+        "config": {
+          "method": "PATCH",
+          "url": "/native",
+          "baseURL": "https://native.invalid",
+          "headers": {
+            "X-Trace": "http"
+          },
+          "params": null,
+          "data": null
+        }
+      },
+      {
+        "id": "http-one",
+        "exchangeName": "binance",
+        "accountName": "account-http",
+        "config": {
+          "method": "PATCH",
+          "url": "/native",
+          "baseURL": "https://native.invalid",
+          "headers": {
+            "X-Trace": "http"
+          },
+          "params": null,
+          "data": null
+        }
+      },
+      {
+        "type": {
+          "http": null
+        },
+        "id": "http-one",
+        "exchangeName": "binance",
+        "accountName": "account-http",
+        "config": {
+          "method": "PATCH",
+          "url": "/native",
+          "baseURL": "https://native.invalid",
+          "headers": {
+            "X-Trace": "http"
+          },
+          "params": null,
+          "data": null
+        }
+      },
+      {
+        "type": "http",
+        "id": "http-one",
+        "exchangeName": "binance",
+        "accountName": "account-http",
+        "config": [
+          "PATCH",
+          "/native",
+          "https://native.invalid",
+          {
+            "X-Trace": "http"
+          },
+          null,
+          null
+        ]
+      },
+      {
+        "type": "http",
+        "id": null,
+        "exchangeName": "binance",
+        "accountName": "account-http",
+        "config": {
+          "method": "PATCH",
+          "url": "/native",
+          "baseURL": "https://native.invalid",
+          "headers": {
+            "X-Trace": "http"
+          },
+          "params": null,
+          "data": null
+        }
+      },
+      {
+        "type": "ws-auth",
+        "id": null,
+        "exchangeName": "future-venue",
+        "accountName": "account-ws",
+        "wsAuth": {
+          "toSign": "bytes",
+          "outputFormat": "hex",
+          "extraData": null
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().expect(\"raw protocol input\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerRequest::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"account\":row.account_name,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"method\":row.config.method,\"url\":row.config.url,\"baseURL\":row.config.base_url,\"headers\":row.config.headers.iter().collect::<Vec<_>>(),\"paramsPresent\":row.config.params.is_some(),\"paramsNull\":row.config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.config.params.as_ref().and_then(|p|p.get(\"limit\")).map(|n|safe_cex_num::js_number(Some(n)).expect(\"number\").to_bits().to_string()),\"dataPresent\":row.config.data.is_some(),\"dataNull\":row.config.data.as_ref().is_some_and(serde_json::Value::is_null)}),Ok(crate::signing::RemoteSignerRequest::WsAuth{exchange_name,account_name,request})=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"account\":account_name,\"isBybit\":exchange_name==safe_cex_types::ExchangeName::Bybit,\"idPresent\":request.id.is_some(),\"idNull\":request.id.as_ref().is_some_and(serde_json::Value::is_null),\"requestType\":request.request_type.as_ref().map(|r|r.get()),\"payloadPresent\":request.ws_auth.is_some(),\"toSign\":request.ws_auth.as_ref().and_then(|a|a.to_sign.as_deref()),\"outputFormat\":request.ws_auth.as_ref().and_then(|a|a.output_format.as_ref()),\"extraPresent\":request.ws_auth.as_ref().is_some_and(|a|a.extra_data.is_some()),\"extraRaw\":request.ws_auth.as_ref().and_then(|a|a.extra_data.as_ref()).map(|r|r.get())})}}",
+      "nativeFields": [
+        "kind",
+        "account"
+      ],
+      "cases": [
+        {
+          "input": "{\"type\":\"http\",\"id\":\"http-one\",\"exchangeName\":\"binance\",\"accountName\":\"account-http\",\"config\":{\"method\":\"PATCH\",\"url\":\"/native\",\"baseURL\":\"https://native.invalid\",\"headers\":{\"X-Trace\":\"http\"},\"params\":{\"limit\":-0},\"data\":null}}",
+          "output": {
+            "ok": true,
+            "kind": "http",
+            "id": "http-one",
+            "account": "account-http",
+            "isBinance": true,
+            "method": "PATCH",
+            "url": "/native",
+            "baseURL": "https://native.invalid",
+            "headers": [
+              [
+                "X-Trace",
+                "http"
+              ]
+            ],
+            "paramsPresent": true,
+            "paramsNull": false,
+            "limitBits": "9223372036854775808",
+            "dataPresent": true,
+            "dataNull": true
+          }
+        },
+        {
+          "input": "{\"type\":\"ws-auth\",\"id\":null,\"exchangeName\":\"bybit\",\"accountName\":\"account-ws\",\"wsAuth\":{\"toSign\":\"bytes\",\"outputFormat\":\"hex\",\"extraData\":{\"overflow\":1e400,\"zero\":-0}}}",
+          "output": {
+            "ok": true,
+            "kind": "ws-auth",
+            "account": "account-ws",
+            "isBybit": true,
+            "idPresent": true,
+            "idNull": true,
+            "requestType": "\"ws-auth\"",
+            "payloadPresent": true,
+            "toSign": "bytes",
+            "outputFormat": "hex",
+            "extraPresent": true,
+            "extraRaw": "{\"overflow\":1e400,\"zero\":-0}"
+          }
+        },
+        {
+          "input": "{\"type\":\"ws-auth\",\"exchangeName\":\"kraken\",\"wsAuth\":false}",
+          "output": {
+            "ok": true,
+            "kind": "ws-auth",
+            "account": null,
+            "isBybit": false,
+            "idPresent": false,
+            "idNull": false,
+            "requestType": "\"ws-auth\"",
+            "payloadPresent": false,
+            "toSign": null,
+            "outputFormat": null,
+            "extraPresent": false,
+            "extraRaw": null
+          }
+        }
+      ]
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "decode_response",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "json",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::signing::RemoteSignerResponse",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual raw response frontdoor retains originating HTTP/WS enum identity, HTTP config fields, WS signature and optional correlation id presence. Same error-only wire is intentionally observed through both origins.",
+        "nativeFields": [
+          "kind",
+          "id",
+          "error"
+        ],
+        "call": "{let origin:$type=serde_json::from_value($value[\"request\"].clone()).expect(\"typed origin arrangement\");match origin.decode_response($value[\"response\"].as_str().expect(\"response wire\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerResponse::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"error\":row.error,\"configPresent\":row.config.is_some(),\"url\":row.config.as_ref().and_then(|c|c.url.as_deref()),\"headers\":row.config.as_ref().map(|c|c.headers.iter().collect::<Vec<_>>())}),Ok(crate::signing::RemoteSignerResponse::WsAuth(row))=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"idPresent\":row.id.is_some(),\"idNull\":row.id.as_ref().is_some_and(serde_json::Value::is_null),\"id\":row.id,\"error\":row.error,\"signature\":row.ws_auth_signature})}}",
+        "cases": [
+          {
+            "input": {
+              "request": {
+                "type": "http",
+                "id": "http-one",
+                "exchangeName": "binance",
+                "accountName": "account-http",
+                "config": {
+                  "method": "PATCH",
+                  "url": "/native",
+                  "baseURL": "https://native.invalid",
+                  "headers": {
+                    "X-Trace": "http"
+                  },
+                  "params": null,
+                  "data": null
+                }
+              },
+              "response": "{\"id\":\"same\",\"error\":\"refused\"}"
+            },
+            "output": {
+              "ok": true,
+              "kind": "http",
+              "id": "same",
+              "error": "refused",
+              "configPresent": false,
+              "url": null,
+              "headers": null
+            }
+          },
+          {
+            "input": {
+              "request": {
+                "type": "ws-auth",
+                "id": null,
+                "exchangeName": "bybit",
+                "accountName": "account-ws",
+                "wsAuth": {
+                  "toSign": "bytes",
+                  "outputFormat": "hex",
+                  "extraData": null
+                }
+              },
+              "response": "{\"id\":\"same\",\"error\":\"refused\"}"
+            },
+            "output": {
+              "ok": true,
+              "kind": "ws-auth",
+              "idPresent": true,
+              "idNull": false,
+              "id": "same",
+              "error": "refused",
+              "signature": null
+            }
+          },
+          {
+            "input": {
+              "request": {
+                "type": "http",
+                "id": "http-one",
+                "exchangeName": "binance",
+                "accountName": "account-http",
+                "config": {
+                  "method": "PATCH",
+                  "url": "/native",
+                  "baseURL": "https://native.invalid",
+                  "headers": {
+                    "X-Trace": "http"
+                  },
+                  "params": null,
+                  "data": null
+                }
+              },
+              "response": "{\"id\":\"accepted\",\"config\":{\"url\":\"/signed\",\"headers\":{\"Authorization\":\"token\"}}}"
+            },
+            "output": {
+              "ok": true,
+              "kind": "http",
+              "id": "accepted",
+              "error": null,
+              "configPresent": true,
+              "url": "/signed",
+              "headers": [
+                [
+                  "Authorization",
+                  "token"
+                ]
+              ]
+            }
+          },
+          {
+            "input": {
+              "request": {
+                "type": "ws-auth",
+                "id": null,
+                "exchangeName": "bybit",
+                "accountName": "account-ws",
+                "wsAuth": {
+                  "toSign": "bytes",
+                  "outputFormat": "hex",
+                  "extraData": null
+                }
+              },
+              "response": "{\"id\":null,\"wsAuthSignature\":\"native-signature\"}"
+            },
+            "output": {
+              "ok": true,
+              "kind": "ws-auth",
+              "idPresent": true,
+              "idNull": true,
+              "id": null,
+              "error": null,
+              "signature": "native-signature"
+            }
+          },
+          {
+            "input": {
+              "request": {
+                "type": "http",
+                "id": "http-one",
+                "exchangeName": "binance",
+                "accountName": "account-http",
+                "config": {
+                  "method": "PATCH",
+                  "url": "/native",
+                  "baseURL": "https://native.invalid",
+                  "headers": {
+                    "X-Trace": "http"
+                  },
+                  "params": null,
+                  "data": null
+                }
+              },
+              "response": "[\"same\",null,\"refused\"]"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ]
   },
   "safe_cex_transport::signing::RemoteSignerResponse": {
     "shape": "map",
@@ -13525,5 +13940,964 @@
     "category": "non-decoder",
     "reason": "Specific typed selector returns the nonempty existing secondary proxy, otherwise nonempty explicit proxy, otherwise the provider public proxy unchanged. It clones an existing String and performs no parsing, coercion or schema construction. The provider capability is invoked only for fallback; conversion of secondary account options is classified separately.",
     "evidence": "Reviewed exact secondary.rs body; maintained_typescript_secondary_options_empty_strings_and_proxy_precedence executes the actual constructed clients against 729 maintained-source cases, observing credential/proxy values and provider/factory/limiter call order. Empty terminal provider strings remain Some(empty). A separate fallback-disconnect control must fail that named native/source test and exact restoration must pass."
+  },
+  "safe_cex_transport::signature_rejection::resend_on_rejected_data": {
+    "api": {
+      "kind": "function",
+      "name": "resend_on_rejected_data",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "retry",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::SignatureRetry",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "is_rejection",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::IsSignatureRejection",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual raw response-data predicate call, shared stamp and thrown error identity are observed. A spent stamp is arranged through an actual prior successful production decision. Rejecting data does not spend the stamp; TypeError preserves its native name/message. Maintained source wrappers independently witness the same one-use decision order.",
+    "call": "{use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&serde_json::Value::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let result=$type(&data,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.name,\"message\":e.message})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "code": -1022
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": true,
+          "calls": 1,
+          "outcome": {
+            "ok": true,
+            "decision": true
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": false,
+          "calls": 1,
+          "outcome": {
+            "ok": true,
+            "decision": false
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": -1022
+          },
+          "spent": true
+        },
+        "output": {
+          "before": true,
+          "after": true,
+          "calls": 0,
+          "outcome": {
+            "ok": true,
+            "decision": false
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": {
+              "toString": 0
+            }
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": false,
+          "calls": 1,
+          "outcome": {
+            "ok": false,
+            "name": "TypeError",
+            "message": "Cannot convert object to primitive value"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::signature_rejection::signature_rejected_response": {
+    "api": {
+      "kind": "function",
+      "name": "signature_rejected_response",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestFailure",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "retry",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::SignatureRetry",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "is_rejection",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::IsSignatureRejection",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::RestFailure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Execute the actual signature_rejected_response frontdoor. Observe predicate count, prior/returned shared stamp, returned approval and JavaScript TypeError metadata together with the actual failed/effective request URL and timeout. Missing response bypass and a spent stamp are separate cases; typed receipt arrangement does not replace execution of the reviewed function.",
+    "call": "{fn failure(e:&crate::RestFailure)->serde_json::Value{serde_json::json!({\"message\":e.message,\"name\":match e.transport_error.as_deref(){Some(crate::TransportError::JavaScript(e))=>Some(e.name),_=>None},\"url\":e.request.url,\"timeout\":e.request.timeout_ms,\"code\":e.code,\"response\":e.response.as_ref().map(|r|r.status)})}use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&serde_json::Value::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let request=crate::RestRequest{method:\"POST\".into(),url:\"/effective\".into(),timeout_ms:Some(27),..Default::default()};let response=crate::RestResponse{status:401,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(data)};let mut input=crate::RestFailure::pre_transmit(\"HTTP rejection\".into(),request);if $value[\"response\"]!=false{input.response=Some(Box::new(response));}let result=$type(&input,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":failure(&e)})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "code": -1022
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": true,
+          "calls": 1,
+          "outcome": {
+            "ok": true,
+            "decision": true
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": false,
+          "calls": 1,
+          "outcome": {
+            "ok": true,
+            "decision": false
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": -1022
+          },
+          "spent": true
+        },
+        "output": {
+          "before": true,
+          "after": true,
+          "calls": 0,
+          "outcome": {
+            "ok": true,
+            "decision": false
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": {
+              "toString": 0
+            }
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": false,
+          "calls": 1,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "Cannot convert object to primitive value",
+              "name": "TypeError",
+              "url": "/effective",
+              "timeout": 27,
+              "code": null,
+              "response": null
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": -1022
+          },
+          "response": false
+        },
+        "output": {
+          "before": false,
+          "after": false,
+          "calls": 0,
+          "outcome": {
+            "ok": true,
+            "decision": false
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::signature_rejection::resend_on_signature_rejection": {
+    "api": {
+      "kind": "function",
+      "name": "resend_on_signature_rejection",
+      "signature": {
+        "inputs": [
+          [
+            "execution",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestExecution",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "retry",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::SignatureRetry",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "is_rejection",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::IsSignatureRejection",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::RestFailure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Execute the actual resend_on_signature_rejection frontdoor. Observe predicate count, prior/returned shared stamp, returned approval and JavaScript TypeError metadata together with the actual failed/effective request URL and timeout. Missing response bypass and a spent stamp are separate cases; typed receipt arrangement does not replace execution of the reviewed function.",
+    "call": "{fn failure(e:&crate::RestFailure)->serde_json::Value{serde_json::json!({\"message\":e.message,\"name\":match e.transport_error.as_deref(){Some(crate::TransportError::JavaScript(e))=>Some(e.name),_=>None},\"url\":e.request.url,\"timeout\":e.request.timeout_ms,\"code\":e.code,\"response\":e.response.as_ref().map(|r|r.status)})}use std::{cell::Cell,rc::Rc};use crate::signature_rejection::*;let retry=SignatureRetry::default();if $value[\"spent\"]==true {let seed:IsSignatureRejection=Rc::new(|_|Ok(true));let _=resend_on_rejected_data(&serde_json::Value::Null,&retry,&seed);}let before=retry.has_retried();let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |data|{count.set(count.get()+1);is_binance_style_signature_rejection(data)});let data=$value[\"data\"].clone();let request=crate::RestRequest{method:\"POST\".into(),url:\"/effective\".into(),timeout_ms:Some(27),..Default::default()};let response=crate::RestResponse{status:401,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(data)};let input=crate::RestExecution{response,config:request};let result=$type(&input,&retry,&predicate);let outcome=match result{Ok(v)=>serde_json::json!({\"ok\":true,\"decision\":v}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":failure(&e)})};serde_json::json!({\"before\":before,\"after\":retry.has_retried(),\"calls\":calls.get(),\"outcome\":outcome})}",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "code": -1022
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": true,
+          "calls": 1,
+          "outcome": {
+            "ok": true,
+            "decision": true
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": 0
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": false,
+          "calls": 1,
+          "outcome": {
+            "ok": true,
+            "decision": false
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": -1022
+          },
+          "spent": true
+        },
+        "output": {
+          "before": true,
+          "after": true,
+          "calls": 0,
+          "outcome": {
+            "ok": true,
+            "decision": false
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "code": {
+              "toString": 0
+            }
+          },
+          "spent": false
+        },
+        "output": {
+          "before": false,
+          "after": false,
+          "calls": 1,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "Cannot convert object to primitive value",
+              "name": "TypeError",
+              "url": "/effective",
+              "timeout": 27,
+              "code": null,
+              "response": null
+            }
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::signature_rejection::retry_network_reads_and_signature_rejection": {
+    "api": {
+      "kind": "function",
+      "name": "retry_network_reads_and_signature_rejection",
+      "signature": {
+        "inputs": [
+          [
+            "request",
+            {
+              "resolved_path": {
+                "path": "safe_cex_transport::retry::ClassifiedRequest",
+                "args": null
+              }
+            }
+          ],
+          [
+            "retries",
+            {
+              "primitive": "usize"
+            }
+          ],
+          [
+            "adapter",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "clock",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::rate_limit::RateLimitClock",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "retry",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::SignatureRetry",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "is_rejection",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::signature_rejection::IsSignatureRejection",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::RestExecution",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::RestFailure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual async read/network-or-signature and write/signature-only engine executes against deterministic immediate adapters and an advancing clock. Observe every attempted method/URL/timeout, zero-delay sleep scheduling, predicate count, shared stamp, final receipt or native failure. Failed config rewrite and measured timeout exhaustion are independent cases. Maintained source axios-retry and existing constructed Bybit consumer gates independently constrain the retry policy; fixture engine only supplies I/O and time.",
+    "call": "{\nuse std::{cell::{Cell,RefCell},rc::Rc,future::Future,task::{Context,Poll,Waker}};\nuse crate::signature_rejection::*;\nfn run<T>(future:impl Future<Output=T>)->T{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut Context::from_waker(Waker::noop())){Poll::Ready(v)=>v,Poll::Pending=>panic!(\"immediate fixture unexpectedly pending\")}}\nstruct Clock{now:Rc<Cell<u64>>,sleeps:RefCell<Vec<u64>>}\nimpl crate::rate_limit::RateLimitClock for Clock{fn now_ms(&self)->u64{self.now.get()}fn sleep_ms(&self,ms:u64)->crate::TransportFuture<'_,()>{self.sleeps.borrow_mut().push(ms);Box::pin(async move{Ok(())})}}\nstruct Adapter{now:Rc<Cell<u64>>,cost:u64,kind:String,rewrite:bool,attempts:RefCell<Vec<serde_json::Value>>}\nimpl crate::RestAdapter for Adapter{fn execute(&self,request:crate::RestRequest)->crate::RestFuture<'_,crate::RestResponse>{Box::pin(async move{self.execute_with_receipt(request).await.map(|e|e.response)})}fn execute_with_receipt(&self,mut request:crate::RestRequest)->crate::RestFuture<'_,crate::RestExecution>{let n=self.attempts.borrow().len();self.attempts.borrow_mut().push(serde_json::json!({\"method\":request.method,\"url\":request.url,\"timeout\":request.timeout_ms}));self.now.set(self.now.get()+self.cost);let kind=self.kind.clone();if self.rewrite{request.url=\"/rewritten\".into();}Box::pin(async move{if n>0&&kind!=\"repeat\"{return Ok(crate::RestExecution{response:crate::RestResponse{status:200,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(serde_json::json!({\"accepted\":true}))},config:request});}if kind==\"network\"{return Err(crate::RestFailure::from_transport(crate::TransportError::Network(crate::NetworkFailure::from_code(\"reset\".into(),Some(\"ECONNRESET\".into()))),request));}let mut error=crate::RestFailure::pre_transmit(\"HTTP rejection\".into(),request);error.response=Some(Box::new(crate::RestResponse{status:401,reason:None,headers:Default::default(),body:crate::RestResponseBody::Untransformed(if kind==\"throw\"{serde_json::json!({\"code\":{\"toString\":0}})}else{serde_json::json!({\"code\":-1022})})}));Err(error)})}}\nfn failure(e:&crate::RestFailure)->serde_json::Value{serde_json::json!({\"message\":e.message,\"name\":match e.transport_error.as_deref(){Some(crate::TransportError::JavaScript(e))=>Some(e.name),_=>None},\"url\":e.request.url,\"timeout\":e.request.timeout_ms,\"code\":e.code,\"response\":e.response.as_ref().map(|r|r.status)})}\nlet now=Rc::new(Cell::new(100));let clock=Clock{now:now.clone(),sleeps:RefCell::new(vec![])};let adapter=Adapter{now:now.clone(),cost:5,kind:$value[\"kind\"].as_str().expect(\"kind\").into(),rewrite:$value[\"rewrite\"]==true,attempts:RefCell::new(vec![])};let calls=Rc::new(Cell::new(0));let count=calls.clone();let predicate:IsSignatureRejection=Rc::new(move |v|{count.set(count.get()+1);is_binance_style_signature_rejection(v)});let retry=SignatureRetry::default();let request=crate::RestRequest{method:$value[\"method\"].as_str().expect(\"method\").into(),url:\"/order\".into(),timeout_ms:Some($value[\"timeout\"].as_i64().expect(\"timeout\")),..Default::default()};let result=run($type(crate::retry::ReadClassification::Methods.classify(request),$value[\"retries\"].as_u64().expect(\"retries\")as usize,&adapter,&clock,&retry,&predicate));let outcome=match result{Ok(e)=>serde_json::json!({\"ok\":true,\"status\":e.response.status,\"url\":e.config.url,\"timeout\":e.config.timeout_ms}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":failure(&e)})};serde_json::json!({\"attempts\":adapter.attempts.borrow().as_slice(),\"sleeps\":clock.sleeps.borrow().as_slice(),\"calls\":calls.get(),\"stamp\":retry.has_retried(),\"now\":now.get(),\"outcome\":outcome})\n}",
+    "cases": [
+      {
+        "input": {
+          "method": "POST",
+          "kind": "signature",
+          "retries": 4,
+          "timeout": 27,
+          "rewrite": true
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "POST",
+              "url": "/order",
+              "timeout": 27
+            },
+            {
+              "method": "POST",
+              "url": "/rewritten",
+              "timeout": 22
+            }
+          ],
+          "sleeps": [
+            0
+          ],
+          "calls": 1,
+          "stamp": true,
+          "now": 110,
+          "outcome": {
+            "ok": true,
+            "status": 200,
+            "url": "/rewritten",
+            "timeout": 22
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "GET",
+          "kind": "network",
+          "retries": 1,
+          "timeout": 27,
+          "rewrite": true
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "GET",
+              "url": "/order",
+              "timeout": 27
+            },
+            {
+              "method": "GET",
+              "url": "/rewritten",
+              "timeout": 22
+            }
+          ],
+          "sleeps": [
+            0
+          ],
+          "calls": 0,
+          "stamp": false,
+          "now": 110,
+          "outcome": {
+            "ok": true,
+            "status": 200,
+            "url": "/rewritten",
+            "timeout": 22
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "POST",
+          "kind": "network",
+          "retries": 4,
+          "timeout": 27,
+          "rewrite": false
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "POST",
+              "url": "/order",
+              "timeout": 27
+            }
+          ],
+          "sleeps": [],
+          "calls": 0,
+          "stamp": false,
+          "now": 105,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "reset",
+              "name": null,
+              "url": "/order",
+              "timeout": 27,
+              "code": "ECONNRESET",
+              "response": null
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "GET",
+          "kind": "repeat",
+          "retries": 3,
+          "timeout": 27,
+          "rewrite": false
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "GET",
+              "url": "/order",
+              "timeout": 27
+            },
+            {
+              "method": "GET",
+              "url": "/order",
+              "timeout": 22
+            }
+          ],
+          "sleeps": [
+            0
+          ],
+          "calls": 1,
+          "stamp": true,
+          "now": 110,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "HTTP rejection",
+              "name": null,
+              "url": "/order",
+              "timeout": 22,
+              "code": null,
+              "response": 401
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "GET",
+          "kind": "network",
+          "retries": 0,
+          "timeout": 27,
+          "rewrite": false
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "GET",
+              "url": "/order",
+              "timeout": 27
+            }
+          ],
+          "sleeps": [],
+          "calls": 0,
+          "stamp": false,
+          "now": 105,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "reset",
+              "name": null,
+              "url": "/order",
+              "timeout": 27,
+              "code": "ECONNRESET",
+              "response": null
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "GET",
+          "kind": "throw",
+          "retries": 1,
+          "timeout": 27,
+          "rewrite": false
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "GET",
+              "url": "/order",
+              "timeout": 27
+            }
+          ],
+          "sleeps": [],
+          "calls": 1,
+          "stamp": false,
+          "now": 105,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "Cannot convert object to primitive value",
+              "name": "TypeError",
+              "url": "/order",
+              "timeout": 27,
+              "code": null,
+              "response": null
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "POST",
+          "kind": "throw",
+          "retries": 1,
+          "timeout": 27,
+          "rewrite": false
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "POST",
+              "url": "/order",
+              "timeout": 27
+            }
+          ],
+          "sleeps": [],
+          "calls": 1,
+          "stamp": false,
+          "now": 105,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "Cannot convert object to primitive value",
+              "name": "TypeError",
+              "url": "/order",
+              "timeout": 27,
+              "code": null,
+              "response": null
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "POST",
+          "kind": "signature",
+          "retries": 4,
+          "timeout": 4,
+          "rewrite": false
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "POST",
+              "url": "/order",
+              "timeout": 4
+            }
+          ],
+          "sleeps": [],
+          "calls": 1,
+          "stamp": true,
+          "now": 105,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "HTTP rejection",
+              "name": null,
+              "url": "/order",
+              "timeout": 4,
+              "code": null,
+              "response": 401
+            }
+          }
+        }
+      },
+      {
+        "input": {
+          "method": "GET",
+          "kind": "signature",
+          "retries": 4,
+          "timeout": 4,
+          "rewrite": false
+        },
+        "output": {
+          "attempts": [
+            {
+              "method": "GET",
+              "url": "/order",
+              "timeout": 4
+            }
+          ],
+          "sleeps": [],
+          "calls": 1,
+          "stamp": true,
+          "now": 105,
+          "outcome": {
+            "ok": false,
+            "error": {
+              "message": "HTTP rejection",
+              "name": null,
+              "url": "/order",
+              "timeout": 4,
+              "code": null,
+              "response": 401
+            }
+          }
+        }
+      }
+    ]
   }
 }

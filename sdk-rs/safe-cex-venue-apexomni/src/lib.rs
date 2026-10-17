@@ -27,3 +27,7 @@ pub mod zklink_host;
 
 pub mod binding;
 pub use binding::{ApexDependencies, ApexOmniExchange};
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_scalar_helper_support.rs"]
+mod accepted_scalar_helper_support;
