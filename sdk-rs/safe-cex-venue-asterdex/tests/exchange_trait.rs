@@ -752,7 +752,12 @@ fn production_private_order_frame_updates_store() {
         .expect("private order in real Store");
     assert_eq!(order.symbol, "BTCUSDT");
     assert_eq!(
-        (order.price.to_number(), order.amount, order.filled, order.remaining),
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
         (95.0, 3.0, 0.0, 3.0)
     );
     drop(rows);
