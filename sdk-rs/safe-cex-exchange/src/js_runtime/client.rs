@@ -887,7 +887,8 @@ fn response_data(body: RestResponseBody) -> Js {
     match body {
         RestResponseBody::Encoded(bytes) => {
             let text = String::from_utf8_lossy(&bytes).into_owned();
-            serde_json::from_str(&text).map_or_else(|_| Js::str(&text), |v| from_json(&v))
+            super::json_parse::parse(&text.encode_utf16().collect::<Vec<_>>())
+                .unwrap_or_else(|_| Js::str(&text))
         }
         RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
             from_json(&value)
