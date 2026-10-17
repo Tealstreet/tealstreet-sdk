@@ -914,3 +914,63 @@ fn production_private_position_close_spread_accepts_iterator_values() {
     assert!(positions[0].margin_size.is_undefined());
     assert_eq!(world.store.update_ids().positions, revision + 1.0);
 }
+
+#[test]
+fn orders_flattening_calls_the_live_owner_helper_after_its_type_guard() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/ws-state-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained Lighter flattening arrows");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let world = world();
+    let payload = Js::object(vec![]);
+    let expected = Js::array(vec![]);
+    let calls = Rc::new(RefCell::new(vec![]));
+    let observed = calls.clone();
+    let (owner, input, result) = (world.socket.clone(), payload.clone(), expected.clone());
+    world
+        .socket
+        .set(
+            "flattenByMarketPayload",
+            Js::function("input", move |this, args| {
+                observed.borrow_mut().push(json!({
+                    "receiver":this.same_reference(&owner),
+                    "payload":args[0].same_reference(&input),
+                    "include":args[1].truthy(),
+                }));
+                Ok(result.clone())
+            }),
+        )
+        .unwrap();
+    let result = world
+        .socket
+        .call_method("flattenOrdersByMarket", vec![payload])
+        .unwrap();
+    let string = world
+        .socket
+        .call_method("flattenOrdersByMarket", vec![Js::str("x")])
+        .unwrap();
+    let function = world
+        .socket
+        .call_method(
+            "flattenOrdersByMarket",
+            vec![Js::function("input", |_, _| Ok(Js::Undefined))],
+        )
+        .unwrap();
+    assert_eq!(
+        json!({
+            "same":result.same_reference(&expected), "calls":*calls.borrow(),
+            "stringLength":string.array_values().unwrap().len(),
+            "functionLength":function.array_values().unwrap().len(),
+        }),
+        source["flattenOrdersDispatch"]
+    );
+}
