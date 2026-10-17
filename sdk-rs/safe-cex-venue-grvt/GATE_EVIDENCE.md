@@ -1,5 +1,44 @@
 # GRVT verification receipts
 
+## Native metadata-only market refresh
+
+The public `&dyn Exchange::refresh_markets` call now delegates to the existing
+GRVT receiver override (`grvt.exchange.ts:803–823`). The shared default updates
+only on ID changes, whereas GRVT always replaces the stored markets before any
+membership event or log. Retaining unchanged IDs must not retain obsolete tick,
+amount limit or ih/bd/qd signing metadata.
+
+The constructed metadata-only regression compiles and fails without the native
+override at `refresh must replace metadata` (tick 0.1 versus 0.25). Restoring the
+override passes both new trait regressions, all 21 existing constructed binding
+tests and all four actual-source/native market tests. The second regression
+checks native added/removed Market results and committed Store membership.
+Response changes are queued before the initial fetch so the scripted transport
+actually returns the updated instrument on refresh; metadata exponents are
+asserted as native Number bits rather than JSON integer spelling.
+
+The four inherited-refusal policy records retain identical method bodies,
+compiler APIs, TypeScript sources, fixture bytes, adapters and expectations.
+Their whole-file source hash and +13-line spans were independently reviewed
+against a frozen candidate by the shared accepted-set owner.
+
+Fresh complete stored-owner gates pass on native and actual Wasm: each reports
+117 production runtime results, 17 explicit classifications and zero failed
+owners, including all 19 compiler aliases. The 268 receipts pass the scoped
+ratchet. Strict host all-target/all-feature and Wasm all-feature clippy, package
+formatting and three pure inherited-policy tests also pass. This verifies the
+existing 134 stored owners; the remaining unreviewed owners stay open.
+
+The complete `venue-oracle:grvt` command also passes: 245 tests across the unit
+and 42 integration binaries, plus two compile-fail doctests, with no ignored
+tests. Set both `SAFE_CEX_TYPESCRIPT_PATH` and `SAFE_CEX_CRYPTO_ORACLE_DEPS` to
+their absolute installed package/dependency directories; the builder-address
+oracle refuses an omitted crypto installation before evaluating source.
+
+Reproduce the 27 scoped tests with `SAFE_CEX_TYPESCRIPT_PATH` set to the actual
+TypeScript package, using `cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml
+--locked -p safe-cex-venue-grvt --jobs 2 --test exchange_binding --test markets`.
+
 ## Protocol table slice
 
 Base `9222ed2454`; five newly mapped rows, 158 remaining pending (one pre-existing

@@ -161,6 +161,13 @@ The private reconciliation prefix resets its timer, snapshots/clears its symbol
 queue and begins the account read before returning a future. A detached AccountRead
 keeps the continuation from borrowing mutable host state across that boundary.
 
+The Exchange trait binds candle history and public candle/book listeners to the
+venue readers and production public socket, applying source symbol formatting.
+The socket reads its parent's timeframes and xhr. Snapshot await continuation
+yields before consuming buffered deltas, including an already settled response.
+The bound_chart regressions cover REST candle rows, socket frames, snapshot-plus-
+delta merging and unsubscribe cleanup through the real assembled binding.
+
 Five preexisting typed-edge FINDING rows remain: response-envelope msg,
 account.currency, getAccount.userId, validateAccount.error, and parseTickers' symbol
 and Store key. These require the coordinated shared string model assigned to core
