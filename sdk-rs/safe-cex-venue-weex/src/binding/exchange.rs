@@ -18,8 +18,9 @@ use safe_cex_exchange::{
 use safe_cex_store::Store;
 use safe_cex_types::{
     Balance, Candle, ExchangeAccount, ExchangeName, ExchangeOptions, Execution, ExecutionsOptions,
-    IncomeHistoryOptions, IncomeRecord, Market, OHLCVOptions, Order, OrderBook, PlaceOrderOpts,
-    Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts, ValidateAccountResult,
+    FetchedLeverage, IncomeHistoryOptions, IncomeRecord, Market, OHLCVOptions, Order, OrderBook,
+    PlaceOrderOpts, Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts,
+    ValidateAccountResult,
 };
 use std::rc::Rc;
 
@@ -190,6 +191,13 @@ impl Exchange for WeexExchange {
     fn fetch_orders(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
         let args = args!(optional(symbols));
         self.invoke("fetchOrders", args)
+    }
+    fn fetch_leverage_for_symbol(
+        &self,
+        symbol: String,
+    ) -> ExchangeFuture<'_, Option<FetchedLeverage>> {
+        let args = args!(js(&symbol));
+        self.invoke("fetchLeverageForSymbol", args)
     }
     fn nuke(&self, _tries: u32) -> ExchangeFuture<'_, ()> {
         self.unit("nuke", std::vec![])

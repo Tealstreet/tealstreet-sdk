@@ -116,7 +116,11 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 .call_method("use", std::vec![callback])?;
             Ok(())
         },
-        clock_ms: |h| Ok(Js::Number(h.0.now())),
+        clock_ms: |_| {
+            Ok(Js::Number(
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+            ))
+        },
         sign: |_, secret, message| {
             Ok(Js::str(&crate::signing::sign_weex_message(
                 &v::units(&secret)?,

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/local_order_cache.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/local_order_cache.rs", "safe-cex-venue-bybit/src/rest_markets.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/variant_accessors.rs", "safe-cex-venue-bybit/src/variant_account_refresh.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/binding/members/spot.rs" ]
 
 [[symbol]]
 ts = "isBybitOrderAlreadyGoneCancelMessage"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_account_refresh.rs::spot_private_snapshot"
 status = "ported"
-note = "Starts the current helper with no arguments, awaits its actual settlement and returns undefined; retains original helper errors and default-argument behavior. Values/errors retain UTF-16 and binary64 values, aliases, property/call failures and original receiver identity through generic runtime capabilities. Original store/fetch/formatter/merge/clock/Promise/loop bodies remain dependencies; no full concrete class/SDK scheduler or dropped-future cancellation claim. Rename: safe-cex-venue-bybit/src/variant_account_refresh.rs::spot_private_snapshot."
+note = "Starts the current helper with no arguments, awaits its actual settlement and returns undefined; retains original helper errors and default-argument behavior. Values/errors retain UTF-16 and binary64 values, aliases, property/call failures and original receiver identity through generic runtime capabilities. Original store/fetch/formatter/merge/clock/Promise/loop bodies remain dependencies; no full concrete class/SDK scheduler or dropped-future cancellation claim. Rename: safe-cex-venue-bybit/src/variant_account_refresh.rs::spot_private_snapshot. Production Exchange dispatch now reaches this receiver member instead of the shared orders-only default; four compiled master-fail real HTTP bindings verify orders, positions and balance publication, preserving Spot's empty positions and source single-attempt behavior."
 
 [[symbol]]
 ts = "BybitSpotExchange.fetchAndSetPrivateSnapshotHelper"
@@ -270,25 +270,25 @@ note = "CHOSEN typed Market boundary: symbol/base/quote must be strings and succ
 ts = "BybitSpotExchange.fetchOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_ohlcv"
+rs = [ "safe-cex-venue-bybit/src/binding/members/ohlcv.rs::fetch_ohlcv", "safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_ohlcv" ]
 status = "ported"
-note = "Preserves limit/default truthiness, interval iterator elision, native date arithmetic and optional-list mapping before timestamp sort. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_ohlcv."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/ohlcv.rs::fetch_ohlcv. Renamed Rust target: safe-cex-venue-bybit/src/spot_exchange_reads.rs::fetch_ohlcv. Exchange fetch_ohlcv dispatches through the constructed receiver and shared source tuple/date mapper. Preserves primary validation/error messages, dedicated optional list mapping, category selection and ascending timestamps. Four compiled master-fail binding controls and all four family HTTP witnesses cover the call edge."
 
 [[symbol]]
 ts = "BybitSpotExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv" ]
 status = "ported"
-note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv."
+note = "Concrete Exchange listener routes to the maintained socket and returns its real cleanup. Four master-red binding controls now deliver klines and trades; native sequence corpus covers minute/week buckets, stale frames and nonfinite values. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv."
 
 [[symbol]]
 ts = "BybitSpotExchange.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book" ]
 status = "ported"
-note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include unchanged symbol forwarding, callback invocation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book."
+note = "Rust rename: safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book preserves source socket selection; safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book wires the real public subscription. All four families have compiled master-fail socket regressions and live snapshot/delta, retry, reconnect and cleanup witnesses."
 
 [[symbol]]
 ts = "BybitSpotExchange._hasFullSizedPositionOppositeSide"

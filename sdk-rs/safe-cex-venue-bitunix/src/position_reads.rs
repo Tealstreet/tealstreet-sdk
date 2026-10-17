@@ -63,21 +63,21 @@ fn position(
     Position {
         id: id(&symbol, side, mode),
         symbol,
-        side,
+        side: side.into(),
         entry_price: 0.0,
         notional: 0.0,
         leverage,
-        margin_type: Some(margin),
-        position_mode: Some(mode),
+        margin_type: (Some(margin)).into(),
+        position_mode: (Some(mode)).into(),
         unrealized_pnl: 0.0,
-        realized_pnl: None,
+        realized_pnl: (None).into(),
         contracts: 0.0,
         liquidation_price: 0.0,
-        margin_size: None,
-        info: None,
-        extra: None,
-        last_update: None,
-        option: None,
+        margin_size: (None).into(),
+        info: (None).into(),
+        extra: (None).into(),
+        last_update: (None).into(),
+        option: (None).into(),
     }
 }
 pub async fn fetch_positions<E, F>(
@@ -152,10 +152,10 @@ where
                 &["unrealizedPNL", "unrealizedPnl", "unRealizedProfit", "upl"],
                 0.0,
             )?;
-            p.realized_pnl = Some(numeric(row, &["realizedPNL", "realizedPnl"], 0.0)?);
+            p.realized_pnl = (Some(numeric(row, &["realizedPNL", "realizedPnl"], 0.0)?)).into();
             p.contracts = contracts.abs();
             p.liquidation_price = numeric(row, &["liqPrice", "liquidationPrice", "liqPx"], 0.0)?;
-            p.info = Some(row.clone());
+            p.info = (Some(row.clone())).into();
             positions.push(p);
         }
         let mode = account_mode();

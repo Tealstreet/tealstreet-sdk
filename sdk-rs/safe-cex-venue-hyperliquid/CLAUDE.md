@@ -340,3 +340,30 @@ their duplicate spot_models definitions does not make those rows not-applicable.
 The current census and reduced fixed corpus counts are in README.md. Historical
 controls for deleted owners are removed from active scripts and contract/schema
 files; earlier audit documents retain their measured trees and original counts.
+
+The unused `spot_rate_limiter` duplicate and its fake-host fixture/oracle are
+removed. Spot limiter rows now name only the production `spot_client` bodies.
+`realm::spot_limiter_tests` constructs the class with the concrete Realm host and
+checks per-instance tokens, default weight, the exact minute refill and recursive
+Promise/timer acquisition. Historical SPOT_LIMITER_BODIES_EVIDENCE.json records
+the removed adapter; it does not establish production binding coverage.
+
+The accepted request-weight contract includes cancelByCloid batches of 39, 40 and
+80 for both raw and native JSON bodies. `rate_encoded` compares the actual TS
+weights and the production ApiClient.prepare_request limiter reservations. The
+cloid-weight binding control deletes each classifier arm independently, requires
+a compiled pacing assertion failure, restores exact bytes and reruns the witness.
+
+The realm Store patch bridge uses the existing ModelPatch carrier for own
+undefined properties and native scalar numbers. Opaque info retains its JSON
+boundary. REST order reconciliation must clear an undefined mapped timeInForce
+once; repeating the same snapshot must not notify or advance the order revision.
+The production binding regression covers this path, including cloid restoration.
+
+The realm's imported `virtualClock.getCurrentTimeMs` reads the shared synced
+singleton for both family constructors, matching TS. Realm `Date.now`, nonce
+helpers that explicitly use it, and monotonic pacing keep their runtime clocks.
+Registry `native_host_hyperliquid_clock` performs a real signed leverage update,
+checks the transmitted action/signature, and requires its nonce to reflect a
+90-second server correction. The binding schedule-cancel fixture uses a deadline
+relative to that synced clock; the fractional Date nonce regression stays raw.

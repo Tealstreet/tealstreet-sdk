@@ -425,3 +425,21 @@ refresh timestamp/timer or later same-frame pong. The shared mapping body accept
 its receiver's logging capability so REST mappings retain exchange warning logs.
 The production binding tests cover mixed valid/unknown rows, unchanged Store and
 skipped pong, plus a known-market socket-frame control that updates Store.
+
+
+The binding dispatches private snapshot refresh through the Apex lifecycle override,
+so reopen commits positions and orders before balance, retaining the WebSocket
+grace merge. Private keepalive schedules into the core Ping slot shared with pong,
+close and disposal; there is no separate shadow timeout. Real binding regressions
+stagger pong deadlines and hold replacement dialing after close. Private order,
+fill, position and wallet frames cover Store, fill notification and execution
+history behavior; wallet-only frames leave balance owned by REST, as in source.
+The socket oracle supplies no invented `log` method: unknown-market position rows
+compare the source TypeError and unchanged state.
+
+Native HTTP auth, socket URLs/login and fallback pong, mapped model timestamps,
+private snapshot grace and order expiration read the shared synchronized clock.
+Raw Date.now remains separate for cancellation caches, fill freshness, client IDs
+and zkLink transaction timestamps; ping timing remains monotonic. The isolated
+native_clock target syncs the actual singleton and covers signed REST/placement,
+socket authentication and a terminal private order frame after a clock advance.

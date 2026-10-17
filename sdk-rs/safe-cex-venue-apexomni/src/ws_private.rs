@@ -248,23 +248,7 @@ impl ApexOmniPrivateWebsocket {
             object([("op", J::String("ping".into()))]),
             true,
         )?;
-        if let Some(timer) = self.host.ping_timeout() {
-            self.host.clear_timeout(timer)?;
-        }
-        let weak = Rc::downgrade(self);
-        let timer = self.host.set_timeout(
-            5000,
-            Rc::new(move || {
-                let owner = weak.upgrade();
-                Box::pin(async move {
-                    owner
-                        .ok_or_else(|| failure("private socket owner released".into()))?
-                        .ping()
-                })
-            }),
-        )?;
-        self.host.set_ping_timeout(Some(timer))?;
-        Ok(())
+        self.host.schedule_ping(5000)
     }
     // ts: ApexOmniPrivateWebsocket.handleWsAccountsV2Topic
     pub fn handle_ws_accounts_v2_topic(self: &Rc<Self>, json: &J) -> Result<(), ExchangeError> {
@@ -455,7 +439,7 @@ impl ApexOmniPrivateWebsocket {
                     let closed = orders
                         .into_iter()
                         .map(|mut order| {
-                            order.status = OrderStatus::Closed;
+                            order.status = safe_cex_types::ModelField::Value(OrderStatus::Closed);
                             order
                         })
                         .collect();
@@ -504,10 +488,10 @@ impl ApexOmniPrivateWebsocket {
                 ] {
                     patch.set_number(key, value);
                 }
-                if let Some(v) = position.realized_pnl {
+                if let Some(v) = position.realized_pnl.into_value() {
                     patch.set_number("realizedPnl", v);
                 }
-                if let Some(v) = position.last_update {
+                if let Some(v) = position.last_update.into_value() {
                     patch.set_number("lastUpdate", v);
                 }
                 updates.push((position.id, patch));

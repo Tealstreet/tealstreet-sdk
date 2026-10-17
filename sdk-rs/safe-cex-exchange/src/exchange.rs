@@ -128,12 +128,11 @@ impl<V: Exchange> ValidatedBatch<V> {
         &self.orders
     }
 }
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SubscribedCandle {
-    #[serde(flatten)]
     pub candle: Candle,
     pub symbol: String,
-    pub interval: Timeframe,
+    pub interval: safe_cex_types::ModelField<safe_cex_types::AnyTimeframe>,
 }
 
 #[derive(Default)]
@@ -705,8 +704,9 @@ impl BaseExchange {
     }
     pub fn resolve_caller_client_order_id(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: impl Into<safe_cex_types::PreparedOrderOpts>,
     ) -> Result<Option<String>, ExchangeError> {
+        let opts = opts.into();
         let Some(id) = &opts.client_order_id else {
             return Ok(None);
         };
@@ -717,13 +717,13 @@ impl BaseExchange {
                 name.as_str().unwrap()
             ));
         };
-        let regular = is_regular_client_order_shape(opts);
+        let regular = is_regular_client_order_shape(&opts);
         if !rule
             .is_honorable_shape
             .as_ref()
-            .map_or(regular, |check| check(opts))
+            .map_or(regular, |check| check(&opts))
         {
-            return self.reject_preflight(client_order_id_shape_message(&rule.label, opts));
+            return self.reject_preflight(client_order_id_shape_message(&rule.label, &opts));
         }
         if !(rule.is_valid)(id) {
             return self.reject_preflight(format!(
@@ -731,10 +731,10 @@ impl BaseExchange {
                 rule.label, rule.requirement
             ));
         }
-        self.assert_caller_client_order_id_unsplit(opts)?;
+        self.assert_caller_client_order_id_unsplit(&opts)?;
         Ok(Some(id.clone()))
     }
-    fn would_split_order(&self, opts: &PlaceOrderOpts) -> bool {
+    fn would_split_order(&self, opts: &safe_cex_types::PreparedOrderOpts) -> bool {
         self.store
             .markets_by_symbol()
             .get(&opts.symbol)
@@ -764,7 +764,7 @@ impl BaseExchange {
     }
     fn assert_caller_client_order_id_unsplit(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &safe_cex_types::PreparedOrderOpts,
     ) -> Result<(), ExchangeError> {
         if opts.client_order_id.is_some() && self.would_split_order(opts) {
             let name = serde_json::to_value(&self.name).expect("exchange name");
@@ -780,13 +780,13 @@ impl BaseExchange {
         }
     }
 
-    pub fn assert_caller_client_order_ids(
+    pub fn assert_caller_client_order_ids<O: Clone + Into<safe_cex_types::PreparedOrderOpts>>(
         &self,
-        orders: &[PlaceOrderOpts],
+        orders: &[O],
     ) -> Result<(), ExchangeError> {
         let mut seen = HashSet::new();
         for order in orders {
-            if let Some(id) = self.resolve_caller_client_order_id(order)?
+            if let Some(id) = self.resolve_caller_client_order_id(order.clone())?
                 && !seen.insert(id.clone())
             {
                 let label = &self.settings.client_order_id_rule.as_ref().unwrap().label;
@@ -1384,11 +1384,15 @@ impl BaseExchange {
 }
 
 impl BaseExchange {
-    pub fn mint_client_order_id(&self, options: &PlaceOrderOpts) -> Option<String> {
+    pub fn mint_client_order_id(
+        &self,
+        options: impl Into<safe_cex_types::PreparedOrderOpts>,
+    ) -> Option<String> {
+        let options = options.into();
         let rule = self.settings.client_order_id_rule.as_ref()?;
         if !rule.is_honorable_shape.as_ref().map_or_else(
-            || is_regular_client_order_shape(options),
-            |check| check(options),
+            || is_regular_client_order_shape(&options),
+            |check| check(&options),
         ) {
             return None;
         }
@@ -1630,12 +1634,17 @@ impl BaseExchange {
     pub fn is_tp_sl_or_trailing_order(&self, order: &Order) -> bool {
         matches!(
             order.r#type,
-            OrderType::TakeProfit | OrderType::StopLoss | OrderType::TrailingStopLoss
+            safe_cex_types::ModelField::Value(
+                OrderType::TakeProfit | OrderType::StopLoss | OrderType::TrailingStopLoss
+            )
         )
     }
 
     pub fn is_tp_sl_order(&self, order: &Order) -> bool {
-        matches!(order.r#type, OrderType::TakeProfit | OrderType::StopLoss)
+        matches!(
+            order.r#type,
+            safe_cex_types::ModelField::Value(OrderType::TakeProfit | OrderType::StopLoss)
+        )
     }
 }
 

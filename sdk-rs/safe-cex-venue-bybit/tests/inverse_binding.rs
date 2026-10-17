@@ -574,7 +574,7 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     fill["cumExecValue"] = json!("0.025");
     fill["avgPrice"] = json!("20000");
     fill["rejectReason"] = json!("EC_NoError");
-    feed(json!({"topic":"order","data":[fill]}));
+    feed(json!({"topic":"order","data":[fill.clone()]}));
     assert_eq!(h.store.orders().len(), 1);
     assert_eq!(h.store.orders()[0].remaining, 0.025);
     assert_eq!(
@@ -586,6 +586,31 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
         fills.borrow()[0]["price"],
         20000.,
         "inverse fill uses cumulative qty divided by BTC value"
+    );
+    feed(json!({"topic":"order","data":[fill.clone()]}));
+    assert_eq!(
+        fills.borrow().len(),
+        1,
+        "inverse duplicate cumulative update emits no fill"
+    );
+    fill["cumExecQty"] = json!("750");
+    fill["cumExecValue"] = json!("0.035");
+    fill["avgPrice"] = json!("19000");
+    feed(json!({"topic":"order","data":[fill]}));
+    assert_eq!(
+        fills.borrow().len(),
+        2,
+        "advancing cumulative update emits one delta fill"
+    );
+    assert_eq!(
+        fills.borrow()[1]["amount"],
+        250.0,
+        "inverse incremental USD quantity"
+    );
+    assert_eq!(
+        fills.borrow()[1]["price"],
+        25000.0,
+        "inverse price uses incremental qty/value, not averages"
     );
     feed(json!({"topic":"position","data":[position("NaN")]}));
     assert!(

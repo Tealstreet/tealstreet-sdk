@@ -10,7 +10,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_transport::provider::RestRequest;
-use safe_cex_types::{ExchangeOptionsExternalPublicData, Market, Ticker};
+use safe_cex_types::{Candle, ExchangeOptionsExternalPublicData, Market, OHLCVOptions, Ticker};
 use serde_json::Value;
 use std::rc::Rc;
 
@@ -48,6 +48,32 @@ impl NativeReads {
                 Box::pin(async { Err(ExchangeError::new("DXtrade API construction incomplete")) })
             }
         }
+    }
+    pub(crate) fn fetch_ohlcv(
+        &self,
+        options: OHLCVOptions,
+    ) -> ExchangeFuture<'static, Vec<Candle>> {
+        let session = self.exchange.get_session_token();
+        let this = self.clone();
+        Box::pin(async move {
+            let to_iso = |milliseconds| {
+                safe_cex_num::js_date_to_iso_string(milliseconds).map_err(|error| {
+                    let mut value = ExchangeError::new(error.message);
+                    value.name = error.name.into();
+                    value
+                })
+            };
+            crate::candles::fetch_ohlcv(
+                options,
+                || session,
+                || this.get_account_code(),
+                |request| this.request(request),
+                &to_iso,
+                &|value| this.host.local_to_utc(value),
+                &|value| this.report(value),
+            )
+            .await
+        })
     }
     fn instruments(&self, details: bool) -> ExchangeFuture<'static, Option<JsNumberInput>> {
         let session = self.exchange.get_session_token();
