@@ -172,7 +172,9 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Transformed(data),
+                body: RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(data).unwrap(),
+                ),
             })
         })
     }

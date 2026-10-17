@@ -861,9 +861,9 @@ pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
     def(
         "jsonParse",
         Js::function("jsonParse", |_, a| {
-            Ok(safe_cex_exchange::js_runtime::value::from_retained_input(safe_cex_transport::how::json_parse(&text(
-                &arg(&a, 0),
-            )?)))
+            Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+                safe_cex_transport::how::json_parse(&text(&arg(&a, 0))?),
+            ))
         }),
     );
     let w = weak.clone();

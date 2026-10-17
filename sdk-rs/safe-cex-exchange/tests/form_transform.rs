@@ -18,7 +18,10 @@ fn explicit_form_transform_matches_live_axios_signing_and_wire_views() {
     for row in rows {
         let mut request = RestRequest {
             method: "post".into(),
-            body: Some(RestBody::Untransformed(row["data"].clone())),
+            body: Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(row["data"].clone())
+                    .unwrap(),
+            )),
             ..Default::default()
         };
         request.headers.insert(
@@ -27,7 +30,8 @@ fn explicit_form_transform_matches_live_axios_signing_and_wire_views() {
         );
         assert_eq!(
             request.body.as_ref().unwrap().untransformed().unwrap(),
-            &row["signed"],
+            &safe_cex_types::retained_json::RetainedJsonInput::from_value(row["signed"].clone())
+                .unwrap(),
             "form signing input must remain structured"
         );
         let result = request.transform_axios_request();
@@ -47,7 +51,8 @@ fn explicit_form_transform_matches_live_axios_signing_and_wire_views() {
         );
         assert_eq!(
             request.body.as_ref().unwrap().untransformed().unwrap(),
-            &row["wire"],
+            &safe_cex_types::retained_json::RetainedJsonInput::from_value(row["wire"].clone())
+                .unwrap(),
             "retry signing must receive the actual form string"
         );
         let retry = request.transform_axios_request().unwrap();

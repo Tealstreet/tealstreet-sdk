@@ -99,7 +99,11 @@ pub(super) fn install(g: &Js, weak: Weak<Shared>) -> Result<(), Thrown> {
         Js::function("jsonParse", |_, a| {
             // jsonParse catches both ToString and parsing errors.
             Ok(text(&arg(&a, 0))
-                .map(|s| safe_cex_exchange::js_runtime::value::from_retained_input(safe_cex_transport::how::json_parse(&s)))
+                .map(|s| {
+                    safe_cex_exchange::js_runtime::value::from_retained_input(
+                        safe_cex_transport::how::json_parse(&s),
+                    )
+                })
                 .unwrap_or(Js::Null))
         }),
     )?;

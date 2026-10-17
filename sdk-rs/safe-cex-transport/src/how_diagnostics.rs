@@ -1,7 +1,7 @@
-use indexmap::IndexSet;
-use serde_json::{Value, json};
-use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use crate::native_data::{self, property, text};
+use indexmap::IndexSet;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
+use serde_json::{Value, json};
 use url::Url;
 
 const TRUNCATED: &str = "[TRUNCATED]";
@@ -55,7 +55,9 @@ fn sensitive_key(key: &str) -> bool {
     .any(|pattern| key.contains(pattern))
 }
 
-pub fn sanitize_for_trade_tunnel_log(value: &Input) -> Input { sanitize(value, 0) }
+pub fn sanitize_for_trade_tunnel_log(value: &Input) -> Input {
+    sanitize(value, 0)
+}
 fn sanitize(value: &Input, depth: usize) -> Input {
     match value {
         // ts-bug: redacts keys, not secrets embedded in strings.
@@ -65,17 +67,43 @@ fn sanitize(value: &Input, depth: usize) -> Input {
             Input::Text(output)
         }
         Input::Array(values) if depth < 4 => {
-            let mut output: Vec<_> = values.iter().take(20).map(|value| sanitize(value,depth+1)).collect();
-            if values.len()>20 { output.push(Input::Text(format!("{TRUNCATED} {} items",values.len()-20).encode_utf16().collect())); }
+            let mut output: Vec<_> = values
+                .iter()
+                .take(20)
+                .map(|value| sanitize(value, depth + 1))
+                .collect();
+            if values.len() > 20 {
+                output.push(Input::Text(
+                    format!("{TRUNCATED} {} items", values.len() - 20)
+                        .encode_utf16()
+                        .collect(),
+                ));
+            }
             Input::Array(output)
         }
         Input::Object(_) if depth < 4 => {
             let fields = native_data::entries(value);
-            let mut output: Vec<_> = fields.iter().take(50).map(|(key,value)| {
-                let sensitive = String::from_utf16(key).is_ok_and(|key| sensitive_key(&key));
-                (key.clone(), if sensitive { Input::Text("[REDACTED]".encode_utf16().collect()) } else { sanitize(value,depth+1) })
-            }).collect();
-            if fields.len()>50 { output.push(("__truncatedKeys".encode_utf16().collect(),Input::Float((fields.len()-50) as f64))); }
+            let mut output: Vec<_> = fields
+                .iter()
+                .take(50)
+                .map(|(key, value)| {
+                    let sensitive = String::from_utf16(key).is_ok_and(|key| sensitive_key(&key));
+                    (
+                        key.clone(),
+                        if sensitive {
+                            Input::Text("[REDACTED]".encode_utf16().collect())
+                        } else {
+                            sanitize(value, depth + 1)
+                        },
+                    )
+                })
+                .collect();
+            if fields.len() > 50 {
+                output.push((
+                    "__truncatedKeys".encode_utf16().collect(),
+                    Input::Float((fields.len() - 50) as f64),
+                ));
+            }
             Input::Object(output)
         }
         Input::Array(_) | Input::Object(_) => Input::Text(TRUNCATED.encode_utf16().collect()),
@@ -145,33 +173,55 @@ pub fn format_trade_tunnel_error_message(error: &Value) -> String {
 }
 
 pub fn log_trade_tunnel_request(request: &Input, route: Option<&Value>) {
-    if !is_trade_tunnel_verbose_logging_enabled() { return; }
-    let mut fields = log_summary(request,route);
-    for key in ["params","data"] {
-        if let Some(value) = property(request,key).filter(|value| has_loggable_content(value)) {
-            fields.push((key.encode_utf16().collect(),sanitize_for_trade_tunnel_log(value)));
+    if !is_trade_tunnel_verbose_logging_enabled() {
+        return;
+    }
+    let mut fields = log_summary(request, route);
+    for key in ["params", "data"] {
+        if let Some(value) = property(request, key).filter(|value| has_loggable_content(value)) {
+            fields.push((
+                key.encode_utf16().collect(),
+                sanitize_for_trade_tunnel_log(value),
+            ));
         }
     }
-    log_trade_tunnel_verbose("[TradeTunnel] REQUEST:",&Input::Object(fields));
+    log_trade_tunnel_verbose("[TradeTunnel] REQUEST:", &Input::Object(fields));
 }
 
 pub fn log_trade_tunnel_response(request: &Input, response: &Input, route: Option<&Value>) {
-    if !is_trade_tunnel_verbose_logging_enabled() { return; }
-    let mut fields = log_summary(request,route);
-    let (key,value) = property(response,"data").map_or(("response",response), |value| ("data",value));
-    fields.push((key.encode_utf16().collect(),sanitize_for_trade_tunnel_log(value)));
-    log_trade_tunnel_verbose("[TradeTunnel] RESPONSE:",&Input::Object(fields));
+    if !is_trade_tunnel_verbose_logging_enabled() {
+        return;
+    }
+    let mut fields = log_summary(request, route);
+    let (key, value) =
+        property(response, "data").map_or(("response", response), |value| ("data", value));
+    fields.push((
+        key.encode_utf16().collect(),
+        sanitize_for_trade_tunnel_log(value),
+    ));
+    log_trade_tunnel_verbose("[TradeTunnel] RESPONSE:", &Input::Object(fields));
 }
 
-fn log_summary(request: &Input,route: Option<&Value>) -> Vec<(Vec<u16>,Input)> {
-    let url = property(request,"url").and_then(text).unwrap_or_default();
+fn log_summary(request: &Input, route: Option<&Value>) -> Vec<(Vec<u16>, Input)> {
+    let url = property(request, "url").and_then(text).unwrap_or_default();
     // The summary has a fixed finite schema, independent of arbitrary adapter data.
     let mut fields = vec![
-        ("url".encode_utf16().collect(),Input::from_value(summarize_trade_tunnel_url(&url)).expect("bounded URL summary")),
-        ("method".encode_utf16().collect(),property(request,"method").cloned().unwrap_or(Input::Undefined)),
+        (
+            "url".encode_utf16().collect(),
+            Input::from_value(summarize_trade_tunnel_url(&url)).expect("bounded URL summary"),
+        ),
+        (
+            "method".encode_utf16().collect(),
+            property(request, "method")
+                .cloned()
+                .unwrap_or(Input::Undefined),
+        ),
     ];
     if let Some(route) = route {
-        fields.push(("route".encode_utf16().collect(),Input::from_value(route.clone()).expect("bounded routing metadata")));
+        fields.push((
+            "route".encode_utf16().collect(),
+            Input::from_value(route.clone()).expect("bounded routing metadata"),
+        ));
     }
     fields
 }
@@ -179,6 +229,34 @@ fn log_summary(request: &Input,route: Option<&Value>) -> Vec<(Vec<u16>,Input)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // These pre-existing oracle observations are bounded JSON views. Native UTF-16
+    // delivery is asserted separately without this projection.
+    fn sanitize_for_trade_tunnel_log(value: &Value) -> Value {
+        crate::RestResponseBody::Transformed(super::sanitize_for_trade_tunnel_log(
+            &Input::from_value(value.clone()).unwrap(),
+        ))
+        .json_value()
+        .unwrap()
+    }
+    fn has_loggable_content(value: &Value) -> bool {
+        super::has_loggable_content(&Input::from_value(value.clone()).unwrap())
+    }
+    #[test]
+    fn native_sanitizer_retains_unpaired_units_without_affecting_delivery() {
+        let value = Input::Object(vec![(vec![0xdfff], Input::Text(vec![0xd800, 120]))]);
+        assert_eq!(super::sanitize_for_trade_tunnel_log(&value), value);
+        let output = super::sanitize_for_trade_tunnel_log(&Input::Text(
+            [vec![120; 499], vec![0xd800, 0xdfff]].concat(),
+        ));
+        let Input::Text(units) = output else {
+            panic!("native string output")
+        };
+        assert_eq!(
+            units[499], 0xd800,
+            "sanitized log retains split unit until physical output"
+        );
+    }
+
     #[test]
     fn log_limits_redaction_utf16_and_primitive_content_match() {
         for key in [

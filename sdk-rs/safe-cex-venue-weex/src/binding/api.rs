@@ -179,7 +179,9 @@ fn install_retry(h: &Host, client: &Js) -> Result<(), Thrown> {
                                 status: status.unwrap_or(0.0) as u16,
                                 reason: None,
                                 headers: Default::default(),
-                                body: RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::Null),
+                                body: RestResponseBody::Untransformed(
+                                    safe_cex_types::retained_json::RetainedJsonInput::Null,
+                                ),
                             })
                         }),
                         request: Box::default(),

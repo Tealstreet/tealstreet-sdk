@@ -181,8 +181,12 @@ async fn prepare_request(
     } else if let Some(body) = &request.body {
         // A resent config carries the body axios already serialized; sign it as sent.
         match body.untransformed().map_err(|e| e.to_string())? {
-            safe_cex_types::retained_json::RetainedJsonInput::Text(text) => String::from_utf16(text).map_err(|error|error.to_string())?,
-            value => safe_cex_num::js_retained_json_stringify(value).map_err(|error|error.to_string())?.unwrap_or_default(),
+            safe_cex_types::retained_json::RetainedJsonInput::Text(text) => {
+                String::from_utf16(text).map_err(|error| error.to_string())?
+            }
+            value => safe_cex_num::js_retained_json_stringify(value)
+                .map_err(|error| error.to_string())?
+                .unwrap_or_default(),
         }
     } else {
         String::new()

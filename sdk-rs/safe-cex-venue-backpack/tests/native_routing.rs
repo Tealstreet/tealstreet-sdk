@@ -82,7 +82,9 @@ fn native_request_keeps_the_override_route_and_factory_timeout() {
     let wire = Arc::new(support::Wire::default());
     wire.bodies.lock().unwrap().insert(
         "/api/v1/markets".into(),
-        RestResponseBody::Untransformed(json!([])),
+        RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([])).unwrap(),
+        ),
     );
     let owner = construct(options, runtime.clone(), wire.clone()).unwrap();
     drive(&runtime, Exchange::fetch_markets(owner.as_ref())).unwrap();
@@ -107,7 +109,9 @@ fn native_request_keeps_the_shared_factory_timeout_without_a_proxy() {
     let wire = Arc::new(support::Wire::default());
     wire.bodies.lock().unwrap().insert(
         "/api/v1/markets".into(),
-        RestResponseBody::Untransformed(json!([])),
+        RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([])).unwrap(),
+        ),
     );
     let owner = construct(options, runtime.clone(), wire.clone()).unwrap();
     drive(&runtime, Exchange::fetch_markets(owner.as_ref())).unwrap();
@@ -146,7 +150,9 @@ fn native_request_uses_the_selected_private_proxy_region_and_authorization() {
     let wire = Arc::new(support::Wire::default());
     wire.bodies.lock().unwrap().insert(
         "/api/v1/markets".into(),
-        RestResponseBody::Untransformed(json!([])),
+        RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([])).unwrap(),
+        ),
     );
     let provider: Arc<dyn TransportProvider> =
         Arc::new(TealstreetTransport::new(Arc::new(ProxyHost(wire.clone()))));
@@ -178,10 +184,12 @@ fn secondary_options() -> ExchangeOptions {
 fn order_wire() -> Arc<support::Wire> {
     let wire = Arc::new(support::Wire::default());
     for path in ["/api/v1/orders", "/api/v1/position", "/api/v1/markets"] {
-        wire.bodies
-            .lock()
-            .unwrap()
-            .insert(path.into(), RestResponseBody::Untransformed(json!([])));
+        wire.bodies.lock().unwrap().insert(
+            path.into(),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([])).unwrap(),
+            ),
+        );
     }
     wire
 }
@@ -394,7 +402,7 @@ fn synced_clock_reaches_native_rest_auth_and_position_mapping() {
     let runtime = Rc::new(support::Runtime::default());
     runtime.now.set(123.0);
     let wire = Arc::new(support::Wire::default());
-    wire.bodies.lock().unwrap().insert("/api/v1/position".into(), RestResponseBody::Untransformed(json!([{"symbol":"BTC_USDC_PERP","netQuantity":"2","entryPrice":"100","netExposureNotional":"200","pnlUnrealized":"3","estLiquidationPrice":"50"}])));
+    wire.bodies.lock().unwrap().insert("/api/v1/position".into(), RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([{"symbol":"BTC_USDC_PERP","netQuantity":"2","entryPrice":"100","netExposureNotional":"200","pnlUnrealized":"3","estLiquidationPrice":"50"}])).unwrap()));
     let secret = base64::engine::general_purpose::STANDARD.encode([1; 32]);
     let owner = construct(
         serde_json::from_value(json!({"key":"clock-key","secret":secret})).unwrap(),

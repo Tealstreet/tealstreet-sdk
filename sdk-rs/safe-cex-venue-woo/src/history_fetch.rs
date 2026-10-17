@@ -41,10 +41,14 @@ async fn request_rows(
     });
     let response = adapter.execute(request.clone()).await?;
     let data = match response.body.into_data() {
-        RetainedJsonInput::Text(text) => RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null),
+        RetainedJsonInput::Text(text) => {
+            RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null)
+        }
         native => native,
     };
-    let data=data.into_value().map_err(|error|RestFailure::pre_transmit(error.to_string(),request))?;
+    let data = data
+        .into_value()
+        .map_err(|error| RestFailure::pre_transmit(error.to_string(), request))?;
     Ok(crate::response::parse_transaction_rows_from_response(&data).to_vec())
 }
 

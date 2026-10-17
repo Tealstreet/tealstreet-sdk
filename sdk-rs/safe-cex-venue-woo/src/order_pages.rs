@@ -44,10 +44,12 @@ pub async fn fetch_orders_recursively(
             return Ok(result);
         }
         let data = match response.body.into_data() {
-            RetainedJsonInput::Text(text) => RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null),
+            RetainedJsonInput::Text(text) => {
+                RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null)
+            }
             native => native,
         };
-        let data=data.into_value()?;
+        let data = data.into_value()?;
         let object = data
             .as_object()
             .ok_or_else(|| refusal("order page requires an object response"))?;

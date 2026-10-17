@@ -216,7 +216,12 @@ impl RestAdapter for Xhr<'_> {
                         status: 503,
                         reason: None,
                         headers: Default::default(),
-                        body: RestResponseBody::Untransformed(json!({"msg":hint})),
+                        body: RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                json!({"msg":hint}),
+                            )
+                            .unwrap(),
+                        ),
                     }));
                 }
                 return Err(failure);
@@ -847,7 +852,12 @@ fn native_signed_zero_leverage_clamp() {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"code":"0"})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"code":"0"}),
+                        )
+                        .unwrap(),
+                    ),
                 })))
             }
         }

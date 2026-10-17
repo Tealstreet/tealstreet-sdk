@@ -1,12 +1,24 @@
 use safe_cex_transport::RestResponseBody;
-use serde_json::Value;
 #[cfg(test)]
 use serde_json::Map;
+use serde_json::Value;
 
 pub(crate) fn decode(body: &RestResponseBody) -> Result<Value, String> {
-    if let RestResponseBody::Transformed(value)=body {return value.clone().into_value().map_err(|error|error.to_string());}
-    body.clone().transform_axios_response().map_err(|error|error.to_string())?.json_value().map_err(|error|format!("KuCoin account response representation refusal at JSON/UTF-8 boundary: {error}"))
-
+    if let RestResponseBody::Transformed(value) = body {
+        return value
+            .clone()
+            .into_value()
+            .map_err(|error| error.to_string());
+    }
+    body.clone()
+        .transform_axios_response()
+        .map_err(|error| error.to_string())?
+        .json_value()
+        .map_err(|error| {
+            format!(
+                "KuCoin account response representation refusal at JSON/UTF-8 boundary: {error}"
+            )
+        })
 }
 
 #[cfg(test)]

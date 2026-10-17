@@ -755,7 +755,10 @@ fn native_query_profile_is_inherited_from_production_factory() {
                     reason: None,
                     headers: Default::default(),
                     body: safe_cex_transport::RestResponseBody::Untransformed(
-                        json!({"code":"200000"}),
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"code":"200000"}),
+                        )
+                        .unwrap(),
                     ),
                 })
             })

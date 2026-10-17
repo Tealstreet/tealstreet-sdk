@@ -201,15 +201,29 @@ pub fn response_json_view(body: &safe_cex_transport::RestResponseBody) -> serde_
     use safe_cex_types::retained_json::RetainedJsonInput as Input;
     fn utf8_view(value: Input) -> Input {
         match value {
-            Input::Text(units) => Input::Text(String::from_utf16_lossy(&units).encode_utf16().collect()),
+            Input::Text(units) => {
+                Input::Text(String::from_utf16_lossy(&units).encode_utf16().collect())
+            }
             Input::Array(values) => Input::Array(values.into_iter().map(utf8_view).collect()),
-            Input::Object(fields) => Input::Object(fields.into_iter().map(|(key,value)| (String::from_utf16_lossy(&key).encode_utf16().collect(),utf8_view(value))).collect()),
+            Input::Object(fields) => Input::Object(
+                fields
+                    .into_iter()
+                    .map(|(key, value)| {
+                        (
+                            String::from_utf16_lossy(&key).encode_utf16().collect(),
+                            utf8_view(value),
+                        )
+                    })
+                    .collect(),
+            ),
             other => other,
         }
     }
     let value = utf8_view(body.clone().into_data());
     let json = safe_cex_num::js_retained_json_stringify(&value).expect("retained tree JSON view");
-    json.map_or(serde_json::Value::Null, |text| serde_json::from_str(&text).expect("UTF-8 JSON error view"))
+    json.map_or(serde_json::Value::Null, |text| {
+        serde_json::from_str(&text).expect("UTF-8 JSON error view")
+    })
 }
 
 pub type ExchangeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ExchangeError>> + 'a>>;

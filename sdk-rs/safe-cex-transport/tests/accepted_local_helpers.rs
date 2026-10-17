@@ -3,10 +3,12 @@ use safe_cex_transport::RestBody;
 use serde_json::{Value, json};
 const FORM: &str = "application/x-www-form-urlencoded";
 fn encode(value: Value) -> Result<String, String> {
-    RestBody::Untransformed(value)
-        .wire_bytes_for_content_type(Some(FORM))
-        .map(|bytes| String::from_utf8(bytes).unwrap())
-        .map_err(|error| error.to_string())
+    RestBody::Untransformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+    )
+    .wire_bytes_for_content_type(Some(FORM))
+    .map(|bytes| String::from_utf8(bytes).unwrap())
+    .map_err(|error| error.to_string())
 }
 fn nested(containers: usize) -> Value {
     (0..containers).fold(Value::Bool(true), |child, _| json!({"next": child}))

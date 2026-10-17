@@ -64,7 +64,10 @@ impl RestAdapter for Script {
                 reason: None,
                 headers: BTreeMap::new(),
                 body: RestResponseBody::Transformed(
-                    json!({"data":{"rows":rows},"rows":[{"id":"wrong-container"}]}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"data":{"rows":rows},"rows":[{"id":"wrong-container"}]}),
+                    )
+                    .unwrap(),
                 ),
             })
         })

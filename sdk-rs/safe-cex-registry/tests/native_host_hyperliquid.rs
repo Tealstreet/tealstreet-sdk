@@ -284,9 +284,7 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                             }
                             .into(),
                         ),
-                        body: Some(safe_cex_transport::RestBody::Untransformed(
-                            json!({"action":{"type":"scheduleCancel"},"nonce":1700000000000_u64}),
-                        )),
+                        body: Some(safe_cex_transport::RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"action":{"type":"scheduleCancel"},"nonce":1700000000000_u64})).unwrap())),
                         ..Default::default()
                     })
                     .await
@@ -322,9 +320,7 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                         base_url: Some("https://api.hyperliquid.xyz".into()),
                         skip_remote_signing: true,
                         params: Some(json!({"coin":["BTC","ETH"]})),
-                        body: Some(safe_cex_transport::RestBody::Untransformed(
-                            json!({"type":"allMids"}),
-                        )),
+                        body: Some(safe_cex_transport::RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"type":"allMids"})).unwrap())),
                         ..Default::default()
                     })
                     .await

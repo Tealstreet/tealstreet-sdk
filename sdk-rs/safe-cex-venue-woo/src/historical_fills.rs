@@ -23,10 +23,16 @@ fn bounds(value: Option<f64>, milliseconds: bool) -> Result<Option<f64>, Exchang
     result.map_err(|error| ExchangeError::new(error.message))
 }
 fn rest_error(failure: RestFailure) -> ExchangeError {
-    let context_view=failure.context.as_deref().and_then(|value|value.get("response")).cloned();
+    let context_view = failure
+        .context
+        .as_deref()
+        .and_then(|value| value.get("response"))
+        .cloned();
     // Shared conversion owns the explicit JSON error view and retained origin.
-    let mut error: ExchangeError=failure.into();
-    if let Some(view)=context_view {error.response=Some(view);}
+    let mut error: ExchangeError = failure.into();
+    if let Some(view) = context_view {
+        error.response = Some(view);
+    }
     error
 }
 

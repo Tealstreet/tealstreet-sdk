@@ -1405,9 +1405,13 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
                             let RestResponseBody::Untransformed(body) = response.body else {
                                 panic!("adapter bodies are untransformed JSON");
                             };
-                            Ok(safe_cex_exchange::js_runtime::value::from_json(
-                                &json!({"status": response.status, "body": body}),
-                            ))
+                            Ok(Js::object(vec![
+                                ("status", Js::Number(response.status.into())),
+                                (
+                                    "body",
+                                    safe_cex_exchange::js_runtime::value::from_retained_input(body),
+                                ),
+                            ]))
                         }
                         Err(failure) => Err(adapter.thrown(failure)),
                     }
@@ -1642,7 +1646,9 @@ fn rest_http_host_text_response_preserves_raw_big_integer_tokens() {
     );
     assert_eq!(raw.to_display(), r#"{ "orderId":9007199254740993 }"#);
     assert_eq!(
-        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())["orderId"],
+        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())
+            .into_value()
+            .unwrap()["orderId"],
         "9007199254740993"
     );
     let failed = settle(
@@ -2922,7 +2928,12 @@ mod http_factory {
                     status: 200,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"ok":true})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"ok":true}),
+                        )
+                        .unwrap(),
+                    ),
                 })
             })
         }
@@ -3537,13 +3548,25 @@ fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
             let RemoteSignerRequest::Http(request) = request else {
                 panic!("HTTP expected")
             };
-            self.0.borrow_mut().push(request.config.data.clone());
+            self.0.borrow_mut().push(
+                request
+                    .config
+                    .data
+                    .clone()
+                    .map(|value| value.into_value().unwrap()),
+            );
             let data = request.config.data.map(|value| {
-                if value.is_object() || value.is_array() {
-                    Value::String(
-                        safe_cex_num::js_json_stringify(&value.into())
+                if matches!(
+                    value,
+                    safe_cex_types::retained_json::RetainedJsonInput::Object(_)
+                        | safe_cex_types::retained_json::RetainedJsonInput::Array(_)
+                ) {
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        safe_cex_num::js_retained_json_stringify(&value)
                             .unwrap()
-                            .unwrap(),
+                            .unwrap()
+                            .encode_utf16()
+                            .collect(),
                     )
                 } else {
                     value

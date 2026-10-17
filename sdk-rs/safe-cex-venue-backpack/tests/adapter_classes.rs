@@ -75,7 +75,12 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
     );
     wire.bodies.lock().unwrap().insert(
         "/api/v1/markets".into(),
-        safe_cex_transport::RestResponseBody::Untransformed(json!({"error":{"msg":"same-base"}})),
+        safe_cex_transport::RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"error":{"msg":"same-base"}}),
+            )
+            .unwrap(),
+        ),
     );
     let e = ready(o.fetch_markets()).err().unwrap();
     assert!(e.message.contains("same-base"), "CLASS native API error");

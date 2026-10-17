@@ -112,7 +112,7 @@ fn parsed_signer_payload_matches_source_before_serialization() {
             "PARSER-CARDINALITY source per-case nodes: {index}"
         );
         let input: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
-        compare(&try_parse_json(input), &case["observed"]);
+        compare(&parsed_value(input), &case["observed"]);
         compared += 1;
     }
     assert_eq!(compared, 62, "PARSER-CARDINALITY compared cases");
@@ -120,7 +120,8 @@ fn parsed_signer_payload_matches_source_before_serialization() {
 #[test]
 fn existing_non_string_payload_is_not_reparsed() {
     for raw in ["{\"n\":9007199254740993}", "{\"n\":-0}", "[1e400]", "1.50"] {
-        let input: Value = serde_json::from_str(raw).unwrap();
+        let input: safe_cex_types::retained_json::RetainedJsonInput =
+            serde_json::from_str(raw).unwrap();
         assert_eq!(
             try_parse_json(input.clone()),
             input,
@@ -146,30 +147,28 @@ fn source_parser_oracle_must_execute() {
 }
 
 #[test]
-fn inherited_parser_boundaries_keep_the_original_string_not_an_object() {
+fn inherited_parser_boundaries_now_retain_the_complete_source_tree() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     let corpus: Value =
         serde_json::from_str(include_str!("fixtures/try-parse-json/boundaries.json")).unwrap();
     for case in corpus["cases"].as_array().unwrap() {
-        let input: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let input: Input = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
         assert_eq!(
             case["sourceKind"], "object",
             "source accepts valid JSON boundary case"
         );
-        let result = try_parse_json(input.clone());
-        if case["refused"] == true {
-            assert_eq!(
-                result, input,
-                "Rust parser boundary falls back to original string"
-            );
-        } else {
-            assert_eq!(
-                safe_cex_num::js_json_stringify(&result.into())
-                    .unwrap()
-                    .unwrap(),
-                case["sourceWire"],
-                "scalar Unicode positive boundary"
-            );
-        }
+        let result = try_parse_json(input);
+        assert!(
+            matches!(result, Input::Object(_) | Input::Array(_)),
+            "native parser admits source tree, including historical refusals"
+        );
+        assert_eq!(
+            safe_cex_num::js_retained_json_stringify(&result)
+                .unwrap()
+                .unwrap(),
+            case["sourceWire"],
+            "complete native UTF-16 tree matches source wire independently of model projection"
+        );
     }
 }
 
@@ -203,7 +202,7 @@ fn consumed_array_control(retain: usize) {
     let expected = serde_json::json!({"kind":"array", "children":[
         cases[0]["observed"]["children"][0], cases[1]["observed"]["children"][0]
     ]});
-    let mut decoded = try_parse_json(Value::String(format!("[{},{}]", inputs[0], inputs[1])));
+    let mut decoded = parsed_value(Value::String(format!("[{},{}]", inputs[0], inputs[1])));
     decoded.as_array_mut().unwrap().truncate(retain);
     compare(&decoded, &expected);
 }
@@ -218,4 +217,11 @@ fn consuming_empty_array_control_reaches_native_length_assertion() {
 #[should_panic(expected = "PARSER-CARDINALITY native array length")]
 fn consuming_subset_array_control_reaches_native_length_assertion() {
     consumed_array_control(1);
+}
+
+fn parsed_value(value: Value) -> Value {
+    let input = safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap();
+    safe_cex_transport::RestResponseBody::Transformed(try_parse_json(input))
+        .json_value()
+        .unwrap()
 }

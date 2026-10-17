@@ -1,10 +1,11 @@
 //! Response transforms consume current data, independently of model projections.
 use safe_cex_transport::{RestResponseBody, how::big_int_as_string_json_parse};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use serde_json::{Value, json};
 
-fn venue_parse(data: Value) -> Value {
+fn venue_parse(data: Input) -> Input {
     match data {
-        Value::String(text) => big_int_as_string_json_parse(&text),
+        Input::Text(text) => big_int_as_string_json_parse(&String::from_utf16(&text).unwrap()),
         data => data,
     }
 }
@@ -21,16 +22,19 @@ fn model_view_does_not_consume_a_response_transform() {
     );
     assert_eq!(
         encoded.transform(venue_parse).into_data(),
-        json!("123"),
+        Input::Text("123".encode_utf16().collect()),
         "direct parser sees the quoted wire text"
     );
     let twice = how.transform(venue_parse).into_data();
     assert!(
-        twice.is_number(),
+        matches!(twice, Input::Float(_)),
         "HOW second parser must see the decoded string"
     );
     assert_eq!(
-        twice.as_f64().unwrap().to_bits(),
+        match twice {
+            Input::Float(number) => number.to_bits(),
+            _ => panic!("native Float"),
+        },
         123_f64.to_bits(),
         "HOW second parser must see the decoded string"
     );
@@ -41,10 +45,16 @@ fn native_response_values_retain_shape_order_and_number_bits() {
     let value: Value =
         serde_json::from_str(r#"{"z":-0,"a":1e400,"nested":[null,true,"123"]}"#).unwrap();
     for body in [
-        RestResponseBody::Untransformed(value.clone()),
-        RestResponseBody::Transformed(value.clone()),
+        RestResponseBody::Untransformed(Input::from_value(value.clone()).unwrap()),
+        RestResponseBody::Transformed(Input::from_value(value.clone()).unwrap()),
     ] {
-        let current = body.clone().into_data();
+        let native = body.clone().into_data();
+        assert_eq!(
+            native,
+            Input::from_value(value.clone()).unwrap(),
+            "native carrier identity before bounded model observation"
+        );
+        let current = native.into_value().unwrap();
         assert_eq!(
             current.as_object().unwrap().keys().collect::<Vec<_>>(),
             vec!["z", "a", "nested"],
@@ -62,16 +72,16 @@ fn native_response_values_retain_shape_order_and_number_bits() {
         );
         assert_eq!(
             body.transform(venue_parse).into_data(),
-            value,
+            Input::from_value(value.clone()).unwrap(),
             "object response transform must receive the native object"
         );
     }
     for value in [Value::Null, json!([1, 2]), json!({"x":1})] {
         assert_eq!(
-            RestResponseBody::Untransformed(value.clone())
+            RestResponseBody::Untransformed(Input::from_value(value.clone()).unwrap())
                 .transform(venue_parse)
                 .into_data(),
-            value,
+            Input::from_value(value).unwrap(),
             "object array and null must not be over-parsed"
         );
     }
@@ -79,16 +89,18 @@ fn native_response_values_retain_shape_order_and_number_bits() {
 
 #[test]
 fn fallible_response_transform_exposes_the_original_error() {
-    let error = RestResponseBody::Transformed(json!("payload"))
-        .try_transform(|data| {
-            assert_eq!(
-                data,
-                json!("payload"),
-                "fallible parser receives current data"
-            );
-            Err::<Value, _>(("TypeError", "parser refused"))
-        })
-        .unwrap_err();
+    let error = RestResponseBody::Transformed(
+        safe_cex_types::retained_json::RetainedJsonInput::from_value(json!("payload")).unwrap(),
+    )
+    .try_transform(|data| {
+        assert_eq!(
+            data,
+            Input::Text("payload".encode_utf16().collect()),
+            "fallible parser receives current data"
+        );
+        Err::<Input, _>(("TypeError", "parser refused"))
+    })
+    .unwrap_err();
     assert_eq!(
         error,
         ("TypeError", "parser refused"),

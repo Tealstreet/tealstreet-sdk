@@ -148,7 +148,10 @@ fn telemetry_receives_the_original_native_request_data_variant() {
                     reason: None,
                     headers: Default::default(),
                     body: RestResponseBody::Untransformed(
-                        json!({"status":"err","response":"venue rejected"}),
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"status":"err","response":"venue rejected"}),
+                        )
+                        .unwrap(),
                     ),
                 },
                 false,

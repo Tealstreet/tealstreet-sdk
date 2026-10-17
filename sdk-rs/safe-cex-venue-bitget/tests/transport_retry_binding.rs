@@ -116,7 +116,10 @@ impl RestAdapter for Adapter {
                 reason: None,
                 headers: Default::default(),
                 body: RestResponseBody::Untransformed(
-                    json!({"code":"00000","data":[],"requestTime":1}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"code":"00000","data":[],"requestTime":1}),
+                    )
+                    .unwrap(),
                 ),
             })
         })

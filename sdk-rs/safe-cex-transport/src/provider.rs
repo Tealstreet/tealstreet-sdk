@@ -419,7 +419,11 @@ impl RestRequest {
         let mut wire = self.clone();
         wire.body = match &self.body {
             None => None,
-            Some(RestBody::Transformed(data)) if matches!(data.value(), Input::Null | Input::Undefined) => None,
+            Some(RestBody::Transformed(data))
+                if matches!(data.value(), Input::Null | Input::Undefined) =>
+            {
+                None
+            }
             Some(body) => Some(RestBody::Encoded(body.wire_bytes()?)),
         };
         Ok(wire)
@@ -478,10 +482,10 @@ impl RestResponseBody {
                 serde_json::from_slice::<Input>(bytes).and_then(Input::into_value)
             }
             Self::Untransformed(value) | Self::Transformed(value) => {
-                let mut projected=value.clone().into_value()?;
-                crate::how::normalize_json_numbers(&mut projected,false,false);
+                let mut projected = value.clone().into_value()?;
+                crate::how::normalize_json_numbers(&mut projected, false, false);
                 Ok(projected)
-            },
+            }
         }
     }
 }

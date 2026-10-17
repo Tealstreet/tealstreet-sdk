@@ -46,11 +46,13 @@ impl PrivateFixture {
         runtime.now.set(1_000.0);
         wire.bodies.lock().unwrap().insert(
             "/api/v1/position".into(),
-            RestResponseBody::Untransformed(json!([])),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!([])).unwrap(),
+            ),
         );
         wire.bodies.lock().unwrap().insert(
             "/api/v1/capital/collateral".into(),
-            RestResponseBody::Untransformed(json!({"netEquity":"25","netEquityAvailable":"18","netEquityLocked":"7","pnlUnrealized":"3"})),
+            RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"netEquity":"25","netEquityAvailable":"18","netEquityLocked":"7","pnlUnrealized":"3"})).unwrap()),
         );
         let socket = Rc::new(private_socket::Socket::default());
         socket.events.borrow_mut().push_back(WsEvent::Open);

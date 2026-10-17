@@ -119,7 +119,12 @@ impl RestAdapter for Http500 {
                 status: 500,
                 reason: None,
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(json!({"direct":true})),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"direct":true}),
+                    )
+                    .unwrap(),
+                ),
             })
         })
     }

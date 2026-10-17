@@ -205,7 +205,10 @@ fn query_profile(value: &Value) -> Result<String, String> {
     .map_err(|e| e.message.to_owned())
 }
 fn body_value(body: RestResponseBody) -> Result<Value, ExchangeError> {
-    body.transform_axios_response().map_err(|error|ExchangeError::new(error.to_string()))?.json_value().map_err(|error|ExchangeError::new(error.to_string()))
+    body.transform_axios_response()
+        .map_err(|error| ExchangeError::new(error.to_string()))?
+        .json_value()
+        .map_err(|error| ExchangeError::new(error.to_string()))
 }
 
 fn signature_rejected(data: &Value) -> Result<bool, ExchangeError> {
@@ -280,7 +283,12 @@ impl Client {
                     base_url: Some(lane.base_url.clone()),
                     timeout_ms: Some(timeout as i64),
                     params: params.clone(),
-                    body: body.clone().map(safe_cex_types::retained_json::RetainedJsonInput::from_value).transpose().map_err(|error|ExchangeError::new(error.to_string()))?.map(RestBody::Untransformed),
+                    body: body
+                        .clone()
+                        .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                        .transpose()
+                        .map_err(|error| ExchangeError::new(error.to_string()))?
+                        .map(RestBody::Untransformed),
                     ..Default::default()
                 };
                 let mut signed_headers = headers.clone();

@@ -463,3 +463,11 @@ retains their own null keys in info. `scripts/legacy-order-null-control.py`
 compiles a live-mapper null-refusal control that must fail its named order-count
 assertion; decoder-only tests are not evidence
 for this production path.
+
+The production WOO signer now receives and returns the original native runtime
+config through `api` and `factory`. Shallow copies retain nested data identity,
+callables and own properties. V1 reuses the shared runtime qs serializer; V3 uses
+the canonical retained JSON writer at its signing boundary. The constructed
+exchange regression in `native_signing_retention` observes NaN and Infinity in
+actual HMAC preimages before the terminal wire projection. Finite JSON fixture
+views in older tests are explicit observations after signing.
