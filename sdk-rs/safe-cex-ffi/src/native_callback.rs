@@ -1,11 +1,11 @@
-use crate::native_value::JsData;
+use crate::native_value::{JsData, check_status};
 use napi::{
     Env, JsValue, Status, ValueType,
     bindgen_prelude::{
         Array, CallbackContext, FromNapiValue, Function, JsObjectValue, Object, PromiseRaw,
         ToNapiValue, TypeName, Unknown,
     },
-    check_status, sys,
+    sys,
     threadsafe_function::ThreadsafeFunction,
 };
 use safe_cex_registry::native_value::NativeValue;
@@ -69,7 +69,7 @@ fn capture_rejection(env: &Env, mut value: Unknown<'_>) -> napi::Result<NativeVa
             Ok(error) => return Ok(error),
             Err(error) => {
                 let mut pending = false;
-                check_status!(unsafe { sys::napi_is_exception_pending(env.raw(), &mut pending) })?;
+                check_status(unsafe { sys::napi_is_exception_pending(env.raw(), &mut pending) })?;
                 if !pending {
                     return Ok(NativeValue::object([
                         ("name", NativeValue::string("Error")),
@@ -77,7 +77,7 @@ fn capture_rejection(env: &Env, mut value: Unknown<'_>) -> napi::Result<NativeVa
                     ]));
                 }
                 let mut exception = std::ptr::null_mut();
-                check_status!(unsafe {
+                check_status(unsafe {
                     sys::napi_get_and_clear_last_exception(env.raw(), &mut exception)
                 })?;
                 value = unsafe { Unknown::from_napi_value(env.raw(), exception)? };
@@ -150,7 +150,7 @@ impl FromNapiValue for CallbackFuture {
             drop(sender.send(Err(error)));
         } else {
             let mut promise = false;
-            check_status!(unsafe { sys::napi_is_promise(env, value.raw(), &mut promise) })?;
+            check_status(unsafe { sys::napi_is_promise(env, value.raw(), &mut promise) })?;
             if promise {
                 let sender = Rc::new(RefCell::new(Some(sender)));
                 let fulfilled = sender.clone();

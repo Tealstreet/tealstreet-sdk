@@ -9,6 +9,7 @@ import { contractJson } from './accepted-contract-files.mjs';
 import { aliasContract } from './accepted-aliases.mjs';
 import { defaultWitnessContract, telemetryDefaultWitness } from './accepted-defaults.mjs';
 import { grvtFieldsBody } from './accepted-grvt-fields.mjs';
+import { nodeProbeConfiguration, nodeProbeHarness, executeNodeProbes } from './accepted-node-probes.mjs';
 
 const literal = value => JSON.stringify(value);
 const aliasTraitMethods = [
@@ -65,6 +66,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
     const packageMetadata = metadata.packages.find(item => item.name === pkg.package);
     const crateRoot = path.dirname(packageMetadata.manifest_path);
     const target = pkg.target ?? packageMetadata.targets.find(item => item.kind.includes('lib') || item.kind.includes('cdylib'));
+    const node = nodeProbeConfiguration(pkg, target, configuration);
     const targetArgs = target.kind.includes('bin') ? ['--bin', target.name] : ['--lib'];
     const originals = new Map();
     const remember = file => { if (!originals.has(file)) originals.set(file, fs.readFileSync(file)); };
@@ -170,6 +172,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
       localTests = `\npub fn __accepted_set_run() { ${nativeSymbols.map(symbol => `{ unsafe extern "Rust" { fn ${symbol}(); } let _ = std::panic::catch_unwind(|| unsafe { ${symbol}(); }); }`).join('\n')} }\n`;
       if (nativeBinary) localTests += '\nfn main() { let _ = __accepted_set_original_main; __accepted_set_run(); }\n';
     }
+    if (node) localTests += nodeProbeHarness();
     remember(copiedRoot);
     fs.appendFileSync(copiedRoot, localTests);
     fs.appendFileSync(copiedRoot, `\n\n#[allow(dead_code)]\n#[path = ${literal(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/runtime.rs'))}]\nmod __accepted_set_runtime;\n`);
@@ -185,18 +188,19 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
         assert.ok(target.crate_types.includes('rlib') && target.crate_types.includes('cdylib'), `accepted-set: ${pkg.package}: wasm probes need both rlib and cdylib outputs`);
       } else text = text.includes('[lib]') ? text.replace('[lib]', '[lib]\ncrate-type = ["rlib", "cdylib"]') : `${text}\n[lib]\ncrate-type = ["rlib", "cdylib"]\n`;
     }
-    if (!wasm && !nativeBinary) {
+    if (!wasm && !nativeBinary && !node) {
       const runner = path.join(path.dirname(manifest), '__accepted_set_runner.rs');
       fs.writeFileSync(runner, `fn main() { ${target.name.replaceAll('-', '_')}::__accepted_set_run(); }\n`);
       text += '\n[[bin]]\nname = "accepted-set-production-runner"\npath = "__accepted_set_runner.rs"\n';
     }
     fs.writeFileSync(manifest, text);
     const features = configuration.features.length ? ['--features', configuration.features.join(',')] : [];
-    const command = wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
-    const result = spawnSync('cargo', command, {
+    const command = node ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--lib', '--message-format=json', ...features] : wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
+    const build = spawnSync('cargo', command, {
       cwd: path.join(sandbox, workspaceRelative), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, CARGO_BUILD_JOBS: jobs, CARGO_TARGET_DIR: path.join(metadata.target_directory, 'accepted-set-build') },
     });
+    const result = node ? executeNodeProbes(build, pkg, metadata.target_directory, manifest) : build;
     const log = `${result.stdout}\n${result.stderr}`;
     fs.writeFileSync(path.join(metadata.target_directory, `accepted-set-${pkg.package}.log`), log);
     let receipts;
