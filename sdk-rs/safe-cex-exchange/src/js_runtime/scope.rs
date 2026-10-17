@@ -210,6 +210,7 @@ impl<X> Scope<X> {
         handle
     }
     pub fn clear_timeout(&self, handle: &Js) {
+        self.shared.sockets.clear_timeout(handle);
         let removed = take_timers(&self.shared.timers, handle);
         // Host cancellation runs after the timer list's borrow is released.
         for (_, task) in removed {
