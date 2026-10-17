@@ -978,6 +978,47 @@ fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
     h.venue().dispose().unwrap();
 }
 
+/// A market whose 5-unit max splits 10.05 into lots with a 0.05 tail under the 0.1 minimum.
+fn lot_market(http: &Http) {
+    let mut row = perp_row();
+    row["supported_size_decimals"] = json!(2);
+    row["min_base_amount"] = json!("0.1");
+    row["order_quote_limit"] = json!("5");
+    http.ok(
+        "GET",
+        DETAILS,
+        json!({"code": 200, "order_book_details": [row]}),
+    );
+    lighter(http);
+}
+
+#[test]
+fn place_order_merges_a_sub_minimum_trailing_lot_into_the_previous_lot() {
+    let h = harness(ExchangeName::Lighter, options(), lot_market);
+    loaded(&h);
+    let before = h.http.count();
+    let ids = h
+        .drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({"amount": 10.05}))),
+        ))
+        .expect("placeOrder");
+    let txs = sent_txs(&h, before);
+    let amounts: Vec<&Value> = txs.iter().map(|(_, info)| &info["BaseAmount"]).collect();
+    assert_eq!(
+        amounts,
+        vec![&json!(333), &json!(333), &json!(338)],
+        "TS lots [3.33, 3.33, 3.33, 0.05] pop the tail into [3.33, 3.33, 3.38]"
+    );
+    assert!(txs.iter().all(|(tx_type, _)| tx_type == "14"));
+    let sent_ids: Vec<String> = txs
+        .iter()
+        .map(|(_, info)| info["ClientOrderIndex"].to_string())
+        .collect();
+    assert_eq!(ids, sent_ids);
+}
+
 fn private_account_frame_for_deployment(name: ExchangeName) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
