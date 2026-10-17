@@ -1002,6 +1002,28 @@ fn socket_frame_units_are_observed_before_wire() {
             ),
             "{marker} native parser retains the complete source frame"
         );
+        // Observe retained units before the explicitly fallible UTF-8 frame view.
+        use safe_cex_transport::native_data::property;
+        use safe_cex_types::retained_json::RetainedJsonInput as Input;
+        let values = property(&decoded, if private { "args" } else { "data" }).unwrap();
+        let Input::Array(values) = values else {
+            panic!("{marker} native frame array");
+        };
+        let value = if private {
+            &values[0]
+        } else {
+            property(&values[0], "s").unwrap()
+        };
+        assert!(
+            matches!(value, Input::Text(actual) if actual == units),
+            "{marker} retained native input units"
+        );
+        if label == "unused-extra" {
+            assert!(
+                matches!(property(&decoded, "ignored"), Some(Input::Text(actual)) if actual == &[0xd800]),
+                "{marker} unrelated native lone unit retained"
+            );
+        }
         let decoded = decoded.into_value();
         if refused {
             assert!(
@@ -1072,16 +1094,22 @@ fn socket_frame_units_are_observed_before_wire() {
         .unwrap();
         let host = SocketHost::new(runtime.clone(), private, 0, "frame-units");
         runtime.operations.borrow_mut().clear();
-        if private {
+        let result = if private {
             ApexOmniPrivateWebsocket::new(parent, host.clone())
                 .unwrap()
                 .on_message(raw)
-                .unwrap();
         } else {
             ApexOmniPublicWebsocket::new(parent, host.clone())
                 .unwrap()
                 .on_message(raw)
-                .unwrap();
+        };
+        if refused {
+            assert!(
+                result.unwrap_err().message.contains("invalid utf-16"),
+                "{marker} typed frame refusal is visible"
+            );
+        } else {
+            result.unwrap();
         }
         let sent = host.raw_frames.borrow().clone();
         assert_eq!(
