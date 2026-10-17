@@ -4,7 +4,6 @@ use safe_cex_types::{Market, Position};
 use serde_json::json;
 #[allow(dead_code)]
 mod io {
-    use crate as safe_cex_venue_weex;
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/support/binding_runtime.rs"
@@ -12,7 +11,7 @@ mod io {
 }
 fn nuke_replacement(empty: bool) {
     let endpoint = |name| {
-        crate::types::ENDPOINTS
+        safe_cex_venue_weex::types::ENDPOINTS
             .iter()
             .find(|(key, _)| *key == name)
             .unwrap()
@@ -34,9 +33,7 @@ fn nuke_replacement(empty: bool) {
         false,
     )
     .unwrap();
-    let expected: Vec<Position> = h
-        .drive(h.exchange.invoke("fetchPositions", vec![]))
-        .unwrap();
+    let expected: Vec<Position> = h.drive(h.venue().fetch_positions(None)).unwrap();
     assert!(
         !expected.is_empty(),
         "source fills absent symbols with fake zero positions"
@@ -56,7 +53,7 @@ fn nuke_replacement(empty: bool) {
         false,
     )
     .unwrap();
-    h.drive(h.exchange.unit("nukePositions", vec![])).unwrap();
+    h.drive(h.venue().nuke_positions(0)).unwrap();
     assert_eq!(h.http.calls(endpoint("CLOSE_POSITIONS")).len(), 1);
     assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 2);
     assert!(
