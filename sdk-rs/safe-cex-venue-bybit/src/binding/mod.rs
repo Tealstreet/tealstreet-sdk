@@ -5,6 +5,7 @@ pub(crate) mod exchange;
 pub(crate) mod globals;
 pub(crate) mod host;
 pub(crate) mod http;
+pub(crate) mod hyro_socket;
 pub(crate) mod members;
 pub(crate) mod receiver;
 pub(crate) mod rt;

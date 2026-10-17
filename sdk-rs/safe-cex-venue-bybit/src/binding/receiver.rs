@@ -78,7 +78,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 
     if matches!(
         typed.base.name,
-        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
     ) {
         method(&this, rt, "fetchClosedPositionRows", |r, a| {
             Ok(crate::ledger_history::fetch_closed_position_rows(
@@ -439,6 +441,23 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "fetchOptionMarkets", |rt, _| {
         members::markets::fetch_option_markets(rt)
     });
+    if matches!(
+        venue(rt)?.base.name,
+        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+    ) {
+        method(&this, rt, "assertOptionsEnabled", |rt, _| {
+            members::options::assert_options_enabled(rt)
+        });
+        method(&this, rt, "fetchOptionChain", |rt, a| {
+            members::options::fetch_option_chain(rt, arg(&a, 0))
+        });
+        method(&this, rt, "fetchOptionExpiries", |rt, a| {
+            members::options::fetch_option_expiries(rt, arg(&a, 0))
+        });
+        method(&this, rt, "fetchAccountGreeks", |rt, _| {
+            members::options::fetch_account_greeks(rt)
+        });
+    }
     method(&this, rt, "fetchMarkets", |rt, _| {
         members::markets::fetch_markets(rt)
     });
@@ -459,6 +478,18 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     });
 
     // Order placement and the local order lifecycle (members/orders.rs, lifecycle.rs).
+    method(&this, rt, "submitCreateOrders", |rt, a| {
+        let rt = rt.clone();
+        let payloads = arg(&a, 0)
+            .array_values()
+            .ok_or_else(|| Thrown::type_error("payloads is not an array"))?;
+        let opts = arg(&a, 1);
+        Ok(rt.clone().spawn(Box::pin(async move {
+            members::orders::submit_create_orders_body(&rt, payloads, &opts)
+                .await
+                .map(Js::array)
+        })))
+    });
     method(&this, rt, "placeOrder", |rt, a| {
         members::orders::place_order(rt, arg(&a, 0))
     });
@@ -632,6 +663,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     }
     if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitinverse {
         members::inverse::install(rt)?;
+    }
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+        members::hyro::install(rt)?;
     }
     Ok(())
 }

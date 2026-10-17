@@ -860,3 +860,66 @@ fn business_socket_reopen_alone_resyncs_the_private_snapshot() {
     );
     h.venue().dispose().expect("dispose");
 }
+
+#[test]
+fn eu_order_reads_start_both_instruments_before_first_reply() {
+    use std::{
+        cell::Cell,
+        rc::Rc,
+        task::{Context, Poll, Waker},
+    };
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/parallel-reads-oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "actual source parallel reads: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let mut observations = vec![];
+    for path in [ORDERS, ALGO_ORDERS] {
+        let h = harness(ExchangeName::Okxeu, options(), |http| {
+            okx(http);
+            http.routes
+                .borrow_mut()
+                .retain(|(_, path, _)| path != ORDERS);
+            http.ok("GET", ORDERS, json!([]));
+        });
+        loaded(&h);
+        h.http.requests.borrow_mut().clear();
+        let gate = Rc::new(Cell::new(false));
+        *h.http.held_instrument.borrow_mut() = Some((path.into(), "SWAP".into(), gate.clone()));
+        let mut future = h.venue().fetch_orders(None);
+        assert!(matches!(
+            future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+        h.runtime.pump();
+        let instruments = h
+            .http
+            .calls(path)
+            .iter()
+            .map(|r| r.params["instType"].clone())
+            .collect::<Vec<_>>();
+        observations.push(json!({"path":path,"instruments":instruments}));
+        gate.set(true);
+        let orders = h.drive(future).expect("both instrument requests settle");
+        assert!(
+            orders.is_empty(),
+            "empty instrument replies complete without an error"
+        );
+        h.venue().dispose().unwrap();
+    }
+    assert_eq!(
+        json!(observations),
+        source,
+        "OKX EU both source parallel reads start before SWAP completes for normal and algo orders"
+    );
+}
