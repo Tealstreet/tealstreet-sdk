@@ -526,8 +526,8 @@ clears recently-placed snapshot grace on sighting, maintains one canonical
 incremental-fill tracker per protocol, publishes terminal rows, and updates
 positions/balance in source order. Primary/Demo filter categories by the account
 switches. Dedicated Spot omits positions; dedicated Inverse preserves its
-qty/value fill pricing and [position, position] Store update pairs. Spot and dedicated Inverse constructors are now bound; HyroTrader
-constructor/session binding remains separate work. Execution and wallet
+qty/value fill pricing and [position, position] Store update pairs. Spot, dedicated Inverse and HyroTrader constructors are bound; Hyro uses its
+acknowledged private session and USDT-only reconciliation. Execution and wallet
 topics are ignored in maintained TS and remain ignored here.
 `tests/private_event_delivery.rs` feeds the actual core socket pump. Its source
 oracle executes maintained handler, mapper, fill helper, selectors and Store
@@ -740,6 +740,43 @@ numeric coercion, duplicate-symbol joins and sorting against live Store markets.
 Dedicated Spot/Inverse retain the base options refusals. The actual HTTP/source
 comparison has 79 passing cases, including tied-right sorting through the
 canonical shared String.prototype.localeCompare implementation.
+
+## Native HyroTrader composition
+
+`BybitExchange::create(Hyrotrader, ...)` selects its explicit simulator origin,
+source receiver overrides and private acknowledgement/reconciliation protocol.
+The registry reuses the existing Bybit dependency edge. Missing build-time REST
+configuration returns the source error before IO; public/private WS origins use
+the existing build-time tables and REST-derived defaults. Never route Hyro to
+Bybit or Demo as a configuration fallback.
+
+`binding/members/hyro_recovery.rs` keeps native Js recovery groups, original
+submission IDs and publication boundaries. Creates use the existing per-request
+zero retry budget; the shared API factory remains unchanged. Complete realtime
+and history absence permits reuse of an uncertain identity; failed/incomplete
+lookups preserve uncertainty. Authoritative terminal recovery returns its ID
+without recording a new open order. Concurrent identical lists share one
+sequence, and constructor disposal clears pending state. The old uncalled
+`failure_diagnostics` rejection class/predicate and their 18 fake-only cases
+were retired; the live recovery owns the retained Error brand and RegExp body.
+All other diagnostic source groups and controls remain.
+
+Hyro inherits dynamic closed PnL, fill and order history plus the closed-row/order
+join for journal positions. Its income reads retain the source empty capability brand. Candle snapshots
+use authoritative kline volume, never subscribe to publicTrade, and reject
+seconds through the source validator. Existing typed interval/model ingress
+bounds remain separate from the runtime body claim.
+
+`tests/hyro_binding.rs` drives the actual constructor/receiver, signed client,
+core socket pump and Store, including hosted WS signing, stale ACK/frame guards,
+malformed snapshots, revision races, generated IDs and order reconciliation.
+`safe-cex-registry/tests/native_host_hyrotrader.rs` constructs through the real
+native host and verifies the transmitted HTTP HMAC on loopback. Configure the
+existing `NEXT_PUBLIC_HYROTRADER_SIMULATOR_*` Cargo build-time origins for the
+configured witnesses; the ordinary test also checks unconfigured refusal.
+Constructor and native-registry refusals were compiled on master before repairs;
+the added source policy witnesses also compiled/fail before their own repairs.
+These local fixtures do not claim live simulator-account acceptance.
 
 Dynamic history capabilities delegate to the same live Exchange methods: fills,
 income/range and closed PnL for primary/demo/inverse, historical orders for

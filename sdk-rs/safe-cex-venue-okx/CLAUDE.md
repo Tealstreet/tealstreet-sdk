@@ -152,3 +152,9 @@ to the existing native operation rather than implementing another terminal map.
 `tests/terminal_store_controls.py` faults the bridge registration, terminal-memory
 delegation, empty-Store handling, subscriber-error propagation and typed ID
 admission, requiring named compiled failures and exact restoration.
+
+The concrete parallel-map host starts every callback with the shared eager promise
+runtime and joins already-started promises. Market/leverage and order-read bodies
+share that implementation. The real EU binding holds a SWAP response and verifies
+FUTURES starts before it completes for both normal and algorithmic orders, matching
+the actual TypeScript members with the installed p-iteration dependency.
