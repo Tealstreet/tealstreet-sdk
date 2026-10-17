@@ -164,6 +164,9 @@ fn dispatch_callback(
             &arg(&args),
         );
     }
+    if code.starts_with("history_") {
+        return crate::ledger_history::dispatch(h.as_ref(), &owner, code, &captures, &args);
+    }
     crate::core_snapshot_readers::dispatch(h, owner, code, captures, args)
 }
 
@@ -279,8 +282,43 @@ impl SnapshotHost for Rt {
         match name {
             "null" => Ok(Js::Null),
             "globalThis" => Ok(self.shared.globals.clone()),
-            "template" => Ok(Js::String(arg(&args, 0).to_js_string()?)),
-            "string.concat" => {
+            "select:mapBybitClosedPnl" => Ok(Js::function("mapBybitClosedPnl", |_, args| {
+                crate::ledger_mapping::map_bybit_closed_pnl(
+                    &arg(&args, 0),
+                    arg(&args, 1),
+                    arg(&args, 2).truthy(),
+                )
+            })),
+            "isBybitOptionSymbol" => Ok(Js::Bool(crate::options::is_bybit_option_symbol(&text(
+                &arg(&args, 0),
+            )?))),
+            "isBybitInverseSymbol" => Ok(Js::Bool(crate::inverse_symbol::is_bybit_inverse_symbol(
+                &text(&arg(&args, 0))?,
+            ))),
+            "omitUndefined" => self.global("omitUndefined")?.call(Js::Undefined, args),
+            "subtract" => Ok(Js::Number(
+                arg(&args, 0).to_number()? - arg(&args, 1).to_number()?,
+            )),
+            "iterator" => arg(&args, 0).iterator(),
+            "iterator.next" => {
+                let step = arg(&args, 0).call_method("next", vec![])?;
+                if !step.is_object() {
+                    return Err(Thrown::type_error("Iterator result is not an object"));
+                }
+                Ok(step)
+            }
+            "iterator.close" => {
+                let iterator = arg(&args, 0);
+                let close = iterator.get("return")?;
+                if !close.is_nullish() {
+                    let result = close.call(iterator, vec![])?;
+                    if !result.is_object() {
+                        return Err(Thrown::type_error("Iterator result is not an object"));
+                    }
+                }
+                Ok(Js::Undefined)
+            }
+            "template" | "string.concat" => {
                 let mut units = vec![];
                 for a in &args {
                     units.extend_from_slice(&a.to_js_string()?);
@@ -294,7 +332,9 @@ impl SnapshotHost for Rt {
                 Ok(Js::array(values))
             }
             "Date.now" => Ok(Js::Number(self.now().floor())),
-            "virtualClock.getCurrentTimeMs" => Ok(Js::Number(self.now())),
+            "virtualClock.getCurrentTimeMs" => self
+                .global("virtualClock")?
+                .call_method("getCurrentTimeMs", vec![]),
             "LogSeverity.Warning" => Ok(Js::str("warning")),
             "v" => get_key(&arg(&args, 0), &text(&arg(&args, 1))?),
             "Math.min" => {

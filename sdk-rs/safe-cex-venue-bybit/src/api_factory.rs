@@ -235,11 +235,18 @@ impl Client {
             let retries = request
                 .config_extensions
                 .get("axios-retry")
-                .and_then(|state| state.get("retries"));
-            let retries = match retries {
-                Some(value) => safe_cex_num::js_number(Some(value)).map_err(|error| {
-                    RestFailure::pre_transmit(error.to_string(), request.clone())
-                })?,
+                .cloned()
+                .map(safe_cex_exchange::js_runtime::value::from_retained_input);
+            let retries = match retries.filter(|state| state.has_own("retries")) {
+                Some(state) => state
+                    .get("retries")
+                    .and_then(|value| value.to_number())
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(
+                            error.to_exchange_error().to_string(),
+                            request.clone(),
+                        )
+                    })?,
                 None => 3.0,
             };
             let receipt = retry_bybit(

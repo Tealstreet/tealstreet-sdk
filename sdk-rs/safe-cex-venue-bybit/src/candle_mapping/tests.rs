@@ -1,4 +1,6 @@
 use super::*;
+use safe_cex_exchange::js_runtime::value::from_json;
+use serde_json::Value;
 fn encode(value: f64) -> Value {
     if value.is_nan() {
         Value::from("NaN")
@@ -60,7 +62,7 @@ fn kline_state_matches_live_source() {
         );
         let mut native = Vec::new();
         for raw in inputs {
-            let result = apply_kline(&mut state, raw);
+            let result = apply_kline(&mut state, &from_json(raw));
             let mut actual = serde_json::Map::new();
             match result {
                 Ok(Some(value)) => {
@@ -68,7 +70,7 @@ fn kline_state_matches_live_source() {
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    actual.insert("error".into(), error.into());
+                    actual.insert("error".into(), error.message().into());
                 }
             }
             if let Some(value) = &state {
