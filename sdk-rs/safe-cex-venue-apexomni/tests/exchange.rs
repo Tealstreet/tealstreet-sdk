@@ -140,10 +140,14 @@ fn order(value: &Order) -> J {
         ("amount", n(value.amount)),
         ("filled", n(value.filled)),
         ("remaining", n(value.remaining)),
-        ("reduceOnly", J::Bool(value.reduce_only)),
         ("info", J::from(value.info.clone().unwrap())),
         ("lastUpdate", source_clock_stamp(value.last_update)),
     ];
+    match value.reduce_only {
+        ModelField::Absent => {}
+        ModelField::Undefined => fields.push(("reduceOnly", J::Undefined)),
+        ModelField::Value(value) => fields.push(("reduceOnly", J::Bool(value))),
+    }
     if let Some(v) = value.time_in_force.into_value() {
         fields.push((
             "timeInForce",
