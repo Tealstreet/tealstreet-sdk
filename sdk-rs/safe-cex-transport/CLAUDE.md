@@ -193,3 +193,9 @@ The bounded follow-up API reviews are recorded in
 diagnostic section records the direct retained-number field decoder, JSON
 projection, error construction, raw URL parsing and separate typed selector
 review, with native/Wasm receipts and serial mutation controls.
+
+The body/secondary accepted review executes all eleven inventoried body APIs,
+including current-data callbacks and separately observable model reads. Its
+controls require compiling named output failures and exact restoration; run
+`scripts/accepted-body-controls.py` serially with other source-sensitive probes.
+The accompanying Axios oracle observes actual transforms and dispatch data.
