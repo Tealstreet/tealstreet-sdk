@@ -146,7 +146,7 @@ fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
             1,
             "source async prefix emits one worker request"
         );
-        let request = requests.borrow()[0].clone();
+        let request = to_json(&requests.borrow()[0]).unwrap();
         assert_eq!(request["method"], json!("removeOrders"));
         assert_eq!(request["args"], json!([[{"id":"wire-7"}],17.0]));
         let result = if success {
@@ -158,7 +158,9 @@ fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
             .base
             .emit(
                 "callMethod:done",
-                json!({"requestId":request["requestId"],"success":success,"result":result}),
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"requestId":request["requestId"],"success":success,"result":result}),
+                ),
             )
             .unwrap();
         let reply = settle(&assembled.runtime, promise);
@@ -3390,7 +3392,7 @@ fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
             row["error"],
             "cleanup throw identity"
         );
-        base.emit("update", json!({})).unwrap();
+        base.emit("update", Js::object(vec![])).unwrap();
         assert_eq!(
             observed.get(),
             1,
@@ -3905,3 +3907,6 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
         assert_eq!(value(2).to_number().unwrap().to_bits(), nan.to_bits());
     }
 }
+
+#[path = "support/emitter_retained.rs"]
+mod emitter_retained;

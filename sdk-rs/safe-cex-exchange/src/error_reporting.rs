@@ -1,5 +1,8 @@
 //! Error telemetry behavior: packages/safe-cex/src/exchanges/base.ts.
-use crate::runtime::ExchangeError;
+use crate::{
+    js_runtime::value::{Js, Thrown, from_json},
+    runtime::ExchangeError,
+};
 use serde_json::{Map, Value, json};
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -152,160 +155,142 @@ pub enum ExchangeErrorInput {
 pub(crate) fn truthy(value: &Value) -> bool {
     safe_cex_num::js_truthy(Some(value))
 }
-pub(crate) fn assign(target: &mut Map<String, Value>, source: &Value) {
-    if let Some(source) = source.as_object() {
-        for (key, value) in source {
-            target.insert(key.clone(), value.clone());
-        }
-    } else if let Some(source) = source.as_array() {
-        for (key, value) in source.iter().enumerate() {
-            target.insert(key.to_string(), value.clone());
-        }
+pub(crate) fn assign(target: &Js, source: &Js) -> Result<(), ExchangeError> {
+    for (key, value) in source.own_entries()? {
+        target.define_key(&key, value)?;
     }
+    Ok(())
 }
 pub(crate) fn insert_option(map: &mut Map<String, Value>, key: &str, value: Option<&Value>) {
     if let Some(value) = value {
         map.insert(key.into(), value.clone());
     }
 }
-pub(crate) fn formatted_context(error: &ExchangeError) -> Map<String, Value> {
-    let mut result = Map::new();
-    let context = error.context.as_ref();
-    let property = |key: &str| context.and_then(|c| c.get(key));
-    result.insert(
-        "errorType".into(),
-        json!(if property("isNetworkError").is_some_and(truthy) {
-            "network"
+fn sentry_context(error: &Js) -> Result<Js, Thrown> {
+    let context = error.get("context")?;
+    let property = |key: &str| {
+        if context.is_nullish() {
+            Ok(Js::Undefined)
         } else {
-            "api"
-        }),
-    );
-    insert_option(
-        &mut result,
-        "errorCode",
-        property("errorCode").filter(|v| truthy(v)),
-    );
-    if !result.contains_key("errorCode")
-        && let Some(code) = &error.code
-    {
-        result.insert("errorCode".into(), json!(code));
-    }
-    for key in [
-        "statusCode",
-        "isTimeout",
-        "isCORS",
-        "url",
-        "method",
-        "statusText",
-    ] {
-        insert_option(&mut result, key, property(key));
-    }
-    if let Some(message) = &error.enhanced_message {
-        result.insert("enhancedMessage".into(), json!(message));
-    }
-    insert_option(
-        &mut result,
-        "originalMessage",
-        error.original_error.as_ref().and_then(|e| e.get("message")),
-    );
-    insert_option(&mut result, "timestamp", property("timestamp"));
-    if let Some(config) = &error.config {
-        let mut projection = Map::new();
-        for key in ["baseURL", "timeout"] {
-            insert_option(&mut projection, key, config.get(key));
+            context.get(key)
         }
-        if let Some(headers) = config.get("headers").and_then(Value::as_object) {
-            projection.insert("headers".into(), json!(headers.keys().collect::<Vec<_>>()));
-        }
-        result.insert("config".into(), Value::Object(projection));
-    }
-    result
-}
-
-/// The raw JSON counterpart of the source formatErrorForSentry body. Preserve
-/// native JSON field types, including a numeric enhancedMessage, rather than
-/// projecting through the string fields of ExchangeError.
-pub(crate) fn raw_formatted_context(error: &Value) -> Map<String, Value> {
-    let mut result = Map::new();
-    let context = error.get("context");
-    let property = |key: &str| context.and_then(|value| value.get(key));
-    result.insert(
-        "errorType".into(),
-        json!(if property("isNetworkError").is_some_and(truthy) {
-            "network"
-        } else {
-            "api"
-        }),
-    );
-    insert_option(
-        &mut result,
-        "errorCode",
-        property("errorCode")
-            .filter(|v| truthy(v))
-            .or_else(|| error.get("code")),
-    );
-    for key in [
-        "statusCode",
-        "isTimeout",
-        "isCORS",
-        "url",
-        "method",
-        "statusText",
-    ] {
-        insert_option(&mut result, key, property(key));
-    }
-    insert_option(&mut result, "enhancedMessage", error.get("enhancedMessage"));
-    insert_option(
-        &mut result,
-        "originalMessage",
-        error
-            .get("originalError")
-            .and_then(|value| value.get("message")),
-    );
-    insert_option(&mut result, "timestamp", property("timestamp"));
-    if let Some(config) = error.get("config").filter(|value| truthy(value)) {
-        let mut projection = Map::new();
-        for key in ["baseURL", "timeout"] {
-            insert_option(&mut projection, key, config.get(key));
-        }
-        if let Some(headers) = config.get("headers").filter(|value| truthy(value)) {
-            let keys: Vec<String> = match headers {
-                Value::Object(object) => {
-                    safe_cex_num::js_own_keys(object.keys().map(String::as_str))
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect()
-                }
-                Value::Array(values) => (0..values.len()).map(|index| index.to_string()).collect(),
-                Value::String(text) => text
-                    .encode_utf16()
-                    .enumerate()
-                    .map(|(index, _)| index.to_string())
+    };
+    let original = error.get("originalError")?;
+    let original_message = if original.is_nullish() {
+        Js::Undefined
+    } else {
+        original.get("message")?
+    };
+    let context_code = property("errorCode")?;
+    let code = if context_code.truthy() {
+        context_code
+    } else {
+        error.get("code")?
+    };
+    let config = error.get("config")?;
+    let config = if config.truthy() {
+        let headers = config.get("headers")?;
+        let headers = if headers.truthy() {
+            Js::array(
+                headers
+                    .own_keys()
+                    .iter()
+                    .map(|key| Js::utf16(key))
                     .collect(),
-                _ => vec![],
-            };
-            projection.insert("headers".into(), json!(keys));
-        }
-        result.insert("config".into(), Value::Object(projection));
-    }
-    result
+            )
+        } else {
+            Js::Undefined
+        };
+        Js::object(vec![
+            ("baseURL", config.get("baseURL")?),
+            ("timeout", config.get("timeout")?),
+            ("headers", headers),
+        ])
+    } else {
+        Js::Undefined
+    };
+    Ok(Js::object(vec![
+        (
+            "errorType",
+            Js::str(if property("isNetworkError")?.truthy() {
+                "network"
+            } else {
+                "api"
+            }),
+        ),
+        ("errorCode", code),
+        ("statusCode", property("statusCode")?),
+        ("isTimeout", property("isTimeout")?),
+        ("isCORS", property("isCORS")?),
+        ("url", property("url")?),
+        ("method", property("method")?),
+        ("statusText", property("statusText")?),
+        ("enhancedMessage", error.get("enhancedMessage")?),
+        ("originalMessage", original_message),
+        ("timestamp", property("timestamp")?),
+        ("config", config),
+    ]))
+}
+pub(crate) fn formatted_context(error: &ExchangeError) -> Js {
+    let source = Js::object(vec![
+        (
+            "context",
+            error
+                .context
+                .as_ref()
+                .map(from_json)
+                .unwrap_or(Js::Undefined),
+        ),
+        ("code", error.code.clone().unwrap_or(Js::Undefined)),
+        (
+            "config",
+            error
+                .config
+                .as_ref()
+                .map(from_json)
+                .unwrap_or(Js::Undefined),
+        ),
+        (
+            "originalError",
+            error
+                .original_error
+                .as_ref()
+                .map(from_json)
+                .unwrap_or(Js::Undefined),
+        ),
+        (
+            "enhancedMessage",
+            error
+                .enhanced_message
+                .as_deref()
+                .map(Js::str)
+                .unwrap_or(Js::Undefined),
+        ),
+    ]);
+    sentry_context(&source).expect("typed error metadata has ordinary data properties")
+}
+pub(crate) fn raw_formatted_context(error: &Value) -> Result<Js, ExchangeError> {
+    sentry_context(&from_json(error)).map_err(Into::into)
 }
 
-pub fn format_error_for_sentry(error: &ExchangeError) -> Value {
+pub fn format_error_for_sentry(error: &ExchangeError) -> Js {
     let flattened = formatted_context(error);
-    let mut tags = Map::new();
-    let mut extra = Map::new();
-    for (key, value) in flattened {
-        if matches!(
-            key.as_str(),
+    let tags = Js::object(vec![]);
+    let extra = Js::object(vec![]);
+    for (key, value) in flattened.own_entries().expect("fresh formatter fields") {
+        let target = if matches!(
+            String::from_utf16_lossy(&key).as_str(),
             "errorType" | "errorCode" | "statusCode" | "isTimeout" | "isCORS"
         ) {
-            tags.insert(key, value);
+            &tags
         } else {
-            extra.insert(key, value);
-        }
+            &extra
+        };
+        target
+            .define_key(&key, value)
+            .expect("fresh formatter property");
     }
-    json!({"tags":tags,"extra":extra})
+    Js::object(vec![("tags", tags), ("extra", extra)])
 }
 
 /// Host identity facts retain Error and XMLHttpRequest instanceof checks across runtimes.
@@ -449,7 +434,7 @@ pub fn enhance_axios_error(
     error.is_axios_error = true;
     error.request = get("request").cloned();
     error.config = get("config").cloned();
-    error.code = get("code").cloned();
+    error.code = get("code").map(from_json);
     error.response = get("response").cloned();
     Ok(error)
 }

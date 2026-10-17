@@ -115,15 +115,11 @@ impl Thrown {
     }
     pub fn to_exchange_error(&self) -> ExchangeError {
         let mut error = self.error_fields();
-        if self.native.is_some() || !self.value.is_object() {
+        if !self.value.is_object() {
             return error;
         }
         let code = self.value.get("code").and_then(|code| {
-            if code.is_undefined() {
-                Ok(None)
-            } else {
-                to_json(&code).map(Some)
-            }
+            Ok((self.value.has_own("code") || !code.is_undefined()).then_some(code))
         });
         match code {
             Ok(code) => error.code = code,
@@ -142,6 +138,11 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(code) = &error.code {
+            value
+                .define("code", code.clone())
+                .expect("fresh error code property");
+        }
         Self {
             value,
             native: Some(Rc::new(error)),
