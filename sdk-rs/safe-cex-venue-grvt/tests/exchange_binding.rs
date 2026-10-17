@@ -537,3 +537,128 @@ fn message(value: String) -> safe_cex_exchange::websocket::WsEvent {
         value,
     ))
 }
+
+#[test]
+fn placement_reports_negative_half_builder_caps_with_source_rounding() {
+    for (fee, cap, bits) in [
+        ("-0.00015", "-1", (-1.0f64).to_bits()),
+        ("-0.00005", "0", (-0.0f64).to_bits()),
+        ("-0.00025", "-2", (-2.0f64).to_bits()),
+    ] {
+        let h = setup();
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/full/v1/get_authorized_builders");
+        h.http.route("POST", "/full/v1/get_authorized_builders", 200.0, json!({"results":[{"builder_account_id":"0xee8f3559f298fffa79b8253437969d15b5dccff3","max_futures_fee_rate":fee}]}));
+        loaded(&h);
+        let error = h
+            .drive(Box::pin(
+                h.venue().base().place_order(h.venue(), order_opts("71")),
+            ))
+            .unwrap_err();
+        assert_eq!(
+            error.message,
+            format!(
+                "GRVT builder authorization cap ({cap}) is below required (300). Please re-authorize."
+            ),
+            "real placement exposes source-rounded cap for {fee}"
+        );
+        assert_eq!(h.http.calls("/full/v1/get_authorized_builders").len(), 1);
+        assert!(h.http.calls("/lite/v1/create_order").is_empty());
+        assert_eq!(
+            safe_cex_venue_grvt::builder::grvt_builder_fee_rate_to_raw(fee)
+                .unwrap()
+                .to_bits(),
+            bits,
+            "accepted-contract bits retain negative zero"
+        );
+    }
+}
+
+fn private_started_for_frames() -> Harness {
+    let h = setup();
+    h.runtime.private_proxy.set(true);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    h
+}
+fn private_frame(h: &Harness, frame: Value) {
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/private"))
+        .unwrap()
+        .1
+        .clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(message(frame.to_string()));
+    h.runtime.pump();
+}
+#[test]
+fn real_private_order_frame_populates_store() {
+    let h = private_started_for_frames();
+    let mut order = source_order();
+    order["m"]["co"] = json!("72");
+    private_frame(&h, json!({"s":"v1.order","f":order}));
+    let orders = h.store.orders();
+    let actual = orders.iter().find(|o| o.id == "72").unwrap();
+    assert_eq!(actual.symbol, SYMBOL);
+    assert_eq!(actual.amount, 0.125);
+    assert_eq!(actual.filled, 0.025);
+    assert_eq!(actual.remaining, 0.1);
+    drop(orders);
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn real_private_fill_frame_emits_native_fill() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = private_started_for_frames();
+    let fills = Rc::new(RefCell::new(vec![]));
+    let seen = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            seen.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    private_frame(
+        &h,
+        json!({"s":"v1.fill","f":{"i":"BTC_USDT_Perp","ib":true,"s":"0.125","p":"50001","ti":"native-fill-42","co":"71","oi":"0xabcdef"}}),
+    );
+    assert_eq!(fills.borrow().len(), 1);
+    assert_eq!(fills.borrow()[0]["id"], "native-fill-42");
+    assert_eq!(fills.borrow()[0]["orderId"], "71");
+    assert_eq!(fills.borrow()[0]["symbol"], SYMBOL);
+    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(0.125));
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn real_private_position_frame_updates_positions_and_balance_upnl() {
+    let h = private_started_for_frames();
+    let row = json!({"i":"BTC_USDT_Perp","s":"0.25","ep":"50000","n":"12500","up":"12.5","l":"7","el":"40000"});
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/lite/v1/positions");
+    h.http.route(
+        "POST",
+        "/lite/v1/positions",
+        200.0,
+        json!({"r":[row.clone()]}),
+    );
+    private_frame(&h, json!({"s":"v1.position","f":row}));
+    let positions = h.store.positions();
+    let actual = positions.iter().find(|p| p.contracts == 0.25).unwrap();
+    assert_eq!(actual.symbol, SYMBOL);
+    assert_eq!(actual.entry_price, 50000.0);
+    assert_eq!(actual.unrealized_pnl, 12.5);
+    assert_eq!(h.store.balance().upnl, 12.5);
+    drop(positions);
+    h.venue().dispose().unwrap();
+}

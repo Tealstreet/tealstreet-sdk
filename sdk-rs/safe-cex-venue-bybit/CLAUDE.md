@@ -650,3 +650,12 @@ dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
 `candle_read_binding` supplies four compiled master-fail controls and six HTTP
 witnesses. `private_frame_binding` sends order/fill/position/balance-related frames
 through each family's real private protocol and Store bridge.
+
+The unused `inverse_socket_bodies` adapter and its fake realm/oracle are removed.
+Inverse socket manifest rows point to the live `ws_private` and `ws_public`
+bodies. The real inverse socket witness replays a cumulative fill frame and then
+advances it, checking suppression, USD delta and inverse qty/value price.
+`scripts/inverse-private-tracker-control.py` resets the production tracker per
+frame, requires the duplicate-fill assertion to fail after compilation, restores
+the exact source bytes and requires the same witness to pass. Historical socket
+body evidence describes the removed adapter, not production coverage.

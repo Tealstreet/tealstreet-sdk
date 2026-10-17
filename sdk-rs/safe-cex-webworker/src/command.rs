@@ -35,6 +35,16 @@ impl CommandHandler {
             return Ok(());
         }
         let data = payload.data.unwrap_or(Value::Null);
+        // Source typeof treats arrays as objects too; primitives never reach the executor.
+        if !data.is_object() && !data.is_array() {
+            command_failure(
+                self.exchange.as_ref(),
+                None,
+                false,
+                "Invalid command payload.".into(),
+            )?;
+            return Ok(());
+        }
         let req_id = data.get("reqId").and_then(Value::as_str).map(str::to_owned);
         let Some(executor) = get_command_executor() else {
             command_failure(

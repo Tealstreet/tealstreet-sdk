@@ -184,7 +184,7 @@ fn report_proxy_failure(owner: &BaseExchange, response: &Js) -> Result<(), Throw
     } else {
         stringify_response_body(&body)
     };
-    let name = serde_json::to_value(owner.name()).expect("exchange name");
+    let name = serde_json::to_value(&owner.name).expect("exchange name");
     let name = name.as_str().expect("exchange name string");
     let message = format!(
         "[{name}] {source} ({}): {text}",

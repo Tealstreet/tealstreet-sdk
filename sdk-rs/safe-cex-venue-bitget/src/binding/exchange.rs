@@ -285,6 +285,10 @@ impl Exchange for BitgetExchange {
         let a = args!(js(&options));
         self.invoke("updateOrder", a)
     }
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        let a = args!(js(&symbol));
+        self.invoke_unit("cancelSymbolOrders", a)
+    }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
         let a = args!(js(&orders));
         self.invoke_unit("cancelOrders", a)
