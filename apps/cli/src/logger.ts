@@ -6,8 +6,9 @@ import { stableHash } from '@tealstreet/utils/src/stableHash';
 
 import { classifyLog, isOperational } from './log-classify';
 import { setStatus } from './status-line';
+import { BRAND } from './brand';
 
-const LOG_DIR = path.join(os.homedir(), '.tealstreet');
+const LOG_DIR = path.join(os.homedir(), BRAND.configDirName);
 const LOG_FILE = path.join(LOG_DIR, 'cli.log');
 
 // Ensure log directory exists

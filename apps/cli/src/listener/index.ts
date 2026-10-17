@@ -14,12 +14,13 @@ import { gcTombstonedCrossTradeConfigs, getCrossTradeFilePath } from '../cross-t
 import { TASKS_FILE } from '../tasks-store';
 import { getHooksFilePath } from './hooks-store';
 import { logger } from '../logger';
+import { BRAND } from '../brand';
 
 // `fs.watch` throws permanently if the target file doesn't exist on bind.
 // Seed each broadcaster's target with a valid empty shape on startup so
 // the watcher attaches and subsequent edits (CLI or external) fire events.
 function ensureStateFilesExist(): void {
-  const dir = join(homedir(), '.tealstreet');
+  const dir = join(homedir(), BRAND.configDirName);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
   const seeds: Array<[string, string]> = [
     [getConfigFilePath(), JSON.stringify({ accounts: [] }, null, 2)],
@@ -113,7 +114,7 @@ export async function startListener({
     clientHintTimer = setTimeout(() => {
       clientHintTimer = null;
       adapter.printInfo(
-        "listener: still waiting for a web client. If you have Tealstreet open in a browser tab and the connect prompt hasn't appeared, try refreshing that tab.",
+        "listener: still waiting for a web client. If you have ${BRAND.displayName} open in a browser tab and the connect prompt hasn't appeared, try refreshing that tab.",
       );
     }, CLIENT_HINT_DELAY_MS);
   } catch (err) {

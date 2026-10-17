@@ -4,8 +4,9 @@ import { join } from 'path';
 import { MemoryPreprocessStore } from '@tealstreet/cli-core';
 import { enqueueAliasChange, type AliasChange, type AliasSyncState, type PreprocessStore } from '@tealstreet/cli-core';
 import { logger } from './logger';
+import { BRAND } from './brand';
 
-const CONFIG_DIR = process.env.TEALSTREET_CONFIG_DIR || join(homedir(), '.tealstreet');
+const CONFIG_DIR = process.env.TEALSTREET_CONFIG_DIR || join(homedir(), BRAND.configDirName);
 const VARS_FILE = join(CONFIG_DIR, 'vars.json');
 const ALIASES_FILE = join(CONFIG_DIR, 'aliases.json');
 const WHITELIST_FILE = join(CONFIG_DIR, 'whitelist.json');

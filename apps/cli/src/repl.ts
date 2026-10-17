@@ -134,6 +134,7 @@ import { runScriptFromHost, runScriptFromHostWithAdapter } from './script-runner
 import { awaitScriptsLoaded, loadScripts, lookupScript, SCRIPTS_DIR } from './scripts-store';
 import { getCliTranspile } from './bun-transpile';
 import { parseScriptInvocation } from './script-dispatcher';
+import { BRAND } from './brand';
 
 const adapter = createStandalonePlatformAdapter();
 const exchangeManager = new ExchangeManager(adapter);
@@ -254,7 +255,7 @@ function formatWatchMessages(): string {
 }
 
 // Command history persistence
-const HISTORY_DIR = path.join(os.homedir(), '.tealstreet');
+const HISTORY_DIR = path.join(os.homedir(), BRAND.configDirName);
 const HISTORY_FILE = path.join(HISTORY_DIR, 'cli_history');
 const MAX_HISTORY_SIZE = 1000;
 

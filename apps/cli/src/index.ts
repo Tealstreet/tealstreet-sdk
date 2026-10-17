@@ -97,6 +97,7 @@ process.on('unhandledRejection', (reason: unknown) => {
 });
 import { checkForUpdatesBackground, performUpdate, forceCheckForUpdates, getCurrentVersion } from './updater';
 import { registerCrossTradeCommand } from './commands/cross-trade';
+import { BRAND } from './brand';
 
 // Dynamic import for repl to avoid circular dependency issues with safe-cex
 const getRepl = async () => import('./repl');
@@ -104,12 +105,12 @@ const getRepl = async () => import('./repl');
 // Check for updates in background (non-blocking). Its banner would corrupt --json output.
 if (!JSON_MODE) checkForUpdatesBackground();
 
-const CLI_DOCS_URL = 'https://docs.tealstreet.io/cli';
+const CLI_DOCS_URL = BRAND.docsUrl;
 
 const program = new Command();
 
 program
-  .name('tealstreet')
+  .name(BRAND.binName)
   .description('Trade crypto from your terminal')
   .version(getCurrentVersion(), '-v, --version', 'Display version number')
   .option('--update', 'Update CLI to the latest version')
@@ -124,7 +125,7 @@ program
 // `tealstreet login` exits with "unknown command 'login'".
 program
   .command('login')
-  .description('Authenticate with Tealstreet (required for proxy/tunnel routing)')
+  .description(`Authenticate with ${BRAND.displayName} (required for proxy/tunnel routing)`)
   .action(async () => {
     const ok = await login();
     process.exit(ok ? 0 : 1);
@@ -132,7 +133,7 @@ program
 
 program
   .command('logout')
-  .description('Clear the stored Tealstreet auth token')
+  .description(`Clear the stored ${BRAND.displayName} auth token`)
   .action(() => logout());
 
 program
@@ -766,7 +767,7 @@ recordCmd
 // ============ Update Commands ============
 program
   .command('update')
-  .description('Update Tealstreet CLI to the latest version')
+  .description(`Update ${BRAND.displayName} CLI to the latest version`)
   .option('-c, --check', 'Only check for updates, do not install')
   .action(async (options) => {
     if (options.check) {
@@ -789,7 +790,7 @@ program
     const { join } = await import('path');
     const { homedir } = await import('os');
 
-    const logFile = join(homedir(), '.tealstreet', 'cli.log');
+    const logFile = join(homedir(), BRAND.configDirName, 'cli.log');
 
     if (options.clear) {
       if (existsSync(logFile)) {
@@ -901,7 +902,7 @@ program
     for (const command of shell) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
     console.log(chalk.cyan("\nTrading commands (at the prompt, or tealstreet exec '<command>'):\n"));
     for (const command of repl) console.log(`  ${chalk.bold(command.name.padEnd(14))} ${command.description}`);
-    console.log(chalk.gray('\nDetails: https://docs.tealstreet.io/cli/reference/commands'));
+    console.log(chalk.gray(`\nDetails: ${BRAND.docsUrl}/reference/commands`));
   });
 
 // ============ Default Action ============
