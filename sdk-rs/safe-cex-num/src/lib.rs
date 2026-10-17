@@ -681,7 +681,9 @@ pub use own_keys::{
 };
 
 mod json_stringify;
-pub use json_stringify::{JsJsonValue, js_json_stringify};
+pub use json_stringify::{
+    JsJsonValue, js_json_stringify, js_retained_json_stringify, js_retained_truthy,
+};
 
 mod v8_math;
 pub use v8_math::math_log10;
