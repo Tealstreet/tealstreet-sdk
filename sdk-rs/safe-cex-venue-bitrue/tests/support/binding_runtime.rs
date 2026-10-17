@@ -23,6 +23,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub exceptions: RefCell<Vec<(ExchangeError, Value)>>,
     pub console: RefCell<Vec<String>>,
     pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
@@ -99,8 +100,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+    fn report_exception(&self, error: &ExchangeError, context: &Value) {
         self.reports.borrow_mut().push(error.message.clone());
+        self.exceptions
+            .borrow_mut()
+            .push((error.clone(), context.clone()));
     }
     fn report_raw_exception(&self, error: &Value, _: &Value) {
         self.reports.borrow_mut().push(error.to_string());
