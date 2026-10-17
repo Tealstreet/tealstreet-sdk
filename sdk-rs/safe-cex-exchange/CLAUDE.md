@@ -570,6 +570,13 @@ without sleeping or sending again. No caller supplies a remaining-timeout value.
 The installed Axios truthy guards retain timeout zero as unlimited and skip the
 first subtraction for a clock starting exactly at epoch zero.
 
+Transport JavaScript coercion failures retain their name and unprefixed message
+when converted into ExchangeError. The original RestFailure remains the opaque
+origin. Direct JsCoercionError conversion retains its typed native cause too;
+Binance and BingX signature predicates use these conversions instead of rebuilding
+an Error from text. The native order/account witnesses cover resolved envelopes
+and HTTP rejection, and assert that coercion failures never trigger a resend.
+
 `RestFailure.context` is boxed to keep the response-bearing error small; the
 metadata is unchanged. `RestFailure.code` preserves general host/status error codes as well as the code
 copied from opaque NetworkFailure. The library network-or-idempotent helper is
@@ -1259,6 +1266,14 @@ combinator settlement; pending members, object identity, negative zero and NaN
 payloads survive. `js_runtime`'s two promise_combinators tests compare eighteen
 Node outcomes and exercise native pending members; both compile/fail on the old
 array-only globals dispatch. Promise scheduling remains in the shared promise core.
+
+Map/Set `forEach` uses stable insertion positions, like the live iterators, and
+releases its collection borrow before each callback. Deletions, clear/reinsert,
+updates and new entries are observed during traversal. Callbacks receive the
+source thisArg and native value/key/owner references; invalid callbacks reject
+even on empty collections. `js_collection_foreach` checks fourteen Node traces,
+nested traversal, abrupt completion, native signed-zero/reference identity and
+thisArg. Both named regressions compiled and failed on the snapshot implementation.
 
 Both JS `virtualClock` getters delegate to the shared synced singleton.
 `getCurrentTime` wraps `VirtualClock::get_current_time` in the existing dayjs
