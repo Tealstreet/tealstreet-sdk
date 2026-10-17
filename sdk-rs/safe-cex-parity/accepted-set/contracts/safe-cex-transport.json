@@ -9539,7 +9539,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "isBinance",
@@ -9625,7 +9625,7 @@
       "error": null
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "config",
