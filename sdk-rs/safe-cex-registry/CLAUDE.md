@@ -214,11 +214,20 @@ cancellation; the Omni seed remains necessary for source L2 contract signing.
 Bitget, Bitget USDC and Bitget Inverse native constructors supply the common
 gateway factory through their existing `external_public_data` dependency. The
 loopback `native_host_bitget_external_data` test covers all three names: gateway
-market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
-with no venue REST or private/public venue sockets in public-only mode.
+market/ticker startup and disposal with no venue REST or private/public venue
+sockets in public-only mode. Bitget overrides the base gateway-aware stream
+methods with unconditional venue-socket delegation. Since gateway startup leaves
+that socket disconnected, book/candle listeners wait for its connection and never
+subscribe to gateway streams. The test compares this behavior with executable
+TypeScript exchange/socket bodies, sends gateway stream frames followed by an
+ordered ticker processing barrier, and checks no callbacks or gateway stream
+unsubscriptions before and after cleanup.
 
 
-Paradex's native constructor supplies shared runtime HTTP and gateway inputs.
+Paradex's native constructor supplies shared runtime HTTP and gateway inputs,
+and explicitly selects a UTC date realm through its required
+`local_wall_time_to_utc` dependency. Other embeddings provide their host timezone
+conversion for offset-less local order timestamps.
 Its loopback test observes distinct market precision axes and source read purity.
 Hosted remoteSigner remains an explicit refusal until SDK signing is bound.
 
@@ -254,6 +263,8 @@ independently authored native types. Keep the optional constructor, dynamic
 module/error owners and JSON error owner intact. These finite identity probes
 and ordinary Serde/conversion checks do not establish future execution, every
 lifetime/type argument, or the behavior of a module/browser/transport host.
+
+
 
 
 
