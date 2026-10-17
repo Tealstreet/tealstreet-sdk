@@ -1,4 +1,5 @@
 //! Pure exchange decisions, kept independent from lifecycle and transport state.
+use safe_cex_exchange::js_runtime::value::{Js, from_json};
 use safe_cex_exchange::runtime::LogSeverity;
 use safe_cex_num::{JsCoercionError, js_number, js_string, js_truthy, parse_float};
 use safe_cex_transport::{RestAdapter, RestRequest};
@@ -216,6 +217,7 @@ pub fn parse_leverage_brackets_response(
     response: Result<&Value, &str>,
 ) -> (Vec<(Option<Value>, Option<Value>)>, String, LogSeverity) {
     let mut entries: Vec<(Option<Value>, Option<Value>)> = Vec::new();
+    let mut keys: Vec<Js> = Vec::new();
     let parse_result = (|| {
         let data = match response {
             Ok(data) => data,
@@ -240,9 +242,16 @@ pub fn parse_leverage_brackets_response(
             }
             let key = item.get("symbol").cloned();
             let value = first.get("initialLeverage").cloned();
-            if let Some((_, old_value)) = entries.iter_mut().find(|(old_key, _)| *old_key == key) {
-                *old_value = value;
+            // Each object/array in the owned JSON tree has its own source identity.
+            // Keep the original JSON metadata alongside the shared Map comparison.
+            let map_key = key.as_ref().map(from_json).unwrap_or(Js::Undefined);
+            if let Some(index) = keys
+                .iter()
+                .position(|old_key| old_key.same_value_zero(&map_key))
+            {
+                entries[index].1 = value;
             } else {
+                keys.push(map_key);
                 entries.push((key, value));
             }
         }
