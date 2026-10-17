@@ -38,9 +38,9 @@ note = "The live-source oracle pins the ping frame; the Rust path suppresses dis
 ts = "MexcPrivateWebsocket.onMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-mexc/src/runtime_assembly.rs::private_on_message"
+rs = [ "safe-cex-venue-mexc/src/runtime_assembly.rs::private_on_message", "safe-cex-venue-mexc/src/sockets.rs::PrivateProtocol::on_message" ]
 status = "ported"
-note = "Argument destructuring before disposal, tracking/large-integer parse/diagnostics, pong/login/request-error guards, stats excluding control channels and exact private channel dispatch with original parsed frame identity. Source body over crate-local AssemblyHost bound native intrinsics/imports and existing mapped member owners; this does not claim a full concrete adapter integration proof. Actual-source oracle asserts decoded native values and ordered effects; enumerations are floors. Adapted as safe-cex-venue-mexc/src/runtime_assembly.rs::private_on_message."
+note = "Argument destructuring before disposal, tracking/large-integer parse/diagnostics, pong/login/request-error guards, stats excluding control channels and exact private channel dispatch with original parsed frame identity. Source body over crate-local AssemblyHost bound native intrinsics/imports and existing mapped member owners; this does not claim a full concrete adapter integration proof. Actual-source oracle asserts decoded native values and ordered effects; enumerations are floors. Adapted as safe-cex-venue-mexc/src/runtime_assembly.rs::private_on_message. Concrete receiver safe-cex-venue-mexc/src/sockets.rs::PrivateProtocol::on_message runs on the constructed native exchange. diagnostic_json reaches its private BaseWebSocket and compares ten numeric/key-order login-failure diagnostic profiles against the maintained onMessage and emitReceiveDiagnostics bodies; this bounded diagnostic witness does not claim every private topic or arbitrary input coverage."
 
 [[symbol]]
 ts = "MexcPrivateWebsocket.dispose"
