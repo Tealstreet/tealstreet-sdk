@@ -23,6 +23,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub console: RefCell<Vec<String>>,
     pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
@@ -86,7 +87,9 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console(&self, _: &str, message: &str) {
+        self.console.borrow_mut().push(message.into());
+    }
     fn unique_id(&self) -> String {
         "00000000-0000-4000-8000-000000000000".into()
     }
