@@ -804,7 +804,12 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     };
     def(
         "console",
-        Js::object(vec![("error", console("error")), ("warn", console("warn"))]),
+        Js::object(vec![
+            ("error", console("error")),
+            ("warn", console("warn")),
+            ("info", console("info")),
+            ("debug", console("debug")),
+        ]),
     );
     def(
         "virtualClock",

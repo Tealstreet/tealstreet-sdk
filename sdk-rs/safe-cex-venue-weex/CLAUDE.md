@@ -45,7 +45,12 @@ request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
 disables each of the sixteen required bindings, requires its compiled native
 witness to fail and restores the complete target. Standalone algorithm/source
 oracles and their existing mutation runners remain independent evidence.
-Error reporting and async ownership choices remain priced at
+Gap re-snapshot failures and routed-callback throws are silently discarded,
+matching source. Initial book subscription failures retain their source warning.
+Constructed HTTP/socket coverage checks no gap warning, no failed replacement
+delivery and a later contiguous update against the retained book.
+
+Remaining reporting and async ownership choices remain priced at
 [weex-async-observation-choice](../parity/MANIFEST-SPEC.md#weex-async-observation-choice);
 normalizer record boundaries keep their existing declarations.
 

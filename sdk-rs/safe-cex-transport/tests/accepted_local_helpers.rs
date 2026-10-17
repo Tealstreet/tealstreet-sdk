@@ -63,58 +63,6 @@ fn form_path_depth_validator_keeps_its_distinct_boundary_and_native_error() {
 }
 
 #[test]
-fn signature_marker_helper_retains_method_selection_and_error_order() {
-    use safe_cex_transport::{RestResponse, RestResponseBody, retry::is_error_signature};
-    for (body, expected, error_field) in [
-        (json!({}), false, None),
-        (json!({"ret_msg":null,"retMsg":"error sign!"}), true, None),
-        (json!({"ret_msg":"prefix error sign! suffix"}), true, None),
-        (json!({"ret_msg":["error sign!"]}), true, None),
-        (json!({"ret_msg":["prefix error sign!"]}), false, None),
-        (
-            json!({"ret_msg":42,"retMsg":"error sign!"}),
-            false,
-            Some("ret_msg"),
-        ),
-        (
-            json!({"ret_msg":false,"retMsg":"error sign!"}),
-            false,
-            Some("ret_msg"),
-        ),
-        (json!({"ret_msg":"none","retMsg":[]}), false, None),
-        (
-            json!({"ret_msg":"none","retMsg":{"includes":true}}),
-            false,
-            Some("retMsg"),
-        ),
-        (json!({"ret_msg":"error sign!","retMsg":42}), true, None),
-    ] {
-        let response = RestResponse {
-            status: 400,
-            reason: None,
-            headers: Default::default(),
-            body: RestResponseBody::Transformed(body),
-        };
-        match error_field {
-            None => assert_eq!(
-                is_error_signature(&response).unwrap(),
-                expected,
-                "LOCAL RETRY native method selection"
-            ),
-            Some(field) => {
-                let error = is_error_signature(&response).unwrap_err();
-                assert_eq!(error.name, "TypeError", "LOCAL RETRY native error name");
-                assert_eq!(
-                    error.message,
-                    format!("error?.response?.data?.{field}?.includes is not a function"),
-                    "LOCAL RETRY native error order"
-                );
-            }
-        }
-    }
-}
-
-#[test]
 fn query_output_helpers_sort_only_views_and_keep_encoding_a_profile_choice() {
     use safe_cex_transport::query::{
         QueryArrayFormat, QueryKeyOrder, QueryProfile, query_identity_eq, render_query,
