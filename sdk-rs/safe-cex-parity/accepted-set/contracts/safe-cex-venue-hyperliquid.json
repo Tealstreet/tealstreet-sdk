@@ -6071,5 +6071,559 @@
     },
     "evidence": "Reviewed the actual perpetual exchange ExchangeError<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Error associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Error binding is the actual realm::value::Value enum. The named native exchange_error_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
     "reason": "For the reviewed actual Realm instantiation, this perpetual exchange error alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+  },
+  "safe_cex_venue_hyperliquid::spot_account_reads::AccountFuture": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Reviewed the actual owned spot account task future declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the actual production realm::value::Value for both success and error; native trait bounds authenticate the production Realm host Value/Error bindings. tests/support/accepted_future_aliases.rs::account_future_fixed_value_preserves_poll_result_and_drop proves invariant mutable-reference equality and TypeId against the independently authored std container type. It executes Pending then wake then Ready for distinct native fulfilled/rejected values, negative-zero/infinity bits, lone UTF-16 units, object/error identity, two polls, one wake, one drop and unpolled cancellation ownership. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
+    "reason": "For this one fixed production Value/Value instantiation, the owned spot account task future is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
+  },
+  "safe_cex_venue_hyperliquid::startup_timeout::TimeoutCallback": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Reviewed the actual reference-counted startup timeout callback declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the actual production realm::value::Value for both success and error; native trait bounds authenticate the production Realm host Value/Error bindings. tests/support/accepted_future_aliases.rs::timeout_callback_fixed_value_preserves_arguments_result_and_identity proves invariant mutable-reference equality and TypeId against the independently authored std container type. It preserves Rc allocation identity, clone sharing, ordered distinct native arguments, negative-zero/infinity bits, lone UTF-16 units, returned object and thrown error identities. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
+    "reason": "For this one fixed production Value/Value instantiation, the reference-counted startup timeout callback is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
+  },
+  "safe_cex_venue_hyperliquid::income::IncomeFuture": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Reviewed the actual borrow-capable income task future at the reviewed static lifetime declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the actual production realm::value::Value for both success and error; native trait bounds authenticate the production Realm host Value/Error bindings. tests/support/accepted_future_aliases.rs::income_future_static_fixed_value_preserves_poll_result_and_drop proves invariant mutable-reference equality and TypeId against the independently authored std container type. It executes Pending then wake then Ready for distinct native fulfilled/rejected values, negative-zero/infinity bits, lone UTF-16 units, object/error identity, two polls, one wake, one drop and unpolled cancellation ownership. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
+    "reason": "For this one fixed production Value/Value instantiation, the borrow-capable income task future at the reviewed static lifetime is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
   }
 }
