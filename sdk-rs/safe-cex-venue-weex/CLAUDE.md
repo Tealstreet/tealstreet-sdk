@@ -13,6 +13,11 @@ gateway factory and UTC date profile, with its existing caller-owned limiter.
 The source's inherited scheduleCancel rejection remains `Not implemented`.
 Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
 native body; batch capability registration invokes the source batch algorithm.
+The trading runtime's `updateStoredOrder` capability binds the real Store's
+`updateOrder` with its Store receiver. Accepted single/batch PostOnly placements
+and TP/SL amendments then apply the source patch and return IDs. Constructed
+regressions check existing and absent rows, batch-result reordering and both
+protective order types; an absent row remains absent.
 
 The explicit Weex bigint response parser consumes original wire tokens on both
 success and HTTP failure before venue status/error handling. Private WS uses the
@@ -22,6 +27,17 @@ through the shared JsProtocol hook: public cleanup removes its symbol listener,
 and private cleanup cancels all three refresh timers before core disposal.
 Source-own methods retain weak receivers; externally returned unsubscribe closures
 and pending snapshot observers retain their host until cleanup or settlement.
+
+The source nukePositions body replaces Store.positions with the refetched snapshot.
+It does not merge positions absent from that response. Constructed exchange tests
+call the public Exchange trait and cover both nonempty and empty
+REST responses, stale IDs, updated contracts and exact fake-zero snapshots. The
+public trait wiring remains separate from this Store-policy correction.
+
+Positions and historical fills use the source's default extractArray admission:
+raw arrays and the `data` array only. Extra `items`, `list` and `rows` wrappers
+are ignored. Constructed HTTP regressions cover all six direct/nested extra
+wrappers plus the two accepted forms, retaining fake zero positions when needed.
 
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
@@ -33,10 +49,20 @@ Error reporting and async ownership choices remain priced at
 [weex-async-observation-choice](../parity/MANIFEST-SPEC.md#weex-async-observation-choice);
 normalizer record boundaries keep their existing declarations.
 
+`fetchOrders` retains only fulfilled normal/algo legs and silently discards each
+rejection, matching Promise.allSettled in the maintained source. Its constructed
+regression checks successful rows and the actual error emitter after one HTTP
+leg rejects. The removed reporting capability and old native-only expectation
+are no longer part of the account-read runtime; source order/dedup mutation
+coverage replaces the former reporting-divergence control.
+
 
 The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly and
 async observation choices cite their explicit MANIFEST-SPEC anchors; ready
-private-refresh reactions suspend before disposal checks, updates and reports.
+private-refresh reactions suspend before disposal checks and updates. All three
+refresh callbacks silently catch fetch and Store-update failures, matching source.
+The real private-account-frame regression rejects its balance REST refresh and
+checks that the old balance survives with no host exception report.
 
 The API request callback signs an already serialized string body verbatim on
 replay, matching the bytes Axios sends. Other truthy values still use JSON
@@ -496,3 +522,10 @@ parsing and public socket pacing retain their source raw clocks. The production
 binding's `synced_clock` regression independently checks HMACs and synced time
 for REST and two private dials with different server corrections, so reopening
 must reevaluate the current offset.
+
+The typed Exchange `nuke` and `nuke_positions` entrypoints dispatch to the existing
+WEEX members: close all venue positions, replace the refreshed snapshot, then
+(for `nuke`) cancel ordinary and algo orders. The source has no retry-count input.
+`exchange_binding` proves endpoint reachability from an empty Store and close/refresh/
+cancel order; private order, position and account frames assert actual Store changes
+alongside the retained fill-event witness.

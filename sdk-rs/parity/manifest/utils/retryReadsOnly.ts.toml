@@ -30,9 +30,9 @@ note = "A policy owns its original read classifier. Retry configs are REVALIDATE
 ts = "networkErrorOnRead"
 kind = "const-fn"
 layer = "adapted"
-rs = [ "safe-cex-transport/src/retry.rs::network_error_on_read", "safe-cex-transport/src/provider.rs::NetworkFailure", "safe-cex-transport/src/provider.rs::NetworkFailure::from_code", "safe-cex-transport/src/provider.rs::NetworkFailure::code", "safe-cex-transport/src/provider.rs::RestFailure::is_retryable_network" ]
+rs = [ "safe-cex-transport/src/retry.rs::network_error_on_read", "safe-cex-transport/src/retry.rs::is_network_error", "safe-cex-transport/src/provider.rs::NetworkFailure", "safe-cex-transport/src/provider.rs::NetworkFailure::from_code", "safe-cex-transport/src/provider.rs::NetworkFailure::code", "safe-cex-transport/src/provider.rs::RestFailure::is_retryable_network" ]
 status = "ported"
-note = "Split network read policy and opaque originating error evidence: safe-cex-transport/src/retry.rs::network_error_on_read safe-cex-transport/src/provider.rs::NetworkFailure safe-cex-transport/src/provider.rs::NetworkFailure::from_code safe-cex-transport/src/provider.rs::NetworkFailure::code safe-cex-transport/src/provider.rs::RestFailure::is_retryable_network . Network origin is opaque and code-based, with response absence and the installed axios-retry predicate including all 30 is-retry-allowed denied codes checked live; callers cannot supply retry eligibility. Terminal errors retain the final attempt response/request/context."
+note = "Split network read policy, its standalone response-absent/code classifier safe-cex-transport/src/retry.rs::is_network_error, and opaque originating error evidence: safe-cex-transport/src/retry.rs::network_error_on_read safe-cex-transport/src/provider.rs::NetworkFailure safe-cex-transport/src/provider.rs::NetworkFailure::from_code safe-cex-transport/src/provider.rs::NetworkFailure::code safe-cex-transport/src/provider.rs::RestFailure::is_retryable_network . Network origin is opaque and code-based, with response absence and the installed axios-retry predicate including all 30 is-retry-allowed denied codes checked live; callers cannot supply retry eligibility. Terminal errors retain the final attempt response/request/context."
 
 [[symbol]]
 ts = "readsAndPosted"

@@ -239,10 +239,6 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
                 call_unit(h, "store.addOrUpdatePositionsFull", std::vec![value])
             }
         },
-        report_refresh_error: |h, _, error| {
-            h.0.report(error, "WEEX private refresh");
-            Ok(())
-        },
         base_dispose,
     }
 }

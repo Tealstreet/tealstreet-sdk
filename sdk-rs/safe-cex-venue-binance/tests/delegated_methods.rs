@@ -209,7 +209,10 @@ fn listener(variant: &str, method: &str, count: usize) {
             );
             let o = opts.borrow();
             assert_eq!(o.symbol, "BTCUSDT");
-            assert_eq!(o.interval, Timeframe::M1);
+            assert_eq!(
+                o.interval,
+                safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1)
+            );
             assert_eq!(o.from, Some(100.0));
             assert_eq!(o.to, Some(200.0));
             assert_eq!(
