@@ -1159,7 +1159,11 @@ fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
         (4.0, 0.0, 4.0)
     );
     assert_eq!(
-        (order.status, order.side, order.r#type),
+        (
+            order.status.unwrap(),
+            order.side.unwrap(),
+            order.r#type.unwrap()
+        ),
         (OrderStatus::Open, OrderSide::Buy, OrderType::Limit)
     );
     assert_eq!(order.price, 29001.5);
@@ -1167,10 +1171,13 @@ fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
     assert!(order.reduce_only);
     let advanced = stored_order(&h, "ws-advanced");
     assert_eq!(
-        (advanced.r#type, advanced.side),
+        (advanced.r#type.unwrap(), advanced.side.unwrap()),
         (OrderType::StopLoss, OrderSide::Sell)
     );
-    assert_eq!((advanced.price, advanced.last_update), (25000.5, 66.0));
+    assert_eq!(
+        (advanced.price.to_number(), advanced.last_update),
+        (25000.5, 66.0)
+    );
     assert!(
         !safe_cex_store::Store::orders(h.store.as_ref())
             .iter()
@@ -1183,7 +1190,7 @@ fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
     );
     let partial = stored_order(&h, "ws-order");
     assert_eq!(
-        (partial.status, partial.filled, partial.remaining),
+        (partial.status.unwrap(), partial.filled, partial.remaining),
         (OrderStatus::Open, 1.5, 2.5)
     );
     private_frame(
@@ -1193,7 +1200,7 @@ fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
     );
     let filled = stored_order(&h, "ws-order");
     assert_eq!(
-        (filled.status, filled.filled, filled.remaining),
+        (filled.status.unwrap(), filled.filled, filled.remaining),
         (OrderStatus::Closed, 4.0, 0.0)
     );
     assert_eq!(stored_order(&h, "O1").status, OrderStatus::Canceled);

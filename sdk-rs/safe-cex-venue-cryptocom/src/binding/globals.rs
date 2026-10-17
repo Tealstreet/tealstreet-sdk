@@ -19,7 +19,6 @@ use safe_cex_exchange::js_runtime::{
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
-    sync::Arc,
 };
 
 fn scope(weak: &Weak<Shared>) -> Result<Rt, Thrown> {
@@ -74,13 +73,6 @@ fn strings(values: &[&str]) -> Js {
 /// The SigningValue the native signer reads; the request keeps the caller's params.
 fn signing_params(params: &Js) -> Result<SigningValue, Thrown> {
     Ok(SigningValue::from_value(to_json(params)?))
-}
-
-fn clock(rt: &Rt) -> safe_cex_store::virtual_clock::VirtualClock {
-    let now = rt.now();
-    let mut clock = safe_cex_store::virtual_clock::VirtualClock::default();
-    clock.now = Arc::new(move || now);
-    clock
 }
 
 struct ErrorHost<'a> {
@@ -539,11 +531,9 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     );
 
     // cryptocom.signing.ts
-    let w = weak.clone();
     def(
         "generateAuthenticatedRequest",
-        Js::function("generateAuthenticatedRequest", move |_, a| {
-            let rt = scope(&w)?;
+        Js::function("generateAuthenticatedRequest", |_, a| {
             let params = arg(&a, 1);
             let nonce = arg(&a, 4);
             let nonce = if nonce.is_nullish() {
@@ -557,7 +547,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 &text(&arg(&a, 2))?,
                 &text(&arg(&a, 3))?,
                 nonce,
-                &clock(&rt),
+                &safe_cex_store::virtual_clock::VIRTUAL_CLOCK,
             )
             .map_err(|e| Thrown::error("Error", &e.message))?;
             Ok(Js::object(vec![
@@ -570,15 +560,13 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
             ]))
         }),
     );
-    let w = weak.clone();
     def(
         "generateWsAuthMessage",
-        Js::function("generateWsAuthMessage", move |_, a| {
-            let rt = scope(&w)?;
+        Js::function("generateWsAuthMessage", |_, a| {
             let message = signing::generate_ws_auth_message(
                 &text(&arg(&a, 0))?,
                 &text(&arg(&a, 1))?,
-                &clock(&rt),
+                &safe_cex_store::virtual_clock::VIRTUAL_CLOCK,
             )
             .map_err(|e| Thrown::error("Error", &e.message))?;
             Ok(Js::object(vec![

@@ -114,7 +114,7 @@ fn unknown_market_private_position_aborts_the_entire_frame() {
     for position in &mut positions {
         position.id = safe_cex_types::model_utils::create_position_id(
             "BTC-USDC",
-            Some(position.side),
+            position.side.into_value(),
             Some(PositionMode::Hedged),
         );
     }
@@ -165,7 +165,7 @@ fn known_market_private_position_updates_store_and_answers_ping() {
     for position in &mut positions {
         position.id = safe_cex_types::model_utils::create_position_id(
             "BTC-USDC",
-            Some(position.side),
+            position.side.into_value(),
             Some(PositionMode::Hedged),
         );
     }
