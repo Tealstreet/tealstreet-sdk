@@ -446,17 +446,17 @@ note = ""
 ts = "BybitInverseExchange.fetchIncomeHistory"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history"
+rs = [ "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history", "safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history" ]
 status = "ported"
-note = "Renamed target safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history. Delegates original opts and freshly read context, preserves returned aliases and original synchronous/rejected errors, and enters eagerly to the first suspension. Venue-local runtime capabilities supply dependencies; concrete class composition and dropped-Future cancellation remain unclaimed. Checkpoint accepted after the complete seven-gate/thirteen-control sequence at c17d433c0ee9311156af4a9d6b19c8e3ce289786."
+note = "Exchange dispatches through the actual receiver, source income context, shared transaction-log helper and native mapper. Six compiled master-fail production binding controls cover both methods on primary/demo/inverse; Spot preserves inherited defaults. Additional signed-HTTP witnesses cover category sort/limit, paging, range boundaries and malformed-row diagnostics. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history. Renamed Rust targets: safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history; safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchIncomeHistoryRange"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history_range"
+rs = [ "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history_range", "safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range" ]
 status = "ported"
-note = "Renamed target safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history_range. Delegates start, end and kind unchanged through a freshly read context, including undefined/null/lone UTF-16 kind values; preserves returned aliases and original errors with eager entry. Venue-local runtime capabilities supply dependencies; concrete class composition and dropped-Future cancellation remain unclaimed. Checkpoint accepted after the complete seven-gate/thirteen-control sequence at c17d433c0ee9311156af4a9d6b19c8e3ce289786."
+note = "Exchange dispatches through the actual receiver, source income context, shared transaction-log helper and native mapper. Six compiled master-fail production binding controls cover both methods on primary/demo/inverse; Spot preserves inherited defaults. Additional signed-HTTP witnesses cover category sort/limit, paging, range boundaries and malformed-row diagnostics. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range. Renamed Rust targets: safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history_range; safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range."
 
 [[symbol]]
 ts = "BybitInverseExchange.get incomeContext"
