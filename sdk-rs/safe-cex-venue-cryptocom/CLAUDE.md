@@ -8,7 +8,12 @@ from real options, a Store, HTTP and WebSocket runtime dependencies. The Exchang
 trait forwards the supported methods and reproduces inherited source rejections
 for `fetchSymbolMaxLeverage`, `scheduleCancel` and `fetchPublicTrades`;
 `fetchHistoricalFills` returns the source's empty list. Registry wiring belongs
-to the registry lane. Tunnel installation currently rejects explicitly.
+to the registry lane. `safeCexAxiosCreate` goes through the shared
+`client::factory::create` with the runtime's transport provider, so a proxied
+account takes the provider's private-proxy baseURL and proxy authorization after
+venue signing. `installTransportAdapter` installs the provider's default adapter.
+`create_api_routes_through_the_provider_and_tunnel_adapter` covers both, and two
+`scripts/binding-controls.py` controls disconnect each.
 
 Disposal follows the source flag write and public/private socket teardown.
 The shared writable `isDisposed` accessor updates the typed base flag without
