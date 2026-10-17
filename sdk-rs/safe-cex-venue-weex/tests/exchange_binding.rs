@@ -1555,7 +1555,7 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
         let reported = errors.clone();
         h.venue().base().on(
             "error",
-            std::rc::Rc::new(move |_, value: &Value| {
+            std::rc::Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
                 reported.borrow_mut().push(value.clone());
                 Ok(())
             }),
@@ -1586,10 +1586,18 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
             let error = result.expect_err(&format!("source rejects malformed batch ID {id:?}"));
             assert_eq!(error.name, text(field(expected_error, "name")));
             assert_eq!(error.message, text(field(expected_error, "message")));
+            let errors = errors.borrow();
             assert_eq!(
-                *errors.borrow(),
-                vec![json!(format!("Exchange Error: {}", error.message))],
+                errors.len(),
+                1,
                 "production BaseExchange reports exactly one refusal"
+            );
+            assert!(
+                errors[0].strict_equals(&safe_cex_exchange::js_runtime::value::Js::str(&format!(
+                    "Exchange Error: {}",
+                    error.message
+                ))),
+                "native emitter preserves the exact source refusal string"
             );
             assert_eq!(
                 h.store.orders()[0].time_in_force,
