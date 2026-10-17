@@ -260,7 +260,7 @@ pub fn map_order(
         if order.price == 0.0 || order.price.is_nan() {
             order.price = float(o.get("triggerPx"))?;
         }
-        order.reduce_only = true.into();
+        order.reduce_only = true;
         let trigger_type = trigger(is("triggerType", "fill_price"));
         if order.kind == TableHit::Mapped(OrderType::TakeProfit) {
             order.tp = Some(trigger_type);
@@ -293,7 +293,7 @@ pub fn map_order(
                 let mut leg = order.clone();
                 leg.kind = TableHit::Mapped(kind);
                 leg.price = price;
-                leg.reduce_only = true.into();
+                leg.reduce_only = true;
                 if kind == OrderType::StopLoss {
                     leg.sl = Some(trigger(is(by, "market")));
                 } else {
@@ -467,7 +467,7 @@ pub fn map_inverse_order(
         if order.price == 0.0 || order.price.is_nan() {
             order.price = float(o.get("triggerPx"))?;
         }
-        order.reduce_only = true.into();
+        order.reduce_only = true;
         if is("posMode", "hedge_mode") {
             order.side = TableHit::Mapped(if is("side", "buy") {
                 OrderSide::Sell
