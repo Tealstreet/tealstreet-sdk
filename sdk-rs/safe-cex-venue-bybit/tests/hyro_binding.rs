@@ -1167,7 +1167,11 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
 
 #[test]
 fn hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation() {
-    if configured_child("hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation") { return; }
+    if configured_child(
+        "hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation",
+    ) {
+        return;
+    }
     use safe_cex_exchange::socket_lifecycle::SocketSlot;
     use safe_cex_transport::socket::SocketFrame;
     use std::{cell::RefCell, rc::Rc};
@@ -1175,11 +1179,32 @@ fn hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation() 
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
     let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
-    let wire = h.runtime.sockets.borrow().iter().find(|(url,_)| url.contains("/public/linear")).unwrap().1.clone();
+    let wire = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("/public/linear"))
+        .unwrap()
+        .1
+        .clone();
     let seen = Rc::new(RefCell::new(vec![]));
     let sink = seen.clone();
-    let cleanup = h.venue().listen_ohlcv(serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(), Rc::new(move |candle| sink.borrow_mut().push(candle))).unwrap();
-    assert!(!wire.sent.borrow().iter().any(|frame| frame.contains("publicTrade.BTCUSDT")), "Hyro snapshot streams never subscribe to trade-derived candles");
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| sink.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    assert!(
+        !wire
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("publicTrade.BTCUSDT")),
+        "Hyro snapshot streams never subscribe to trade-derived candles"
+    );
     for volume in ["7", "8"] {
         socket.on_message(&SocketFrame::Text(json!({"topic":"kline.1.BTCUSDT","data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":volume}]}).to_string())).unwrap();
         socket.on_message(&SocketFrame::Text(json!({"topic":"publicTrade.BTCUSDT","data":[{"T":1700000041000u64,"p":"200","v":"1000","S":"Buy"}]}).to_string())).unwrap();
@@ -1189,9 +1214,24 @@ fn hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation() 
     assert_eq!(seen.borrow()[1].volume, 8.);
     assert_eq!(seen.borrow()[1].close, 103.);
     cleanup().unwrap();
-    assert!(!wire.sent.borrow().iter().any(|frame| frame.contains("publicTrade.BTCUSDT")));
-    let error = match h.venue().listen_ohlcv(serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1s"})).unwrap(), Rc::new(|_| panic!("seconds candle cannot emit"))) { Ok(_) => panic!("source refuses seconds streams"), Err(error) => error };
-    assert_eq!(error.message, "HyroTrader seconds candles require a supported trade stream");
+    assert!(
+        !wire
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("publicTrade.BTCUSDT"))
+    );
+    let error = match h.venue().listen_ohlcv(
+        serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1s"})).unwrap(),
+        Rc::new(|_| panic!("seconds candle cannot emit")),
+    ) {
+        Ok(_) => panic!("source refuses seconds streams"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.message,
+        "HyroTrader seconds candles require a supported trade stream"
+    );
     h.venue().dispose().unwrap();
 }
 
@@ -1202,26 +1242,72 @@ fn hyro_inherits_dynamic_history_except_explicit_empty_income() {
     }
     use safe_cex_exchange::capabilities::{BaseCapabilityMethod, is_base_capability_fallback};
     let h = support::harness_as(ExchangeName::Hyrotrader, support::options(), |wire| {
-        for path in ["/v5/position/closed-pnl", "/v5/order/history", "/v5/execution/list"] {
+        for path in [
+            "/v5/position/closed-pnl",
+            "/v5/order/history",
+            "/v5/execution/list",
+        ] {
             wire.ok("GET", path, json!({"list":[]}));
         }
     });
     let venue = h.venue();
     let caps = venue.capabilities();
     let options = json!({"symbol":"BTCUSDT","from":1,"to":2});
-    assert!(h.drive(caps.fetch_closed_pnl(venue, serde_json::from_value(options.clone()).unwrap())).unwrap().is_empty());
-    assert_eq!(h.wire.calls("/v5/position/closed-pnl").len(), 1, "inherited dynamic closed PnL must reach the simulator");
-    assert!(h.drive(caps.fetch_historical_orders(venue, Some(serde_json::from_value(options.clone()).unwrap()))).unwrap().is_empty());
+    assert!(
+        h.drive(caps.fetch_closed_pnl(venue, serde_json::from_value(options.clone()).unwrap()))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        h.wire.calls("/v5/position/closed-pnl").len(),
+        1,
+        "inherited dynamic closed PnL must reach the simulator"
+    );
+    assert!(
+        h.drive(caps.fetch_historical_orders(
+            venue,
+            Some(serde_json::from_value(options.clone()).unwrap())
+        ))
+        .unwrap()
+        .is_empty()
+    );
     assert_eq!(h.wire.calls("/v5/order/history").len(), 1);
-    assert!(h.drive(caps.fetch_historical_fills(venue, serde_json::from_value(options).unwrap())).unwrap().is_empty());
+    assert!(
+        h.drive(caps.fetch_historical_fills(venue, serde_json::from_value(options).unwrap()))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(h.wire.calls("/v5/execution/list").len(), 1);
-    assert!(!is_base_capability_fallback(&caps.fetch_closed_pnl, BaseCapabilityMethod::FetchClosedPnl));
-    assert!(!is_base_capability_fallback(&caps.fetch_historical_orders, BaseCapabilityMethod::FetchHistoricalOrders));
-    assert!(!is_base_capability_fallback(&caps.fetch_historical_fills, BaseCapabilityMethod::FetchHistoricalFills));
-    assert!(is_base_capability_fallback(&caps.fetch_income_history, BaseCapabilityMethod::FetchIncomeHistory));
-    assert!(is_base_capability_fallback(&caps.fetch_income_history_range, BaseCapabilityMethod::FetchIncomeHistoryRange));
-    assert!(h.drive(caps.fetch_income_history(venue, None)).unwrap().is_empty());
-    assert!(h.drive(caps.fetch_income_history_range(venue, 1., 2., None)).unwrap().is_empty());
+    assert!(!is_base_capability_fallback(
+        &caps.fetch_closed_pnl,
+        BaseCapabilityMethod::FetchClosedPnl
+    ));
+    assert!(!is_base_capability_fallback(
+        &caps.fetch_historical_orders,
+        BaseCapabilityMethod::FetchHistoricalOrders
+    ));
+    assert!(!is_base_capability_fallback(
+        &caps.fetch_historical_fills,
+        BaseCapabilityMethod::FetchHistoricalFills
+    ));
+    assert!(is_base_capability_fallback(
+        &caps.fetch_income_history,
+        BaseCapabilityMethod::FetchIncomeHistory
+    ));
+    assert!(is_base_capability_fallback(
+        &caps.fetch_income_history_range,
+        BaseCapabilityMethod::FetchIncomeHistoryRange
+    ));
+    assert!(
+        h.drive(caps.fetch_income_history(venue, None))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        h.drive(caps.fetch_income_history_range(venue, 1., 2., None))
+            .unwrap()
+            .is_empty()
+    );
     assert!(h.wire.calls("/v5/account/transaction-log").is_empty());
     venue.dispose().unwrap();
 }
@@ -1236,9 +1322,16 @@ fn hyro_inherits_journal_closed_rows_and_order_join() {
         wire.ok("GET", "/v5/position/closed-pnl", json!({"list":[]}));
         wire.ok("GET", "/v5/order/history", json!({"list":[]}));
     });
-    let rows = h.drive(h.venue().fetch_historical_positions(HistoricalPositionOptions {
-        account: "hyro-account".into(), from: Some(0.), to: Some(10000.),
-    })).unwrap();
+    let rows = h
+        .drive(
+            h.venue()
+                .fetch_historical_positions(HistoricalPositionOptions {
+                    account: "hyro-account".into(),
+                    from: Some(0.),
+                    to: Some(10000.),
+                }),
+        )
+        .unwrap();
     assert!(rows.is_empty());
     assert_eq!(h.wire.calls("/v5/position/closed-pnl").len(), 1);
     assert_eq!(h.wire.calls("/v5/order/history").len(), 1);

@@ -14,7 +14,7 @@ note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Se
 ts = "HyroOrderRejectedError"
 kind = "class"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::rejected", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::is_rejected"]
+rs = [ "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::rejected", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::is_rejected" ]
 status = "divergent"
 note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. The private source Error subclass is represented by a retained Error object plus per-recovery prototype identity. Catching definitive rejection tests that identity and retains name/message; the obsolete typed surrogate and fake-only tests were removed."
 
@@ -30,7 +30,7 @@ note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Se
 ts = "HyroOrderRecovery"
 kind = "class"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/binding/members/hyro.rs::install", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install"]
+rs = [ "safe-cex-venue-bybit/src/binding/members/hyro.rs::install", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install" ]
 status = "divergent"
 note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Allocation keeps one pending Map and the four original capability closures on the active source receiver. This private JS class needs no parallel public Rust record."
 
@@ -38,7 +38,7 @@ note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Se
 ts = "HyroOrderRecovery.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/binding/members/hyro.rs::install", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install"]
+rs = [ "safe-cex-venue-bybit/src/binding/members/hyro.rs::install", "safe-cex-venue-bybit/src/binding/members/hyro_recovery.rs::install" ]
 status = "divergent"
 note = "CHOSEN: source recovery state is retained in canonical Js objects/Map/Set and native Promise handles; Scope owns the asynchronous work. No typed snapshot projection or fallback recovery path. Production tests cover acknowledged creates, definitive rejection with transport retries disabled, terminal reconciliation without a second create and concurrent identical list submission. Constructs retained pending state and installs weak scope captures for client, disposal/readiness and publication-boundary capabilities."
 

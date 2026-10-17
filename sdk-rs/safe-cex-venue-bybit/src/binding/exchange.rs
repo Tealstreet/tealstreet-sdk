@@ -94,7 +94,16 @@ pub(crate) fn capabilities(name: &ExchangeName) -> ExchangeCapabilities {
         capabilities.fetch_closed_pnl =
             CapabilityBinding::implemented(|venue, options| venue.fetch_closed_pnl(options));
     }
-    if matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo) {
+    if *name == ExchangeName::Hyrotrader {
+        capabilities.fetch_historical_fills =
+            CapabilityBinding::implemented(|venue, options| venue.fetch_historical_fills(options));
+        capabilities.fetch_closed_pnl =
+            CapabilityBinding::implemented(|venue, options| venue.fetch_closed_pnl(options));
+    }
+    if matches!(
+        name,
+        ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
+    ) {
         capabilities.fetch_historical_orders =
             CapabilityBinding::implemented(|venue, options| venue.fetch_historical_orders(options));
     }
@@ -131,7 +140,10 @@ impl BybitExchange {
         callback: Rc<dyn Fn(safe_cex_types::Candle)>,
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
         if self.base.name == ExchangeName::Hyrotrader {
-            self.rt().this.call_method("validateCandleInterval", vec![js(&options.interval)?]).map_err(err)?;
+            self.rt()
+                .this
+                .call_method("validateCandleInterval", vec![js(&options.interval)?])
+                .map_err(err)?;
         }
         use safe_cex_exchange::socket_lifecycle::SocketSlot;
         let websocket = |property: &str| {
@@ -200,7 +212,10 @@ impl BybitExchange {
         callback: Rc<dyn Fn(safe_cex_exchange::exchange::SubscribedCandle)>,
     ) -> Result<(), ExchangeError> {
         if self.base.name == ExchangeName::Hyrotrader {
-            self.rt().this.call_method("validateCandleInterval", vec![js(&options.interval)?]).map_err(err)?;
+            self.rt()
+                .this
+                .call_method("validateCandleInterval", vec![js(&options.interval)?])
+                .map_err(err)?;
         }
         use safe_cex_exchange::socket_lifecycle::SocketSlot;
         let websocket = |property: &str| {

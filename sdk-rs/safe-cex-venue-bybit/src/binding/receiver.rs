@@ -78,7 +78,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 
     if matches!(
         typed.base.name,
-        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
     ) {
         method(&this, rt, "fetchClosedPositionRows", |r, a| {
             Ok(crate::ledger_history::fetch_closed_position_rows(

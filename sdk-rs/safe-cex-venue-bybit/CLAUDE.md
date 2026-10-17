@@ -754,7 +754,8 @@ sequence, and constructor disposal clears pending state. The old uncalled
 were retired; the live recovery owns the retained Error brand and RegExp body.
 All other diagnostic source groups and controls remain.
 
-Hyro income reads retain the source empty capability brand. Candle snapshots
+Hyro inherits dynamic closed PnL, fill and order history plus the closed-row/order
+join for journal positions. Its income reads retain the source empty capability brand. Candle snapshots
 use authoritative kline volume, never subscribe to publicTrade, and reject
 seconds through the source validator. Existing typed interval/model ingress
 bounds remain separate from the runtime body claim.
