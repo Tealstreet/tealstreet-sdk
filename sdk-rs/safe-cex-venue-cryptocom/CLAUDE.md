@@ -334,10 +334,10 @@ construction records, locals, features and target execution remain separate
 obligations. No decoder behavior or manifest classification is changed.
 
 Native/default accepted-contract review for six concrete scalar wire records and
-eight finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
+five finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
 The closed selector is scripts/record-carrier-contracts.mjs; native field/variant
 observations and mutation controls run independently of compiler shape discovery.
-This is fourteen original census owners and six specific Clone reviews; other
+This is eleven original census owners and six specific Clone reviews; other
 owners, aliases, construction entries, locals, features and WASM execution remain
 separate obligations.
 
@@ -369,19 +369,28 @@ field/presence/bit/cardinality cases and mutation controls. This is the declared
 static projection boundary, with no JSON/property binding or live alias claim.
 Other owners, aliases, construction and full discovery/matrix remain owed.
 
-The twenty-owner helper batch reviews three enum-returning mapping decoders and
-seventeen specific comparison/rendering/dispatch/state roles. Every owner has a
+The seventeen-owner helper batch reviews three enum-returning mapping decoders and
+fourteen specific comparison/rendering/dispatch/state roles. Every owner has a
 direct native witness and individual compiling body control; compiler
 classification receipts remain separate from executed evidence. See
 HELPER_BATCH_CONTRACT_REVIEW.md and scripts/helper-batch-contracts.mjs. Supplied
 host parsers, generic Clone behavior, downstream decoders, aliases and the full
 discovery/feature/target matrix remain independent obligations.
 
-Twenty control-flow/property/adapter owners have individual accepted-contract
-role reviews backed by four direct native witnesses and sixteen helpers reached
-through unchanged actual-source native caller tests. All twenty body corruptions
-and all five counted fixture walks require compiled named failures and restored
+Fifteen control-flow/property/adapter owners have individual accepted-contract
+role reviews backed by three direct native witnesses and twelve helpers reached
+through unchanged actual-source native caller tests. All fifteen body corruptions
+and the retained counted fixture walks require compiled named failures and restored
 passes. See CONTROL_FLOW_CONTRACT_REVIEW.md and scripts/control-flow-contracts.mjs.
-The twenty compiler classification receipts remain separate from behavioral
+The fifteen compiler classification receipts remain separate from behavioral
 proof; downstream admission, parser grammar, generic hosts, aliases, construction
 and full discovery/matrix obligations remain independent.
+
+The test-only account_admin, account_envelopes, private_lifecycle and
+public_lifecycle modules and their fixtures/oracles were removed after the
+wave2-vacuous-tests audit found no production callers. Their accepted-contract
+entries and selectors were removed with them; manifest rows now point at the
+production class and socket bodies. Retained historical logs are archives, not
+coverage claims. Production lifecycle and admin coverage lives in
+`tests/exchange_binding.rs`; streams/history and private data frames are separate
+follow-up obligations.

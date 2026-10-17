@@ -1,4 +1,4 @@
-// Execute the twenty reviewed native/default Crypto.com helper owners, not full discovery.
+// Execute the seventeen reviewed native/default Crypto.com helper owners, not full discovery.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,10 +18,7 @@ const selected = [
   "safe_cex_venue_cryptocom::order_mappings::map_order_type",
   "safe_cex_venue_cryptocom::order_mappings::map_stop_trigger_type",
   "safe_cex_venue_cryptocom::order_mappings::map_time_in_force",
-  "safe_cex_venue_cryptocom::private_lifecycle::subscribe_one",
   "safe_cex_venue_cryptocom::private_order_mappings::equals",
-  "safe_cex_venue_cryptocom::public_lifecycle::channel",
-  "safe_cex_venue_cryptocom::public_lifecycle::is_channel",
   "safe_cex_venue_cryptocom::socket_handlers::caught",
   "safe_cex_venue_cryptocom::socket_handlers::concat",
   "safe_cex_venue_cryptocom::socket_handlers::get",
@@ -32,7 +29,7 @@ const selected = [
   "safe_cex_venue_cryptocom::socket_handlers::parsed_field",
   "safe_cex_venue_cryptocom::socket_handlers::parsed_or"
 ];
-assert.equal(selected.length, 20);
+assert.equal(selected.length, 17);
 function cargo(args, extraEnv = {}) {
   const result = spawnSync('cargo', args, {
     cwd: workspace, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -64,7 +61,7 @@ fs.writeFileSync(path.join(metadata.target_directory, 'cryptocom-helper-batch-re
 assert.deepEqual(results.map(row => row.name).sort(), selected);
 for (const row of results) assert.deepEqual(row.failures, [], row.name);
 assert.equal(results.filter(row => !row.classificationOnly).length, 3);
-assert.equal(results.filter(row => row.classificationOnly).length, 17);
-console.log('Crypto.com selected helper owners: 3 native runtime decoder probes, 17 explicit classifications, 0 failed owners.');
-console.log('Direct native witnesses and compiling body controls are separate required evidence for all twenty owners; classification receipts are not runtime evidence.');
-console.log('Scope: these twenty original native/default helper owners only; other owners, aliases, construction, locals, features and wasm remain owed.');
+assert.equal(results.filter(row => row.classificationOnly).length, 14);
+console.log('Crypto.com selected helper owners: 3 native runtime decoder probes, 14 explicit classifications, 0 failed owners.');
+console.log('Direct native witnesses and compiling body controls are separate required evidence for all seventeen owners; classification receipts are not runtime evidence.');
+console.log('Scope: these seventeen original native/default helper owners only; other owners, aliases, construction, locals, features and wasm remain owed.');
