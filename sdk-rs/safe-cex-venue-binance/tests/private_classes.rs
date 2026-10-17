@@ -3610,7 +3610,7 @@ fn production_native_pm_position_info_does_not_grow_per_frame() {
 fn production_native_pm_position_info_is_the_current_position_without_info() {
     let owner = production_native_owner(Venue::PM);
     for index in 0..16 {
-        let amount = if index % 2 == 0 { 2.0 } else { -3.0 };
+        let amount: f64 = if index % 2 == 0 { 2.0 } else { -3.0 };
         let entry = 110.0 + f64::from(index);
         let upnl = 7.0 - f64::from(index);
         let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{
