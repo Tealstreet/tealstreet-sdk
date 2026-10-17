@@ -206,3 +206,11 @@ checks both the HTTP request and replacement of the stored leverage limit.
 The same test target drives a real private socket frame for each of orders,
 fills, positions and balance. Account/balance notifications exercise the source
 350ms refresh through the signed REST binding before checking the Store.
+
+
+The production collection host consumes `ReadHost::items` with the shared iterator
+protocol. The background order loop reads the actual `prioritySymbols` Set before
+issuing requests; requiring an array there aborts every symbol refresh. The
+constructed-binding `background_orders` regression uses known LIMIT rows and
+asserts both the signed REST read and asynchronous Store commit, independently
+of the coordinated unmapped Order.type representation change.
