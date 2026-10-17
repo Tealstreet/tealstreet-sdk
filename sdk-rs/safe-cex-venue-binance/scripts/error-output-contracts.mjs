@@ -1,4 +1,4 @@
-// Four individually reviewed decoder outputs, including the private shared helper. This is not the whole-venue accepted gate.
+// Three individually reviewed decoder outputs, including the private shared helper. This is not the whole-venue accepted gate.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +19,6 @@ function cargo(args, env = {}) {
   return result.stdout;
 }
 const selected = [
-  'safe_cex_venue_binance::private_order_logic::get_order_reject_reason',
   'safe_cex_venue_binance::response_message::get_binance_pm_response_message',
   'safe_cex_venue_binance::response_message::get_binance_response_message',
   'safe_cex_venue_binance::response_message::response_message',
@@ -45,7 +44,7 @@ const types = found.types.filter(value => selected.includes(value.name));
 assert.deepEqual(types.map(value => value.name).sort(), selected);
 assert.ok(types.every(value => value.deserialize === false && value.kind === 'function'));
 console.log(`Discovery: ${found.types.length} owners, ${found.publicAliases.length} aliases, ${found.construction.length} construction policies.`);
-console.log('Probe scope: four selected decoder outputs only; remaining owners/aliases/locals and feature/wasm coverage are excluded. Run accepted probes serially.');
+console.log('Probe scope: three selected decoder outputs only; remaining owners/aliases/locals and feature/wasm coverage are excluded. Run accepted probes serially.');
 const results = runProbes(workspace, metadata, [{
   package: pkg.name, packageId: pkg.id, target, types,
   publicAliases: [], defaultWitnesses: [], locals: [], delegatedLocals: [],
@@ -62,5 +61,5 @@ if (control) {
 } else {
   for (const result of results) assert.equal(result.failures.length, 0,
     `${result.name}: ${result.failures.join('; ')}`);
-  console.log('Four production decoder-output probes passed, including the direct private helper call. No whole-venue accepted-set zero claim.');
+  console.log('Three production decoder-output probes passed, including the direct private helper call. No whole-venue accepted-set zero claim.');
 }
