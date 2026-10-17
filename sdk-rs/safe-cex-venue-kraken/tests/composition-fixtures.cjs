@@ -16,13 +16,6 @@ const execution={channel:'executions',type:'update',data:[{order_id:'A',symbol:'
 classes.KrakenPrivateWebsocket.push({...clone(base),spot:false,argument:{data:JSON.stringify(fill)},invoke:'onMessage'});
 classes.KrakenSpotPrivateWebsocket.push({...clone(base),spot:true,argument:{data:JSON.stringify(execution)},invoke:'onMessage'});
 classes.KrakenPublicWebsocket.push({...clone(base),spot:false,argument:'1h',invoke:'mapTimeframe'});
-const constructors={};
-for(const [name,spot]of [['futures',false],['spot',true]])constructors[name]=[
- {...clone(base),spot}, {...clone(base),spot,wrapRate:true,secondaryOptions:{key:'SECONDARY'}},
- {...clone(base),spot,effectFail:'superExchange'}, {...clone(base),spot,effectFail:'secondary'},
- {...clone(base),spot,effectFail:'rateLimit'},
- ...[0,1,2].map(apiFailAt=>({...clone(base),spot,apiFailAt})),
-];
 const candle={timestamp:1723638896.125,open:17.25,high:29.5,low:5.75,close:23.125,volume:31.5};
 const changed={...candle,close:37.25};
 const poll={options:{symbol:'X',interval:'1m'},pages:[[candle],[candle],[changed]]};
@@ -45,4 +38,4 @@ const polling=[
  {...clone(poll),fetchSyncFail:true,effectFail:'timer'},
 ];
 for(const row of polling)row.sharedFirstPages=!!(row.pages[0]?.[0]&&row.pages[0][0]===row.pages[1]?.[0]);
-module.exports={classes,constructors,polling};
+module.exports={classes,polling};

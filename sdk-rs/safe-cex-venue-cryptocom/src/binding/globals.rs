@@ -602,7 +602,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 rt.shared.runtime.transport().as_ref(),
                 arg(&a, 0),
                 &arg(&a, 1),
-                to_typed(&arg(&a, 2).get("name")?)?,
+                rt.base(),
             )?;
             with_rejected_handlers(&rt, xhr)
         }),

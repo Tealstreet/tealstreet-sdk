@@ -60,7 +60,7 @@ fn http_create(rt: &Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         rt.shared.runtime.transport().as_ref(),
         arg(&a, 0),
         &arg(&a, 1),
-        to_typed(&arg(&a, 2).get("name")?)?,
+        rt.base(),
     )?;
     *rt.shared.extra.api_http.borrow_mut() = Some(host);
     Ok(client)
