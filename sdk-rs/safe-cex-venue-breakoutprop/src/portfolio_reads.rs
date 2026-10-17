@@ -62,6 +62,7 @@ pub fn fetch_positions<F, E>(
     store: &dyn Store,
     local_to_utc: &dyn Fn(f64) -> f64,
     symbols: Option<&[String]>,
+    report: &dyn Fn(&str) -> Result<(), ExchangeError>,
     format_error: impl FnOnce(ExchangeError) -> E,
 ) -> impl Future<Output = Result<Vec<Position>, E>>
 where
@@ -74,7 +75,7 @@ where
             let Some(data) = truthy_input(data)? else {
                 return Ok(store.positions().to_vec());
             };
-            format_positions(&data, store, symbols, local_to_utc)
+            format_positions(&data, store, symbols, local_to_utc, report)
         })()
         .map_err(format_error)
     }
@@ -84,6 +85,7 @@ pub fn fetch_open_positions<F, E>(
     fetch_portfolio_raw: impl FnOnce() -> F,
     store: &dyn Store,
     local_to_utc: &dyn Fn(f64) -> f64,
+    report: &dyn Fn(&str) -> Result<(), ExchangeError>,
     format_error: impl FnOnce(ExchangeError) -> E,
 ) -> impl Future<Output = Result<Option<Vec<Position>>, E>>
 where
@@ -96,7 +98,7 @@ where
             let Some(data) = truthy_input(data)? else {
                 return Ok(Some(store.positions().to_vec()));
             };
-            format_open_positions(&data, store, local_to_utc)
+            format_open_positions(&data, store, local_to_utc, report)
         })()
         .map_err(format_error)
     }
