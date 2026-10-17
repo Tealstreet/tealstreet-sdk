@@ -204,3 +204,160 @@ fn raw_reporter_uses_source_falsy_and_string_constructor_rules() {
         );
     }
 }
+#[test]
+fn raw_reporter_enhanced_fields_keep_native_context_and_formatter_references() {
+    let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
+    assembled.runtime.worker.set(true);
+    let observed = observe_errors(&assembled);
+    let code = Js::object(vec![
+        ("native", Js::Number(f64::INFINITY)),
+        ("missing", Js::Undefined),
+    ]);
+    let context = Js::object(vec![("errorCode", code.clone())]);
+    let original_message = Js::object(vec![("zero", Js::Number(-0.0))]);
+    let enhanced = Js::utf16(&[0xd800, 0x0061]);
+    let raw = Js::object(vec![
+        ("context", context.clone()),
+        ("enhancedMessage", enhanced.clone()),
+        (
+            "originalError",
+            Js::object(vec![("message", original_message.clone())]),
+        ),
+    ]);
+    assembled
+        .this
+        .call_method(
+            "emitAndLogError",
+            vec![
+                raw.clone(),
+                Js::Undefined,
+                Js::object(vec![("suppressConsoleLog", Js::Bool(true))]),
+            ],
+        )
+        .unwrap();
+    let events = observed.borrow();
+    assert!(events[0][0].strict_equals(&enhanced));
+    let metadata = &events[0][1];
+    assert!(
+        metadata
+            .get("enhancedContext")
+            .unwrap()
+            .same_reference(&context)
+    );
+    let sentry = metadata.get("sentryData").unwrap();
+    assert!(sentry.get("error").unwrap().same_reference(&raw));
+    assert!(
+        sentry
+            .get("tags")
+            .unwrap()
+            .get("errorCode")
+            .unwrap()
+            .same_reference(&code)
+    );
+    assert!(
+        sentry
+            .get("extra")
+            .unwrap()
+            .get("originalMessage")
+            .unwrap()
+            .same_reference(&original_message)
+    );
+}
+
+#[test]
+fn raw_reporter_accessor_reads_follow_actual_source_order() {
+    let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
+    assembled.runtime.worker.set(true);
+    let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+    let observed = |label: &'static str, values: Vec<(&str, Js)>| {
+        let object = Js::object(vec![]);
+        for (key, value) in values {
+            let label = format!("{label}.{key}");
+            let trace = trace.clone();
+            object.define_accessor(
+                key,
+                Some(Rc::new(move |_| {
+                    trace.borrow_mut().push(label.clone());
+                    Ok(value.clone())
+                })),
+                None,
+            );
+        }
+        object
+    };
+    let config = observed(
+        "config",
+        vec![
+            ("baseURL", Js::str("/native")),
+            ("timeout", Js::Number(20.0)),
+            (
+                "headers",
+                Js::object(vec![("Authorization", Js::str("fixture"))]),
+            ),
+        ],
+    );
+    let context = observed(
+        "context",
+        vec![
+            ("isNetworkError", Js::Bool(false)),
+            ("errorCode", Js::Number(0.0)),
+            ("statusCode", Js::Number(401.0)),
+            ("isTimeout", Js::Bool(false)),
+            ("isCORS", Js::Bool(false)),
+            ("url", Js::str("/native")),
+            ("method", Js::str("GET")),
+            ("statusText", Js::str("Unauthorized")),
+            ("timestamp", Js::str("now")),
+        ],
+    );
+    let original = observed("original", vec![("message", Js::str("original"))]);
+    let error = observed(
+        "error",
+        vec![
+            ("context", context),
+            ("enhancedMessage", Js::str("enhanced")),
+            ("config", config),
+            ("originalError", original),
+            ("code", Js::str("CODE")),
+        ],
+    );
+    assembled
+        .this
+        .call_method(
+            "emitAndLogError",
+            vec![
+                error,
+                Js::Undefined,
+                Js::object(vec![("suppressConsoleLog", Js::Bool(true))]),
+            ],
+        )
+        .unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let compiler = std::env::var_os("SAFE_CEX_TYPESCRIPT_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("../target/asterdex-oracle-deps/node_modules/typescript"));
+    let output = std::process::Command::new("node")
+        .arg(root.join("tests/raw-error-source.cjs"))
+        .arg("--trace")
+        .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "actual source getter oracle: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let source = profiles
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|profile| profile["worker"] == true)
+        .unwrap();
+    let expected: Vec<String> = serde_json::from_value(source["reads"].clone()).unwrap();
+    assert_eq!(
+        *trace.borrow(),
+        expected,
+        "RAW-REPORT actual source getter order"
+    );
+}

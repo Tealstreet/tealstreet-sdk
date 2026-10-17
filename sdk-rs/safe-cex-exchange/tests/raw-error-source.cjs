@@ -26,6 +26,7 @@ const formatter = enhancer.statements.find(x => ts.isFunctionDeclaration(x) && x
 assert(formatter);
 const source = compile(`${read.getText(correlation).replace(/^export /, '')}\n${formatter.getText(enhancer).replace(/^export /, '')}\nclass Reporter { ${method.getText(base)} }\n`);
 let cases = 0;
+const getterProfiles = [];
 for (const worker of [false, true]) {
   const events = [], reports = [], trace = [];
   const env = {self: {}, window: worker ? undefined : {}, console: {
@@ -63,6 +64,29 @@ for (const worker of [false, true]) {
   assert.equal(events.at(-1)[1], message);
   assert.equal(worker ? events.at(-1)[2].sentryData.error : reports.at(-1).error, raw);
   cases++;
+  const nativeCode = {native: Infinity, missing: undefined};
+  const nativeContext = {errorCode: nativeCode};
+  const nativeMessage = {zero: -0};
+  const enhanced = {context: nativeContext, enhancedMessage: '\ud800a', originalError: {message: nativeMessage}};
+  report.call(host, enhanced, undefined, {suppressConsoleLog: true});
+  const enhancedData = worker ? events.at(-1)[2].sentryData : reports.at(-1).data;
+  assert.equal(events.at(-1)[1], '\ud800a');
+  assert.equal(events.at(-1)[2].enhancedContext, nativeContext);
+  assert.equal(enhancedData.tags.errorCode, nativeCode);
+  assert.equal(enhancedData.extra.originalMessage, nativeMessage);
+  cases++;
+  const reads = [];
+  const observed = (label, values) => new Proxy(values, {get(target, key) {
+    reads.push(`${label}.${String(key)}`); return Reflect.get(target, key);
+  }});
+  const config = observed('config', {baseURL: '/native', timeout: 20, headers: {Authorization: 'fixture'}});
+  const context = observed('context', {isNetworkError: false, errorCode: 0, statusCode: 401,
+    isTimeout: false, isCORS: false, url: '/native', method: 'GET', statusText: 'Unauthorized', timestamp: 'now'});
+  const original = observed('original', {message: 'original'});
+  const accessorError = observed('error', {context, enhancedMessage: 'enhanced', config, originalError: original, code: 'CODE'});
+  report.call(host, accessorError, undefined, {suppressConsoleLog: true});
+  getterProfiles.push({worker, reads});
+  cases++;
   trace.length = 0;
   const coerced = {toString() { trace.push(['coerce']); return 'source object'; }};
   report.call(host, coerced);
@@ -73,5 +97,6 @@ for (const worker of [false, true]) {
   assert.equal(events.at(-1)[1], 'source object');
   cases++;
 }
-assert.equal(cases, 30);
-console.log('RAW-ERROR actual source: 30 worker/main profiles preserve own undefined/order, native message/error identity, lazy code and console-before-coercion.');
+assert.equal(cases, 34);
+if (process.argv.includes('--trace')) process.stdout.write(JSON.stringify(getterProfiles));
+else console.log('RAW-ERROR actual source: 34 worker/main profiles preserve own undefined/order, native message/error identity, accessor read order and console-before-coercion.');
