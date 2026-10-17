@@ -925,7 +925,7 @@ fn fetch_ohlcv_worker_forwards_every_source_timeframe() {
     let capture = replies.clone();
     let handler = safe_cex_webworker::call_method::CallMethodHandler::new(
         venue.clone(),
-        Rc::new(move |reply| capture.borrow_mut().push(reply)),
+        data_trace::post(Rc::new(move |reply| capture.borrow_mut().push(reply))),
         error_post_support::unexpected(),
     );
     let intervals = [

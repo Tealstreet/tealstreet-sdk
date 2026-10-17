@@ -1134,7 +1134,7 @@ fn ohlcv_worker_subscribes_every_source_timeframe_and_delivers_candles() {
     let capture = posts.clone();
     let handler = OHLCVSubscriptionsHandler::new(
         venue.clone(),
-        Rc::new(move |post| capture.borrow_mut().push(post)),
+        data_trace::post(Rc::new(move |post| capture.borrow_mut().push(post))),
         error_post_support::unexpected(),
     );
     let intervals = [
