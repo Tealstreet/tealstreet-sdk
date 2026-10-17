@@ -28,6 +28,12 @@ and private cleanup cancels all three refresh timers before core disposal.
 Source-own methods retain weak receivers; externally returned unsubscribe closures
 and pending snapshot observers retain their host until cleanup or settlement.
 
+The source nukePositions body replaces Store.positions with the refetched snapshot.
+It does not merge positions absent from that response. Constructed exchange tests
+call the public Exchange trait and cover both nonempty and empty
+REST responses, stale IDs, updated contracts and exact fake-zero snapshots. The
+public trait wiring remains separate from this Store-policy correction.
+
 Positions and historical fills use the source's default extractArray admission:
 raw arrays and the `data` array only. Extra `items`, `list` and `rows` wrappers
 are ignored. Constructed HTTP regressions cover all six direct/nested extra
@@ -58,7 +64,10 @@ coverage replaces the former reporting-divergence control.
 
 The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly and
 async observation choices cite their explicit MANIFEST-SPEC anchors; ready
-private-refresh reactions suspend before disposal checks, updates and reports.
+private-refresh reactions suspend before disposal checks and updates. All three
+refresh callbacks silently catch fetch and Store-update failures, matching source.
+The real private-account-frame regression rejects its balance REST refresh and
+checks that the old balance survives with no host exception report.
 
 The API request callback signs an already serialized string body verbatim on
 replay, matching the bytes Axios sends. Other truthy values still use JSON

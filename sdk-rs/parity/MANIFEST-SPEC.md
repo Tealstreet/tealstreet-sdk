@@ -1583,11 +1583,13 @@ Public depth-gap recovery silently discards snapshot rejections and routed-callb
 throws, matching the maintained empty catch. The initial listenOrderBook snapshot
 retains its distinct source warning. Constructed HTTP/socket coverage observes
 no gap warning, no failed replacement delivery and a subsequent valid update.
-Private refresh reporting is corrected separately in #638.
+The three private refresh callbacks silently catch fetch and Store-update failures,
+matching source. A constructed account frame with a rejected REST balance refresh
+retains the old balance without reporting a host exception.
 
 The returned `fetchOrders` future owns its aggregation/dedup continuation;
-refresh futures own update/report continuations. Dropping one can omit those
-outcomes, even when host-started
+refresh futures own update continuations. Dropping one can omit those outcomes,
+even when host-started
 requests survive. This bounds abandoned native work instead of requiring every
 borrowed host context to survive an unobserved Promise. Public snapshot observers
 are different: `observe_snapshot` must retain its callbacks and receiver until
@@ -1596,7 +1598,7 @@ not a cancellation proof from a recording fixture.
 
 The imported `settled` capability supplies Promise.allSettled reaction semantics
 and peer retention. Refresh reactions suspend after a ready fetch result before
-checking disposal or applying/reporting it. These boundaries do not implement an
+checking disposal or applying it. These boundaries do not implement an
 entire JavaScript microtask scheduler. Shared pager ownership and callback costs
 remain at [exchange-runtime-callback-choice](#exchange-runtime-callback-choice)
 and [shared-handler-and-ledger-choice](#shared-handler-and-ledger-choice).

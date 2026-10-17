@@ -392,3 +392,9 @@ result and restores the real DefaultStore mutator. On the master slot body the
 position remains open; the repaired spread delivers the close pair, clears margin
 through own undefined, and increments the position revision once. It exercises
 latent iterable admission; maintained wire payloads still provide arrays.
+
+Partner-attribution order rejection helpers are installed in the production
+module globals. Their source String/nullish coercion runs before the existing
+account-tier classifiers; matching codes short-circuit the message read.
+Real signed-placement rejection tests cover tier, approval and ordinary errors,
+including the normalized message delivered through the native error reporter.

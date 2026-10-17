@@ -1351,9 +1351,25 @@ still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
 the actual native runtime, factory, transport and HOW protocol against scripted
 socket I/O and compares four statuses with the maintained HOW adapter and Axios.
 
+Plain JS socket dispatch follows the DOM listener snapshot and per-registration
+removed flag: removal before a callback's turn skips it, and readding the same
+function cannot revive its old registration. ReconnectingWebSocket retains its
+vendored captured-array removal behavior. The native TCP
+`js_socket_listener_removal` witness compares 16 open/message cases with Node
+EventTarget and the actual vendored class, using only shared Node/DOM outcomes.
+The browser rule is https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke;
+Node's additions-during-dispatch quirk is outside this removal comparison.
+
 For array inputs, JS Store `removeOrders` reads each element's `id` and applies
 source object-key coercion; it never treats a bare element as the ID itself.
 Property access and string-hint conversion failures propagate after the source's
 empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
 24 maintained Store cases through the production facade, including numeric keys,
 primitive elements, nullish elements and throwing getters/conversions.
+
+Shared console.info/debug route to the native runtime console sink and return
+undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
+output in a child process and compares its payloads with Node, including exact
+info/debug severity dispatch. The original shared globals compile but fail at
+console.info before either host output can be observed. Console.log is handled
+by its separate source-binding change.

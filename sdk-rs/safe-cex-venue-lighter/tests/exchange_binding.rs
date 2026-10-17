@@ -380,6 +380,69 @@ fn place_order_signs_an_attributed_create_order() {
     assert_eq!(ids, vec![info["ClientOrderIndex"].to_string()]);
 }
 
+fn assert_rejected_placement(code: i64, message: &str, expected: &str) {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(method, path, _)| method != "POST" || path != SEND_TX);
+    h.http
+        .ok("POST", SEND_TX, json!({"code": code, "message": message}));
+    let error = h
+        .drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({}))),
+        ))
+        .expect_err("venue rejected the real signed transaction");
+    assert_eq!(
+        h.http.calls(SEND_TX).len(),
+        1,
+        "one signed transaction reached the venue"
+    );
+    assert_eq!(
+        error.message, expected,
+        "production order rejection retains source guidance"
+    );
+    assert!(
+        h.runtime
+            .reports
+            .borrow()
+            .iter()
+            .any(|report| report.contains(expected)),
+        "normalized venue rejection reaches the real error reporter: {:?}",
+        h.runtime.reports.borrow()
+    );
+}
+
+#[test]
+fn partner_tier_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21520,
+        "venue tier refused",
+        "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.",
+    );
+}
+
+#[test]
+fn partner_approval_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21149,
+        "venue approval refused",
+        "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.",
+    );
+}
+
+#[test]
+fn ordinary_order_rejection_keeps_source_message() {
+    assert_rejected_placement(
+        29999,
+        "venue rejected this order",
+        "venue rejected this order",
+    );
+}
+
 #[test]
 fn place_order_refuses_a_caller_client_order_id_before_any_request() {
     let h = harness(ExchangeName::Lighter, options(), lighter);
@@ -851,4 +914,66 @@ fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
         h.venue().recover_after_offline().unwrap(),
         "disposed accounts do not request another reload"
     );
+}
+
+#[test]
+fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_transport::socket::SocketFrame;
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let private = h.runtime.sockets.borrow()[1].1.clone();
+    private
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"type":"pong"}).to_string(),
+        )));
+    h.runtime.pump();
+    let core = h.venue().base().get_socket(SocketSlot::Private).unwrap();
+    assert_eq!(
+        core.last_message_timestamp(),
+        Some(h.runtime.now.get()),
+        "real private pong starts the native watchdog"
+    );
+    core.handle_pong_event(3217).unwrap();
+    h.runtime.pump();
+    private.closed.set(true);
+    private.events.borrow_mut().push_back(WsEvent::Close {
+        code: Some(1008),
+        reason: "rate limit exceeded".into(),
+    });
+    h.runtime.pump();
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|line| line.contains("closed (code 1008")),
+        "real source close handler ran"
+    );
+    h.runtime.completed_sleeps.borrow_mut().clear();
+    h.runtime.advance(5000.0);
+    let completed = h.runtime.completed_sleeps.borrow();
+    assert!(
+        !completed.contains(&3217),
+        "source close must cancel the actual native ping deadline: {completed:?}"
+    );
+    assert!(
+        !completed.contains(&1000),
+        "source close must cancel the actual native receive deadline: {completed:?}"
+    );
+    assert_eq!(
+        h.runtime.sockets.borrow().len(),
+        2,
+        "source rate-limit backoff owns the next dial"
+    );
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    drop(completed);
+    h.venue().dispose().unwrap();
 }
