@@ -1300,6 +1300,13 @@ endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
 
+Adapter config capture/restore reuses the canonical RetainedJsonInput and existing
+native typed codec through two thin value helpers. Shared HTTP adapters retain
+own undefined, raw NaN payloads, infinities and signed zero at the terminal and
+effective success/error config; they do not JSON-copy extension data. Transport
+HOW owns the eventual protocol projection. This retains the typed codec
+limitations and does not claim executable callbacks or live JS alias identity.
+
 SubscribedCandle.interval uses ModelField<AnyTimeframe> at the callback boundary.
 Its native record codec preserves absent, own undefined and concrete intervals,
 including 1M, and omits undefined intervals from JSON. Candle number bits remain

@@ -1,3 +1,5 @@
+#[path = "support/data_trace.rs"]
+mod data_trace;
 #[path = "support/error_post.rs"]
 mod error_post_support;
 #[path = "support/error_trace.rs"]
@@ -281,7 +283,7 @@ fn call_method_replies_preserve_null_undefined_unknown_and_cancellation() {
     let sink = messages.clone();
     let handler = CallMethodHandler::new(
         venue.clone(),
-        Rc::new(move |message| sink.borrow_mut().push(message)),
+        data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("unknown".into(), "notAMethod".into(), vec![]));
@@ -351,7 +353,7 @@ fn call_method_discarded_host_task_still_settles_the_waiter() {
     let sink = messages.clone();
     let handler = CallMethodHandler::new(
         venue,
-        Rc::new(move |message| sink.borrow_mut().push(message)),
+        data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
     handler.handle(StoreWorkerPayload {
@@ -556,7 +558,7 @@ fn complete_call_method_dispatch_matches_live_typescript_replies() {
     let sink = messages.clone();
     let handler = CallMethodHandler::new(
         venue.clone(),
-        Rc::new(move |message| sink.borrow_mut().push(message)),
+        data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
     for record in records {
@@ -632,7 +634,7 @@ fn offline_recovery_inner_worker_route_is_admitted() {
     let sink = messages.clone();
     let handler = CallMethodHandler::new(
         venue,
-        Rc::new(move |message| sink.borrow_mut().push(message)),
+        data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("recover-inner".into(), "recoverAfterOffline".into(), vec![]));
@@ -661,7 +663,7 @@ fn offline_recovery_outer_worker_route_is_admitted() {
     let sink = messages.clone();
     let handler = CallMethodHandler::new(
         venue,
-        Rc::new(move |message| sink.borrow_mut().push(message)),
+        data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
     handler.handle(StoreWorkerPayload {
@@ -732,7 +734,7 @@ fn offline_recovery_visits_every_socket_and_preserves_false_policy() {
     let sink = messages.clone();
     let handler = safe_cex_webworker::call_method::CallMethodHandler::new(
         venue,
-        Rc::new(move |message| sink.borrow_mut().push(message)),
+        data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("policy".into(), "recoverAfterOffline".into(), vec![]));
@@ -780,7 +782,7 @@ fn offline_recovery_reports_exchange_hook_failure() {
     let sink = messages.clone();
     let handler = safe_cex_webworker::call_method::CallMethodHandler::new(
         venue,
-        Rc::new(move |message| sink.borrow_mut().push(message)),
+        data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
     ready(handler.handle_call_method("error".into(), "recoverAfterOffline".into(), vec![]));
@@ -936,7 +938,7 @@ fn market_timeout_never_projects_its_error_into_the_json_post_channel() {
     );
     let handler = safe_cex_webworker::subscriptions::OHLCVSubscriptionsHandler::new(
         venue,
-        Rc::new(move |payload| capture.borrow_mut().push(payload)),
+        data_trace::post(Rc::new(move |payload| capture.borrow_mut().push(payload))),
         error_post,
     );
     handler
