@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
 
 root = Path(__file__).resolve().parents[2]
 venue = root / "safe-cex-venue-paradex/src"
@@ -42,6 +43,10 @@ for name in ["listen_ohlcv", "listen_order_book", "fetch_historical_fills", "fet
     start = s.index("    fn " + name + "(")
     end = s.index("    fn ", start + 8)
     s = s[:start] + s[end:]
+# Removing the only callers intentionally orphans these helpers; allow only that
+# mutation artifact so the behavioral control must still compile under -D warnings.
+s = s.replace("    fn listen<T:", "    #[allow(dead_code)]\n    fn listen<T:")
+s = s.replace("struct NativeJournal;", "#[allow(dead_code)]\nstruct NativeJournal;")
 controls = [("trait-defaults", native, s, all_names)]
 s = originals[members].decode()
 for name in ["fetchHistoricalFills", "fetchHistoricalOrders", "fetchIncomeHistory", "fetchIncomeHistoryRange"]:
@@ -52,7 +57,7 @@ controls.append(("history-dispatch", members, s, all_names[:5]))
 s = originals[native].decode()
 start = s.index("                fetch_historical_fills: CapabilityBinding")
 end = s.index("                fetch_income_history:", start)
-s = s[:start] + "                fetch_historical_fills: Default::default(),\n" + s[end:]
+s = s[:start] + "                fetch_historical_fills: ExchangeCapabilities::default().fetch_historical_fills,\n" + s[end:]
 controls.append(("fills-brand", native, s, [all_names[4]]))
 s = originals[native].decode()
 needle = "                    scoped,"
@@ -76,7 +81,11 @@ for count in (0, 1):
             Ok(Js::array(rows.array_values().expect("native history array").into_iter().take(COUNT).collect()))
         },'''.replace("COUNT", str(count))
     controls.append(("fills-take-" + str(count), members, s.replace(needle, replacement), [all_names[0]]))
+selected = set(sys.argv[1:])
+assert selected <= {label for label, *_ in controls}, "unknown control selection"
 for label, path, mutation, failures in controls:
+    if selected and label not in selected:
+        continue
     try:
         path.write_text(mutation)
         run(label, failures)

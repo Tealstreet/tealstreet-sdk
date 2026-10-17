@@ -1225,17 +1225,27 @@ fn real_trait_stream_ohlcv_polls_then_stops_after_cleanup() {
         .requests
         .borrow()
         .iter()
-        .filter(|r| r.url == "/markets/klines")
+        .filter(|r| r.url.split('?').next() == Some("/markets/klines"))
         .count();
+    assert!(
+        reads >= 2,
+        "actual initial and follow-up serialized REST reads"
+    );
+    let delivered = seen.borrow().len();
+    wire.responses.borrow_mut().insert(
+        "/markets/klines".into(),
+        json!({"results":[[1700000000000.0,101,107,100,106,11]]}),
+    );
     runtime.now.set(runtime.now.get() + 3000.0);
     for _ in 0..32 {
         runtime.pump();
     }
+    assert_eq!(seen.borrow().len(), delivered, "cleanup stops delivery");
     assert_eq!(
         wire.requests
             .borrow()
             .iter()
-            .filter(|r| r.url == "/markets/klines")
+            .filter(|r| r.url.split('?').next() == Some("/markets/klines"))
             .count(),
         reads,
         "candle cleanup cancels polling"
