@@ -307,7 +307,8 @@ fn attached_amendment_recreates_only_after_matching_refusal_and_successful_cance
         venue.base().on(
             "error",
             Rc::new(move |_, v| {
-                sink.borrow_mut().push(v.as_str().unwrap().to_owned());
+                sink.borrow_mut()
+                    .push(String::from_utf16(v.as_str().unwrap().as_ref()).unwrap());
                 Ok(())
             }),
         );
