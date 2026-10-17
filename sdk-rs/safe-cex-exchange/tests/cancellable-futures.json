@@ -845,7 +845,7 @@
         "await",
         "poll-fn"
       ],
-      "producer_sha256": "7979e18405850b52c9636006bb0481ac5c2dc524c412b40478333c33151b364f",
+      "producer_sha256": "4c95769d169248e81cc09c2ff483173c37af9ccd3608e1ce1c1870acf03f757f",
       "classification": "guarded",
       "reason": "Invocation registers eagerly; the pre-pin SignerWaitGuard owns subscription and waker cleanup even for unpolled Drop. Callback throw retains the source settled-but-unresolved state. Caller cancellation remains an explicit owned-continuation choice.",
       "witnesses": [
@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "5a9f1df2a0f8887e8385a451e743aafd70ee2e2a775dee0c5ee6b088cf31f587"
+          "sha256": "b3cec3b700043666bb839ff57d4e4b1dd4a04da6a8fe47dfc979fb830d8d7f75"
         }
       ],
       "guards": [
@@ -1582,7 +1582,7 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "fa3fd6e286eaca9259d9d112ee6f4b0a3117373389a178cd094005e4cc494f46",
+      "producer_sha256": "c9b2141f4dc8a12d9b938e3b91cab5ede17c4d94555c2f98f50c557589a338a4",
       "classification": "no-owned-latch",
       "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced."
     },
@@ -2080,7 +2080,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "5a9f1df2a0f8887e8385a451e743aafd70ee2e2a775dee0c5ee6b088cf31f587"
+          "sha256": "b3cec3b700043666bb839ff57d4e4b1dd4a04da6a8fe47dfc979fb830d8d7f75"
         }
       ],
       "guards": [

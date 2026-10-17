@@ -450,9 +450,9 @@ fn private_fill_reaches_emitter_and_disposal_cancels_refresh_timers() {
     let socket = h.venue().base().get_private_sockets()[0].clone();
     socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(json!({"e":"fill","d":[{"id":"fill-42","orderId":"native-9","orderSide":"SELL","symbol":"BTCUSDT","fillValue":"202.5","fillSize":"2","fillFee":"0.1","realizePnl":"3.5","createdTime":1700000000000.0}]}).to_string())).unwrap();
     assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0][0]["id"], "fill-42");
-    assert_eq!(fills.borrow()[0][0]["side"], "buy");
-    assert_eq!(fills.borrow()[0][0]["price"], 101.25);
+    assert_eq!(fills.borrow()[0]["id"], "fill-42");
+    assert_eq!(fills.borrow()[0]["side"], "buy");
+    assert_eq!(fills.borrow()[0]["price"], 101.25);
     let before = h.http.sent.lock().unwrap().len();
     h.venue().dispose().unwrap();
     h.runtime.advance(300.0);

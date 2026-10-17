@@ -741,3 +741,7 @@ fn chain_value(rt: &Rc<dyn ExchangeRuntime>, p: Js, outcome: Result<Js, Thrown>)
         }),
     ))
 }
+
+#[cfg(test)]
+#[path = "builtin_iterator_contract_tests.rs"]
+mod accepted_contract_tests;

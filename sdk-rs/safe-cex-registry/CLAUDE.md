@@ -103,6 +103,12 @@ and BinanceSpotExchange (signed ws-api user-data subscription) on the native hos
 The native JSON account surface forwards journal reads (`fetchHistoricalPositions`)
 to the venue's declared fold/reported path, preserving account and time bounds.
 It must not inherit a TS wrapper's default rejection for a supported venue method.
+Client-order reconciliation likewise dispatches `findOrderByClientOrderId` through
+the venue override, preserving `{found, order}` / `{found, definitive}`. Worker
+order removal accepts `{id}` objects; socket logs and active ticker selection use
+the shared BaseExchange methods. `tests/native_account_methods.rs` exercises the
+public JSON entrypoints on real native registry accounts over loopback HTTP;
+the FFI crate's Node tests cover the same calls through the actual napi addon.
 
 GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
 terminal HTTP host and the common public-data provider. Its HTTP clients receive
