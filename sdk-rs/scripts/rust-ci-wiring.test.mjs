@@ -641,8 +641,8 @@ function auditRunner(source) {
  assert.throws(()=>probeRunner(source,expectedOracles.length), /native SDK boundary oracle failed/);
  assert.deepEqual(calls.at(-2),{command:'git',args:['diff','--exit-code','--','sdk-rs/safe-cex-crypto/tests/fixtures/*.json']});
  assert.throws(()=>probeRunner(source,expectedOracles.length+1), /fixture regeneration drift/);
- assert.deepEqual(calls.at(-1),{command:'cargo',args:['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--jobs','1']});
- assert.throws(()=>probeRunner(source,expectedOracles.length+2), /native Stark domain field identity supplement failed/);
+ assert.deepEqual(calls.at(-1),{command:'cargo',args:['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--test','live_poseidon_types','--jobs','1','--','--include-ignored']}, 'native identity and ignored Poseidon tests must execute');
+ assert.throws(()=>probeRunner(source,expectedOracles.length+2), /native cryptographic identity supplements failed/);
 }
 test('all seven oracle families execute and propagate every failure',()=>auditRunner(oracleRunner));
 test('removing independent Lighter venue oracle is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("  ['../../scripts/check-independent-lighter.cjs'],\n",'')),/required/));
@@ -657,7 +657,17 @@ test('masking child oracle failures is rejected',()=>assert.throws(()=>auditRunn
 test('removing native SDK oracle setup is rejected',()=>assert.throws(()=>audit(workflow.replace(/      - name: Prepare pinned zkLink native oracle\n[\s\S]*?(?=      - name:)/,'')),/missing Prepare pinned/));
 test('masking native SDK oracle failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(native.status,0,'native SDK boundary oracle failed');",'')),/Missing expected exception/));
 test('removing Stark identity SDK oracle is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("  ['starknet/domain-field-identities.cjs'],\n",'')),/required/));
-test('masking native Stark identity failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(identity.status,0,'native Stark domain field identity supplement failed');",'')),/Missing expected exception/));
+test('masking native identity failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(identity.status,0,'native cryptographic identity supplements failed');",'')),/Missing expected exception/));
+test('removing ignored Poseidon record target is rejected',()=>{
+ const changed=oracleRunner.replace(",'--test','live_poseidon_types'",'');
+ assert.notEqual(changed,oracleRunner,'Poseidon target mutation must apply');
+ assert.throws(()=>auditRunner(changed),/native identity and ignored Poseidon tests must execute/);
+});
+test('omitting include-ignored for Poseidon records is rejected',()=>{
+ const changed=oracleRunner.replace(",'--','--include-ignored'",'');
+ assert.notEqual(changed,oracleRunner,'include-ignored mutation must apply');
+ assert.throws(()=>auditRunner(changed),/native identity and ignored Poseidon tests must execute/);
+});
 
 }
 
