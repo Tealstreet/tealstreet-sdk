@@ -246,3 +246,7 @@ installed retry eligibility, rather than inventing a blanket TLS retry refusal.
 Other InvalidCertificate categories use CERT_REJECTED to retain
 the certificate refusal category; rustls UnknownIssuer cannot identify every
 OpenSSL self-signed/chain/leaf label, so exact label equivalence is unclaimed.
+
+Bybit signature and network retries run through its constructed venue factory and
+the shared signature_rejection module. The obsolete retry.rs compatibility
+engine and the tests that only exercised it have been removed.
