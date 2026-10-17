@@ -551,7 +551,7 @@
         "where_predicates": []
       }
     },
-    "evidence": "safe-cex-crypto/src/lib.rs owner-local decoder boundary classification.",
+    "evidence": "Shared Node Buffer decoder used by Kraken WS and the Polymarket ethers host binding.",
     "category": "decoder",
     "call": "serde_json::json!($type($value.as_str().expect(\"base64 witness\")))",
     "cases": [

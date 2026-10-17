@@ -5,8 +5,10 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{Error, Value, value::RawValue};
 use std::fmt;
 const RAW_TOKEN: &str = "$serde_json::private::RawValue";
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RetainedJsonInput {
+    /// Native JavaScript undefined; never constructed from JSON input.
+    Undefined,
     Null,
     Bool(bool),
     Text(String),
@@ -207,6 +209,9 @@ impl<'de> Visitor<'de> for BufferVisitor {
 
 fn into_value(input: RetainedJsonInput) -> Result<Value, serde_json::Error> {
     Ok(match input {
+        RetainedJsonInput::Undefined => {
+            return Err(de::Error::custom("undefined has no standalone JSON value"));
+        }
         RetainedJsonInput::Null => Value::Null,
         RetainedJsonInput::Bool(value) => Value::Bool(value),
         RetainedJsonInput::Text(value) => Value::String(value),
@@ -227,12 +232,19 @@ fn into_value(input: RetainedJsonInput) -> Result<Value, serde_json::Error> {
         RetainedJsonInput::Array(values) => Value::Array(
             values
                 .into_iter()
-                .map(into_value)
+                .map(|value| {
+                    if matches!(value, RetainedJsonInput::Undefined) {
+                        Ok(Value::Null)
+                    } else {
+                        into_value(value)
+                    }
+                })
                 .collect::<Result<_, _>>()?,
         ),
         RetainedJsonInput::Object(values) => Value::Object(
             values
                 .into_iter()
+                .filter(|(_, value)| !matches!(value, RetainedJsonInput::Undefined))
                 .map(|(key, value)| Ok((key, into_value(value)?)))
                 .collect::<Result<_, serde_json::Error>>()?,
         ),

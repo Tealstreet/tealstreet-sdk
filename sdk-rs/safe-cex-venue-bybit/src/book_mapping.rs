@@ -1,8 +1,4 @@
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Book mapper awaits subscription lifecycle")
-)]
-//! Orderbook frame state; sending and resubscribe timer ownership remain pending.
+//! Shared book snapshot/delta state used by the public socket subscriptions.
 use crate::{
     api::truthy,
     exchange_state::{number, parse_float},
@@ -64,20 +60,22 @@ impl BookState {
                 if !truthy(rows) {
                     continue;
                 }
-                // The exchange wire uses arrays. Objects without length have no
-                // iterations in JS; array-like custom objects remain unclaimed.
-                let Some(rows) = rows.as_array() else {
-                    if rows.get("length").is_some() || rows.is_string() {
-                        return Err("Bybit book mapping requires array levels".into());
-                    }
-                    continue;
+                let length = match rows {
+                    Value::Array(values) => values.len() as f64,
+                    Value::String(value) => value.encode_utf16().count() as f64,
+                    _ => number(rows.get("length"))?,
                 };
-                for row in rows {
+                let mut index = 0;
+                while (index as f64) < length {
+                    let row = indexed(rows, index).ok_or_else(|| {
+                        "Cannot read properties of undefined (reading '0')".to_owned()
+                    })?;
+                    index += 1;
                     if row.is_null() {
                         return Err("Cannot read properties of null (reading '0')".into());
                     }
-                    let price = parse_float(indexed(row, 0).as_ref())?;
-                    let amount = parse_float(indexed(row, 1).as_ref())?;
+                    let price = parse_float(indexed(&row, 0).as_ref())?;
+                    let amount = parse_float(indexed(&row, 1).as_ref())?;
                     if snapshot {
                         let levels = if bids {
                             &mut self.book.bids

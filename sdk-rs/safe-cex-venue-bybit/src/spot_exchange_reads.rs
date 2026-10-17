@@ -289,6 +289,17 @@ pub async fn fetch_ohlcv<H: SpotExchangeHost>(
     r: &H::Value,
     opts: H::Value,
 ) -> Result<H::Value, H::Error> {
+    fetch_ohlcv_for_category(h, r, opts, |_| Ok(h.literal("spot")), true, |_, _| Ok(())).await
+}
+
+pub(crate) async fn fetch_ohlcv_for_category<H: SpotExchangeHost>(
+    h: &H,
+    r: &H::Value,
+    opts: H::Value,
+    category: impl FnOnce(&H::Value) -> Result<H::Value, H::Error>,
+    optional_mapping: bool,
+    validate_response: impl FnOnce(&H::Value, &H::Value) -> Result<(), H::Error>,
+) -> Result<H::Value, H::Error> {
     let min = h.select(p(h, &h.global(), "Math")?, "min")?;
     let limit = h.apply(
         min,
@@ -319,7 +330,7 @@ pub async fn fetch_ohlcv<H: SpotExchangeHost>(
         )?
     };
     let params = h.object(vec![
-        ("category", h.literal("spot")),
+        ("category", category(&opts)?),
         ("symbol", p(h, &opts, "symbol")?),
         ("start", call!(h, start, "valueOf", vec![])),
         ("end", call!(h, end, "valueOf", vec![])),
@@ -332,13 +343,14 @@ pub async fn fetch_ohlcv<H: SpotExchangeHost>(
         .wait(h.apply(get, vec![e, h.object(vec![("params", params)])])?)
         .await?;
     let data = p(h, &response, "data")?;
+    validate_response(&response, &data)?;
     let order_by = h.select(h.global(), "orderBy")?;
     let list = h.optional(&h.optional(&data, "result")?, "list")?;
-    let candles = if nullish(h, &list)? {
+    let candles = if optional_mapping && nullish(h, &list)? {
         h.undefined()
     } else {
         let map = p(h, &list, "map")?;
-        if nullish(h, &map)? {
+        if optional_mapping && nullish(h, &map)? {
             h.undefined()
         } else {
             let selected = h.intrinsic("capturedMember", vec![list, map])?;

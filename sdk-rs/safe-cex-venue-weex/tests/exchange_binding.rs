@@ -53,7 +53,7 @@ fn script(http: &Http) {
         ),
         (
             "BALANCE",
-            json!([{"asset":"USDT","equity":"150","available":"120","unrealizedPnl":"3"}]),
+            json!([{"asset":"USDT","balance":"150","availableBalance":"120","unrealizePnl":"3"}]),
         ),
         (
             "POSITIONS",
@@ -250,6 +250,41 @@ fn change_position_mode_e2e() {
     assert!(h.store.options().is_hedged);
 }
 #[test]
+fn rejected_order_leg_keeps_successful_orders_without_error_event() {
+    let h = harness(options(), |http| {
+        http.route(
+            "GET",
+            endpoint("OPEN_ALGO_ORDERS"),
+            400,
+            json!({"msg":"algo endpoint unavailable"}),
+        );
+        script(http);
+    });
+    seed(&h);
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, value: &Value| {
+            captured.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let orders = h
+        .drive(h.venue().fetch_orders(None))
+        .expect("allSettled retains the successful order leg");
+    assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), 1);
+    assert_eq!(h.http.calls(endpoint("OPEN_ALGO_ORDERS")).len(), 1);
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, "native-9");
+    assert!(
+        errors.borrow().is_empty(),
+        "source allSettled must swallow rejected legs, emitted {:?}",
+        errors.borrow()
+    );
+}
+
+#[test]
 fn place_order_e2e() {
     let h = setup();
     let ids = h
@@ -263,6 +298,152 @@ fn place_order_e2e() {
     assert_eq!(body(&calls[0])["symbol"], "BTCUSDT");
     assert_eq!(body(&calls[0])["newClientOrderId"], "synthetic-client-1");
 }
+#[test]
+fn accepted_post_only_placement_updates_the_real_store() {
+    for has_stored_order in [false, true] {
+        let h = harness(options(), |http| {
+            // Queue the accepted response before the generic fallback fixture.
+            http.ok("POST", endpoint("ORDER"), json!({"orderId":"1008"}));
+            script(http);
+        });
+        seed(&h);
+        if has_stored_order {
+            let mut existing = order();
+            existing.id = "1008".into();
+            existing.time_in_force = ModelField::Value(OrderTimeInForce::GoodTillCancel);
+            Store::update(
+                h.store.as_ref(),
+                serde_json::from_value(json!({"orders":[existing]})).unwrap(),
+                false,
+            )
+            .unwrap();
+        }
+        let mut opts = place();
+        opts.time_in_force = Some(OrderTimeInForce::PostOnly);
+        let outcome = h.drive(Box::pin(
+            h.venue().base().place_order(h.exchange.as_ref(), opts),
+        ));
+        let calls = h.http.calls(endpoint("ORDER"));
+        assert_eq!(
+            calls.len(),
+            1,
+            "venue accepted the actual placement before local Store update"
+        );
+        assert_eq!(body(&calls[0])["timeInForce"], "POST_ONLY");
+        let ids = outcome.expect("accepted PostOnly placement must resolve after Store update");
+        assert_eq!(ids, ["1008"]);
+        let stored = h.store.orders();
+        assert_eq!(stored.len(), usize::from(has_stored_order));
+        if has_stored_order {
+            assert_eq!(
+                stored[0].time_in_force,
+                ModelField::Value(OrderTimeInForce::PostOnly)
+            );
+            assert_eq!(stored[0].filled, 0.25, "only patch the source's TIF field");
+        }
+    }
+}
+
+#[test]
+fn accepted_post_only_batch_updates_only_the_matching_store_row() {
+    let h = harness(options(), |http| {
+        http.ok(
+            "POST",
+            endpoint("BATCH_ORDERS"),
+            json!([
+                {"orderId":"1009","clientOrderId":"synthetic-client-2","success":true},
+                {"orderId":"1008","clientOrderId":"synthetic-client-1","success":true}
+            ]),
+        );
+        script(http);
+    });
+    seed(&h);
+    let rows: Vec<_> = ["1008", "1009"]
+        .into_iter()
+        .map(|id| {
+            let mut row = order();
+            row.id = id.into();
+            row.time_in_force = ModelField::Value(OrderTimeInForce::GoodTillCancel);
+            row
+        })
+        .collect();
+    Store::update(
+        h.store.as_ref(),
+        serde_json::from_value(json!({"orders":rows})).unwrap(),
+        false,
+    )
+    .unwrap();
+    let mut post_only = place();
+    post_only.time_in_force = Some(OrderTimeInForce::PostOnly);
+    let mut regular = place();
+    regular.client_order_id = Some("synthetic-client-2".into());
+    let outcome = h.drive(Box::pin(
+        h.venue()
+            .base()
+            .place_orders(h.exchange.as_ref(), vec![post_only, regular]),
+    ));
+    let calls = h.http.calls(endpoint("BATCH_ORDERS"));
+    assert_eq!(calls.len(), 1, "venue accepted both actual batch rows");
+    assert_eq!(body(&calls[0])["batchOrders"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        outcome.expect("accepted PostOnly batch must resolve after Store update"),
+        ["1008", "1009"]
+    );
+    let stored = h.store.orders();
+    assert_eq!(stored.len(), 2);
+    assert_eq!(
+        stored
+            .iter()
+            .find(|o| o.id == "1008")
+            .unwrap()
+            .time_in_force,
+        ModelField::Value(OrderTimeInForce::PostOnly)
+    );
+    assert_eq!(
+        stored
+            .iter()
+            .find(|o| o.id == "1009")
+            .unwrap()
+            .time_in_force,
+        ModelField::Value(OrderTimeInForce::GoodTillCancel)
+    );
+}
+
+#[test]
+fn accepted_tpsl_amendment_updates_the_real_store_price() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let h = setup();
+        h.http.ok(
+            "POST",
+            endpoint("MODIFY_TP_SL_ORDER"),
+            json!({"success":true}),
+        );
+        let mut protective = order();
+        protective.r#type = ModelField::Value(kind);
+        Store::update(
+            h.store.as_ref(),
+            serde_json::from_value(json!({"orders":[protective.clone()]})).unwrap(),
+            false,
+        )
+        .unwrap();
+        let update =
+            serde_json::from_value(json!({"order":protective,"update":{"price":103.5}})).unwrap();
+        let outcome = h.drive(h.venue().update_order(update));
+        let calls = h.http.calls(endpoint("MODIFY_TP_SL_ORDER"));
+        assert_eq!(calls.len(), 1, "venue accepted the actual TP/SL amendment");
+        assert_eq!(body(&calls[0])["triggerPrice"], "103.5");
+        assert_eq!(
+            outcome.expect("accepted TP/SL amendment must resolve after Store update"),
+            ["native-9"]
+        );
+        let stored = h.store.orders();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].price, ModelField::Value(103.5));
+        assert_eq!(stored[0].amount, 2.0);
+        assert_eq!(stored[0].r#type, ModelField::Value(kind));
+    }
+}
+
 #[test]
 fn cancel_orders_e2e() {
     let h = setup();
@@ -344,8 +525,10 @@ fn private_auth_headers_are_fresh_on_each_core_owned_dial() {
     let socket = h.venue().base().get_private_sockets()[0].clone();
     for delta in [0.0, 17.0] {
         h.runtime.advance(delta);
+        let before = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         socket.connect_and_subscribe(delta > 0.0).unwrap();
         h.runtime.pump();
+        let after = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let dials = h.runtime.dials.borrow();
         let (_, options) = dials.last().unwrap();
         assert!(options.headers_required);
@@ -354,7 +537,8 @@ fn private_auth_headers_are_fresh_on_each_core_owned_dial() {
         };
         assert_eq!(headers.get("ACCESS-KEY").unwrap(), "synthetic-key");
         let timestamp = headers.get("ACCESS-TIMESTAMP").unwrap();
-        assert_eq!(timestamp.parse::<f64>().unwrap(), h.runtime.now.get());
+        let parsed = timestamp.parse::<f64>().unwrap();
+        assert!(parsed >= before && parsed <= after);
         let mut mac = Hmac::<sha2::Sha256>::new_from_slice(b"synthetic-secret").unwrap();
         mac.update(format!("{timestamp}/v3/ws/private").as_bytes());
         assert_eq!(
@@ -550,4 +734,154 @@ fn income_page_and_range_use_bound_post_normalizer_and_shared_pager() {
     assert!(calls.len() >= 2);
     assert_eq!(body(&calls[1])["startTime"], 1700000000000.0);
     assert_eq!(body(&calls[1])["incomeType"], "FUNDING_FEE");
+}
+
+#[test]
+fn trait_fetch_leverage_uses_cross_config_instead_of_market_maximum() {
+    let h = setup();
+    let actual = h
+        .drive(h.venue().fetch_leverage_for_symbol("BTCUSDT".into()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        actual.buy_leverage, 20.0,
+        "user leverage comes from the symbol config"
+    );
+    assert_eq!(actual.sell_leverage, 20.0);
+    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert_eq!(h.http.calls(endpoint("SYMBOL_CONFIG")).len(), 1);
+    assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
+}
+
+#[test]
+fn trait_fetch_leverage_retains_distinct_isolated_sides() {
+    let h = harness(options(), |http| {
+        http.ok("GET", endpoint("SYMBOL_CONFIG"), json!([{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedMode":"SEPARATED","crossLeverage":"20","isolatedLongLeverage":"11","isolatedShortLeverage":"13"}]));
+        http.ok(
+            "GET",
+            endpoint("EXCHANGE_INFO"),
+            json!({"symbols":[raw_market()]}),
+        );
+    });
+    seed(&h);
+    let actual = h
+        .drive(h.venue().fetch_leverage_for_symbol("BTCUSDT".into()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(actual.buy_leverage, 11.0);
+    assert_eq!(actual.sell_leverage, 13.0);
+    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
+}
+
+fn generated_order_id(order_type: OrderType, endpoint_name: &str, key: &str) {
+    let h = setup();
+    *h.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
+    let mut opts = place();
+    opts.client_order_id = None;
+    opts.r#type = order_type;
+    if opts.r#type == OrderType::Conditional {
+        opts.trigger_price = Some(100.0);
+    }
+    h.http.ok(
+        "POST",
+        endpoint(endpoint_name),
+        json!({"orderId":"placed-8"}),
+    );
+    let ids = h
+        .drive(Box::pin(
+            h.venue().base().place_order(h.exchange.as_ref(), opts),
+        ))
+        .unwrap();
+    assert_eq!(ids, ["placed-8"]);
+    let calls = h.http.calls(endpoint(endpoint_name));
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        body(&calls[0])[key],
+        "tsAbcDefGhiJklM",
+        "production uuid must strip both nanoid separators"
+    );
+    assert!(!calls[0].headers["ACCESS-SIGN"].is_empty());
+}
+#[test]
+fn generated_regular_order_id_strips_nanoid_separators() {
+    generated_order_id(OrderType::Limit, "ORDER", "newClientOrderId");
+}
+#[test]
+fn generated_conditional_order_id_strips_nanoid_separators() {
+    generated_order_id(OrderType::Conditional, "ALGO_ORDER", "clientAlgoId");
+}
+#[test]
+fn generated_protective_order_id_strips_nanoid_separators() {
+    generated_order_id(OrderType::StopLoss, "PLACE_TP_SL_ORDER", "clientAlgoId");
+}
+#[test]
+fn generated_minted_order_id_strips_nanoid_separators() {
+    let h = setup();
+    *h.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
+    assert_eq!(
+        h.venue().base().mint_client_order_id(place()).as_deref(),
+        Some("tsAbcDefGhiJklM")
+    );
+}
+
+#[test]
+fn private_order_frame_commits_the_normalized_order() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let mut row = raw_order();
+    row["price"] = json!("107.5");
+    row["executedQty"] = json!("0.75");
+    h.venue().base().get_private_sockets()[0]
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"orders","d":[row]}).to_string(),
+        ))
+        .unwrap();
+    let orders = h.store.orders();
+    let order = orders.iter().find(|o| o.id == "native-9").unwrap();
+    assert_eq!(order.price, 107.5);
+    assert_eq!(order.filled, 0.75);
+    assert_eq!(order.remaining, 1.25);
+}
+#[test]
+fn private_position_frame_commits_the_normalized_position() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    h.venue().base().get_private_sockets()[0]
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(json!({"e":"positions","d":[{"symbol":"BTCUSDT","positionSide":"LONG","size":"7","openValue":"714","leverage":"14","marginType":"CROSS","updatedTime":1700000000000.0}]}).to_string())).unwrap();
+    let positions = h.store.positions();
+    let position = positions
+        .iter()
+        .find(|p| p.symbol == "BTCUSDT" && p.side == PositionSide::Long)
+        .unwrap();
+    assert_eq!(position.contracts, 7.0);
+    assert_eq!(position.entry_price, 102.0);
+    assert_eq!(position.leverage, 14.0);
+}
+#[test]
+fn private_account_frame_refreshes_balance_from_rest() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    Store::update(
+        h.store.as_ref(),
+        serde_json::from_value(json!({"balance":{"total":1,"free":1,"used":0,"upnl":0}})).unwrap(),
+        false,
+    )
+    .unwrap();
+    let before = h.http.calls(endpoint("BALANCE")).len();
+    h.venue().base().get_private_sockets()[0]
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"account","d":[{"equity":"999"}]}).to_string(),
+        ))
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(250.0);
+    h.runtime.pump();
+    assert_eq!(h.http.calls(endpoint("BALANCE")).len(), before + 1);
+    assert_eq!(h.store.balance().total, 150.0);
+    assert_eq!(h.store.balance().free, 120.0);
+    assert_eq!(h.store.balance().upnl, 3.0);
 }

@@ -695,10 +695,13 @@ decision faithfully — `is_truthy`, `is_nullish` and presence all answer exactl
 as JavaScript does, so every `||`, `??` and `!` guard takes the same path. What
 it cannot do is put the hit into the field the mapper returns.
 
-`safe-cex-types::Order` declares `type: OrderType` and `side: OrderSide`;
-`Position` declares `side`; `DisplayedPosition` declares typed ticker and market
-fields. Those are closed enums, consumed by the store, the worker, the UI and
-the OEMS layer. In TypeScript the same field holds an inherited **function**.
+`safe-cex-types::Order` carries type/status/side as `ModelField` values;
+`Position.side` uses the same carrier. Absent properties and own undefined are
+represented directly, and JSON omits both. This boundary does not justify
+refusing an undefined enum lookup or a missing Order.price. The typed value
+variants remain closed enums. `DisplayedPosition` declares typed ticker and
+market fields. Those typed values are consumed by the store, worker, UI and
+OEMS layer. In TypeScript the same field holds an inherited **function**.
 
 So a mapper can take the right branch and still be unable to return what
 TypeScript returns. Measured independently on woo (`mapLimitOrder`,
@@ -1573,14 +1576,15 @@ production JavaScript/transport/Store assembly.
 
 ### WEEX reporting and continuation ownership
 
-`fetchOrders`, the three private refresh callbacks and public depth-gap recovery
-choose observable rejection reporting where the maintained source discards
-failures. Silent partial orders or stale private/book state would hide missing
-updates from native callers. The added reporter call, and any failure of a
-fallible reporter, are observable costs; source empty catches are not copied.
+`fetchOrders` discards rejected normal/algo legs without reporting, matching the
+maintained Promise.allSettled body. Its constructed HTTP regression observes
+successful orders and zero error events after an algo endpoint rejection.
+The three private refresh callbacks and public depth-gap recovery still report
+failures discarded by source; those separate porting findings remain open.
 
-The returned `fetchOrders` and refresh futures own their aggregation/update/report
-continuations. Dropping one can omit those outcomes, even when host-started
+The returned `fetchOrders` future owns its aggregation/dedup continuation;
+refresh futures own update/report continuations. Dropping one can omit those
+outcomes, even when host-started
 requests survive. This bounds abandoned native work instead of requiring every
 borrowed host context to survive an unobserved Promise. Public snapshot observers
 are different: `observe_snapshot` must retain its callbacks and receiver until

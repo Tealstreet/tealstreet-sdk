@@ -355,3 +355,40 @@ remoteSigner is available. `tests/hosted_signer.rs` compares six live source gat
 and both native family names with an advertised hosted capability, preserving
 the missing-key error before HTTP or signer calls. This evidence covers that
 conditional source limitation, not hosted transaction signing.
+
+
+Native stream, candle, fills and private snapshot hooks now invoke the existing
+Lighter class members. Listener cleanup calls the original closure once; it
+must remove the parser or polling timer. The snapshot ignores the base retry
+argument because the source helper owns one attempt and its error handling.
+Historical fills retain the source public-only refusal, authenticated reads,
+filtering and complete collection; they no longer hit the empty trait default.
+`real_trait_` regressions in exchange_binding use the production constructor,
+actual signed HTTP and socket events. `scripts/trait-binding-controls.py` requires
+compiled named failures and exact restoration, including empty/subset REST
+results and both listener cleanup paths. Run controls without another Cargo
+process or concurrent production edits in this worktree.
+
+Measured stream/history checkpoint: the six regressions fail on the original
+trait defaults and pass after binding; the complete constructed target passes
+23 tests. Six independent compiled production faults fail named tests, and each
+exact restoration passes all six regressions. Venue-local parity passes 695
+manifest rows and 1,404 public Rust items with full workspace target resolution.
+
+Strict host all-target and WASM library lint pass. The override contract passes
+8 tests including the live TypeScript inventory, and the production binding
+inventory passes 25 tests. After the shared ModelField and library-pin merges,
+all 23 constructed tests and the all-features cancellation inventory (6 tests,
+explicit export ignored) pass.
+
+Private feed/stream for-of and spread consume the shared GetIterator protocol,
+including iterator objects and live collection mutations. A for-of body throw
+runs IteratorClose while preserving its original cause; next/done/value failures
+escape without closing. Registered private-class regressions cover live Set,
+Map-values and array traces plus these four abrupt-completion boundaries.
+This slice is scoped to binding/ws_private/slots.rs, rather than every venue host.
+The supplementary close-spread regression substitutes an iterator-valued helper
+result and restores the real DefaultStore mutator. On the master slot body the
+position remains open; the repaired spread delivers the close pair, clears margin
+through own undefined, and increments the position revision once. It exercises
+latent iterable admission; maintained wire payloads still provide arrays.

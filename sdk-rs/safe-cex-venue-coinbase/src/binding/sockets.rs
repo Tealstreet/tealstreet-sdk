@@ -208,7 +208,8 @@ impl SocketHost {
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info = Some(to_json(&to_js(&order.info)).expect("parsed private frame"));
+                fields.info =
+                    (Some(to_json(&to_js(&order.info)).expect("parsed private frame"))).into();
                 fields
             })
             .collect()
@@ -709,7 +710,7 @@ impl CoinbasePrivateClassHost for SocketHost {
         self.log_console("error", vec![Js::str(message), Js::str(value)])
     }
     fn private_order_now_ms(&self) -> Result<f64, PortfolioFailure> {
-        Ok(self.host.now())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn private_orders_loaded(&self) -> Result<Frame, PortfolioFailure> {
         value::from_js(&from_typed(&*self.host.shared.store.loaded()).map_err(from_thrown)?)?

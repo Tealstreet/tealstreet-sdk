@@ -2817,7 +2817,7 @@ const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
     (
         "Futures",
         "fetch_positions",
-        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":0.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0,"marginSize":0.0,"info":{"synthetic":true,"symbolConfig":null}}]"#,
+        r#"ok:[{"id":"BTCUSDT","symbol":"BTCUSDT","side":"long","entryPrice":10.0,"notional":10.0,"leverage":5.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.5,"contracts":1.0,"liquidationPrice":0.0,"marginSize":2.0,"info":{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"1","notional":"10","entryPrice":"10","markPrice":"10","unRealizedProfit":"0.5","liquidationPrice":"0","leverage":"5","isolatedMargin":"0","marginType":"cross","updateTime":1.0}},{"id":"ETHUSDC","symbol":"ETHUSDC","side":"long","entryPrice":0.0,"notional":0.0,"leverage":0.0,"marginType":"cross","positionMode":"oneway","unrealizedPnl":0.0,"contracts":0.0,"liquidationPrice":0.0,"marginSize":0.0,"info":{"synthetic":true}}]"#,
         &["/fapi/v3/positionRisk", "/fapi/v1/symbolConfig"],
     ),
     (
@@ -3316,7 +3316,7 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
     }
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let owner = production_native_owner(venue);
-        let mint_opts = serde_json::from_value(
+        let mint_opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
             json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":90}),
         )
         .unwrap();
@@ -3498,7 +3498,12 @@ fn production_native_private_orders_frames_update_the_real_store() {
         assert_eq!(order.r#type, OrderType::Limit);
         assert_eq!(order.side, OrderSide::Buy);
         assert_eq!(
-            (order.price, order.amount, order.filled, order.remaining),
+            (
+                order.price.to_number(),
+                order.amount,
+                order.filled,
+                order.remaining
+            ),
             (91.2, 3.0, 0.0, 3.0)
         );
         assert!(fills.borrow().is_empty(), "NEW must emit no fill");
@@ -3625,6 +3630,214 @@ fn production_native_private_balance_frames_follow_each_source_family() {
     }
 }
 
+#[cfg(feature = "native")]
+fn native_stop_limit_snapshot_case(venue: Venue) {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
+    use std::sync::{Arc, Mutex};
+    struct OpenOrders {
+        calls: Mutex<Vec<String>>,
+        unmapped: bool,
+    }
+    impl RestAdapter for OpenOrders {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            let path = request.url.split('?').next().unwrap().to_owned();
+            self.calls.lock().unwrap().push(path.clone());
+            let normal = json!({"orderId":11,"clientOrderId":"regular-11","symbol":"BTCUSDT","type":"LIMIT","side":"BUY","price":"90","origQty":"3","executedQty":"1","reduceOnly":false});
+            let rows = if path.ends_with("/openOrders") && !path.contains("/conditional/") {
+                json!([normal])
+            } else if path.ends_with("/openAlgoOrders") {
+                json!([
+                    {"algoId":22,"symbol":"BTCUSDT","orderType":if self.unmapped {"STOP"}else{"STOP_MARKET"},"side":"SELL","triggerPrice":"80","quantity":"2","reduceOnly":true,"workingType":"MARK_PRICE"},
+                    {"algoId":33,"symbol":"BTCUSDT","orderType":if self.unmapped {"TAKE_PROFIT"}else{"TAKE_PROFIT_MARKET"},"side":"SELL","triggerPrice":"120","quantity":"2","reduceOnly":true,"workingType":"MARK_PRICE"}
+                ])
+            } else if path.ends_with("/conditional/openOrders") {
+                json!([
+                    {"newClientStrategyId":"stop-22","symbol":"BTCUSDT","strategyType":if self.unmapped {"STOP"}else{"STOP_MARKET"},"side":"SELL","price":"80","origQty":"2","executedQty":"0","reduceOnly":true,"workingType":"MARK_PRICE"},
+                    {"newClientStrategyId":"tp-33","symbol":"BTCUSDT","strategyType":if self.unmapped {"TAKE_PROFIT"}else{"TAKE_PROFIT_MARKET"},"side":"SELL","price":"120","origQty":"2","executedQty":"0","reduceOnly":true,"workingType":"MARK_PRICE"}
+                ])
+            } else {
+                panic!("unexpected production request {path}")
+            };
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(serde_json::to_vec(&rows).unwrap()),
+            })))
+        }
+    }
+    for unmapped in [false, true] {
+        // Each phase uses a fresh actual host/client rate window.
+        let construct = || {
+            let runtime = Rc::new(Runtime::default());
+            let adapter = Arc::new(OpenOrders {
+                calls: Mutex::new(vec![]),
+                unmapped,
+            });
+            let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+                runtime.clone(),
+                adapter.clone(),
+                Rc::new(|_, _| panic!("no external provider configured")),
+                None,
+                safe_cex_exchange::native::NativeHttpEvents::default(),
+            );
+            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let owner = ExchangeOwner::new(
+                venue,
+                serde_json::from_value(json!(if venue == Venue::Futures {
+                    "binance"
+                } else {
+                    "binancepm"
+                }))
+                .unwrap(),
+                serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"}))
+                    .unwrap(),
+                store,
+                dependencies,
+            )
+            .unwrap();
+            (runtime, adapter, owner)
+        };
+        let (runtime, adapter, owner) = construct();
+        let mapped = run(
+            &runtime,
+            safe_cex_venue_binance::class_jobs::reaction(owner.invoke(Method::Orders, vec![])),
+        )
+        .unwrap();
+        let raw = mapped.array_values().unwrap();
+        assert_eq!(raw.len(), 3);
+        for row in raw.iter().skip(1) {
+            if unmapped {
+                assert!(
+                    row.has_own("type"),
+                    "native mapper keeps own undefined, not absence"
+                );
+                assert!(matches!(row.read("type").unwrap(), EventValue::Undefined));
+            }
+        }
+        assert_eq!(adapter.calls.lock().unwrap().len(), 2);
+        let (runtime, adapter, owner) = construct();
+        let exchange = sdk_class(venue, owner.clone());
+        let orders = run(&runtime, exchange.fetch_orders(None))
+            .expect("unmapped STOP/TAKE_PROFIT must not discard the production snapshot");
+        assert_eq!(
+            orders.len(),
+            3,
+            "retain normal plus both unmapped stop-limit rows"
+        );
+        assert_eq!(
+            (
+                orders[0].price.to_number(),
+                orders[0].amount,
+                orders[0].filled,
+                orders[0].remaining
+            ),
+            (90.0, 3.0, 1.0, 2.0)
+        );
+        for (index, expected_price) in [(1, 80.0), (2, 120.0)] {
+            assert_eq!(orders[index].symbol, "BTCUSDT");
+            assert_eq!(
+                (
+                    orders[index].price.to_number(),
+                    orders[index].amount,
+                    orders[index].filled,
+                    orders[index].remaining
+                ),
+                (expected_price, 2.0, 0.0, 2.0)
+            );
+            // TS table miss is undefined, never an invented stop-market type.
+            let wire = serde_json::to_value(&orders[index]).unwrap();
+            if unmapped {
+                assert!(matches!(
+                    orders[index].r#type,
+                    safe_cex_types::ModelField::Undefined
+                ));
+                assert!(wire.get("type").is_none());
+            } else {
+                assert_eq!(
+                    wire["type"],
+                    if index == 1 {
+                        "stop_market"
+                    } else {
+                        "take_profit_market"
+                    }
+                );
+            }
+        }
+        assert_eq!(adapter.calls.lock().unwrap().len(), 2);
+        let (runtime, adapter, owner) = construct();
+        let exchange = sdk_class(venue, owner.clone());
+        run(&runtime, exchange.fetch_and_set_private_snapshot(1)).unwrap();
+        assert!(
+            owner.base.store.loaded().orders,
+            "real binding snapshot sets loaded.orders"
+        );
+        assert_eq!(owner.base.store.orders().len(), 3);
+        assert_eq!(adapter.calls.lock().unwrap().len(), 2);
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_stop_limit_snapshot_keeps_rows_and_loads() {
+    native_stop_limit_snapshot_case(Venue::Futures);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_stop_limit_snapshot_keeps_rows_and_loads() {
+    native_stop_limit_snapshot_case(Venue::PM);
+}
+
+#[cfg(feature = "native")]
+fn native_stop_limit_frame_case(venue: Venue) {
+    let owner = production_native_owner(venue);
+    let fills = native_fill_events(&owner);
+    for (index, kind) in ["STOP", "TAKE_PROFIT"].into_iter().enumerate() {
+        let event = if venue == Venue::Futures {
+            json!({"e":"ALGO_UPDATE","o":{"aid":22+index,"caid":"native-stop","o":kind,"s":"BTCUSDT","S":"SELL","X":"NEW","tp":"80","q":"2","R":true,"wt":"MARK_PRICE"}})
+        } else {
+            json!({"e":"CONDITIONAL_ORDER_TRADE_UPDATE","so":{"c":format!("native-stop-{index}"),"st":kind,"os":"NEW","s":"BTCUSDT","S":"SELL","p":"0","sp":"80","q":"2","z":"0","R":true,"wt":"MARK_PRICE"}})
+        };
+        owner
+            .private
+            .on_message(string(event.to_string()))
+            .expect("source-accepted stop-limit private frame must reach the real Store");
+    }
+    owner
+        .private
+        .on_message(string(native_order_frame(venue, false).to_string()))
+        .unwrap();
+    let orders = owner.base.store.orders();
+    assert_eq!(
+        orders.len(),
+        3,
+        "both stop-limit rows and subsequent normal frame survive"
+    );
+    for row in orders.iter().take(2) {
+        assert_eq!(
+            (row.price.to_number(), row.amount, row.filled, row.remaining),
+            (80.0, 2.0, 0.0, 2.0)
+        );
+        assert!(matches!(row.r#type, safe_cex_types::ModelField::Undefined));
+        assert!(serde_json::to_value(row).unwrap().get("type").is_none());
+    }
+    assert_eq!(orders[2].symbol, "BTCUSDT");
+    assert!(fills.borrow().is_empty());
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_stop_limit_private_frames_keep_rows() {
+    native_stop_limit_frame_case(Venue::Futures);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_stop_limit_private_frames_keep_rows() {
+    native_stop_limit_frame_case(Venue::PM);
+}
+
 #[test]
 #[cfg(feature = "native")]
 fn production_native_private_post_only_rejection_keeps_the_rejection_reason() {
@@ -3653,4 +3866,213 @@ fn production_native_private_post_only_rejection_keeps_the_rejection_reason() {
         "production rejection classifier updates the real Store extra"
     );
     assert!(fills.borrow().is_empty(), "cancel rejection emits no fill");
+}
+
+#[cfg(feature = "native")]
+#[derive(Default)]
+struct ProjectionWire(std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>);
+#[cfg(feature = "native")]
+impl safe_cex_transport::RestAdapter for ProjectionWire {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        self.0.lock().unwrap().push(request);
+        Box::pin(async {
+            Ok(safe_cex_transport::RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: safe_cex_transport::RestResponseBody::Encoded(br#"{"ok":true}"#.to_vec()),
+            })
+        })
+    }
+}
+#[cfg(feature = "native")]
+fn projection_host() -> (
+    Rc<Runtime>,
+    Rc<dyn ExchangeImports>,
+    std::sync::Arc<ProjectionWire>,
+) {
+    let runtime = Rc::new(Runtime::default());
+    let wire = std::sync::Arc::new(ProjectionWire::default());
+    let deps = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        wire.clone(),
+        Rc::new(|_, _| panic!("no external provider")),
+        None,
+        Default::default(),
+    );
+    (runtime, deps.imports, wire)
+}
+#[cfg(feature = "native")]
+fn projection_client(imports: &dyn ExchangeImports, kind: Factory) -> EventValue {
+    let options = EventValue::from_json(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    let owner = record([("name", string("binance")), ("options", options.clone())]);
+    imports
+        .factory(Venue::Futures, kind, options, owner)
+        .unwrap()
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_query_bigint_is_rendered_instead_of_dropping_every_parameter() {
+    for method in [HttpMethod::Get, HttpMethod::Delete] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::PublicAPI);
+        let params = record([
+            ("symbol", string("BTCUSDT")),
+            (
+                "orderId",
+                EventValue::BigInt(Rc::new("10".parse().unwrap())),
+            ),
+        ]);
+        let result = run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(params))
+                .unwrap(),
+        )
+        .result;
+        result.expect("BigInt query must be admitted by the real production host");
+        let calls = wire.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].url, "/projection?symbol=BTCUSDT&orderId=10",
+            "real native query must keep all params and stringify BigInt"
+        );
+    }
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_body_bigint_rejects_before_any_transport_call() {
+    for method in [HttpMethod::Post, HttpMethod::Put] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::PublicAPI);
+        let data = record([(
+            "quantity",
+            EventValue::BigInt(Rc::new("10".parse().unwrap())),
+        )]);
+        let error = run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(data))
+                .unwrap(),
+        )
+        .result
+        .expect_err("real native JSON body must reject BigInt before transport");
+        assert_eq!(error.name, "TypeError");
+        assert!(
+            wire.0.lock().unwrap().is_empty(),
+            "serialization refusal must send no empty request"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_signing_observes_bigint_query_and_body_before_serialization() {
+    use std::io::Write;
+    let mut vectors = vec![];
+    let mut queries = vec![];
+    for method in [HttpMethod::Get, HttpMethod::Post] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::API);
+        let payload = record([
+            ("symbol", string("BTCUSDT")),
+            (
+                "orderId",
+                EventValue::BigInt(Rc::new("10".parse().unwrap())),
+            ),
+        ]);
+        run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(payload))
+                .unwrap(),
+        )
+        .result
+        .expect("source signs BigInt as its decimal query spelling");
+        let calls = wire.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert!(
+            calls[0]
+                .url
+                .starts_with("/projection?symbol=BTCUSDT&orderId=10&timestamp="),
+            "real native signer must retain request arguments: {}",
+            calls[0].url
+        );
+        assert!(calls[0].url.contains("&signature="));
+        assert!(
+            calls[0].body.is_none(),
+            "source signer moves data to the query"
+        );
+        let query = calls[0].url.split_once('?').unwrap().1.to_owned();
+        let fields: std::collections::HashMap<_, _> = query
+            .split('&')
+            .map(|pair| pair.split_once('=').unwrap())
+            .collect();
+        let is_get = matches!(method, HttpMethod::Get);
+        let mut config = json!({"method":if is_get {"get"}else{"post"},"url":"/projection"});
+        config[if is_get { "params" } else { "data" }] = json!({"symbol":"BTCUSDT","orderId":"10"});
+        vectors.push(json!({"mode":if is_get {"bigint-query"}else{"bigint-body"},"lossy":true,"config":config,"options":{"key":"fixture-key","secret":"fixture-secret"},"now":fields["timestamp"].parse::<f64>().unwrap(),"window":fields["recvWindow"].parse::<f64>().unwrap()}));
+        queries.push(query);
+    }
+    // One source capture for the complete signed corpus, using actual TS, qs and HMAC.
+    let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+    });
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/signing.mjs"))
+        .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&vectors).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 2, "independent signed BigInt source floor");
+    assert_eq!(queries.len(), 2);
+    for (native, source) in queries.iter().zip(source) {
+        assert_eq!(
+            source["query"].as_str(),
+            Some(native.as_str()),
+            "real signed wire must match actual TS BigInt query/HMAC"
+        );
+    }
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_unsigned_private_body_keeps_json_bigint_refusal() {
+    let (runtime, imports, wire) = projection_host();
+    let options = EventValue::from_json(json!({"key":"","secret":""}));
+    let owner = record([("name", string("binance")), ("options", options.clone())]);
+    let client = imports
+        .factory(Venue::Futures, Factory::API, options, owner)
+        .unwrap();
+    let payload = record([(
+        "quantity",
+        EventValue::BigInt(Rc::new("10".parse().unwrap())),
+    )]);
+    let error = run(
+        &runtime,
+        imports
+            .request(client, HttpMethod::Post, "/projection", Some(payload))
+            .unwrap(),
+    )
+    .result
+    .expect_err("skipped signing must leave original JSON BigInt refusal");
+    assert_eq!(error.name, "TypeError");
+    assert!(wire.0.lock().unwrap().is_empty());
 }

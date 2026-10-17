@@ -202,7 +202,7 @@ impl ChaserHost for Host {
 }
 fn order(id: &str, price: f64) -> Order {
     let mut o:Order=serde_json::from_value(json!({"id":id,"symbol":"BTC","status":"open","type":"limit","side":"buy","price":0,"amount":3,"filled":0,"remaining":3,"reduceOnly":false,"lastUpdate":0})).unwrap();
-    o.price = price;
+    o.price = price.into();
     o
 }
 fn fixture(

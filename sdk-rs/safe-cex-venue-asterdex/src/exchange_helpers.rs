@@ -5,7 +5,7 @@ use safe_cex_num::{JsCoercionError, js_number, js_string, js_truthy, parse_float
 use safe_cex_transport::{RestAdapter, RestRequest};
 use safe_cex_types::{
     Balance, BothPositionSide, Candle, ExchangeAccount, Execution, ExecutionPositionSide,
-    OrderBook, OrderBookOrders, OrderSide, OrderType, PlaceOrderOpts, PositionSide,
+    OrderBook, OrderBookOrders, OrderSide, OrderType, PositionSide,
 };
 use serde_json::{Map, Value};
 
@@ -22,14 +22,18 @@ pub fn is_aster_dex_unknown_order_error(
 }
 
 // ts: AsterDEXExchange.getOrderPositionSide
-pub fn get_order_position_side(opts: &PlaceOrderOpts, is_hedged: bool) -> &'static str {
+pub fn get_order_position_side(
+    opts: impl Into<safe_cex_types::PreparedOrderOpts>,
+    is_hedged: bool,
+) -> &'static str {
+    let opts = opts.into();
     if !is_hedged {
         return "BOTH";
     }
     let mut long = opts.side == OrderSide::Buy;
     if matches!(
-        opts.r#type,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+        opts.r#type.into_value(),
+        Some(OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss)
     ) || opts.reduce_only == Some(true)
     {
         long = !long;
@@ -140,7 +144,11 @@ pub fn is_algo_order(order_type: OrderType, info: Option<&Value>) -> bool {
     matches!(
         order_type,
         OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
-    ) || matches!(
+    ) || is_raw_algo_order(info)
+}
+
+fn is_raw_algo_order(info: Option<&Value>) -> bool {
+    matches!(
         info.and_then(|v| v.get("type")).and_then(Value::as_str),
         Some(
             "STOP" | "STOP_MARKET" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" | "TRAILING_STOP_MARKET"
@@ -464,32 +472,33 @@ pub fn transform_position(
     let realized_pnl = existing
         .iter()
         .find(|p| p.id == id)
-        .and_then(|p| p.realized_pnl)
+        .and_then(|p| (p.realized_pnl).into_value())
         .unwrap_or(0.0);
     Ok(Position {
         id,
         symbol: symbol.to_owned(),
-        side,
+        side: side.into(),
         contracts: amount.abs(),
         entry_price: number("entryPrice", false)?,
         notional: number("notional", false)?,
         leverage,
         unrealized_pnl: number("unRealizedProfit", false)?,
-        realized_pnl: Some(realized_pnl),
+        realized_pnl: Some(realized_pnl).into(),
         margin_type: Some(
             if pos.get("marginType").and_then(Value::as_str) == Some("ISOLATED") {
                 MarginType::Isolated
             } else {
                 MarginType::Cross
             },
-        ),
+        )
+        .into(),
         liquidation_price: number("liquidationPrice", true)?,
-        position_mode: Some(mode),
-        info: Some(pos.clone()),
-        margin_size: None,
-        extra: None,
-        last_update: None,
-        option: None,
+        position_mode: Some(mode).into(),
+        info: Some(pos.clone()).into(),
+        margin_size: None.into(),
+        extra: None.into(),
+        last_update: None.into(),
+        option: None.into(),
     })
 }
 
@@ -527,7 +536,10 @@ pub fn get_open_algo_orders_count(symbol: &str, orders: &[safe_cex_types::Order]
         .filter(|o| {
             o.symbol == symbol
                 && o.status == safe_cex_types::OrderStatus::Open
-                && is_algo_order(o.r#type, o.info.as_ref())
+                && match o.r#type.into_value() {
+                    Some(kind) => is_algo_order(kind, o.info.as_ref()),
+                    None => is_raw_algo_order(o.info.as_ref()),
+                }
         })
         .count()
 }
@@ -1021,24 +1033,24 @@ pub fn transform_order(
     let amount = parse_float(&order.orig_qty);
     let filled = parse_float(&order.executed_qty);
     Ok(safe_cex_types::Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: js_number_string(order.order_id),
-        parent_id: None,
+        parent_id: (None).into(),
         symbol: order.symbol.clone(),
-        r#type: kind,
+        r#type: (kind).into(),
         side: if order.side == "BUY" {
-            OrderSide::Buy
+            safe_cex_types::ModelField::Value(OrderSide::Buy)
         } else {
-            OrderSide::Sell
+            safe_cex_types::ModelField::Value(OrderSide::Sell)
         },
-        price,
+        price: price.into(),
         amount,
         filled,
         remaining: amount - filled,
-        status,
+        status: status.into(),
         reduce_only: order.close_position == Some(true) || order.reduce_only == Some(true),
         last_update: order.time,
-        info: Some(
+        info: (Some(
             retained_info(
                 order,
                 [
@@ -1049,15 +1061,16 @@ pub fn transform_order(
                 ],
             )
             .map_err(|error| ("Error", error.to_string()))?,
-        ),
-        close: None,
-        time_in_force: None,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        ))
+        .into(),
+        close: (None).into(),
+        time_in_force: (None).into(),
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     })
 }
 

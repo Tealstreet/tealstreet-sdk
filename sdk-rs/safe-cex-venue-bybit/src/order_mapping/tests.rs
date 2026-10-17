@@ -71,7 +71,7 @@ fn spot_and_inverse_orders_match_live_source() {
             .iter()
             .map(|o| {
                 [
-                    o.price,
+                    o.price.to_number(),
                     o.amount,
                     o.filled,
                     o.remaining,

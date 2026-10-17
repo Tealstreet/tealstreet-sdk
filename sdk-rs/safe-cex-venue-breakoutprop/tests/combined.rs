@@ -202,11 +202,6 @@ fn combined_source_parity() {
                 original,
                 "COMBINED-ERROR unchanged metadata"
             );
-        } else if name == "missing-unused" {
-            assert!(
-                result.is_err(),
-                "COMBINED-VALIDATION declared-record boundary"
-            );
         } else {
             let output = native(result.unwrap());
             assert_eq!(
