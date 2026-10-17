@@ -479,3 +479,7 @@ The constructed clientOrderIdRule retains its source Number(input) conversion an
 uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
 compares26 maintained-source identifiers, including safe-range and canonical-decimal
 boundaries, without replacing the rule or its operation table.
+
+The live order-page reader passes truthy message/meta.message values directly to
+the shared Raw(Js) reporter. Non-string errors must retain completed pages;
+`binding_orders` covers actual signed pagination, original emitted text and fallbacks.

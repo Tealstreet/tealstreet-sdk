@@ -1057,23 +1057,34 @@ fn fetch_orders_reports_raw_page_messages_and_preserves_completed_pages() {
         ),
         (json!(false), json!(["bad", 7]), "bad,7"),
         (json!(""), json!(true), "true"),
-        (json!(0), Value::Null, "Failed to fetch orders"),
+        (
+            json!(0),
+            Value::Null,
+            "Exchange Error: Failed to fetch orders",
+        ),
+        (
+            json!("venue rejection"),
+            Value::Null,
+            "Exchange Error: venue rejection",
+        ),
     ] {
         let h = harness(ExchangeName::Woo, options(), |http| {
-            http.ok(
+            http.route(
                 "GET",
                 LIMIT_PAGE,
+                200.0,
                 json!({"success":true,"rows":[{
                 "order_id":11,"symbol":"PERP_BTC_USDT","side":"BUY","type":"LIMIT",
                 "price":99,"quantity":2,"executed":0,"status":"NEW","reduce_only":false
             }],"meta":{"total":2,"records_per_page":1}}),
             );
-            http.ok(
+            http.route(
                 "GET",
                 LIMIT_PAGE,
+                200.0,
                 json!({"success":false,"message":message,"meta":{"message":nested}}),
             );
-            http.ok("GET", ALGO_PAGE, json!({"success":true,"data":{"rows":[],"meta":{"total":0,"records_per_page":100}}}));
+            http.route("GET", ALGO_PAGE, 200.0, json!({"success":true,"data":{"rows":[],"meta":{"total":0,"records_per_page":100}}}));
         });
         seed(&h, vec![], vec![]);
         let errors = Rc::new(RefCell::new(vec![]));
@@ -1088,12 +1099,6 @@ fn fetch_orders_reports_raw_page_messages_and_preserves_completed_pages() {
         let orders = h
             .drive(h.venue().fetch_orders(None))
             .expect("source reports failed page and returns completed prefix");
-        assert_eq!(
-            orders.len(),
-            1,
-            "raw error must not discard completed pages: {message}"
-        );
-        assert_eq!(orders[0].id, "11");
         let events: Vec<_> = errors
             .borrow()
             .iter()
@@ -1104,6 +1109,12 @@ fn fetch_orders_reports_raw_page_messages_and_preserves_completed_pages() {
             vec![json!(expected)],
             "source error text for {message}"
         );
+        assert_eq!(
+            orders.len(),
+            1,
+            "raw error must not discard completed pages: {message}"
+        );
+        assert_eq!(orders[0].id, "11");
         assert_eq!(h.http.calls(LIMIT_PAGE).len(), 2);
         assert_eq!(h.http.calls(ALGO_PAGE).len(), 1);
     }
