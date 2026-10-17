@@ -51,9 +51,12 @@ in this venue scope. This is not a green Rust-parity claim or workspace build.
   private transient-status projection permits reconciliation of normal terminal
   rows while preserving original raw info; standalone mapOrders remains unchanged.
   Partial→filled/canceled/effective/order_failed fixtures assert retained native
-  Closed/Canceled and Store status inside fill callbacks. Nonregressing dedupe,
-  terminal deletion after emission, repeated terminal fills, emitter failure,
-  contract NaN and strict timestamp threshold/floor have decoded native assertions.
+  Closed/Canceled and Store status inside fill callbacks. Fills go through the
+  shared `create_incremental_fills` with cumulative filledSize and
+  filledSize×averagePrice, as the source does: repeat, regression and a replayed
+  filled frame emit nothing, each partial carries its own price without float
+  noise, and a non-finite filledSize is skipped. Emitter failure, contract NaN
+  and strict timestamp threshold/floor have decoded native assertions.
 - **CHOSEN handleAccountTopic:** info is an owned copy. Source caller mutation
   changes stored info100→999; native retains100. Free/total use current used/upnl.
 - **CHOSEN private class:** static concrete handlers; source runtime replacement
@@ -74,7 +77,7 @@ The oracle executes the maintained **exchange and private classes**, actual
 createAPI initializer and inherited getTickInterval method. Its public socket is
 an intentional venue forwarding spy. Native composition owns the actual public
 facade, whose source body parity was covered in the prior public-stream slice.
-This is **not** proof that all3 maintained classes execute together. Class70/16
+This is **not** proof that all3 maintained classes execute together. Class71/16
 member inventories are surface floors; runtime enumeration stops at66 source
 cases and the explicit native composition/reentry/lifetime probes. Existing
 per-function manifests retain their prior specific divergence classifications.
