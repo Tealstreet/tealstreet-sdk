@@ -293,3 +293,17 @@ and WS login uses the same account with trimmed API key plus request time. A
 signer error or absent signature preserves the source “Remote WS signing
 unavailable” message and sends no login or private filters. Native registry
 E2Es and compiled omission controls are documented in HOSTED_SIGNER_EVIDENCE.md.
+
+
+The concrete `Host::for_of` uses the shared GetIterator/next protocol for JS
+values, including empty and live Map iterator objects. It keeps the existing
+opaque symbol-settings projection separate. Source disposal captures timer
+values before clearing the current map; its iterator must remain live while
+handles are cancelled. Do not restore raw-array admission or a map snapshot.
+
+`ITERATOR_CONSUMERS.md` records the cross-venue for-of/spread/Array.from review.
+The two native map-iterator witnesses cover empty and non-empty iteration across
+values/keys/entries and raw Map, including insertion/deletion, native numeric bits
+and reference identity. `scripts/iterator-consumer-controls.py` compiles an
+iterator-object rejection, requires both named failures and restores exact bytes.
+Its Cargo subprocesses have deadlines and private temporary logs.
