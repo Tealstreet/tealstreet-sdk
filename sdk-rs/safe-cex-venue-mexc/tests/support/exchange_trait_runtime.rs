@@ -28,6 +28,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 type Sleeper = (f64, Weak<RefCell<Option<Waker>>>);
 
 pub struct Runtime {
+    pub diagnostics: Cell<bool>,
     pub now: Rc<Cell<f64>>,
     pub jobs: RefCell<Vec<Job>>,
     pub console: RefCell<Vec<String>>,
@@ -192,7 +193,7 @@ impl WsRuntime for Runtime {
         3000.0
     }
     fn diagnostics_enabled(&self) -> bool {
-        false
+        self.diagnostics.get()
     }
     fn lifecycle_logs_enabled(&self) -> bool {
         false
@@ -261,6 +262,7 @@ pub fn fixture_with_settings(
     supports_public_only: bool,
 ) -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) {
     let runtime = Rc::new(Runtime {
+        diagnostics: Cell::new(false),
         now: Rc::new(Cell::new(1_700_000_000_000.0)),
         jobs: RefCell::default(),
         console: RefCell::default(),

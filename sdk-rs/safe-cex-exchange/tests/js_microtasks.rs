@@ -2,7 +2,7 @@
 use safe_cex_exchange::{
     js_runtime::{
         client, globals,
-        promise::{Promise, await_js},
+        promise::{await_js, Promise},
         scope::ScopeShared,
         value::Js,
     },
@@ -466,20 +466,28 @@ const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const
         first.settle(Err(safe_cex_exchange::js_runtime::value::Thrown::new(
             Js::str("first"),
         )));
-        rows.push(vec![
-            await_js(combined).await.unwrap_err().value.to_display(),
-        ]);
+        rows.push(vec![await_js(combined)
+            .await
+            .unwrap_err()
+            .value
+            .to_display()]);
         assert_eq!(rows, expected);
     });
 }
 
 #[test]
 fn native_host_task_checkpoint_preserves_callback_batches() {
-    let output = Command::new("node").args(["-e", r#"
+    let output = Command::new("node")
+        .args([
+            "-e",
+            r#"
 const trace=[];let resolve;new Promise(r=>resolve=r).then(()=>trace.push('reaction'));
 setImmediate(()=>{trace.push('first');resolve();trace.push('second')});
 setImmediate(()=>{trace.push('next-host');console.log(JSON.stringify(trace))});
-"#]).output().unwrap();
+"#,
+        ])
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
