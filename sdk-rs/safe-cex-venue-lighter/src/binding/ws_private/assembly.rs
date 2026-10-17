@@ -22,7 +22,7 @@ use crate::{
         PrivateStreamWarningParams, PrivateWarningFlags, PrivateWarningHost, ReadonlyWarningTimes,
     },
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_json, to_json};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::{cell::OnceCell, rc::Rc};
 
 struct Parts {
@@ -101,17 +101,19 @@ impl PrivateWebsocketContexts<Realm> for Assembly {
             .get_or_init(|| Rc::new(slots::stream(self.feed())))
             .clone()
     }
-    fn json_view(&self, payload: &AccountValue) -> SigningResult<Option<serde_json::Value>> {
-        let payload = to_js(payload);
-        if payload.is_undefined() {
-            return Ok(None);
-        }
-        js(to_json(&payload)).map(Some)
+    fn flatten_by_market_payload(
+        &self,
+        payload: &AccountValue,
+        include_single_objects: bool,
+    ) -> SigningResult<AccountValue> {
+        js(crate::ws_private::flatten_by_market_payload(
+            Some(&to_js(payload)),
+            include_single_objects,
+        ))
+        .map(|value| to_account(&value))
     }
-    fn json_array(&self, values: Vec<&serde_json::Value>) -> SigningResult<AccountValue> {
-        Ok(to_account(&Js::array(
-            values.into_iter().map(from_json).collect(),
-        )))
+    fn empty_array(&self) -> AccountValue {
+        to_account(&Js::array(vec![]))
     }
     fn type_error(&self, message: &str) -> TransactionSigningError {
         to_signing(Thrown::type_error(message))

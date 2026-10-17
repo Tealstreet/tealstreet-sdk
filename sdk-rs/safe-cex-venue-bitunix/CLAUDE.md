@@ -151,11 +151,11 @@ Optional response-envelope reads remain distinct from direct batch-row reads.
 `tests/native_audit_controls.py` compiles each fault independently and retains
 logs under `target/venue-audit-controls`.
 
-Concrete market-fetch refusals log the original cause at error level before
-returning cached markets, including an empty startup cache. This intentionally
-raises the source trace-only diagnostic at the existing typed Market boundary;
-it does not admit or replace the refused row. The production-binding witness is
-`tests/native_market_refusal.rs`; its control restores trace-only logging.
+Concrete market reads omit only eligible rows with a non-string base and warn
+with the row, symbol, field and value. Valid siblings remain fresh; all refused
+rows produce an empty result. Quote filtering remains source-strict USDT.
+Source/transport failures still log their cause before returning cached markets.
+`tests/native_market_refusal.rs` exercises production fetch and refresh paths.
 
 The native HTTP lane acquires its rate slot before each signing attempt, including retries and signature resends. `tests/rate_limit_signing.rs` fills the constructed venue’s five-request window and changes the synced clock while a private read is queued; its transmitted timestamp must come from dequeue time.
 
