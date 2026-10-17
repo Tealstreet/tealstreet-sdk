@@ -40,18 +40,6 @@ impl ZkLinkHost for Services {
         self.host().record("sdk:init", vec![]);
         Box::pin(async { Ok(()) })
     }
-    fn now_ms(&self) -> f64 {
-        1700001234567.
-    }
-    fn pack_amount(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn pack_fee(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn pubkey_hash(&self) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
     fn builder(&self, _: TransactionKind, _: Vec<J>) -> Result<ZkLinkHandle, ExchangeError> {
         panic!("not used by lifecycle")
     }
@@ -63,18 +51,6 @@ impl ZkLinkHost for Services {
         panic!("not used by lifecycle")
     }
     fn create_signed_contract(&self, _: ZkLinkHandle) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn create_signed_order(&self, _: ZkLinkHandle) -> Result<J, ExchangeError> {
-        panic!("not used by lifecycle")
-    }
-    fn sign_transfer(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by lifecycle")
-    }
-    fn sign_withdraw(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by lifecycle")
-    }
-    fn sign_change_pubkey(&self, _: ZkLinkHandle, _: bool) -> ExchangeFuture<'_, J> {
         panic!("not used by lifecycle")
     }
 }

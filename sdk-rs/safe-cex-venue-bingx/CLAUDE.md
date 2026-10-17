@@ -244,3 +244,8 @@ corpora cover nested and 12-element array key sorting and comma/form encoding.
 Signature-predicate coercion failures retain their TypeError name and unprefixed
 message through the shared ExchangeError conversion. The real native receiver
 regressions cover both resolved and rejected HTTP responses without a resend.
+
+Historical fill ISO dates without an offset use the required
+`BingxDependencies.local_wall_time_to_utc` callback; explicit offsets bypass it.
+The native registry supplies its UTC profile explicitly. The real binding test
+compares actual TS executions in Singapore and New York (winter and summer).
