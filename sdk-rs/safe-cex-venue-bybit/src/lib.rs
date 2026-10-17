@@ -112,7 +112,6 @@ pub mod inverse_read_surface;
 
 pub mod spot_exchange_reads;
 
-pub mod inverse_socket_bodies;
 pub mod private_snapshot_refresh;
 
 pub mod local_order_reconciliation;
