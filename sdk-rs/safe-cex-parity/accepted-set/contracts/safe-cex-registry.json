@@ -1028,9 +1028,8 @@
     ]
   },
   "safe_cex_registry::public_data_host::MarketBatch": {
-    "category": "non-decoder",
-    "evidence": "safe-cex-registry/src/public_data_host.rs::MarketBatch: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
-    "reason": "Rc/RefCell handle to live typed market state retained across provider callbacks. This capability handle is not a raw market parser.",
+    "category": "decoder",
+    "shape": "union",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -1078,6 +1077,280 @@
           }
         }
       }
+    },
+    "evidence": "The production MarketBatch is Rc<RefCell<Vec<Market>>>. It retains provider array identity and also exposes the ordinary Serde decoder through Rc/RefCell/Vec. Finite array witnesses retain ordered model fields; forbidden outer shapes, malformed members and missing/wrong typed fields are rejected by both trait and qualified native paths. This does not claim live browser aliases, all model inputs, or source-side runtime validation.",
+    "positive": [
+      [],
+      [
+        {
+          "id": "m1",
+          "symbol": "BTC/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ],
+      [
+        {
+          "id": "m1",
+          "symbol": "BTC/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        },
+        {
+          "id": "m12",
+          "symbol": "ETH/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      0,
+      "batch",
+      {},
+      {
+        "id": "m1",
+        "symbol": "BTC/USDT",
+        "base": "BTC",
+        "quote": "USDT",
+        "active": true,
+        "precision": {
+          "amount": 0.01,
+          "price": 0.1
+        },
+        "limits": {
+          "amount": {
+            "min": 1,
+            "max": 2
+          },
+          "leverage": {
+            "min": 3,
+            "max": 4
+          }
+        }
+      },
+      [
+        null
+      ],
+      [
+        {}
+      ],
+      [
+        {
+          "symbol": "BTC/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ],
+      [
+        {
+          "id": "m1",
+          "symbol": false,
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ]
+    ],
+    "entrypoints": [],
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"base\": row.base, \"quote\": row.quote, \"active\": row.active, \"amountPrecision\": row.precision.amount, \"pricePrecision\": row.precision.price, \"minAmount\": row.limits.amount.min, \"maxAmount\": row.limits.amount.max, \"minLeverage\": row.limits.leverage.min, \"maxLeverage\": row.limits.leverage.max})).collect()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.01,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 1,
+                  "max": 2
+                },
+                "leverage": {
+                  "min": 3,
+                  "max": 4
+                }
+              }
+            }
+          ],
+          "output": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "amountPrecision": 0.01,
+              "pricePrecision": 0.1,
+              "minAmount": 1,
+              "maxAmount": 2,
+              "minLeverage": 3,
+              "maxLeverage": 4
+            }
+          ]
+        },
+        {
+          "input": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.01,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 1,
+                  "max": 2
+                },
+                "leverage": {
+                  "min": 3,
+                  "max": 4
+                }
+              }
+            },
+            {
+              "id": "m12",
+              "symbol": "ETH/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.01,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 1,
+                  "max": 2
+                },
+                "leverage": {
+                  "min": 3,
+                  "max": 4
+                }
+              }
+            }
+          ],
+          "output": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "amountPrecision": 0.01,
+              "pricePrecision": 0.1,
+              "minAmount": 1,
+              "maxAmount": 2,
+              "minLeverage": 3,
+              "maxLeverage": 4
+            },
+            {
+              "id": "m12",
+              "symbol": "ETH/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "amountPrecision": 0.01,
+              "pricePrecision": 0.1,
+              "minAmount": 1,
+              "maxAmount": 2,
+              "minLeverage": 3,
+              "maxLeverage": 4
+            }
+          ]
+        }
+      ]
     }
   },
   "safe_cex_registry::public_data_host::PublicDataCleanup": {
@@ -1143,9 +1416,8 @@
     }
   },
   "safe_cex_registry::public_data_host::TickerBatch": {
-    "category": "non-decoder",
-    "evidence": "safe-cex-registry/src/public_data_host.rs::TickerBatch: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
-    "reason": "Rc/RefCell handle to live typed ticker state retained across provider callbacks. Its aliasing/notification behavior is separate; this handle itself exposes no raw decoder.",
+    "category": "decoder",
+    "shape": "union",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -1193,6 +1465,232 @@
           }
         }
       }
+    },
+    "evidence": "The production TickerBatch is Rc<RefCell<Vec<Ticker>>>. It retains provider array identity and also exposes the ordinary Serde decoder through Rc/RefCell/Vec. Finite array witnesses retain ordered model fields; forbidden outer shapes, malformed members and missing/wrong typed fields are rejected by both trait and qualified native paths. This does not claim live browser aliases, all model inputs, or source-side runtime validation.",
+    "positive": [
+      [],
+      [
+        {
+          "id": "t1",
+          "symbol": "BTC/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ],
+      [
+        {
+          "id": "t1",
+          "symbol": "BTC/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        },
+        {
+          "id": "t12",
+          "symbol": "ETH/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      0,
+      "batch",
+      {},
+      {
+        "id": "t1",
+        "symbol": "BTC/USDT",
+        "bid": 1,
+        "ask": 2,
+        "last": 3,
+        "mark": 4,
+        "index": 5,
+        "percentage": 6,
+        "openInterest": 7,
+        "fundingRate": 8,
+        "fundingTime": 9,
+        "volume": 10,
+        "quoteVolume": 11
+      },
+      [
+        null
+      ],
+      [
+        {}
+      ],
+      [
+        {
+          "symbol": "BTC/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ],
+      [
+        {
+          "id": "t1",
+          "symbol": false,
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ]
+    ],
+    "entrypoints": [],
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"bid\": row.bid, \"ask\": row.ask, \"last\": row.last, \"mark\": row.mark, \"index\": row.index, \"percentage\": row.percentage, \"openInterest\": row.open_interest, \"fundingRate\": row.funding_rate, \"fundingTime\": row.funding_time, \"volume\": row.volume, \"quoteVolume\": row.quote_volume})).collect()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            }
+          ],
+          "output": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            }
+          ]
+        },
+        {
+          "input": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            },
+            {
+              "id": "t12",
+              "symbol": "ETH/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            }
+          ],
+          "output": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            },
+            {
+              "id": "t12",
+              "symbol": "ETH/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            }
+          ]
+        }
+      ]
     }
   },
   "safe_cex_registry::rust_venues::BitunixBuild": {
