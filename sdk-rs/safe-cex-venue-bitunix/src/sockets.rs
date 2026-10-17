@@ -180,6 +180,27 @@ impl WsProtocol for Protocol {
     fn on_message(&self, _: &Rc<BaseWebSocket>, frame: &SocketFrame) -> Result<(), ExchangeError> {
         self.socket()?.on_message(frame)
     }
+    // ts: the sockets register `handleClose = () => { …; this.onClose(); }`, never the
+    // base onClose, so processClose sees no close code.
+    fn owns_close_handling(&self) -> bool {
+        true
+    }
+    fn on_transport_close(
+        &self,
+        _: &Rc<BaseWebSocket>,
+        _: Option<u16>,
+        _: &str,
+    ) -> Result<(), ExchangeError> {
+        let socket = self.socket()?;
+        let kind = socket.kind;
+        crate::session_control::connection_close(&mut Conn { socket }, kind)
+    }
+    // ts: `handleError` closes a live socket, then runs handleClose.
+    fn on_error(&self, _: &BaseWebSocket, _: &str) -> Result<(), ExchangeError> {
+        let socket = self.socket()?;
+        let kind = socket.kind;
+        crate::session_control::connection_error(&mut Conn { socket }, kind)
+    }
 }
 
 impl Socket {
@@ -247,21 +268,6 @@ impl Socket {
             next_parser: Cell::new(1),
             markets_listener: RefCell::new(None),
         });
-        let weak = Rc::downgrade(&socket);
-        socket.base.set_before_close(Rc::new(move || {
-            if let Some(socket) = weak.upgrade() {
-                let kind = socket.kind;
-                let result = crate::session_control::connection_close(
-                    &mut Conn {
-                        socket: socket.clone(),
-                    },
-                    kind,
-                );
-                if let Err(e) = result {
-                    socket.runtime().report_exception(&e, &Value::Null);
-                }
-            }
-        }));
         Ok(socket)
     }
     fn me(&self) -> Rc<Socket> {
@@ -1450,7 +1456,7 @@ impl ConnectionHost for Conn {
         Ok(!self.socket.base.is_connected())
     }
     fn close_socket(&mut self, _: Option<()>) -> Result<(), ExchangeError> {
-        self.socket.base.force_close();
+        self.socket.base.close_current_websocket();
         Ok(())
     }
     fn ping_timer(&mut self) -> Result<Option<Timer>, ExchangeError> {
@@ -1462,9 +1468,9 @@ impl ConnectionHost for Conn {
         }
         Ok(())
     }
-    // Runs inside BaseWebSocket's before-close hook; the base continues with onClose itself.
+    // ts: `this.onClose()` with no event.
     fn on_close(&mut self) -> Result<(), ExchangeError> {
-        Ok(())
+        self.socket.base.on_close(None, "")
     }
 }
 
