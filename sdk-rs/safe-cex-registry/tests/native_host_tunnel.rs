@@ -76,13 +76,11 @@ async fn source_factory_tunnel(name: safe_cex_types::ExchangeName, mut options: 
     );
     assert!(tunnel.tokens.borrow().iter().all(|token| token == TOKEN));
     assert!(
-        tunnel.frames.borrow().iter().all(|frame| {
-            if name == safe_cex_types::ExchangeName::Okx {
-                frame["format"] == "raw"
-            } else {
-                frame.get("format").is_none()
-            }
-        }),
+        tunnel
+            .frames
+            .borrow()
+            .iter()
+            .all(|frame| frame.get("format").is_none()),
         "{name:?} uses its source adapter variant"
     );
     assert_eq!(
@@ -104,11 +102,6 @@ macro_rules! factory_tunnel_case {
         }
     };
 }
-factory_tunnel_case!(
-    okx_factory_tunnel,
-    Okx,
-    json!({"key":"native-key","secret":SECRET,"passphrase":"native-passphrase"})
-);
 factory_tunnel_case!(
     asterdex_factory_tunnel,
     Asterdex,
@@ -463,5 +456,114 @@ fn phemex_rest_runs_over_the_tealstreet_tunnel_with_signed_account_query() {
             "Phemex uses the source default adapter variant"
         );
         h.exchange.dispose().expect("dispose Phemex tunnel account");
+    });
+}
+
+#[test]
+fn okx_family_signed_rest_uses_the_authenticated_bigint_tunnel() {
+    use base64::Engine;
+    use safe_cex_types::ExchangeName;
+    run_local(async {
+        for name in [
+            ExchangeName::Okx,
+            ExchangeName::Okxeu,
+            ExchangeName::Okxeudemo,
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = format!("ws://{}", listener.local_addr().unwrap());
+            let tunnel = Rc::new(Tunnel::default());
+            tokio::task::spawn_local(serve_tunnel(
+                listener,
+                Rc::new(|request| match request.path.as_str() {
+                    "/api/v5/account/account-position-risk" => Some(json!({"code":"0","data":[{
+                        "balData":[{"ccy":"USDT","eq":"1000"}],"posData":[]
+                    }]})),
+                    "/api/v5/account/config" => {
+                        Some(json!({"code":"0","data":[{"posMode":"net_mode","acctLv":"2"}]}))
+                    }
+                    _ => None,
+                }),
+                tunnel.clone(),
+            ));
+            let runtime = native_tealstreet_runtime_with(
+                Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+                Rc::new(LocalTunnel {
+                    inner: NativeTunnelHost,
+                    origin,
+                }),
+            );
+            let h = venue_harness(
+                name.clone(),
+                Rc::new(|_| None),
+                json!({"key":"native-key","secret":SECRET,"passphrase":"native-passphrase",
+                    "tealstreetProxy":true,"tealstreetTunnel":true}),
+                None,
+                runtime,
+            )
+            .await;
+            let result = h
+                .exchange
+                .validate_account()
+                .await
+                .expect("signed tunneled account validation");
+            assert_eq!(
+                serde_json::to_value(result.error).unwrap(),
+                json!(""),
+                "{name:?} paths: {:?}",
+                tunnel
+                    .seen
+                    .borrow()
+                    .iter()
+                    .map(|r| &r.path)
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                h.seen.borrow().is_empty(),
+                "{name:?} must send no direct HTTP request"
+            );
+            assert_eq!(
+                *tunnel.tokens.borrow(),
+                [TOKEN],
+                "tunnel authenticates with proxy token"
+            );
+            let requests = tunnel.seen.borrow();
+            assert_eq!(
+                requests.len(),
+                1,
+                "one private validation read for {name:?}"
+            );
+            assert_eq!(h.store.request_stats().unwrap().ok, requests.len() as f64);
+            let request = &requests[0];
+            assert_eq!(
+                request.path,
+                if name == ExchangeName::Okx {
+                    "/api/v5/account/account-position-risk"
+                } else {
+                    "/api/v5/account/config"
+                }
+            );
+            assert_eq!(request.headers["ok-access-key"], "native-key");
+            assert_eq!(request.headers["ok-access-passphrase"], "native-passphrase");
+            let timestamp = &request.headers["ok-access-timestamp"];
+            let preimage = format!("{timestamp}GET{}", request.path);
+            let mut mac = Hmac::<sha2::Sha256>::new_from_slice(SECRET.as_bytes()).unwrap();
+            mac.update(preimage.as_bytes());
+            let signature =
+                base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+            assert_eq!(
+                request.headers["ok-access-sign"], signature,
+                "tunnel verifies signed bytes for {name:?}"
+            );
+            assert!(
+                tunnel
+                    .frames
+                    .borrow()
+                    .iter()
+                    .all(|frame| frame["format"] == "raw"),
+                "source bigInt transport uses raw responses"
+            );
+            drop(requests);
+            h.exchange.dispose().unwrap();
+        }
     });
 }
