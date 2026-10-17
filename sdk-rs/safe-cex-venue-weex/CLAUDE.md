@@ -28,6 +28,12 @@ and private cleanup cancels all three refresh timers before core disposal.
 Source-own methods retain weak receivers; externally returned unsubscribe closures
 and pending snapshot observers retain their host until cleanup or settlement.
 
+The source nukePositions body replaces Store.positions with the refetched snapshot.
+It does not merge positions absent from that response. Constructed exchange tests
+call the real source member through invoke/unit and cover both nonempty and empty
+REST responses, stale IDs, updated contracts and exact fake-zero snapshots. The
+public trait wiring remains separate from this Store-policy correction.
+
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
 request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
