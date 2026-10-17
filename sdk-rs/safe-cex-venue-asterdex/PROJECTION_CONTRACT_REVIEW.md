@@ -77,7 +77,11 @@ node sdk-rs/safe-cex-venue-asterdex/scripts/accepted-projection-contracts.mjs
 python3 sdk-rs/safe-cex-venue-asterdex/scripts/accepted-projection-controls.py
 ```
 
-The final refreshed native/parity checks are pending.
+After merging master `41e20791f8` (including #380), frozen dependency installation,
+actual TS 20/274, native twenty runtime / zero classification-only / zero failed
+owners and `parity:check` all passed. Parity measured 7459 rows and 17214 public
+Rust items, with zero findings. The twenty selected function bodies, contracts,
+source observations and control targets were unchanged by the master refresh.
 
 The leverage-bracket response helper remains outside this batch: its separate
 key-identity repair is PR #380, and its array-like input behavior needs independent
