@@ -402,17 +402,12 @@ Opposite-position size checks use signed contracts, strict nonzero and >= amount
 with some/any selection rather than exactly-one matching. Keep malformed typed
 ingress separate from the numeric predicate; placement does not call this helper yet.
 
-The public journal_fold module now constructs shared PositionRecord values from
-closed-PnL partials. It preserves the source numeric-entry grouping heuristic,
-including identical-entry reopens merging. Resolve the leg once while bucketing
-and again on the sorted first row; optional resolver absence must skip orderId
-coercion. Funding context precedes settlement lookup, and gross is net + fees -
-funding. Inherited CLOSE_REASON values refuse the closed enum after remaining
-source effects; aggregation continues later buckets so later coercion failures
-retain precedence. The live record oracle observes every native field and
-callback before JSON (595-case floor plus 20 numeric inputs). Typed callbacks
-are infallible and enum-constrained; arbitrary host objects/getters and non-UTF8
-strings are outside this slice. No fetchHistoricalPositions composition is claimed.
+The public `journal_fold` adapter now retains native Js rows, dependency callbacks
+and records through the actual primary/demo historical-position reader. Closed
+rows join the historical-order hedge axis before grouping, and each quote resolves
+from the live Store. The 595 source-case corpus compares native number bits and
+callback traces, including inherited close reasons and optional context. The
+real signed-HTTP binding tests cover both families and source variant refusals.
 
 exchange_helpers ports the pure mode/cancel predicates and balance scalar/fold
 helpers. Preserve strict string guards, whitespace-only Number zero versus
@@ -738,3 +733,9 @@ valid prefix on mapping errors, but discard a failed recovery accumulator. Sourc
 primary short/extended recovery differs from dedicated inverse single recovery;
 Spot inherits empty history. The full reader source corpus covers requests, results
 and diagnostics; mapper source corpora retain their separate scalar contracts.
+
+Dynamic history capabilities delegate to the same live Exchange methods: fills,
+income/range and closed PnL for primary/demo/inverse, historical orders for
+primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
+order history. `history_capability_binding` exercises the actual capability calls
+and signed HTTP; direct trait coverage alone does not witness this dispatch path.

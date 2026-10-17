@@ -1926,34 +1926,6 @@
       ]
     },
     {
-      "type": "safe_cex_transport::signing::RemoteSignerRequest",
-      "owner": {
-        "crate": "safe-cex-transport",
-        "agent": "codex-oerz4t"
-      },
-      "status": "outstanding",
-      "failures": [
-        "[native;] Deserialize accepted [\"sample\",\"sample\",\"apexomni\",null,{\"method\":\"sample\",\"url\":\"sample\",\"baseUrl\":\"sample\",\"params\":null,\"data\":null,\"headers\":{}}]",
-        "[native;] qualified decoder accepted [\"sample\",\"sample\",\"apexomni\",null,{\"method\":\"sample\",\"url\":\"sample\",\"baseUrl\":\"sample\",\"params\":null,\"data\":null,\"headers\":{}}]",
-        "[wasm32-unknown-unknown;] Deserialize accepted [\"sample\",\"sample\",\"apexomni\",null,{\"method\":\"sample\",\"url\":\"sample\",\"baseUrl\":\"sample\",\"params\":null,\"data\":null,\"headers\":{}}]",
-        "[wasm32-unknown-unknown;] qualified decoder accepted [\"sample\",\"sample\",\"apexomni\",null,{\"method\":\"sample\",\"url\":\"sample\",\"baseUrl\":\"sample\",\"params\":null,\"data\":null,\"headers\":{}}]"
-      ]
-    },
-    {
-      "type": "safe_cex_transport::signing::RemoteSignerResponse",
-      "owner": {
-        "crate": "safe-cex-transport",
-        "agent": "codex-oerz4t"
-      },
-      "status": "outstanding",
-      "failures": [
-        "[native;] Deserialize accepted [\"sample\",null,null]",
-        "[native;] qualified decoder accepted [\"sample\",null,null]",
-        "[wasm32-unknown-unknown;] Deserialize accepted [\"sample\",null,null]",
-        "[wasm32-unknown-unknown;] qualified decoder accepted [\"sample\",null,null]"
-      ]
-    },
-    {
       "type": "safe_cex_crypto::WsAuth",
       "owner": {
         "crate": "safe-cex-crypto",

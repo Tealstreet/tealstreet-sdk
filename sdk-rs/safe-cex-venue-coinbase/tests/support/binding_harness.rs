@@ -28,6 +28,8 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 #[derive(Default)]
 pub struct Runtime {
     pub now: Rc<Cell<f64>>,
+    pub random_values: RefCell<VecDeque<f64>>,
+    pub random_calls: Cell<usize>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
@@ -101,7 +103,8 @@ impl ExchangeRuntime for Runtime {
         false
     }
     fn random(&self) -> f64 {
-        0.5
+        self.random_calls.set(self.random_calls.get() + 1);
+        self.random_values.borrow_mut().pop_front().unwrap_or(0.5)
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.message.clone());
