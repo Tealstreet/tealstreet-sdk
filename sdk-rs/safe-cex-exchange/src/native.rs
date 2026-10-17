@@ -2,6 +2,7 @@
 //! an HTTP host that drives the supplied adapter once. Everything here must run
 //! inside a `tokio::task::LocalSet` on a current-thread runtime.
 use crate::{
+    exchange::Exchange,
     http::{HttpFuture, HttpHost},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
@@ -22,11 +23,11 @@ use safe_cex_transport::{
 use safe_cex_types::ExchangeName;
 use serde_json::Value;
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::BTreeMap,
     future::Future,
     pin::Pin,
-    rc::Rc,
+    rc::{Rc, Weak},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -390,10 +391,16 @@ impl WsSocket for NativeWsSocket {
     }
 }
 
+/// ts: the `exchange.emitter` safeCexAxiosCreate emits through. The account host
+/// binds its constructed exchange here; an unbound host refuses visibly.
+pub type NativeHttpEvents = Rc<RefCell<Option<Weak<dyn Exchange>>>>;
+
 /// HTTP host for the native runtime: drives the adapter exactly once and keeps
 /// its failure and request/response provenance intact.
 #[derive(Default)]
-pub struct NativeHttpHost;
+pub struct NativeHttpHost {
+    pub events: NativeHttpEvents,
+}
 impl HttpHost for NativeHttpHost {
     fn execute(&self, adapter: Arc<dyn RestAdapter>, request: RestRequest) -> HttpFuture<'_> {
         Box::pin(async move { adapter.execute_with_receipt(request).await })
@@ -401,8 +408,17 @@ impl HttpHost for NativeHttpHost {
     fn enhance_error(&self, error: RestFailure, _exchange: &ExchangeName) -> RestFailure {
         error
     }
-    fn emit(&self, _event: &str, _message: &str) -> Result<(), String> {
-        Ok(())
+    fn emit(&self, event: &str, message: &str) -> Result<(), String> {
+        let exchange = self
+            .events
+            .borrow()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .ok_or_else(|| format!("native HTTP host has no exchange to emit {event}"))?;
+        exchange
+            .base()
+            .emit(event, Value::String(message.into()))
+            .map_err(|error| error.message)
     }
     fn note_success(&self, _exchange: &ExchangeName, _response: &RestResponse) {}
     fn note_failure(&self, _exchange: &ExchangeName, _error: &RestFailure) {}

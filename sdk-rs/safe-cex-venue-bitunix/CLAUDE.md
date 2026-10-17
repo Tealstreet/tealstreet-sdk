@@ -134,3 +134,23 @@ focused --test position_adapter -- --include-ignored test; no fetch wiring is cl
 **TP/SL helpers:** `tpsl_helpers` preserves nullish raw-ID precedence, position-disambiguated leg IDs, explicit raw trigger precedence and cached false reduce-only values. `TpslLeg` represents the inline TS tp/sl union and is mapped alongside the ID helper. Inputs use shared retained numeric JSON; arbitrary host objects and lone-surrogate strings remain declared boundaries. Recovery gates are recorded in tracked `GATE_EVIDENCE.md`.
 
 **REST write orchestration:** `rest_writes` keeps store/transport/error hooks fallible so source catch boundaries remain observable. Mode changes inspect all fallible contract-number projections before posting, then set `isHedged`. Margin changes retain full UTF-16 symbol units, including lone surrogates. Symbol cancellation captures filter length and skips absent slots; batching hydrates against live length, then captures formatting length and flattens in order. Child cancellation/formatting/hydration implementations remain separately mapped rows. Leverage retains shared Math.min/Math.max NaN/signed-zero behavior and updates both long/short IDs only after the POST succeeds.
+
+Concrete REST and private websocket signing read the shared `VIRTUAL_CLOCK`
+(`get_current_time`, matching numeric Date coercion), while transport timers keep
+the runtime clock. Both the sendLogin prefix and login-failure retry await
+`sync_bybit_client_server_time(None)` in source order. The timestamp is captured
+before the first sync, as in TypeScript. Native UUID consumers strip nanoid's
+`-` and `_`; correlation request IDs retain the raw runtime ID.
+`tests/native_clock.rs` exercises the concrete signed REST and websocket paths
+with a different host wall clock and a pushed 40-second offset.
+`tests/native_identity.rs` executes the actual source batch body and uuid utility
+and compares generated IDs, null-row errors, retained prefixes and later chunks.
+Optional response-envelope reads remain distinct from direct batch-row reads.
+`tests/native_audit_controls.py` compiles each fault independently and retains
+logs under `target/venue-audit-controls`.
+
+Concrete market-fetch refusals log the original cause at error level before
+returning cached markets, including an empty startup cache. This intentionally
+raises the source trace-only diagnostic at the existing typed Market boundary;
+it does not admit or replace the refused row. The production-binding witness is
+`tests/native_market_refusal.rs`; its control restores trace-only logging.

@@ -859,13 +859,14 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             ("log", console("log")),
         ]),
     );
-    let clock_rt = rt.clone();
     def(
         "virtualClock",
         Js::object(vec![(
             "getCurrentTimeMs",
             Js::function("getCurrentTimeMs", move |_, _| {
-                Ok(Js::Number(scope_of(&clock_rt)?.now()))
+                Ok(Js::Number(
+                    safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+                ))
             }),
         )]),
     );

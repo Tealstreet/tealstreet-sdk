@@ -73,10 +73,12 @@ The store contract is `safe-cex-store`'s port of
 that trait directly; it never defines a projection or another store shape.
 `ExchangeRuntime` supplies clock, local task/timer cancellation, runtime logging
 and worker requests. Runtime signing handles stay outside serializable options.
-The native wall clock supplies integer epoch milliseconds for Date.now timestamps
-and signing nonces; its monotonic clock retains fractional milliseconds. The shared
-JS Date.now facade also rounds down an injected wall clock, while performance.now
-keeps the host's fractional precision.
+The native wall clock supplies integer epoch milliseconds for Date.now timestamps;
+its monotonic clock retains fractional milliseconds. Source virtualClock reads,
+including the shared JS facade, use safe-cex-store's VIRTUAL_CLOCK instead so
+server offsets and its native/worker policies remain authoritative for signing.
+The shared JS Date.now facade rounds down an injected wall clock, while
+performance.now keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
@@ -1216,3 +1218,8 @@ facade models dayjs 1.11 `plugin/utc` in the runtime's UTC zone: non-enumerable
 `tests/js_builtins.rs` compares 16 array, 420 dayjs-chain, 5 key-order and 7
 property-list cases against Node with installed dayjs (TZ=UTC), plus the
 Lighter, Orderly, Bitrue and Phemex production paths that call them.
+
+`JsProtocol::resyncs_private_state_on_reopen` reads the receiver's
+`resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
+OKX's business socket defines it, so a business-only re-open runs the private
+snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).

@@ -3625,3 +3625,36 @@ mod string_coercion;
 
 #[path = "support/js_raw_socket_close.rs"]
 mod raw_socket_close;
+
+#[test]
+fn virtual_clock_global_preserves_synced_time_without_changing_date_now() {
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    let (runtime, shared) = scoped_globals();
+    runtime.wall_clock.set(123.0);
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 40_000.0);
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
+    let actual = shared
+        .globals
+        .get("virtualClock")
+        .unwrap()
+        .call_method("getCurrentTimeMs", vec![])
+        .unwrap()
+        .as_f64()
+        .unwrap();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
+    assert!(
+        actual >= before && actual <= after,
+        "JS virtualClock must retain server offset"
+    );
+    assert_eq!(
+        shared
+            .globals
+            .get("Date")
+            .unwrap()
+            .call_method("now", vec![])
+            .unwrap()
+            .as_f64(),
+        Some(123.0)
+    );
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
+}

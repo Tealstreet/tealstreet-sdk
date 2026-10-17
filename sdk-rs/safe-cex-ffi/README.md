@@ -28,6 +28,14 @@ instructions if missing. Setup does not install Bun.
 `CARGO` can specify the Cargo executable. Build output is ignored under `dist/`;
 both smokes rebuild before executing and fail on errors/timeouts.
 
+`tests/native-account-placement.test.mjs` exercises client-ID minting/placement,
+option capability errors and nuke dispatch through the real Node addon, using a
+loopback public-data gateway and HTTP server. Run it after
+`node sdk-rs/safe-cex-ffi/scripts/build.mjs node` with
+`node --test sdk-rs/safe-cex-ffi/tests/native-account-placement.test.mjs`.
+The matching scoped Rust suite is
+`cargo test -p safe-cex-registry --test native_account_placement` from `sdk-rs`.
+
 With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 `nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
 JSON account host. Events and private Store slices are forwarded to JS; signing
@@ -35,6 +43,19 @@ and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
+
+Streaming uses the same command channel: call `listenOHLCV([options])`,
+`listenOHLCVs([options])` or `listenOrderBook([symbol])` to obtain a numeric
+registration handle. `onEvent` receives the method name with
+`data: {subscriptionId, data: callbackValue}`. Call `unlisten([subscriptionId])`
+to run the venue cleanup; repeated cleanup is silent. Account disposal closes
+all registrations and suppresses subsequent callbacks. Bulk candle APIs that
+return no cleanup in TS retain that venue lifetime while allowing host delivery
+to be stopped through the handle.
+
+`tests/native-account-streams.test.mjs` and the scoped Rust
+`native_account_streams` suite drive real Binance gateway candle/book frames,
+observe remote unsubscribe, and check disposal through the native account API.
 
 The account method table exposes `findOrderByClientOrderId` through the venue's
 lookup implementation so hosts can reconcile a lost placement response. It also

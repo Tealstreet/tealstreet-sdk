@@ -138,6 +138,8 @@ pub async fn serve_http(listener: TcpListener, handler: Handler, seen: Rc<RefCel
                 Some(reply) if reply.get("__status").is_some() => (
                     match reply["__status"].as_u64() {
                         Some(400) => "400 Bad Request",
+                        Some(401) => "401 Unauthorized",
+                        Some(502) => "502 Bad Gateway",
                         other => panic!("unsupported fixture status {other:?}"),
                     },
                     reply["body"].to_string(),

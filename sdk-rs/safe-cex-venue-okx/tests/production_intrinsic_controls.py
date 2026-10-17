@@ -23,11 +23,30 @@ colon = '''        "colon-append" => {
             Js::utf16(&out)
         }'''
 old_colon = '''        "colon-append" => Js::str(&format!("{}:{}", text(&x)?, text(&y)?)),'''
+concat = '''        "template-concat" | "template-suffix" => {
+            let mut out = Vec::new();
+            for part in &a {
+                out.extend_from_slice(&part.to_js_string()?);
+            }
+            Js::utf16(&out)
+        }'''
+old_concat = '''        "template-concat" | "template-suffix" => Js::str(&(text(&x)? + &text(&y)?)),'''
+is_array = '''        "is-array" => Js::Bool(x.is_array()),
+'''
+string = '''        "string" => Js::utf16(&x.to_js_string()?),
+'''
+add = '''        "add" => ops::add(&x, &y)?,
+'''
 controls = [
     ('orders', spread, old_spread, 'order_reads', 'order_reads_native_before_source', 'ORDER native independent result count'),
     ('cancellation', spread, old_spread, 'exchange_binding', 'fetch_orders_retains_all_five_groups_for_symbol_cancellation', 'OKX production retains all five order groups in source order'),
     ('subscriptions', spread, old_spread, 'websocket_account_events', 'market_events_native', 'MARKETS native 100-topic batch widths'),
     ('utf16-dedupe', colon, old_colon, 'websocket_account_events', 'dedupe_native', 'maintained source dedupe/4'),
+    ('error-is-array', is_array, '', 'exchange_binding', 'okx_place_rejection_reads_the_attached_response', 'unknown OKX intrinsic is-array'),
+    ('error-string', string, '', 'exchange_binding', 'okx_api_error_without_msg_names_the_full_code', 'unknown OKX intrinsic string'),
+    ('error-fallback-concat', concat, old_concat, 'exchange_binding', 'okx_api_error_without_msg_names_the_full_code', '"OKX API error (code 50011"'),
+    ('error-row-concat', concat, old_concat, 'exchange_binding', 'okx_api_error_row_message_carries_its_code', '"Insufficient margin (code "'),
+    ('income-add', add, '', 'exchange_binding', 'fetch_income_history_maps_a_nonempty_bills_page', 'unknown OKX intrinsic add'),
 ]
 
 
