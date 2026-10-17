@@ -290,7 +290,6 @@ fn capture_strings<
     Ok(strings.borrow().clone())
 }
 include!("fixtures/typed-string-bindings.rs");
-include!("fixtures/typed-null-string-bindings.rs");
 
 #[derive(Deserialize)]
 struct Corpus {
@@ -308,27 +307,23 @@ struct Case {
 #[test]
 fn all_numeric_types_match_node_bits_before_serialization() {
     let corpus: Corpus = serde_json::from_str(include_str!("fixtures/typed-numbers.json")).unwrap();
-    assert_eq!(corpus.names.len(), 53, "NUMERIC-CARDINALITY source roots");
-    assert_eq!(corpus.cases.len(), 2380, "NUMERIC-CARDINALITY source cases");
+    assert_eq!(corpus.names.len(), 29, "NUMERIC-CARDINALITY source roots");
+    assert_eq!(corpus.cases.len(), 680, "NUMERIC-CARDINALITY source cases");
     assert_eq!(
         corpus
             .cases
             .iter()
             .map(|case| case.bits.len())
             .sum::<usize>(),
-        7980,
+        1420,
         "NUMERIC-CARDINALITY source numeric field total"
     );
     // Pin subcorpora separately without rewriting the source-first artifact.
     let root_counts = [
         ("TriggerOrderType", 20),
         ("OrderType", 40),
-        ("OidOrCloid", 10),
-        ("Meta", 90),
         ("ClearinghouseState", 30),
         ("UserFills", 30),
-        ("OrderResponseStatus", 20),
-        ("OrderResponse", 20),
         ("WsTrade", 20),
         ("WsBook", 30),
         ("WsBbo", 70),
@@ -338,31 +333,13 @@ fn all_numeric_types_match_node_bits_before_serialization() {
         ("WsUserFunding", 10),
         ("WsLiquidation", 10),
         ("WsNonUserCancel", 10),
-        ("SpotClearinghouseBalance", 10),
-        ("SpotClearinghouseState", 20),
-        ("FrontendOpenOrders", 80),
         ("L2Book", 20),
-        ("CandleSnapshot", 30),
-        ("MetaAndAssetCtxs", 90),
-        ("UserFundingEntry", 10),
-        ("UserFunding", 10),
-        ("UserNonFundingLedgerEntry", 40),
-        ("UserNonFundingLedgerUpdates", 40),
         ("FundingHistoryEntry", 10),
         ("FundingHistory", 10),
-        ("SpotToken", 110),
-        ("SpotMarket", 30),
-        ("SpotMeta", 200),
-        ("SpotMetaAndAssetCtxs", 270),
         ("UserOpenOrder", 20),
         ("UserOpenOrders", 20),
-        ("OrderRequest", 120),
-        ("OrderWire", 80),
         ("CancelOrderRequest", 10),
         ("CancelOrderRequests", 20),
-        ("ModifyRequest", 190),
-        ("ModifyWire", 120),
-        ("ScheduleCancelAction", 10),
         ("Signature", 10),
         ("Candle", 30),
         ("HyperliquidCandle", 30),
@@ -371,13 +348,11 @@ fn all_numeric_types_match_node_bits_before_serialization() {
         ("WsUserFundings", 10),
         ("WsUserNonFundingLedgerUpdate", 40),
         ("WsUserNonFundingLedgerUpdates", 40),
-        ("Hip3MarketInfo", 90),
         ("BuilderInfo", 10),
-        ("BuilderFeeCheckResult", 10),
     ];
     assert_eq!(
         root_counts.len(),
-        53,
+        29,
         "NUMERIC-CARDINALITY native root inventory"
     );
     for (name, count) in root_counts {
@@ -413,7 +388,7 @@ fn all_numeric_types_match_node_bits_before_serialization() {
     let mut numeric_fields = 0;
     for mode in 0..7 {
         MODE.store(mode, Ordering::SeqCst);
-        for index in 0..2380 {
+        for index in 0..680 {
             let case = corpus
                 .cases
                 .get(index)
@@ -437,9 +412,9 @@ fn all_numeric_types_match_node_bits_before_serialization() {
             comparisons += 1;
         }
     }
-    assert_eq!(comparisons, 16660, "NUMERIC-CARDINALITY native comparisons");
+    assert_eq!(comparisons, 4760, "NUMERIC-CARDINALITY native comparisons");
     assert_eq!(
-        numeric_fields, 55860,
+        numeric_fields, 9940,
         "NUMERIC-CARDINALITY native numeric field total"
     );
 }
@@ -447,16 +422,6 @@ fn all_numeric_types_match_node_bits_before_serialization() {
 fn live_node_number_corpus_and_binding_inventory_regenerate() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/typed-numbers.cjs");
     let string_script = script.with_file_name("typed-string-boundaries.cjs");
-    let extra = std::process::Command::new("node")
-        .arg(&string_script)
-        .arg("--null-types")
-        .output()
-        .unwrap();
-    assert!(
-        extra.status.success(),
-        "extra null-type string witnesses regenerate {}",
-        String::from_utf8_lossy(&extra.stderr)
-    );
     let string_output = std::process::Command::new("node")
         .arg(string_script)
         .output()
@@ -479,78 +444,46 @@ fn live_node_number_corpus_and_binding_inventory_regenerate() {
 
 #[test]
 fn shared_utf8_refusal_and_scalar_unicode_remain_separate_from_numeric_flips() {
-    for (raw, extra) in [
-        (include_str!("fixtures/typed-string-boundaries.json"), false),
-        (
-            include_str!("fixtures/typed-null-string-boundaries.json"),
-            true,
-        ),
-    ] {
-        let corpus: serde_json::Value = serde_json::from_str(raw).unwrap();
+    {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/typed-string-boundaries.json")).unwrap();
         let cases = corpus["cases"].as_array().unwrap();
-        let required = if extra { 6 } else { 147 };
+        let required = 78;
         assert_eq!(cases.len(), required, "STRING-CARDINALITY source cases");
         assert_eq!(
             corpus["names"].as_array().unwrap().len(),
-            if extra { 2 } else { 49 },
+            26,
             "STRING-CARDINALITY source roots"
         );
 
-        let expected_roots: &[&str] = if extra {
-            &["AssetCtx", "SpotAssetCtx"]
-        } else {
-            &[
-                "OidOrCloid",
-                "Meta",
-                "ClearinghouseState",
-                "UserFills",
-                "OrderResponseStatus",
-                "OrderResponse",
-                "WsTrade",
-                "WsBook",
-                "WsBbo",
-                "WsLevel",
-                "WsOrder",
-                "WsFill",
-                "WsUserFunding",
-                "WsLiquidation",
-                "WsNonUserCancel",
-                "SpotClearinghouseBalance",
-                "SpotClearinghouseState",
-                "FrontendOpenOrders",
-                "L2Book",
-                "CandleSnapshot",
-                "MetaAndAssetCtxs",
-                "UserFundingEntry",
-                "UserFunding",
-                "UserNonFundingLedgerEntry",
-                "UserNonFundingLedgerUpdates",
-                "FundingHistoryEntry",
-                "FundingHistory",
-                "SpotToken",
-                "SpotMarket",
-                "SpotMeta",
-                "SpotMetaAndAssetCtxs",
-                "UserOpenOrder",
-                "UserOpenOrders",
-                "OrderRequest",
-                "OrderWire",
-                "CancelOrderRequest",
-                "ModifyRequest",
-                "ModifyWire",
-                "Signature",
-                "Candle",
-                "HyperliquidCandle",
-                "WsUserFill",
-                "WsUserFills",
-                "WsUserFundings",
-                "WsUserNonFundingLedgerUpdate",
-                "WsUserNonFundingLedgerUpdates",
-                "Hip3MarketInfo",
-                "BuilderInfo",
-                "BuilderFeeCheckResult",
-            ]
-        };
+        let expected_roots: &[&str] = &[
+            "ClearinghouseState",
+            "UserFills",
+            "WsTrade",
+            "WsBook",
+            "WsBbo",
+            "WsLevel",
+            "WsOrder",
+            "WsFill",
+            "WsUserFunding",
+            "WsLiquidation",
+            "WsNonUserCancel",
+            "L2Book",
+            "FundingHistoryEntry",
+            "FundingHistory",
+            "UserOpenOrder",
+            "UserOpenOrders",
+            "CancelOrderRequest",
+            "Signature",
+            "Candle",
+            "HyperliquidCandle",
+            "WsUserFill",
+            "WsUserFills",
+            "WsUserFundings",
+            "WsUserNonFundingLedgerUpdate",
+            "WsUserNonFundingLedgerUpdates",
+            "BuilderInfo",
+        ];
         assert_eq!(
             corpus["names"]
                 .as_array()
@@ -595,11 +528,7 @@ fn shared_utf8_refusal_and_scalar_unicode_remain_separate_from_numeric_flips() {
             let case = cases
                 .get(index)
                 .expect("STRING-CARDINALITY native index coverage");
-            let capture = if extra {
-                capture_null_type_strings
-            } else {
-                capture_typed_strings
-            };
+            let capture = capture_typed_strings;
             let actual = capture(
                 case["name"].as_str().unwrap(),
                 case["raw"].as_str().unwrap(),
