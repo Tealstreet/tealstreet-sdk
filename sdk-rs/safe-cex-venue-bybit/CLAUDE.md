@@ -665,6 +665,11 @@ lots. A zero market maximum produces Infinity and no payloads, as in TypeScript.
 `tests/zero_order_max_binding.rs` drives both actual primary/demo placement paths
 in bounded child processes so the pre-fix infinite loop fails safely.
 
+The Spot binding installs its source `omit` import over native object-literal
+requests, so later split lots drop SL/TP fields without mutating the first lot.
+`spot_binding::split_spot_orders_omit_brackets_only_after_the_first_lot` proves the
+pre-fix missing-import rejection and validates both signed placement payloads.
+
 Private reopen snapshots now dispatch through the actual venue receiver for all four
 families. Primary/Demo tick uses BaseExchange's real remote-signer gate, and omitted
 fetchOrders arguments retain the source true default. `private_refresh_binding`
