@@ -2875,7 +2875,7 @@
   },
   {
     "function": "fetch_markets",
-    "body": "0bed6f25e35cb926",
+    "body": "c9a60edb344c2ced",
     "reference": "crate :: rest_reads :: fetch_markets",
     "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
   },
@@ -3025,7 +3025,7 @@
   },
   {
     "function": "send_login",
-    "body": "342e0d85efe950b1",
+    "body": "a11769b119644a03",
     "reference": "Exchange :: name",
     "file": "safe-cex-venue-bitunix/src/sockets.rs"
   },

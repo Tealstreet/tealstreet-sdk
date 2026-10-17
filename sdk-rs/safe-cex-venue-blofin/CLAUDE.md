@@ -309,3 +309,11 @@ HTTP receipt forwarding preserves the effective configuration after inner signin
 ACCESS-SIGN auth classification reads that configuration, including header removal;
 outer retry-unwind response handling retains the final successful configuration.
 Input headers are not evidence of what the adapter actually returned.
+
+Concrete REST signing reads `VIRTUAL_CLOCK.get_current_time()` and private
+websocket authentication reads `get_current_time_ms()`, matching the two source
+clock calls. Lifecycle clocks and transport deadlines remain runtime operations.
+`tests/native_clock.rs` sends through the production REST adapter and an opened
+private socket with a deliberately different host wall clock and a pushed
+40-second server offset; the shared Bitunix audit control runner independently
+replaces each signing clock with wall time and requires a compiled failure.

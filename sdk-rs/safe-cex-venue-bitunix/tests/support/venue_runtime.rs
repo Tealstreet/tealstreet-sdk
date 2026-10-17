@@ -27,8 +27,10 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 #[derive(Default)]
 pub struct Runtime {
     pub now: Rc<Cell<f64>>,
+    pub id: RefCell<Option<String>>,
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
+    pub console: RefCell<Vec<(String, String)>>,
     /// When set, dials open a scripted socket instead of failing.
     pub dial: Cell<bool>,
     pub dialed: RefCell<Vec<(String, Rc<FakeSocket>)>>,
@@ -108,9 +110,16 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((f, c.clone()));
         Box::new(Task(c))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console(&self, severity: &str, message: &str) {
+        self.console
+            .borrow_mut()
+            .push((severity.into(), message.into()));
+    }
     fn unique_id(&self) -> String {
-        "fixture-nonce".into()
+        self.id
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| "fixture-nonce".into())
     }
     fn is_worker(&self) -> bool {
         false
