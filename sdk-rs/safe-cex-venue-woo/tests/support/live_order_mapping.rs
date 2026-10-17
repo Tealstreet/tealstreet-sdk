@@ -289,6 +289,7 @@ fn live_algo_filter_error_and_clock_order_match_all_12_source_cases() {
 #[test]
 fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
     use safe_cex_exchange::{exchange::Exchange, js_runtime::value::from_typed};
+    use std::rc::Rc;
     for (source_field, model_field, bad_value) in [
         ("quantity", "amount", "not-an-amount"),
         ("totalExecutedQuantity", "filled", "not-filled"),
