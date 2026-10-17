@@ -101,7 +101,7 @@ async function run(input) {
   const payloads = [], configs = [], logs = [];
   const options = { key: 'key', secret: 'secret' };
   const listenerError = Object.assign(new Error('subscriber refused diagnostic'), {
-    name: 'DiagnosticSubscriberError', code: { retry: false },
+    name: 'DiagnosticSubscriberError', code: { retry: false, sentinel: NaN, ownUndefined: undefined },
   });
   let diagnosticCalls = 0;
   const api = load(apiPath, {
@@ -184,6 +184,9 @@ async function run(input) {
     await assert.rejects(client.request({ method: 'get', url: '/private' }), error => error === listenerError);
     assert.equal(diagnosticCalls, 1);
     assert.equal(attempts, 1, 'diagnostic rejection does not retry');
+    assert.ok(Number.isNaN(listenerError.code.sentinel));
+    assert.ok(Object.hasOwn(listenerError.code, 'ownUndefined'));
+    assert.equal(listenerError.code.ownUndefined, undefined);
     return { attempts, diagnosticCalls, name: listenerError.name, code: listenerError.code };
   }
   const result = await client.request({

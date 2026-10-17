@@ -2,7 +2,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
 use hmac::{Hmac, Mac};
-use safe_cex_exchange::runtime::{Cleanup, RemoteSigner};
+use safe_cex_exchange::{
+    js_runtime::value::Js,
+    runtime::{Cleanup, RemoteSigner},
+};
 use safe_cex_transport::{
     TransportFuture,
     signing::{HttpSigningResponse, RemoteSignerRequest, RemoteSignerResponse, SignedConfig},
@@ -116,6 +119,11 @@ fn bybit_response_error_listener_rejection_reaches_native_registry() {
                         "subscriber refused diagnostic",
                     );
                     error.name = "DiagnosticSubscriberError".into();
+                    error.code = Some(Js::object(vec![
+                        ("retry", Js::Bool(false)),
+                        ("sentinel", Js::Number(f64::NAN)),
+                        ("ownUndefined", Js::Undefined),
+                    ]));
                     Err(error)
                 }),
             );
@@ -136,6 +144,11 @@ fn bybit_response_error_listener_rejection_reaches_native_registry() {
                 "{name:?}: preserve callback error name"
             );
             assert_eq!(error.message, "subscriber refused diagnostic");
+            let code = error.code.as_ref().expect("retained callback code");
+            assert!(code.get("sentinel").unwrap().to_number().unwrap().is_nan());
+            assert!(code.has_own("ownUndefined"));
+            assert!(code.get("ownUndefined").unwrap().is_undefined());
+            assert!(matches!(code.get("retry").unwrap(), Js::Bool(false)));
             h.exchange.base().off("error", Some(&cleanup));
             h.exchange.dispose().unwrap();
         }
