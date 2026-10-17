@@ -9,6 +9,29 @@ use crate::{
 };
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
+    for name in [
+        "getBybitRestBaseUrl",
+        "getBybitPublicWsUrl",
+        "getBybitPrivateWsUrl",
+    ] {
+        let weak = std::rc::Rc::downgrade(&rt.shared);
+        rt.this.define(
+            name,
+            Js::function(name, move |_, args| {
+                let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
+                match name {
+                    "getBybitRestBaseUrl" => snapshots::get_bybit_rest_base_url(&rt, arg(&args, 0)),
+                    "getBybitPublicWsUrl" => {
+                        snapshots::get_bybit_public_ws_url(&rt, arg(&args, 0), arg(&args, 1))
+                    }
+                    "getBybitPrivateWsUrl" => {
+                        snapshots::get_bybit_private_ws_url(&rt, arg(&args, 0))
+                    }
+                    _ => unreachable!(),
+                }
+            }),
+        )?;
+    }
     for field in ["snapshotVersion", "ordersSnapshotVersion"] {
         rt.this.define(field, Js::Number(0.0))?;
     }
@@ -98,6 +121,37 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             }),
         )?;
     }
+    let weak = std::rc::Rc::downgrade(&rt.shared);
+    for name in ["fetchIncomeHistory", "fetchIncomeHistoryRange"] {
+        let weak = weak.clone();
+        rt.this.define(
+            name,
+            Js::function(name, move |_, _| {
+                let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
+                Ok(Js::Promise(super::super::promise::Promise::settled(
+                    &rt.exchange_runtime(),
+                    Ok(Js::array(vec![])),
+                )))
+            }),
+        )?;
+    }
+    rt.this.define(
+        "validateCandleInterval",
+        Js::function("validateCandleInterval", |owner, args| {
+            if arg(&args, 0)
+                .call_method("endsWith", vec![Js::str("s")])?
+                .truthy()
+            {
+                let error = super::super::value::error_object(
+                    "Error",
+                    "HyroTrader seconds candles require a supported trade stream",
+                );
+                owner.call_method("emitAndLogError", vec![error.clone()])?;
+                return Err(Thrown::new(error));
+            }
+            Ok(Js::Undefined)
+        }),
+    )?;
     let dispose = rt.this.get("dispose")?;
     rt.this.define(
         "dispose",
@@ -150,33 +204,50 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             Ok(Js::Bool(trimmed.truthy() && value.to_number()?.is_finite()))
         }),
     )?;
-    let map_rt = rt.clone();
+    let map_rt = std::rc::Rc::downgrade(&rt.shared);
     rt.this.define(
         "mapPosition",
         Js::function("mapPosition", move |this, args| {
-            reads::map_position(&map_rt, this, arg(&args, 0))
+            reads::map_position(
+                &safe_cex_exchange::js_runtime::scope::scope_of(&map_rt)?,
+                this,
+                arg(&args, 0),
+            )
         }),
     )?;
-    let validate_rt = rt.clone();
+    let validate_rt = std::rc::Rc::downgrade(&rt.shared);
     rt.this.define(
         "assertPrivateListResponse",
         Js::function("assertPrivateListResponse", move |this, args| {
-            reads::assert_private_list_response(&validate_rt, this, arg(&args, 0), arg(&args, 1))?;
+            reads::assert_private_list_response(
+                &safe_cex_exchange::js_runtime::scope::scope_of(&validate_rt)?,
+                this,
+                arg(&args, 0),
+                arg(&args, 1),
+            )?;
             Ok(Js::Undefined)
         }),
     )?;
-    let map_rt = rt.clone();
+    let map_rt = std::rc::Rc::downgrade(&rt.shared);
     rt.this.define(
         "mapValidatedOrders",
         Js::function("mapValidatedOrders", move |this, args| {
-            reads::map_validated_orders(&map_rt, this, arg(&args, 0))
+            reads::map_validated_orders(
+                &safe_cex_exchange::js_runtime::scope::scope_of(&map_rt)?,
+                this,
+                arg(&args, 0),
+            )
         }),
     )?;
-    let fail_rt = rt.clone();
+    let fail_rt = std::rc::Rc::downgrade(&rt.shared);
     rt.this.define(
         "fail",
         Js::function("fail", move |this, args| {
-            capabilities::fail(&fail_rt, this, arg(&args, 0))
+            capabilities::fail(
+                &safe_cex_exchange::js_runtime::scope::scope_of(&fail_rt)?,
+                this,
+                arg(&args, 0),
+            )
         }),
     )?;
     for name in [
@@ -200,10 +271,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         "fetchOrdersPositionsAndBalance",
         "fetchAndSetPrivateSnapshotHelper",
     ] {
-        let rt = rt.clone();
-        rt.this.clone().define(
+        let weak = std::rc::Rc::downgrade(&rt.shared);
+        rt.this.define(
             name,
             Js::function(name, move |_, args| {
+                let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
                 let body = rt.clone();
                 Ok(rt.spawn(Box::pin(async move {
                     let owner = body.this.clone();

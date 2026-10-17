@@ -30,17 +30,31 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
         }),
     );
     let json = g.get("JSON").expect("installed JSON builtin");
-    def("jsonParse", Js::function("jsonParse", move |_, args| {
-        Ok(json.call_method("parse", args).unwrap_or(Js::Null))
-    }));
-    def("RegExp", Js::function("RegExp", |_, args| {
-        let pattern = arg(&args, 0);
-        let flags = arg(&args, 1);
-        safe_cex_exchange::js_runtime::regexp::regexp(
-            &if pattern.is_undefined() { vec![] } else { pattern.to_js_string()?.to_vec() },
-            &if flags.is_undefined() { vec![] } else { flags.to_js_string()?.to_vec() },
-        )
-    }));
+    def(
+        "jsonParse",
+        Js::function("jsonParse", move |_, args| {
+            Ok(json.call_method("parse", args).unwrap_or(Js::Null))
+        }),
+    );
+    def(
+        "RegExp",
+        Js::function("RegExp", |_, args| {
+            let pattern = arg(&args, 0);
+            let flags = arg(&args, 1);
+            safe_cex_exchange::js_runtime::regexp::regexp(
+                &if pattern.is_undefined() {
+                    vec![]
+                } else {
+                    pattern.to_js_string()?.to_vec()
+                },
+                &if flags.is_undefined() {
+                    vec![]
+                } else {
+                    flags.to_js_string()?.to_vec()
+                },
+            )
+        }),
+    );
     // The source import omits literal top-level keys from object-literal requests.
     def(
         "omit",
@@ -173,6 +187,14 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
         super::value::from_json(&crate::types::ENDPOINTS),
     );
     for (key, value) in [
+        (
+            "HYROTRADER_SIMULATOR_URL",
+            &*crate::types::HYROTRADER_SIMULATOR_URL,
+        ),
+        (
+            "HYROTRADER_SIMULATOR_WS_URL",
+            &*crate::types::HYROTRADER_SIMULATOR_WS_URL,
+        ),
         ("INTERVAL", &*crate::types::INTERVAL),
         ("ORDER_SIDE", &*crate::types::ORDER_SIDE),
         ("POSITION_SIDE", &*crate::types::POSITION_SIDE),

@@ -293,8 +293,14 @@ async fn place_option_order(
         ("reduceOnly", Js::Bool(base.reduce_only.unwrap_or(false))),
         ("orderLinkId", link_id),
     ]);
-    let responses = await_js(rt.this.call_method("submitCreateOrders", vec![Js::array(vec![payload]), opts.clone()])?).await?;
-    let responses = responses.array_values().ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
+    let responses = await_js(rt.this.call_method(
+        "submitCreateOrders",
+        vec![Js::array(vec![payload]), opts.clone()],
+    )?)
+    .await?;
+    let responses = responses
+        .array_values()
+        .ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
     let Some(response) = responses.first().cloned() else {
         return Err(Thrown::new(error_object(
             "Error",
@@ -872,8 +878,13 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         };
         let lot_size = adjust((amount - rest) / lots, p_amount);
         let link_id = || -> Result<Js, Thrown> {
-            if !client_order_id.is_undefined() { return Ok(client_order_id.clone()); }
-            Ok(venue.generated_order_link_id().map_err(Thrown::from)?.map_or(Js::Undefined, |id| Js::str(&id)))
+            if !client_order_id.is_undefined() {
+                return Ok(client_order_id.clone());
+            }
+            Ok(venue
+                .generated_order_link_id()
+                .map_err(Thrown::from)?
+                .map_or(Js::Undefined, |id| Js::str(&id)))
         };
         // Lodash times returns no lots outside 1..=MAX_SAFE_INTEGER, including Infinity.
         let count = if (1. ..=9_007_199_254_740_991.).contains(&lots) {
@@ -903,8 +914,14 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             "assertSingleNativeClientOrderId",
             vec![client_order_id.clone(), Js::Number(payloads.len() as f64)],
         )?;
-        let responses = await_js(rt.this.call_method("submitCreateOrders", vec![Js::array(payloads), opts.clone()])?).await?;
-        let responses = responses.array_values().ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
+        let responses = await_js(rt.this.call_method(
+            "submitCreateOrders",
+            vec![Js::array(payloads), opts.clone()],
+        )?)
+        .await?;
+        let responses = responses
+            .array_values()
+            .ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
         collect_ids(&rt, &opts, responses)
     })))
 }

@@ -127,7 +127,7 @@ impl BybitExchange {
                     callback| {
             let primary = matches!(
                 self.base.name,
-                ExchangeName::Bybit | ExchangeName::Bybitdemo
+                ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
             );
             let secondary = self
                 .base

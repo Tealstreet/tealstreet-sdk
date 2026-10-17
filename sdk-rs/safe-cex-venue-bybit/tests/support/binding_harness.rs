@@ -366,12 +366,21 @@ impl RestAdapter for Wire {
                 .await;
             }
             match reply {
-                Some((status, body)) if reject_http_errors && status >= 400 => Err(safe_cex_transport::RestFailure {
-                    code: Some("ERR_BAD_REQUEST".into()), transport_error: None,
-                    message: format!("Request failed with status code {status}"),
-                    response: Some(Box::new(RestResponse { status, reason: None, headers: Default::default(), body: RestResponseBody::Encoded(body.to_string().into_bytes()) })),
-                    request: Box::new(request), context: None,
-                }),
+                Some((status, body)) if reject_http_errors && status >= 400 => {
+                    Err(safe_cex_transport::RestFailure {
+                        code: Some("ERR_BAD_REQUEST".into()),
+                        transport_error: None,
+                        message: format!("Request failed with status code {status}"),
+                        response: Some(Box::new(RestResponse {
+                            status,
+                            reason: None,
+                            headers: Default::default(),
+                            body: RestResponseBody::Encoded(body.to_string().into_bytes()),
+                        })),
+                        request: Box::new(request),
+                        context: None,
+                    })
+                }
                 Some((status, body)) => Ok(RestResponse {
                     status,
                     reason: None,

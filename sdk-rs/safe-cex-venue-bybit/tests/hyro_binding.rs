@@ -888,3 +888,100 @@ fn hyro_submission_disables_rejected_signature_replay() {
     assert!(h.store.orders().is_empty());
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() {
+    if configured_child(
+        "hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post",
+    ) {
+        return;
+    }
+    use safe_cex_exchange::exchange::Exchange;
+    use std::{
+        cell::Cell,
+        collections::VecDeque,
+        future::Future,
+        rc::Rc,
+        task::{Context, Poll, Waker},
+    };
+    let (h, private, _) = start_private();
+    ack_private(&h, &private, "auth");
+    ack_private(&h, &private, "subscribe");
+    h.wire.route(
+        "POST",
+        "/v5/order/create",
+        500,
+        json!({"retCode":10016,"retMsg":"unconfirmed"}),
+    );
+    let gate = Rc::new(Cell::new(false));
+    h.wire
+        .response_gates
+        .borrow_mut()
+        .push(("/v5/order/create".into(), gate.clone()));
+    let opts: safe_cex_venue_bybit::order_params::BybitPlaceOrderOpts =
+        serde_json::from_value(hyro_limit()).unwrap();
+    let mut pending = Box::pin(h.exchange.base().place_order(h.exchange.as_ref(), opts));
+    assert!(matches!(
+        pending
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Pending
+    ));
+    h.runtime.pump();
+    let posts = h.wire.calls("/v5/order/create");
+    assert_eq!(posts.len(), 1);
+    let link = posts[0].body["orderLinkId"].clone();
+    let body = json!({"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"recovered-filled","orderLinkId":link,"orderStatus":"Filled"}],"nextPageCursor":""}});
+    let mut routes = h.wire.routes.borrow_mut();
+    let (_, _, replies) = routes
+        .iter_mut()
+        .find(|(method, path, _)| method == "GET" && path == "/v5/order/realtime")
+        .unwrap();
+    *replies = VecDeque::from([(200, body)]);
+    drop(routes);
+    gate.set(true);
+    let ids = h
+        .drive(pending)
+        .expect("source reconciles a terminal identity after uncertain acceptance");
+    assert_eq!(ids, ["recovered-filled"]);
+    assert_eq!(h.wire.calls("/v5/order/create").len(), 1);
+    assert!(
+        h.store
+            .orders()
+            .iter()
+            .all(|order| order.id != "recovered-filled")
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn hyro_history_fallback_and_seconds_refusal_do_not_send_requests() {
+    if configured_child("hyro_history_fallback_and_seconds_refusal_do_not_send_requests") {
+        return;
+    }
+    let h = support::harness_as(ExchangeName::Hyrotrader, support::options(), |_| {});
+    assert!(
+        h.drive(h.venue().fetch_income_history(None))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        h.drive(h.venue().fetch_income_history_range(0., 1., None))
+            .unwrap()
+            .is_empty()
+    );
+    let options = serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1s"})).unwrap();
+    let error = h.drive(h.venue().fetch_ohlcv(options)).unwrap_err();
+    assert_eq!(
+        error.message,
+        "HyroTrader seconds candles require a supported trade stream"
+    );
+    assert!(h.wire.requests.borrow().is_empty());
+    h.venue().dispose().unwrap();
+    let weak = std::rc::Rc::downgrade(&h.exchange);
+    drop(h);
+    assert!(
+        weak.upgrade().is_none(),
+        "receiver callbacks must not retain the native venue"
+    );
+}

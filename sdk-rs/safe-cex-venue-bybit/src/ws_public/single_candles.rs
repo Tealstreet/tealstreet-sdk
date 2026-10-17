@@ -126,7 +126,10 @@ pub(crate) fn listen_ohlcv(
     recovery: Option<Rc<Recovery>>,
     callback: Rc<dyn Fn(Candle)>,
 ) -> Result<ListenerCleanup, ExchangeError> {
-    let primary = matches!(parent.name, ExchangeName::Bybit | ExchangeName::Bybitdemo);
+    let primary = matches!(
+        parent.name,
+        ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
+    );
     let spot = parent.name == ExchangeName::Bybitspot;
     let runtime = parent.runtime.clone();
     let interval =

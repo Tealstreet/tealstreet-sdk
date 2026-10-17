@@ -241,6 +241,17 @@ impl SessionHost for Rt {
                 Ok(values.first().cloned().unwrap_or(Js::Undefined))
             }
             "iterator" => arg(&args, 0).iterator(),
+            "IteratorClose normal" => {
+                let iterator = arg(&args, 0);
+                let method = iterator.get("return")?;
+                if !method.is_nullish() {
+                    let result = method.call(iterator, vec![])?;
+                    if !result.is_object() {
+                        return Err(Thrown::type_error("Iterator result is not an object"));
+                    }
+                }
+                Ok(arg(&args, 1))
+            }
             "IteratorClose abrupt" => {
                 let iterator = arg(&args, 0);
                 if let Ok(method) = iterator.get("return") {
