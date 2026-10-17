@@ -2241,8 +2241,8 @@
     ]
   },
   "safe_cex_transport::how::HOWWebSocket": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "shape": "observed",
+    "evidence": "Reviewed packages/http-over-websocket/src/HOWWebSocket.ts constructor, validateAndSend, sendToken and latency lookup. Actual native constructors, connect_socket host binding, send/token frames and rpc.latency ingress execute unchanged production bodies; observations read stored endpoint/auth state, actual socket wire bytes and native latency fields. Host fixture supplies only deterministic clock/socket capabilities and records I/O. No REST request/response or parser API is replaced.",
     "entrypoints": [
       {
         "api": {
@@ -2333,8 +2333,351 @@
             "is_c_variadic": false
           }
         },
+        "input": "observed",
+        "reason": "Raw endpoint admission: empty URL refuses before host capability access; nonempty URLs retain their exact endpoint and lazy socket state.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); match $type::new(host.clone(),$value.as_str().unwrap().into()) {\n        Ok(client)=>serde_json::json!({\"url\":client.url,\"socket\":client.state.borrow().socket.is_some(),\"auth\":format!(\"{:?}\",client.state.borrow().auth),\"dials\":host.dials.borrow().len()}),\n        Err(error)=>serde_json::json!({\"error\":error.to_string(),\"capabilities\":host.capabilities_calls.get()}) } }",
+        "cases": [
+          {
+            "input": "wss://one.example/tunnel",
+            "output": {
+              "url": "wss://one.example/tunnel",
+              "socket": false,
+              "auth": "Unknown",
+              "dials": 0
+            }
+          },
+          {
+            "input": "wss://two.example/tunnel?tag=1",
+            "output": {
+              "url": "wss://two.example/tunnel?tag=1",
+              "socket": false,
+              "auth": "Unknown",
+              "dials": 0
+            }
+          },
+          {
+            "input": "",
+            "output": {
+              "error": "No HOW websocket endpoint provided",
+              "capabilities": 0
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "send",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw frame admission and actual stringify/send effects, including source ping-substring bypass while disconnected.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let client=$type::new(host.clone(),\"wss://fixture.example/tunnel\".into()).unwrap();\n        if $value[\"connected\"].as_bool().unwrap() {fx::ready(client.connect_socket(1000)).unwrap();}\n        let result=client.send($value[\"frame\"].clone()); let sent=fx::sent(&host.socket);\n        match result {Ok(())=>serde_json::json!({\"ok\":true,\"sent\":sent}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_string(),\"sent\":sent})} }",
+        "cases": [
+          {
+            "input": {
+              "connected": true,
+              "frame": {
+                "type": "notice",
+                "number": 7
+              }
+            },
+            "output": {
+              "ok": true,
+              "sent": [
+                "{\"type\":\"notice\",\"number\":7}"
+              ]
+            }
+          },
+          {
+            "input": {
+              "connected": false,
+              "frame": {
+                "type": "notice"
+              }
+            },
+            "output": {
+              "ok": false,
+              "error": "WebSocketNotReadyError",
+              "sent": []
+            }
+          },
+          {
+            "input": {
+              "connected": false,
+              "frame": {
+                "message": "PING anywhere"
+              }
+            },
+            "output": {
+              "ok": true,
+              "sent": []
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "send_token",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "token",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw token reaches the actual connected socket auth frame, preserving exact token bytes and worker source while updating native token/auth state.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let client=$type::new(host.clone(),\"wss://fixture.example/tunnel\".into()).unwrap();\n        fx::ready(client.connect_socket(1000)).unwrap(); client.send_token($value.as_str().unwrap()).unwrap();\n        serde_json::json!({\"sent\":fx::sent(&host.socket),\"tokenSent\":client.state.borrow().token_sent,\"auth\":format!(\"{:?}\",client.state.borrow().auth)}) }",
+        "cases": [
+          {
+            "input": "alpha",
+            "output": {
+              "sent": [
+                "{\"type\":\"rpc.auth\",\"token\":\"alpha\",\"source\":\"worker\"}"
+              ],
+              "tokenSent": true,
+              "auth": "Unknown"
+            }
+          },
+          {
+            "input": "beta\"quoted",
+            "output": {
+              "sent": [
+                "{\"type\":\"rpc.auth\",\"token\":\"beta\\\"quoted\",\"source\":\"worker\"}"
+              ],
+              "tokenSent": true,
+              "auth": "Unknown"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get_latency_for_domain",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "domain",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::how_config::LatencyEntry",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "String lookup observes the actual rpc.latency message path and native entry fields; a missing domain remains absent.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let client=$type::new(host,\"wss://fixture.example/tunnel\".into()).unwrap();\n        client.on_message(crate::socket::SocketFrame::Text(r#\"{\"type\":\"rpc.latency\",\"domain\":\"venue.example\",\"latency_ms\":7,\"source\":\"measured\",\"sample_count\":3,\"measured_at\":40}\"#.into())).unwrap();\n        match client.get_latency_for_domain($value.as_str().unwrap()) {Some(row)=>serde_json::json!({\"latency\":row.latency_ms,\"source\":row.source,\"cached\":row.cached,\"samples\":row.sample_count,\"measured\":row.measured_at,\"updated\":row.updated_at}),None=>serde_json::Value::Null} }",
+        "cases": [
+          {
+            "input": "venue.example",
+            "output": {
+              "latency": 7,
+              "source": "measured",
+              "cached": false,
+              "samples": 3,
+              "measured": 40,
+              "updated": 42
+            }
+          },
+          {
+            "input": "missing.example",
+            "output": null
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get_all_latencies",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "indexmap::map::IndexMap",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::how_config::LatencyEntry",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
         "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "reason": "Read-only snapshot of already admitted LatencyEntry values with no raw input or decoding step; string-domain admission is independently observed by get_latency_for_domain."
       }
     ]
   },
@@ -2435,8 +2778,8 @@
     ]
   },
   "safe_cex_transport::relay::RelayWebSocket": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "shape": "observed",
+    "evidence": "Reviewed packages/http-over-websocket/src/RelayWebSocket.ts and tunnelEndpoints.ts: first ts-relay query selection, remaining URL retention, lazy connecting state, close forwarding and once-only close dispatch. Actual production constructors, on_inner_open with recorded host I/O, close and on_inner_close/next_event execute; no replacement relay or fake protocol implementation is used.",
     "entrypoints": [
       {
         "api": {
@@ -2516,8 +2859,41 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "input": "observed",
+        "reason": "Raw relay URLs decode through production parsing; valid endpoints retain tunnel/upstream separately and invalid/missing upstream URLs refuse.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); match $type::new(host,$value.as_str().unwrap()) {Ok(relay)=>serde_json::json!({\"tunnel\":relay.tunnel_url,\"upstream\":relay.upstream,\"state\":relay.ready_state(),\"protocols\":relay.connection_options.protocols}),Err(error)=>serde_json::json!({\"error\":error.to_string()})} }",
+        "cases": [
+          {
+            "input": "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example%2Fprivate",
+            "output": {
+              "tunnel": "wss://relay.example/tunnel",
+              "upstream": "wss://venue.example/private",
+              "state": 0,
+              "protocols": []
+            }
+          },
+          {
+            "input": "wss://other.example/a?tag=2&ts-relay=wss%3A%2F%2Fsecond.example%3Fx%3D1#frag",
+            "output": {
+              "tunnel": "wss://other.example/a?tag=2#frag",
+              "upstream": "wss://second.example?x=1",
+              "state": 0,
+              "protocols": []
+            }
+          },
+          {
+            "input": "not a URL",
+            "output": {
+              "error": "Invalid URL"
+            }
+          },
+          {
+            "input": "wss://relay.example/tunnel",
+            "output": {
+              "error": "not a relay url: wss://relay.example/tunnel"
+            }
+          }
+        ]
       },
       {
         "api": {
@@ -2606,8 +2982,234 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "input": "observed",
+        "reason": "Raw endpoint plus already typed socket options retain protocol order and default header policy; URL admission is observed independently of the typed options.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let options=crate::relay::WebSocketConnectionOptions {\n        protocols:$value[\"protocols\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().into()).collect(),..Default::default()};\n        match $type::with_connection_options(host,$value[\"url\"].as_str().unwrap(),options) {Ok(relay)=>serde_json::json!({\"tunnel\":relay.tunnel_url,\"upstream\":relay.upstream,\"state\":relay.ready_state(),\"protocols\":relay.connection_options.protocols}),Err(error)=>serde_json::json!({\"error\":error.to_string()})} }",
+        "cases": [
+          {
+            "input": {
+              "url": "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example%2Fprivate",
+              "protocols": [
+                "p1"
+              ]
+            },
+            "output": {
+              "tunnel": "wss://relay.example/tunnel",
+              "upstream": "wss://venue.example/private",
+              "state": 0,
+              "protocols": [
+                "p1"
+              ]
+            }
+          },
+          {
+            "input": {
+              "url": "wss://other.example/a?tag=2&ts-relay=wss%3A%2F%2Fsecond.example%3Fx%3D1#frag",
+              "protocols": [
+                "x",
+                "y"
+              ]
+            },
+            "output": {
+              "tunnel": "wss://other.example/a?tag=2#frag",
+              "upstream": "wss://second.example?x=1",
+              "state": 0,
+              "protocols": [
+                "x",
+                "y"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "close",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "code",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::convert::Into",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::option::Option",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "primitive": "u16"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ],
+              [
+                "reason",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw reason and optional code traverse actual relay connection/close into the socket recorder without substitution.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let relay=$type::new(host.clone(),\"wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example\").unwrap();\n        fx::ready(relay.on_inner_open()).unwrap(); let code=$value[\"code\"].as_u64().map(|v|u16::try_from(v).unwrap());\n        relay.close(code,$value[\"reason\"].as_str().unwrap());\n        serde_json::json!({\"state\":relay.ready_state(),\"closes\":host.socket.closes.borrow().clone()}) }",
+        "cases": [
+          {
+            "input": {
+              "code": 4001,
+              "reason": "bye"
+            },
+            "output": {
+              "state": 2,
+              "closes": [
+                [
+                  4001,
+                  "bye"
+                ]
+              ]
+            }
+          },
+          {
+            "input": {
+              "code": null,
+              "reason": "no-code"
+            },
+            "output": {
+              "state": 2,
+              "closes": [
+                [
+                  null,
+                  "no-code"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "on_inner_close",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "code",
+                {
+                  "primitive": "u16"
+                }
+              ],
+              [
+                "reason",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "was_clean",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw host close data reaches the actual close event exactly once; a later duplicate cannot replace the first code/reason/clean flag.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let relay=$type::new(host,\"wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example\").unwrap();\n        fx::ready(relay.on_inner_open()).unwrap(); relay.on_inner_close(u16::try_from($value[\"code\"].as_u64().unwrap()).unwrap(),$value[\"reason\"].as_str().unwrap().into(),$value[\"clean\"].as_bool().unwrap());\n        let event=fx::ready(relay.next_event()).unwrap(); relay.on_inner_close(4999,\"duplicate\".into(),false); assert!(relay.events.borrow().is_empty(),\"duplicate close must not enqueue another event\");\n        match event {crate::relay::RelayEvent::Close{code,reason,was_clean}=>serde_json::json!({\"state\":relay.ready_state(),\"code\":code,\"reason\":reason,\"clean\":was_clean}),_=>panic!(\"expected actual close event\")} }",
+        "cases": [
+          {
+            "input": {
+              "code": 4001,
+              "reason": "remote",
+              "clean": true
+            },
+            "output": {
+              "state": 3,
+              "code": 4001,
+              "reason": "remote",
+              "clean": true
+            }
+          },
+          {
+            "input": {
+              "code": 4007,
+              "reason": "lost",
+              "clean": false
+            },
+            "output": {
+              "state": 3,
+              "code": 4007,
+              "reason": "lost",
+              "clean": false
+            }
+          }
+        ]
       }
     ]
   },
@@ -5618,11 +6220,11 @@
       },
       {
         "input": "%FF",
-        "output": "�"
+        "output": "\ufffd"
       },
       {
         "input": "%E2%82%AC",
-        "output": "€"
+        "output": "\u20ac"
       }
     ]
   },
@@ -12307,14 +12909,14 @@
               "request": [
                 [
                   "x-token",
-                  "\tlast\r\n\u0000\t"
+                  "\tlast\r\n\u0000\u007f\t"
                 ],
                 [
                   " New ",
                   " a\tb "
                 ],
                 [
-                  " ﻿ ",
+                  " \ufeff ",
                   "skip"
                 ]
               ]
@@ -12932,7 +13534,7 @@
             },
             "output": {
               "kind": "string",
-              "value": "�A"
+              "value": "\ufffdA"
             }
           },
           {
@@ -13062,7 +13664,7 @@
               "calls": 1,
               "seen": {
                 "kind": "string",
-                "value": "�A"
+                "value": "\ufffdA"
               },
               "actual": {
                 "phase": "transformed",
@@ -13388,7 +13990,7 @@
                 "phase": "transformed",
                 "value": {
                   "kind": "string",
-                  "value": "﻿{}"
+                  "value": "\ufeff{}"
                 }
               }
             }
@@ -14986,6 +15588,471 @@
         },
         "input": "typed",
         "reason": "Constructs FIFO window state from an existing RateLimitClock capability and typed usize/u64 budget; accepts no serialized domain model. Native slot cancellation, failure accounting, and queued venue timestamp witnesses execute the resulting state."
+      }
+    ]
+  },
+  "safe_cex_transport::registry::TransportRegistry": {
+    "shape": "observed",
+    "evidence": "Reviewed packages/safe-cex/src/transport/registry.ts lazy options.transport/defaultTransport/directTransport precedence and truthy publicCorsProxy URL wrapping. Native observations use the actual registry, TealstreetTransport and DirectTransport, including an instance override after registration. Provider host REST/token capabilities panic if accidentally invoked.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "with_public_cors_proxy",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "instance",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::sync::Arc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "dyn_trait": {
+                                                "traits": [
+                                                  {
+                                                    "trait": {
+                                                      "path": "safe_cex_transport::provider::TransportProvider",
+                                                      "args": null
+                                                    },
+                                                    "generic_params": []
+                                                  }
+                                                ],
+                                                "lifetime": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw URL wrapping follows actual lazy provider selection; default and registered selection cannot override a supplied direct instance.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } use std::sync::Arc; use crate::TransportProvider;\n        let registry:$type=Default::default(); let mode=$value[\"mode\"].as_str().unwrap();\n        let direct:Arc<dyn TransportProvider>=Arc::new(crate::DirectTransport);\n        if mode!=\"default\" {registry.set_default_transport(Arc::new(crate::tealstreet::TealstreetTransport::new(Arc::new(fx::ProviderHost))));}\n        let instance=(mode==\"instance\").then_some(&direct);\n        serde_json::json!({\"url\":registry.with_public_cors_proxy($value[\"url\"].as_str().unwrap(),instance),\"provider\":registry.get_transport(instance).name()}) }",
+        "cases": [
+          {
+            "input": {
+              "mode": "default",
+              "url": "https://venue.example/book"
+            },
+            "output": {
+              "url": "https://venue.example/book",
+              "provider": "direct"
+            }
+          },
+          {
+            "input": {
+              "mode": "registered",
+              "url": "https://venue.example/book"
+            },
+            "output": {
+              "url": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://venue.example/book",
+              "provider": "tealstreet"
+            }
+          },
+          {
+            "input": {
+              "mode": "instance",
+              "url": "https://venue.example/book"
+            },
+            "output": {
+              "url": "https://venue.example/book",
+              "provider": "direct"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "resolve_transport_routing",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "exchange",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeName",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::routing::RoutingOptions",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "instance",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::sync::Arc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "dyn_trait": {
+                                                "traits": [
+                                                  {
+                                                    "trait": {
+                                                      "path": "safe_cex_transport::provider::TransportProvider",
+                                                      "args": null
+                                                    },
+                                                    "generic_params": []
+                                                  }
+                                                ],
+                                                "lifetime": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_transport::routing::ResolvedRouting",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Selects a supplied or registered TransportProvider using already typed ExchangeName/RoutingOptions; no raw JSON/string decoding or new validation authority is introduced."
+      }
+    ]
+  },
+  "safe_cex_transport::tealstreet::TealstreetTransport": {
+    "shape": "observed",
+    "evidence": "Reviewed packages/safe-cex/src/transport/tealstreet/tealstreetTransport.ts wsConnection: relay detection takes precedence, ordinary Tealstreet hosts receive fixed upgrade headers, unrelated and lookalike hosts receive no override. Native observations invoke the actual provider trait, inspect connection kind and exact native Origin/User-Agent/header count, and never execute REST or token capabilities.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::sync::Arc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::tealstreet::TealstreetTransportHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Binds an already supplied TealstreetTransportHost capability; no raw input is decoded and the host is not invoked during construction."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_transport::provider::TransportProvider",
+          "name": "ws_routing",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "exchange",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeName",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::routing::RoutingOptions",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_transport::routing::ResolvedRouting",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Projects already typed ExchangeName/RoutingOptions through the canonical routing resolver; raw URL admission is separately observed by ws_connection."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_transport::provider::TransportProvider",
+          "name": "ws_connection",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::WsConnection",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Raw URL selects actual Relay/Headers/None and exact upgrade header values, including an unrelated host and a suffix-spoofing negative.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } use crate::TransportProvider; let provider=$type::new(std::sync::Arc::new(fx::ProviderHost));\n        match provider.ws_connection($value.as_str().unwrap()) {\n        Some(crate::WsConnection::Headers{headers})=>serde_json::json!({\"kind\":\"headers\",\"origin\":headers.get(\"Origin\"),\"ua\":headers.get(\"User-Agent\"),\"count\":headers.len()}),\n        Some(crate::WsConnection::Relay{headers})=>serde_json::json!({\"kind\":\"relay\",\"origin\":headers.get(\"Origin\"),\"ua\":headers.get(\"User-Agent\"),\"count\":headers.len()}),\n        None=>serde_json::json!({\"kind\":\"none\",\"origin\":null,\"ua\":null,\"count\":0})} }",
+        "cases": [
+          {
+            "input": "wss://feed.tealstreet.io/tunnel",
+            "output": {
+              "kind": "headers",
+              "origin": "https://preview.tealstreet.io",
+              "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+              "count": 2
+            }
+          },
+          {
+            "input": "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example%2Fprivate",
+            "output": {
+              "kind": "relay",
+              "origin": "https://preview.tealstreet.io",
+              "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+              "count": 2
+            }
+          },
+          {
+            "input": "wss://ordinary.example/private",
+            "output": {
+              "kind": "none",
+              "origin": null,
+              "ua": null,
+              "count": 0
+            }
+          },
+          {
+            "input": "wss://tealstreet.io.evil.example/private",
+            "output": {
+              "kind": "none",
+              "origin": null,
+              "ua": null,
+              "count": 0
+            }
+          }
+        ]
       }
     ]
   }
