@@ -135,7 +135,9 @@
       "explicit owner regression scope cannot turn the default matrix inventory green",
       "inherent factories returning a different decoded owner remain inventoried",
       "alias defaults respect lexical parameter scopes and nested applications without weakening cycle refusal",
-      "unsupported receivers and uninstantiated defaults pass only with a reviewed source pin"
+      "unsupported receivers and uninstantiated defaults pass only with a reviewed source pin",
+      "receiver item hashes preserve Unicode columns and refuse invalid spans",
+      "compiler receiver item pins survive unrelated edits and refuse changes inside the impl"
     ],
     "accepted-loader-future-native.test.mjs": [
       "loader future actual compiler coverage refuses removal and restores the named assertion"
@@ -380,6 +382,8 @@
     "projection exact raw target",
     "projection fixed Realm host",
     "projection selected workspace source",
-    "projection native concrete owner identity"
+    "projection native concrete owner identity",
+    "receiver item pin widened to whole file",
+    "receiver item source check removed"
   ]
 }
