@@ -43,11 +43,12 @@ fn s(value: impl Into<String>) -> J {
 fn n(value: f64) -> J {
     J::Number(value)
 }
-fn side(value: OrderSide) -> J {
-    s(match value {
-        OrderSide::Buy => "buy",
-        OrderSide::Sell => "sell",
-    })
+fn side(value: impl Into<safe_cex_types::ModelField<OrderSide>>) -> J {
+    match value.into().into_value() {
+        Some(OrderSide::Buy) => s("buy"),
+        Some(OrderSide::Sell) => s("sell"),
+        None => J::Undefined,
+    }
 }
 thread_local! {
     static FIXTURE_STAMPS: RefCell<Vec<(f64, f64)>> = const { RefCell::new(Vec::new()) };
@@ -87,24 +88,24 @@ fn position(value: &Position) -> J {
         ("contracts", n(value.contracts)),
         ("liquidationPrice", n(value.liquidation_price)),
     ];
-    if let Some(v) = value.margin_size {
+    if let Some(v) = value.margin_size.into_value() {
         fields.push(("marginSize", n(v)));
     }
-    if let Some(v) = value.realized_pnl {
+    if let Some(v) = value.realized_pnl.into_value() {
         fields.push(("realizedPnl", n(v)));
     }
-    if let Some(v) = value.position_mode {
+    if let Some(v) = value.position_mode.into_value() {
         assert_eq!(v, PositionMode::Hedged);
         fields.push(("positionMode", s("hedged")));
     }
-    if let Some(v) = value.margin_type {
+    if let Some(v) = value.margin_type.into_value() {
         assert_eq!(v, MarginType::Cross);
         fields.push(("marginType", s("cross")));
     }
-    if let Some(v) = &value.info {
+    if let Some(v) = value.info.as_ref() {
         fields.push(("info", J::from(v.clone())));
     }
-    if let Some(v) = value.last_update {
+    if let Some(v) = value.last_update.into_value() {
         fields.push(("lastUpdate", source_clock_stamp(v)));
     }
     obj(fields)
@@ -114,26 +115,38 @@ fn order(value: &Order) -> J {
         ("id", s(&value.id)),
         (
             "status",
-            s(match value.status {
-                OrderStatus::Open => "open",
-                OrderStatus::Closed => "closed",
-                OrderStatus::Canceled => "canceled",
-                _ => panic!(),
-            }),
+            s(
+                match value
+                    .status
+                    .value()
+                    .expect("present source enum in fixture")
+                {
+                    OrderStatus::Open => "open",
+                    OrderStatus::Closed => "closed",
+                    OrderStatus::Canceled => "canceled",
+                    _ => panic!(),
+                },
+            ),
         ),
         ("symbol", s(&value.symbol)),
         (
             "type",
-            s(match value.r#type {
-                OrderType::Limit => "limit",
-                OrderType::Market => "market",
-                OrderType::StopLoss => "stop_market",
-                OrderType::TakeProfit => "take_profit_market",
-                _ => panic!(),
-            }),
+            s(
+                match value
+                    .r#type
+                    .value()
+                    .expect("present source enum in fixture")
+                {
+                    OrderType::Limit => "limit",
+                    OrderType::Market => "market",
+                    OrderType::StopLoss => "stop_market",
+                    OrderType::TakeProfit => "take_profit_market",
+                    _ => panic!(),
+                },
+            ),
         ),
         ("side", side(value.side)),
-        ("price", n(value.price)),
+        ("price", n((value.price).to_number())),
         ("amount", n(value.amount)),
         ("filled", n(value.filled)),
         ("remaining", n(value.remaining)),
@@ -141,7 +154,7 @@ fn order(value: &Order) -> J {
         ("info", J::from(value.info.clone().unwrap())),
         ("lastUpdate", source_clock_stamp(value.last_update)),
     ];
-    if let Some(v) = value.time_in_force {
+    if let Some(v) = value.time_in_force.into_value() {
         fields.push((
             "timeInForce",
             s(match v {
@@ -155,7 +168,7 @@ fn order(value: &Order) -> J {
         ("tpTriggerType", value.tp_trigger_type),
         ("slTriggerType", value.sl_trigger_type),
     ] {
-        if let Some(v) = v {
+        if let Some(v) = v.into_value() {
             fields.push((
                 key,
                 s(match v {

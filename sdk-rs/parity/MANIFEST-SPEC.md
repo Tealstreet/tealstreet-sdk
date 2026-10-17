@@ -695,10 +695,13 @@ decision faithfully — `is_truthy`, `is_nullish` and presence all answer exactl
 as JavaScript does, so every `||`, `??` and `!` guard takes the same path. What
 it cannot do is put the hit into the field the mapper returns.
 
-`safe-cex-types::Order` declares `type: OrderType` and `side: OrderSide`;
-`Position` declares `side`; `DisplayedPosition` declares typed ticker and market
-fields. Those are closed enums, consumed by the store, the worker, the UI and
-the OEMS layer. In TypeScript the same field holds an inherited **function**.
+`safe-cex-types::Order` carries type/status/side as `ModelField` values;
+`Position.side` uses the same carrier. Absent properties and own undefined are
+represented directly, and JSON omits both. This boundary does not justify
+refusing an undefined enum lookup or a missing Order.price. The typed value
+variants remain closed enums. `DisplayedPosition` declares typed ticker and
+market fields. Those typed values are consumed by the store, worker, UI and
+OEMS layer. In TypeScript the same field holds an inherited **function**.
 
 So a mapper can take the right branch and still be unable to return what
 TypeScript returns. Measured independently on woo (`mapLimitOrder`,

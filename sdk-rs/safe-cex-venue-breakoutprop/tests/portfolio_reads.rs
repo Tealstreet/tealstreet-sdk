@@ -56,7 +56,7 @@ fn balance(b: &Balance) -> Value {
     v
 }
 fn order(o: &Order) -> Value {
-    let mut v = json!({"id":o.id,"status":o.status,"symbol":o.symbol,"type":o.r#type,"side":o.side,"price":number(o.price),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
+    let mut v = json!({"id":o.id,"status":o.status,"symbol":o.symbol,"type":o.r#type,"side":o.side,"price":number(o.price.to_number()),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
     optional(&mut v, "info", o.info.as_ref().map(observe));
     optional(&mut v, "timeInForce", o.time_in_force.map(|x| json!(x)));
     v

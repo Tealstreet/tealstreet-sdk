@@ -17,6 +17,7 @@ pub(super) fn encode<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thro
 
 fn from_input(value: Input) -> Js {
     match value {
+        Input::Undefined => Js::Undefined,
         Input::Null => Js::Null,
         Input::Bool(value) => Js::Bool(value),
         Input::Text(value) => Js::str(&value),
@@ -44,7 +45,8 @@ fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thro
     }
     Ok(match value {
         Js::SymbolIterator => return Err(fault("Cannot decode a Symbol as typed data")),
-        Js::Undefined | Js::Null | Js::Function(_) | Js::Promise(_) => Input::Null,
+        Js::Undefined => Input::Undefined,
+        Js::Null | Js::Function(_) | Js::Promise(_) => Input::Null,
         Js::Bool(value) => Input::Bool(*value),
         Js::Number(value) => Input::Float(*value),
         Js::BigInt(value) => Input::Text(value.to_string()),
@@ -67,9 +69,7 @@ fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thro
         Js::Object(_) | Js::Builtin(_) => {
             let mut fields = vec![];
             for (key, value) in value.own_entries()? {
-                if !present_fields
-                    && (matches!(value, Js::Undefined | Js::Function(_)) || value.is_callable())
-                {
+                if !present_fields && (matches!(value, Js::Function(_)) || value.is_callable()) {
                     continue;
                 }
                 fields.push((
@@ -87,10 +87,30 @@ pub(super) fn decode<T: de::DeserializeOwned>(
     value: &Js,
     present_fields: bool,
 ) -> Result<T, Thrown> {
-    T::deserialize(NativeInput(capture(value, 0, present_fields)?)).map_err(fault)
+    let mode = if present_fields {
+        NativeMode::Preserve
+    } else {
+        NativeMode::Normal
+    };
+    T::deserialize(NativeInput(capture(value, 0, present_fields)?, mode)).map_err(fault)
 }
 
-struct NativeInput(Input);
+#[derive(Clone, Copy, PartialEq)]
+enum NativeMode {
+    Normal,
+    Preserve,
+    ModelRecord,
+}
+impl NativeMode {
+    fn child(self) -> Self {
+        if self == Self::ModelRecord {
+            Self::Normal
+        } else {
+            self
+        }
+    }
+}
+struct NativeInput(Input, NativeMode);
 impl<'de> IntoDeserializer<'de, Error> for NativeInput {
     type Deserializer = Self;
     fn into_deserializer(self) -> Self {
@@ -101,7 +121,7 @@ impl<'de> Deserializer<'de> for NativeInput {
     type Error = Error;
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
         match self.0 {
-            Input::Null => visitor.visit_unit(),
+            Input::Undefined | Input::Null => visitor.visit_unit(),
             Input::Bool(value) => visitor.visit_bool(value),
             Input::Text(value) => visitor.visit_string(value),
             Input::Float(value) => {
@@ -116,30 +136,41 @@ impl<'de> Deserializer<'de> for NativeInput {
                 visitor.visit_f64(value)
             }
             Input::Lexeme(_) => unreachable!("native input capture uses numeric visitor values"),
-            Input::Array(values) => {
-                de::value::SeqDeserializer::new(values.into_iter().map(NativeInput))
-                    .deserialize_any(visitor)
-            }
+            Input::Array(values) => de::value::SeqDeserializer::new(
+                values
+                    .into_iter()
+                    .map(|value| NativeInput(value, self.1.child())),
+            )
+            .deserialize_any(visitor),
             Input::Object(values) => de::value::MapDeserializer::new(
                 values
                     .into_iter()
-                    .map(|(key, value)| (key, NativeInput(value))),
+                    .filter(|(_, value)| {
+                        self.1 != NativeMode::Normal || !matches!(value, Input::Undefined)
+                    })
+                    .map(|(key, value)| (key, NativeInput(value, self.1.child()))),
             )
             .deserialize_any(visitor),
         }
     }
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        if matches!(self.0, Input::Null) {
+        if matches!(self.0, Input::Null | Input::Undefined) {
             visitor.visit_none()
         } else {
             visitor.visit_some(self)
         }
     }
     fn deserialize_newtype_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
+        mut self,
+        name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
+        if name == safe_cex_types::model_field::MODEL_FIELD && matches!(self.0, Input::Undefined) {
+            return visitor.visit_unit();
+        }
+        if name == safe_cex_types::model_field::MODEL_RECORD {
+            self.1 = NativeMode::ModelRecord;
+        }
         visitor.visit_newtype_struct(self)
     }
     fn deserialize_enum<V: Visitor<'de>>(
@@ -154,7 +185,7 @@ impl<'de> Deserializer<'de> for NativeInput {
                 de::value::MapAccessDeserializer::new(de::value::MapDeserializer::new(
                     values
                         .into_iter()
-                        .map(|(key, value)| (key, NativeInput(value))),
+                        .map(|(key, value)| (key, NativeInput(value, self.1.child()))),
                 ))
                 .deserialize_enum(name, variants, visitor)
             }
