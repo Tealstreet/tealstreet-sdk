@@ -208,3 +208,11 @@ bits are observed before serialization. PreparedOrderOpts, its private wire and
 optional decoder have independent native field witnesses in the same scoped
 `accepted-model-field-native.test.mjs` target. Generic helper delegation requires
 an exact source review and the inventoried decoder's native observations.
+
+Order.reduceOnly uses ModelField<bool>: absent, own undefined, false and true
+remain distinct in native codecs. Its internal PreparedOrderOpts amendment copy
+uses the same carrier; public PlaceOrderOpts keeps Option<bool> and refuses
+non-booleans. The real native/Store presence target covers 48 actual-source
+upsert/patch combinations. BingX's real amendment witness compares the complete
+signed request against actual source execution and requires undefined reduceOnly
+to be omitted from the wire and HMAC preimage.

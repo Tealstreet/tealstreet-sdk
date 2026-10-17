@@ -942,6 +942,69 @@ fn historical_fills_use_host_local_time_conversion() {
     }
 }
 
+#[test]
+fn undefined_reduce_only_amendment_omits_the_signed_wire_field_like_source() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
+    use std::process::Command;
+
+    let h = fixture();
+    let mut source_order = serde_json::to_value(order()).unwrap();
+    let info = source_order["info"].as_object_mut().unwrap();
+    info.insert("clientOrderId".into(), json!("original-presence-client"));
+    for key in ["reduceOnly", "ro", "R", "positionSide", "ps"] {
+        info.remove(key);
+    }
+    let raw = from_json(&source_order);
+    raw.define("reduceOnly", Js::Undefined).unwrap();
+    let original: Order = to_typed(&raw).expect("native Order admits own-undefined reduceOnly");
+    h.store.add_or_update_order(original.clone()).unwrap();
+    const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
+    h.http.ok("POST", REPLACE, json!({"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"presence-replacement"}));
+    let mut request: UpdateOrderOpts =
+        serde_json::from_value(json!({"order":order(),"update":{"price":110}})).unwrap();
+    request.order = original;
+    assert_eq!(
+        h.drive(h.venue().update_order(request)).unwrap(),
+        ["presence-replacement"]
+    );
+    let calls = h.http.calls(REPLACE);
+    assert_eq!(calls.len(), 1);
+    let wire = &calls[0].data;
+    assert!(
+        wire.get("reduceOnly").is_none(),
+        "undefined reduceOnly must be omitted, including before HMAC: {wire}"
+    );
+    // Control only clock and UUID entropy; execute the maintained class, actual
+    // createAPI signer, installed qs and real HMAC over the source payload.
+    let input = json!({"order":source_order,"options":options(),"markets":&*h.store.markets(),"price":110,"timestamp":wire["timestamp"],"uuid":wire["clientOrderId"].as_str().unwrap().strip_prefix("ts").unwrap()});
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/completion_oracle.cjs"
+        ))
+        .arg("--undefined-reduce-only")
+        .arg(input.to_string())
+        .output()
+        .expect("execute actual TypeScript amendment and signer");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        wire, &expected["body"],
+        "complete signed wire body matches source"
+    );
+    assert!(
+        !expected["preimage"]
+            .as_str()
+            .unwrap()
+            .contains("reduceOnly")
+    );
+    done(&h);
+}
+
 fn asset_market(symbol: &str, base: &str) -> Value {
     json!({"symbol":symbol,"asset":base,"currency":"USDT","status":1,"quantityPrecision":"3","pricePrecision":"2","tradeMinLimit":"0.01","maxLongLeverage":75})
 }
