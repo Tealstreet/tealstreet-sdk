@@ -636,10 +636,11 @@ fn hyro_rejected_and_timed_out_auth_close_the_session_without_subscription() {
             "HyroTrader private auth acknowledgement timed out"
         };
         assert!(
-            errors
-                .borrow()
-                .iter()
-                .any(|value| value.to_string().contains(expected)),
+            errors.borrow().iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|text| String::from_utf16_lossy(text).contains(expected))
+            }),
             "{:?}",
             errors.borrow()
         );
@@ -1382,7 +1383,12 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     feed(json!({"topic":"order","data":[order.clone()]}));
     feed(json!({"topic":"order","data":[order.clone()]}));
     assert_eq!(
-        *fills.borrow(),
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Hyro fill fixture"),
         vec![
             json!({"id":"hyro-frame","side":"buy","symbol":"BTCUSDT","price":25000.0,"amount":0.004})
         ]
@@ -1408,4 +1414,79 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     assert_eq!(fills.borrow().len(), 2);
     assert_eq!(h.wire.requests.borrow().len(), requests);
     h.venue().dispose().unwrap();
+}
+
+#[test]
+fn hyro_option_reads_reject_with_inherited_source_guard() {
+    if configured_child("hyro_option_reads_reject_with_inherited_source_guard") {
+        return;
+    }
+    let mut options = support::options();
+    options.enable_option_markets = Some(true);
+    let h = support::harness_as(ExchangeName::Hyrotrader, options, |_| {});
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/hyro_option_refusal_source.cjs"
+        ))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["calls"], 0);
+    let mut failures = vec![];
+    for dynamic in [false, true] {
+        let v = h.venue();
+        let query = serde_json::from_value(json!({"underlying":"BTC"})).unwrap();
+        let results = [
+            h.drive(if dynamic {
+                v.capabilities().fetch_option_chain(v, query)
+            } else {
+                v.fetch_option_chain(query)
+            })
+            .map(|_| ()),
+            h.drive(if dynamic {
+                v.capabilities().fetch_option_expiries(v, "BTC".into())
+            } else {
+                v.fetch_option_expiries("BTC".into())
+            })
+            .map(|_| ()),
+            h.drive(if dynamic {
+                v.capabilities().fetch_account_greeks(v)
+            } else {
+                v.fetch_account_greeks()
+            })
+            .map(|_| ()),
+        ];
+        for (result, row) in results
+            .into_iter()
+            .zip(expected["rows"].as_array().unwrap())
+        {
+            let error =
+                result.expect_err("Hyro source disables options even when inherited methods exist");
+            if error.name != row["name"].as_str().unwrap()
+                || error.message != row["message"].as_str().unwrap()
+            {
+                failures.push(format!(
+                    "dynamic={dynamic} {}: {}: {}; expected {row}",
+                    row["method"], error.name, error.message
+                ));
+            }
+        }
+    }
+    assert!(
+        h.wire.requests.borrow().is_empty(),
+        "source guard must reject before HTTP"
+    );
+    h.venue().dispose().unwrap();
+    assert!(
+        failures.is_empty(),
+        "Hyro inherited option refusals: {}",
+        failures.join("\n")
+    );
 }
