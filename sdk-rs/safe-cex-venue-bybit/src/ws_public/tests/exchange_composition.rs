@@ -625,12 +625,12 @@ fn concrete_exchange_url_selectors_match_live_source() {
             "REST selector {case}"
         );
         assert_eq!(
-            venue.get_bybit_public_ws_url(category, network),
+            venue.get_bybit_public_ws_url(category, network).unwrap(),
             case["public"].as_str().unwrap(),
             "public WS selector {case}"
         );
         assert_eq!(
-            venue.get_bybit_private_ws_url(network),
+            venue.get_bybit_private_ws_url(network).unwrap(),
             case["private"].as_str().unwrap(),
             "private WS selector {case}"
         );
@@ -1425,7 +1425,7 @@ fn linear_generated_link_id_matches_source_without_generation() {
             "undefined"
         );
         assert_eq!(
-            venue.generated_order_link_id(),
+            venue.generated_order_link_id().unwrap(),
             None,
             "LINK-ID native undefined case {index}"
         );
