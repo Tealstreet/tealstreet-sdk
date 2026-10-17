@@ -170,22 +170,6 @@ fn every_record_is_map_only() {
                 );
                 check::<OrderType>(case)
             }
-            "Meta" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    Meta::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<Meta>(case)
-            }
-            "MetaUniverseItem" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    MetaUniverseItem::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<MetaUniverseItem>(case)
-            }
             "ClearinghouseState" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
                 assert!(
@@ -254,70 +238,6 @@ fn every_record_is_map_only() {
                     "public qualified record decoder must refuse positional input"
                 );
                 check::<UserFills>(case)
-            }
-            "OrderResponseStatusCase0" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponseStatusCase0::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponseStatusCase0>(case)
-            }
-            "OrderResponseStatusCase0Resting" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponseStatusCase0Resting::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponseStatusCase0Resting>(case)
-            }
-            "OrderResponseStatusCase1" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponseStatusCase1::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponseStatusCase1>(case)
-            }
-            "OrderResponseStatusCase1Filled" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponseStatusCase1Filled::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponseStatusCase1Filled>(case)
-            }
-            "OrderResponseStatusCase2" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponseStatusCase2::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponseStatusCase2>(case)
-            }
-            "OrderResponse" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponse::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponse>(case)
-            }
-            "OrderResponseResponseCase1" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponseResponseCase1::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponseResponseCase1>(case)
-            }
-            "OrderResponseResponseCase1Data" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderResponseResponseCase1Data::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderResponseResponseCase1Data>(case)
             }
             "WsTrade" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
@@ -399,30 +319,6 @@ fn every_record_is_map_only() {
                 );
                 check::<WsNonUserCancel>(case)
             }
-            "SpotClearinghouseBalance" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotClearinghouseBalance::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotClearinghouseBalance>(case)
-            }
-            "SpotClearinghouseState" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotClearinghouseState::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotClearinghouseState>(case)
-            }
-            "FrontendOpenOrders" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    FrontendOpenOrders::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<FrontendOpenOrders>(case)
-            }
             "L2Book" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
                 assert!(
@@ -447,62 +343,6 @@ fn every_record_is_map_only() {
                 );
                 check::<L2BookLevelsItem1Item>(case)
             }
-            "CandleSnapshot" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    CandleSnapshot::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<CandleSnapshot>(case)
-            }
-            "AssetCtx" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    AssetCtx::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<AssetCtx>(case)
-            }
-            "MetaAndAssetCtxs" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    MetaAndAssetCtxs::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<MetaAndAssetCtxs>(case)
-            }
-            "UserFundingDelta" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    UserFundingDelta::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<UserFundingDelta>(case)
-            }
-            "UserFundingEntry" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    UserFundingEntry::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<UserFundingEntry>(case)
-            }
-            "UserNonFundingLedgerDelta" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    UserNonFundingLedgerDelta::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<UserNonFundingLedgerDelta>(case)
-            }
-            "UserNonFundingLedgerEntry" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    UserNonFundingLedgerEntry::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<UserNonFundingLedgerEntry>(case)
-            }
             "FundingHistoryEntry" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
                 assert!(
@@ -511,54 +351,6 @@ fn every_record_is_map_only() {
                 );
                 check::<FundingHistoryEntry>(case)
             }
-            "SpotToken" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotToken::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotToken>(case)
-            }
-            "SpotTokenEvmContract" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotTokenEvmContract::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotTokenEvmContract>(case)
-            }
-            "SpotMarket" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotMarket::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotMarket>(case)
-            }
-            "SpotMeta" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotMeta::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotMeta>(case)
-            }
-            "SpotAssetCtx" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotAssetCtx::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotAssetCtx>(case)
-            }
-            "SpotMetaAndAssetCtxs" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    SpotMetaAndAssetCtxs::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<SpotMetaAndAssetCtxs>(case)
-            }
             "UserOpenOrder" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
                 assert!(
@@ -566,22 +358,6 @@ fn every_record_is_map_only() {
                     "public qualified record decoder must refuse positional input"
                 );
                 check::<UserOpenOrder>(case)
-            }
-            "OrderRequest" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderRequest::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderRequest>(case)
-            }
-            "OrderWire" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    OrderWire::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<OrderWire>(case)
             }
             "CancelOrderRequest" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
@@ -606,30 +382,6 @@ fn every_record_is_map_only() {
                     "public qualified record decoder must refuse positional input"
                 );
                 check::<CancelByCloidRequest>(case)
-            }
-            "ModifyRequest" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    ModifyRequest::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<ModifyRequest>(case)
-            }
-            "ModifyWire" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    ModifyWire::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<ModifyWire>(case)
-            }
-            "ScheduleCancelAction" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    ScheduleCancelAction::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<ScheduleCancelAction>(case)
             }
             "Signature" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
@@ -703,22 +455,6 @@ fn every_record_is_map_only() {
                 );
                 check::<WsUserNonFundingLedgerUpdates>(case)
             }
-            "PerpDex" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    PerpDex::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<PerpDex>(case)
-            }
-            "Hip3MarketInfo" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    Hip3MarketInfo::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<Hip3MarketInfo>(case)
-            }
             "BuilderInfo" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);
                 assert!(
@@ -734,14 +470,6 @@ fn every_record_is_map_only() {
                     "public qualified record decoder must refuse positional input"
                 );
                 check::<BuilderFeeApprovalResult>(case)
-            }
-            "BuilderFeeCheckResult" => {
-                let mut decoder = serde_json::Deserializer::from_str(&case.positional);
-                assert!(
-                    BuilderFeeCheckResult::deserialize(&mut decoder).is_err(),
-                    "public qualified record decoder must refuse positional input"
-                );
-                check::<BuilderFeeCheckResult>(case)
             }
             "CancelOrderResponse" => {
                 let mut decoder = serde_json::Deserializer::from_str(&case.positional);

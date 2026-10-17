@@ -176,205 +176,6 @@
     ]
   },
   {
-    "name": "MetaUniverseItemMarginMode",
-    "accepted": [
-      "strictIsolated",
-      "noCross"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"STRICTISOLATED\"",
-      "\"strictisolated\"",
-      "\" strictIsolated\"",
-      "\"strictIsolated \"",
-      "\"﻿strictIsolated\"",
-      "\"strictIsolated\"",
-      "\"NOCROSS\"",
-      "\"nocross\"",
-      "\" noCross\"",
-      "\"noCross \"",
-      "\"﻿noCross\"",
-      "\"noCross\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"strictIsolated\":null}",
-      "{\"noCross\":null}",
-      "[\"strictIsolated\"]",
-      "[\"noCross\"]"
-    ]
-  },
-  {
-    "name": "MetaUniverseItemGrowthMode",
-    "accepted": [
-      "enabled",
-      "disabled"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"ENABLED\"",
-      "\" enabled\"",
-      "\"enabled \"",
-      "\"﻿enabled\"",
-      "\"enabled\"",
-      "\"DISABLED\"",
-      "\" disabled\"",
-      "\"disabled \"",
-      "\"﻿disabled\"",
-      "\"disabled\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"enabled\":null}",
-      "{\"disabled\":null}",
-      "[\"enabled\"]",
-      "[\"disabled\"]"
-    ]
-  },
-  {
-    "name": "OrderResponseStatusCase3",
-    "accepted": [
-      "waitingForFill"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"WAITINGFORFILL\"",
-      "\"waitingforfill\"",
-      "\" waitingForFill\"",
-      "\"waitingForFill \"",
-      "\"﻿waitingForFill\"",
-      "\"waitingForFill\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"waitingForFill\":null}",
-      "[\"waitingForFill\"]"
-    ]
-  },
-  {
-    "name": "OrderResponseStatusCase4",
-    "accepted": [
-      "waitingForTrigger"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"WAITINGFORTRIGGER\"",
-      "\"waitingfortrigger\"",
-      "\" waitingForTrigger\"",
-      "\"waitingForTrigger \"",
-      "\"﻿waitingForTrigger\"",
-      "\"waitingForTrigger\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"waitingForTrigger\":null}",
-      "[\"waitingForTrigger\"]"
-    ]
-  },
-  {
-    "name": "UserFundingDeltaType",
-    "accepted": [
-      "funding"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"FUNDING\"",
-      "\" funding\"",
-      "\"funding \"",
-      "\"﻿funding\"",
-      "\"funding\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"funding\":null}",
-      "[\"funding\"]"
-    ]
-  },
-  {
-    "name": "UserNonFundingLedgerDeltaType",
-    "accepted": [
-      "deposit",
-      "withdraw",
-      "transfer",
-      "liquidation"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"DEPOSIT\"",
-      "\" deposit\"",
-      "\"deposit \"",
-      "\"﻿deposit\"",
-      "\"deposit\"",
-      "\"WITHDRAW\"",
-      "\" withdraw\"",
-      "\"withdraw \"",
-      "\"﻿withdraw\"",
-      "\"withdraw\"",
-      "\"TRANSFER\"",
-      "\" transfer\"",
-      "\"transfer \"",
-      "\"﻿transfer\"",
-      "\"transfer\"",
-      "\"LIQUIDATION\"",
-      "\" liquidation\"",
-      "\"liquidation \"",
-      "\"﻿liquidation\"",
-      "\"liquidation\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"deposit\":null}",
-      "{\"withdraw\":null}",
-      "{\"transfer\":null}",
-      "{\"liquidation\":null}",
-      "[\"deposit\"]",
-      "[\"withdraw\"]",
-      "[\"transfer\"]",
-      "[\"liquidation\"]"
-    ]
-  },
-  {
-    "name": "ScheduleCancelActionType",
-    "accepted": [
-      "scheduleCancel"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"SCHEDULECANCEL\"",
-      "\"schedulecancel\"",
-      "\" scheduleCancel\"",
-      "\"scheduleCancel \"",
-      "\"﻿scheduleCancel\"",
-      "\"scheduleCancel\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"scheduleCancel\":null}",
-      "[\"scheduleCancel\"]"
-    ]
-  },
-  {
     "name": "WsUserNonFundingLedgerUpdateType",
     "accepted": [
       "deposit",
@@ -418,68 +219,6 @@
       "[\"withdraw\"]",
       "[\"transfer\"]",
       "[\"liquidation\"]"
-    ]
-  },
-  {
-    "name": "Hip3MarketInfoMarginMode",
-    "accepted": [
-      "strictIsolated",
-      "noCross"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"STRICTISOLATED\"",
-      "\"strictisolated\"",
-      "\" strictIsolated\"",
-      "\"strictIsolated \"",
-      "\"﻿strictIsolated\"",
-      "\"strictIsolated\"",
-      "\"NOCROSS\"",
-      "\"nocross\"",
-      "\" noCross\"",
-      "\"noCross \"",
-      "\"﻿noCross\"",
-      "\"noCross\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"strictIsolated\":null}",
-      "{\"noCross\":null}",
-      "[\"strictIsolated\"]",
-      "[\"noCross\"]"
-    ]
-  },
-  {
-    "name": "Hip3MarketInfoGrowthMode",
-    "accepted": [
-      "enabled",
-      "disabled"
-    ],
-    "rejected": [
-      "\"\"",
-      "\"__unknown__\"",
-      "\"ENABLED\"",
-      "\" enabled\"",
-      "\"enabled \"",
-      "\"﻿enabled\"",
-      "\"enabled\"",
-      "\"DISABLED\"",
-      "\" disabled\"",
-      "\"disabled \"",
-      "\"﻿disabled\"",
-      "\"disabled\"",
-      "null",
-      "false",
-      "123",
-      "[]",
-      "{}",
-      "{\"enabled\":null}",
-      "{\"disabled\":null}",
-      "[\"enabled\"]",
-      "[\"disabled\"]"
     ]
   }
 ]

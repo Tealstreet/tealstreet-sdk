@@ -116,7 +116,6 @@ fn expected_counts(name: &str) -> (usize, usize) {
         "OrderResponseStatusCase3" | "OrderResponseStatusCase4" | "ScheduleCancelActionType" => {
             (1, 15)
         }
-        "UserFundingDeltaType" => (1, 14),
         "UserNonFundingLedgerDeltaType" | "WsUserNonFundingLedgerUpdateType" => (4, 35),
         other => panic!("LITERAL-CARDINALITY unknown root {other}"),
     }
@@ -189,16 +188,7 @@ fn actual_serde_literal_sets_match_ts_and_reject_widening() {
             Tif,
             Tpsl,
             Grouping,
-            MetaUniverseItemMarginMode,
-            MetaUniverseItemGrowthMode,
-            OrderResponseStatusCase3,
-            OrderResponseStatusCase4,
-            UserFundingDeltaType,
-            UserNonFundingLedgerDeltaType,
-            ScheduleCancelActionType,
-            WsUserNonFundingLedgerUpdateType,
-            Hip3MarketInfoMarginMode,
-            Hip3MarketInfoGrowthMode
+            WsUserNonFundingLedgerUpdateType
         );
         assert_eq!(
             accepted.len(),

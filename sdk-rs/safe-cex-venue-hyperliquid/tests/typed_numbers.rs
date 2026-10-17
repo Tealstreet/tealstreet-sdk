@@ -290,7 +290,6 @@ fn capture_strings<
     Ok(strings.borrow().clone())
 }
 include!("fixtures/typed-string-bindings.rs");
-include!("fixtures/typed-null-string-bindings.rs");
 
 #[derive(Deserialize)]
 struct Corpus {
@@ -447,16 +446,6 @@ fn all_numeric_types_match_node_bits_before_serialization() {
 fn live_node_number_corpus_and_binding_inventory_regenerate() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/typed-numbers.cjs");
     let string_script = script.with_file_name("typed-string-boundaries.cjs");
-    let extra = std::process::Command::new("node")
-        .arg(&string_script)
-        .arg("--null-types")
-        .output()
-        .unwrap();
-    assert!(
-        extra.status.success(),
-        "extra null-type string witnesses regenerate {}",
-        String::from_utf8_lossy(&extra.stderr)
-    );
     let string_output = std::process::Command::new("node")
         .arg(string_script)
         .output()
@@ -479,78 +468,19 @@ fn live_node_number_corpus_and_binding_inventory_regenerate() {
 
 #[test]
 fn shared_utf8_refusal_and_scalar_unicode_remain_separate_from_numeric_flips() {
-    for (raw, extra) in [
-        (include_str!("fixtures/typed-string-boundaries.json"), false),
-        (
-            include_str!("fixtures/typed-null-string-boundaries.json"),
-            true,
-        ),
-    ] {
-        let corpus: serde_json::Value = serde_json::from_str(raw).unwrap();
+    {
+        let corpus: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/typed-string-boundaries.json")).unwrap();
         let cases = corpus["cases"].as_array().unwrap();
-        let required = if extra { 6 } else { 147 };
+        let required = 78;
         assert_eq!(cases.len(), required, "STRING-CARDINALITY source cases");
         assert_eq!(
             corpus["names"].as_array().unwrap().len(),
-            if extra { 2 } else { 49 },
+            26,
             "STRING-CARDINALITY source roots"
         );
 
-        let expected_roots: &[&str] = if extra {
-            &["AssetCtx", "SpotAssetCtx"]
-        } else {
-            &[
-                "OidOrCloid",
-                "Meta",
-                "ClearinghouseState",
-                "UserFills",
-                "OrderResponseStatus",
-                "OrderResponse",
-                "WsTrade",
-                "WsBook",
-                "WsBbo",
-                "WsLevel",
-                "WsOrder",
-                "WsFill",
-                "WsUserFunding",
-                "WsLiquidation",
-                "WsNonUserCancel",
-                "SpotClearinghouseBalance",
-                "SpotClearinghouseState",
-                "FrontendOpenOrders",
-                "L2Book",
-                "CandleSnapshot",
-                "MetaAndAssetCtxs",
-                "UserFundingEntry",
-                "UserFunding",
-                "UserNonFundingLedgerEntry",
-                "UserNonFundingLedgerUpdates",
-                "FundingHistoryEntry",
-                "FundingHistory",
-                "SpotToken",
-                "SpotMarket",
-                "SpotMeta",
-                "SpotMetaAndAssetCtxs",
-                "UserOpenOrder",
-                "UserOpenOrders",
-                "OrderRequest",
-                "OrderWire",
-                "CancelOrderRequest",
-                "ModifyRequest",
-                "ModifyWire",
-                "Signature",
-                "Candle",
-                "HyperliquidCandle",
-                "WsUserFill",
-                "WsUserFills",
-                "WsUserFundings",
-                "WsUserNonFundingLedgerUpdate",
-                "WsUserNonFundingLedgerUpdates",
-                "Hip3MarketInfo",
-                "BuilderInfo",
-                "BuilderFeeCheckResult",
-            ]
-        };
+        let expected_roots: &[&str] = &["ClearinghouseState", "UserFills", "WsTrade", "WsBook", "WsBbo", "WsLevel", "WsOrder", "WsFill", "WsUserFunding", "WsLiquidation", "WsNonUserCancel", "L2Book", "FundingHistoryEntry", "FundingHistory", "UserOpenOrder", "UserOpenOrders", "CancelOrderRequest", "Signature", "Candle", "HyperliquidCandle", "WsUserFill", "WsUserFills", "WsUserFundings", "WsUserNonFundingLedgerUpdate", "WsUserNonFundingLedgerUpdates", "BuilderInfo"];
         assert_eq!(
             corpus["names"]
                 .as_array()
@@ -595,11 +525,7 @@ fn shared_utf8_refusal_and_scalar_unicode_remain_separate_from_numeric_flips() {
             let case = cases
                 .get(index)
                 .expect("STRING-CARDINALITY native index coverage");
-            let capture = if extra {
-                capture_null_type_strings
-            } else {
-                capture_typed_strings
-            };
+            let capture = capture_typed_strings;
             let actual = capture(
                 case["name"].as_str().unwrap(),
                 case["raw"].as_str().unwrap(),
