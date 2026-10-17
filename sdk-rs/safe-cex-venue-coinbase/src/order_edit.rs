@@ -22,7 +22,8 @@ pub struct EditUpdate {
     pub has_price: bool,
 }
 pub type EditUpdateRoot = Rc<RefCell<EditUpdate>>;
-pub type EditReplacement = safe_cex_types::PreparedOrderOpts<String, Option<f64>, bool>;
+pub type EditReplacement =
+    safe_cex_types::PreparedOrderOpts<String, Option<f64>, safe_cex_types::ModelField<bool>>;
 pub trait OrderEditHost {
     fn selected_portfolio_type(&self) -> Result<Option<String>, PortfolioFailure>;
     fn orders(&self) -> Result<SyncedOrders, PortfolioFailure>;
@@ -119,7 +120,7 @@ pub fn update_order<H: OrderEditHost + 'static>(
                         side: o.fields.side.into_property(),
                         price: o.fields.price.into_value(),
                         amount: Some(o.fields.amount),
-                        reduce_only: o.fields.reduce_only,
+                        reduce_only: o.fields.reduce_only.into_property(),
                         ..Default::default()
                     }
                 };
@@ -245,7 +246,7 @@ pub fn update_order<H: OrderEditHost + 'static>(
                         && o.take_profit.is_none()
                         && o.stop_loss.is_none()
                         && o.close != Some(true)
-                        && !o.reduce_only
+                        && o.reduce_only != true
                 };
                 if !allowed {
                     return reject(

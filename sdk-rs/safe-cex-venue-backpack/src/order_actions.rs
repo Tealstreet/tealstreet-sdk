@@ -3,7 +3,8 @@ use crate::public_control::JsString;
 use safe_cex_types::{OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType};
 use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc};
 pub type Task<T, E> = Pin<Box<dyn Future<Output = Result<T, E>>>>;
-pub type Options = safe_cex_types::PreparedOrderOpts<JsString, f64, bool>;
+pub type Options =
+    safe_cex_types::PreparedOrderOpts<JsString, f64, safe_cex_types::ModelField<bool>>;
 #[derive(Clone, Debug)]
 pub enum Field {
     Text(JsString),
@@ -185,7 +186,7 @@ pub fn place_order<H: Host>(host: Rc<RefCell<H>>, opts: Options) -> Task<Vec<JsS
                 req.push(("price", Field::Text(format(&mut *h, &market, n, true)?)));
             }
         }
-        if opts.reduce_only && !stop {
+        if opts.reduce_only == true && !stop {
             req.push(("reduceOnly", Field::Bool(true)));
         }
         let separate = limit && attached;
@@ -389,7 +390,11 @@ pub fn update_order<H: Host>(
                 amount,
                 price,
                 time_in_force: o.time_in_force,
-                reduce_only: stop || o.reduce_only,
+                reduce_only: if stop {
+                    true.into()
+                } else {
+                    o.reduce_only.into_property()
+                },
                 trigger_price: None,
                 take_profit: None,
                 stop_loss: None,

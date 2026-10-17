@@ -818,3 +818,8 @@ probe regression now passes, with inverse and primary/demo timer controls.
 The unused typed local_order_cache facade, its fake-host oracle and its mutation
 runner are removed. Spot/inverse cache manifest rows name the live native
 lifecycle handlers; the canonical PrimaryOrderState owns the actual cache.
+
+Submission checks unknown outcome only for one payload carrying a caller client ID.
+The real HTTP regression sends a rejected first split lot with a non-coercible
+error code and verifies later lots still place; a single order without a caller
+ID also skips classification, while a caller-ID control still reaches it.
