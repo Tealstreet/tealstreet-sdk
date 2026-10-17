@@ -409,3 +409,7 @@ the source-throttled balance refresh through the real private socket.
 Public REST payload parsers retain native arrays and row references. Book fallback
 selection stays lazy, ticker candidate capture stays eager, and guarded book-side
 reads occur twice as in the source. Native source tests retain UTF16 and sparse rows.
+
+Private market-payload flattening retains native JS rows and skips array holes
+without copying through JSON. The orders wrapper applies its object guard before
+calling the live owner helper; source oracles cover identity, numeric bits and UTF16.
