@@ -12,8 +12,6 @@
   "safe-cex-venue-blofin": [],
   "safe-cex-venue-breakoutprop": [],
   "safe-cex-venue-bybit": [
-    "intrinsic Map",
-    "intrinsic select:aggregateBybitClosedPnl",
     "intrinsic super.dispose",
     "intrinsic unknown callback"
   ],

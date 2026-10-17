@@ -460,9 +460,10 @@ impl BybitExchange {
                 * 60.
                 * 60.
                 * 1000.;
+        let capabilities = crate::binding::exchange::capabilities(&base.name);
         let venue = Rc::new(Self {
             base,
-            capabilities: crate::binding::exchange::capabilities(),
+            capabilities,
             xhr: std::cell::OnceCell::new(),
             unlimited_xhr: std::cell::OnceCell::new(),
             js: std::cell::OnceCell::new(),

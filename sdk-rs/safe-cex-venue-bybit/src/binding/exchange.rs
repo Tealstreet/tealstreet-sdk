@@ -72,13 +72,33 @@ pub(crate) fn settings() -> ExchangeSettings {
     }
 }
 
-pub(crate) fn capabilities() -> ExchangeCapabilities {
-    ExchangeCapabilities {
+pub(crate) fn capabilities(name: &ExchangeName) -> ExchangeCapabilities {
+    let mut capabilities = ExchangeCapabilities {
         start: CapabilityBinding::implemented(|venue, ()| venue.start()),
         place_order: PlaceOrderBinding::implemented::<BybitExchange>(Exchange::place_order),
         place_orders: PlaceOrdersBinding::implemented::<BybitExchange>(Exchange::place_orders),
         ..Default::default()
+    };
+    if matches!(
+        name,
+        ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Bybitinverse
+    ) {
+        capabilities.fetch_historical_fills =
+            CapabilityBinding::implemented(|venue, options| venue.fetch_historical_fills(options));
+        capabilities.fetch_income_history =
+            CapabilityBinding::implemented(|venue, options| venue.fetch_income_history(options));
+        capabilities.fetch_income_history_range =
+            CapabilityBinding::implemented(|venue, (start, end, kind)| {
+                venue.fetch_income_history_range(start, end, kind)
+            });
+        capabilities.fetch_closed_pnl =
+            CapabilityBinding::implemented(|venue, options| venue.fetch_closed_pnl(options));
     }
+    if matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo) {
+        capabilities.fetch_historical_orders =
+            CapabilityBinding::implemented(|venue, options| venue.fetch_historical_orders(options));
+    }
+    capabilities
 }
 
 /// ScopeShared requires a generic client host; Bybit's bodies send through `this.xhr`.
@@ -732,6 +752,28 @@ impl Exchange for BybitExchange {
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&options)))
+    }
+    fn fetch_historical_positions(
+        &self,
+        options: safe_cex_exchange::journal::HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybitspot | ExchangeName::Bybitinverse
+        ) {
+            return Box::pin(async move {
+                Err(ExchangeError::new(format!(
+                    "{}: no journal records path declared. Override fetchHistoricalPositions — fold from fills via foldClosedPositionRecords, or map this venue's reported closed axis.",
+                    self.class_name()
+                )))
+            });
+        }
+        let opts = Js::object(vec![
+            ("account", Js::str(&options.account)),
+            ("from", options.from.map_or(Js::Undefined, Js::Number)),
+            ("to", options.to.map_or(Js::Undefined, Js::Number)),
+        ]);
+        self.invoke("fetchHistoricalPositions", vec![opts])
     }
     fn fetch_historical_fills(
         &self,
