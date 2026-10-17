@@ -99,3 +99,10 @@ executes all eight controls, with an optional named-control selection for review
 
 Remaining continuation ownership and private/public refresh reporting choices
 remain declared in MANIFEST-SPEC; this correction only fixes fetchOrders reporting.
+
+Post-master merge `c83d2d5151` (master parent `4d4c5ffaba`): all 38 binding
+tests, the 54-fixture source corpus and cancellation inventory (6/1) pass. The
+direct node extractor check reports zero manifest updates. Full-resolution parity
+now fails on the unchanged shared BaseWebSocket.recoverAfterOffline declaration
+pointing to absent JsProtocol::recovers_after_offline; this is a master baseline
+failure outside the WEEX changes, reported to the overseer.
