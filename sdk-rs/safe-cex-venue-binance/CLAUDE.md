@@ -522,3 +522,7 @@ Concrete market reads apply the approved strict-asset row policy after complete
 source REST projection. Non-string base/quote/symbol or nonnumeric leverage-max rows emit their
 field and original value through the existing error path; valid siblings remain available to typed
 fetch and Store refresh. Raw REST helpers retain their source-owned values.
+
+Native depth application converts coercion failures through ExchangeError::from,
+retaining the source error name and cause. The production socket regression covers
+all three families, subsequent valid deltas and sequence-gap snapshot recovery.
