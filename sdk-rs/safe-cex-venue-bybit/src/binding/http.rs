@@ -139,3 +139,60 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod retained_config_tests {
+    use super::*;
+    use crate::retained_config_binding_harness::{harness, options};
+    use std::task::{Context, Poll, Waker};
+
+    fn binding_retry(budget: Js, expected_attempts: usize) {
+        static SOURCE: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+        let source = SOURCE.get_or_init(|| {
+            let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into());
+            let output = std::process::Command::new("node")
+                .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/create-api-signature-resend-boundaries.cjs"))
+                .arg("--native-retry-budgets").output().unwrap();
+            assert!(output.status.success(), "actual Bybit retry source: {}", String::from_utf8_lossy(&output.stderr));
+            let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(source["cases"].as_array().unwrap().len(), 2, "independent source native retry cases");
+            source
+        });
+        let index = usize::from(!budget.is_undefined());
+        assert_eq!(source["cases"][index]["source"]["attempts"], expected_attempts);
+        let h = harness(options(), |wire| {
+            wire.network_failures.borrow_mut().push("/v5/order/realtime".into());
+        });
+        let config = Js::object(vec![
+            ("method", Js::str("get")),
+            ("url", Js::str("/v5/order/realtime")),
+            ("axios-retry", Js::object(vec![("retries", budget.clone())])),
+        ]);
+        let host = TypedHttpHost {
+            wire: Wire::Single(h.exchange.unlimited_xhr().clone()),
+            runtime: h.runtime.clone(),
+        };
+        let mut pending = host.send(config.clone());
+        assert!(matches!(pending.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(_)), "real Bybit retry settles");
+        assert_eq!(h.wire.calls("/v5/order/realtime").len(), expected_attempts, "retained_retry_real_binding_attempts");
+        let terminal = h.wire.requests.borrow();
+        let retained = from_json(terminal[0].config.config_extensions.get("axios-retry").unwrap());
+        assert!(retained.has_own("retries"), "retained_retry_own_undefined_key");
+        let actual = retained.get("retries").unwrap();
+        if budget.is_undefined() {
+            assert!(actual.is_undefined(), "retained_retry_undefined_value");
+        } else {
+            assert!(actual.to_number().unwrap().is_nan(), "retained_retry_native_nan");
+        }
+    }
+
+    #[test]
+    fn retained_retry_own_undefined_suppresses_real_binding_retry() {
+        binding_retry(Js::Undefined, 1);
+    }
+    #[test]
+    fn retained_retry_nan_survives_real_binding() {
+        binding_retry(Js::Number(f64::NAN), 1);
+    }
+}

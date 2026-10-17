@@ -201,6 +201,7 @@ impl WsRuntime for Runtime {
 /// One request as it reached the wire, after signing.
 #[derive(Clone, Debug)]
 pub struct Request {
+    pub config: RestRequest,
     pub method: String,
     pub url: String,
     pub params: Value,
@@ -211,6 +212,7 @@ pub struct Request {
 /// Scripted wire: (METHOD, path) -> queue of bodies; the last one repeats.
 #[derive(Default)]
 pub struct Wire {
+    pub network_failures: RefCell<Vec<String>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(u16, Value)>)>>,
     /// (METHOD, path, query key, query value) routes, checked before the plain ones.
     pub param_routes: RefCell<Vec<(String, String, String, String, (u16, Value))>>,
@@ -275,6 +277,7 @@ impl RestAdapter for Wire {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or(Value::Null);
         self.requests.borrow_mut().push(Request {
+            config: request.clone(),
             method: method.clone(),
             url: path.clone(),
             params: request
@@ -284,6 +287,13 @@ impl RestAdapter for Wire {
             body,
             headers: json!(request.headers),
         });
+        if self.network_failures.borrow().contains(&path) {
+            return Box::pin(async move {
+                Err(safe_cex_transport::RestFailure::from_transport(
+                    safe_cex_transport::TransportError::Network(safe_cex_transport::NetworkFailure::from_code("scripted network".into(), Some("ERR_NETWORK".into()))), request,
+                ))
+            });
+        }
         let params = request
             .params
             .clone()
