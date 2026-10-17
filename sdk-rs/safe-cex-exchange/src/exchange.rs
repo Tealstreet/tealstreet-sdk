@@ -6,8 +6,8 @@ use crate::client_order_id::{
 };
 use crate::client_order_id::{default_mint_candidates, order_carries_client_order_id};
 use crate::error_reporting::{
-    ExchangeErrorInput, assign, formatted_context, raw_formatted_context,
-    read_http_failure_context, record_http_failure, truthy,
+    ExchangeErrorInput, assign, raw_formatted_context, read_http_failure_context,
+    record_http_failure,
 };
 use crate::external::ExternalPublicData;
 use crate::js_runtime::value::{Js, from_json, from_typed, to_json, to_typed};
@@ -43,7 +43,7 @@ use safe_cex_types::{
     ExchangeOptionsExternalPublicData, FetchedLeverage, OHLCVSOptions, OrderBook, OrderSide,
     OrderType, Timeframe,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -1016,24 +1016,38 @@ impl BaseExchange {
         msg: Option<&str>,
         extra_data: Option<&Value>,
     ) -> Result<(), ExchangeError> {
-        let description = match &input {
-            ExchangeErrorInput::Message(text) | ExchangeErrorInput::Raw(Value::String(text)) => {
-                text.clone()
+        use crate::js_runtime::value::{Thrown, error_object};
+        let (source, mut host_error) = match input {
+            ExchangeErrorInput::Missing => (Js::Undefined, None),
+            ExchangeErrorInput::Message(text) => (Js::str(&text), None),
+            ExchangeErrorInput::Raw(value) => (value, None),
+            ExchangeErrorInput::Error(error) => {
+                let source = Thrown::from((*error).clone()).value;
+                for (key, value) in [
+                    ("context", error.context.as_ref().map(from_json)),
+                    ("config", error.config.as_ref().map(from_json)),
+                    (
+                        "originalError",
+                        error.original_error.as_ref().map(from_json),
+                    ),
+                    (
+                        "enhancedMessage",
+                        error.enhanced_message.as_deref().map(Js::str),
+                    ),
+                    ("url", error.url.as_deref().map(Js::str)),
+                    ("method", error.method.as_deref().map(Js::str)),
+                ] {
+                    if let Some(value) = value {
+                        source.define(key, value)?;
+                    }
+                }
+                (source, Some(*error))
             }
-            ExchangeErrorInput::Error(error) => error.to_string(),
-            // Console is a string-only host capability. Do not execute source
-            // String(err) here: it belongs after both console calls below.
-            ExchangeErrorInput::Raw(value) => value.to_string(),
-            ExchangeErrorInput::Missing => "undefined".into(),
         };
-        let input = match input {
-            ExchangeErrorInput::Raw(value) if !truthy(&value) => ExchangeErrorInput::Missing,
-            ExchangeErrorInput::Raw(Value::String(text)) => ExchangeErrorInput::Message(text),
-            other => other,
-        };
-        let raw_error = match &input {
-            ExchangeErrorInput::Raw(value) => Some(value.clone()),
-            _ => None,
+        let description = if source.is_object() {
+            format!("[{}]", source.type_of())
+        } else {
+            source.to_display()
         };
         if self.is_disposed() {
             self.runtime.console(
@@ -1054,15 +1068,15 @@ impl BaseExchange {
         }
         let sentry_tags = extra
             .get("sentryTags")
-            .filter(|value| value.is_object() || value.is_array())
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+            .filter(|v| v.is_object() || v.is_array())
+            .map(from_json)
+            .unwrap_or_else(|| Js::object(vec![]));
         let sentry_extra = extra
             .get("sentryExtra")
-            .filter(|value| value.is_object() || value.is_array())
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        let legacy = Value::Object(
+            .filter(|v| v.is_object() || v.is_array())
+            .map(from_json)
+            .unwrap_or_else(|| Js::object(vec![]));
+        let legacy = from_json(&Value::Object(
             extra
                 .into_iter()
                 .filter(|(key, _)| {
@@ -1072,131 +1086,72 @@ impl BaseExchange {
                     )
                 })
                 .collect(),
-        );
-        let msg = msg.filter(|m| !m.is_empty());
-        let mut context = Js::object(vec![]);
-        let (formatted, error) = match input {
-            ExchangeErrorInput::Missing => {
-                let formatted = msg.unwrap_or("Unknown Exchange Error").to_owned();
-                let mut error = ExchangeError::new(&formatted);
-                error.name = "ExchangeError".into();
-                (Value::String(formatted), error)
-            }
-            ExchangeErrorInput::Message(text) => {
-                let formatted = if text.is_empty() {
-                    msg.unwrap_or("Unknown Exchange Error").to_owned()
+        ));
+        let msg = msg.filter(|text| !text.is_empty()).map(Js::str);
+        let context = Js::object(vec![]);
+        let (formatted, error_object) = if !source.truthy() || source.is_string() {
+            let formatted = if !source.truthy() {
+                msg.clone()
+                    .unwrap_or_else(|| Js::str("Unknown Exchange Error"))
+            } else {
+                let prefix = msg.clone().unwrap_or_else(|| Js::str("Exchange Error"));
+                let mut units = prefix.to_js_string()?.to_vec();
+                units.extend(": ".encode_utf16());
+                units.extend_from_slice(source.as_str().expect("source string"));
+                Js::utf16(&units)
+            };
+            let error = error_object("Error", "");
+            error.set("message", formatted.clone())?;
+            error.set("name", Js::str("ExchangeError"))?;
+            let mut typed = ExchangeError::new(formatted.to_display());
+            typed.name = "ExchangeError".into();
+            host_error = Some(typed);
+            (formatted, error)
+        } else {
+            let formatted =
+                if source.get("context")?.truthy() && source.get("enhancedMessage")?.truthy() {
+                    let formatted = match &msg {
+                        Some(msg) => msg.clone(),
+                        None => source.get("enhancedMessage")?,
+                    };
+                    assign(&context, &raw_formatted_context(&source)?)?;
+                    assign(&context, &legacy)?;
+                    formatted
                 } else {
-                    format!("{}: {text}", msg.unwrap_or("Exchange Error"))
-                };
-                let mut error = ExchangeError::new(&formatted);
-                error.name = "ExchangeError".into();
-                (Value::String(formatted), error)
-            }
-            ExchangeErrorInput::Error(error) => {
-                let error = *error;
-                let formatted = if error.context.as_ref().is_some_and(truthy)
-                    && error
-                        .enhanced_message
-                        .as_ref()
-                        .is_some_and(|m| !m.is_empty())
-                {
-                    context = formatted_context(&error);
-                    msg.map(str::to_owned).unwrap_or_else(|| {
-                        error.enhanced_message.clone().expect("enhanced message")
-                    })
-                } else {
-                    if error.url.as_ref().is_some_and(|v| !v.is_empty())
-                        || error.method.as_ref().is_some_and(|v| !v.is_empty())
-                    {
-                        if let Some(url) = &error.url {
-                            context.define("url", Js::str(url))?;
-                        }
-                        if let Some(method) = &error.method {
-                            context.define("method", Js::str(method))?;
-                        }
-                        if let Some(original) = &error.original_error {
-                            context.define("originalError", from_json(original))?;
-                        }
-                        context.define(
-                            "errorType",
-                            Js::str(if error.name.is_empty() {
-                                "TradeTunnelError"
+                    let formatted = match &msg {
+                        Some(msg) => msg.clone(),
+                        None => {
+                            let message = source.get("message")?;
+                            if message.truthy() {
+                                message
+                            } else if matches!(source, Js::SymbolIterator) {
+                                Js::str("Symbol(Symbol.iterator)")
                             } else {
-                                &error.name
-                            }),
-                        )?;
-                    }
-                    msg.map(str::to_owned).unwrap_or_else(|| {
-                        if error.message.is_empty() {
-                            error.name.clone()
-                        } else {
-                            error.message.clone()
-                        }
-                    })
-                };
-                (Value::String(formatted), error)
-            }
-            ExchangeErrorInput::Raw(value) => {
-                // This projection supplies formatter metadata only. The host
-                // and worker receive the original JSON value, not this Error.
-                let text = |key: &str| {
-                    value.get(key).map(|v| match v {
-                        Value::String(text) => text.clone(),
-                        other => other.to_string(),
-                    })
-                };
-                let mut error = ExchangeError::new(text("message").unwrap_or_default());
-                error.name = text("name").unwrap_or_default();
-                error.context = value.get("context").cloned();
-                error.code = value.get("code").map(from_json);
-                error.original_error = value.get("originalError").cloned();
-                error.config = value.get("config").cloned();
-                error.enhanced_message = value
-                    .get("enhancedMessage")
-                    .filter(|v| truthy(v))
-                    .map(|_| text("enhancedMessage").expect("present enhanced message"));
-                let enhanced =
-                    error.context.as_ref().is_some_and(truthy) && error.enhanced_message.is_some();
-                let formatted = if enhanced {
-                    context = raw_formatted_context(&value)?;
-                    msg.map(|v| json!(v))
-                        .unwrap_or_else(|| value["enhancedMessage"].clone())
-                } else {
-                    if value.get("url").is_some_and(truthy)
-                        || value.get("method").is_some_and(truthy)
-                    {
-                        for key in ["url", "method", "originalError"] {
-                            if let Some(field) = value.get(key) {
-                                context.define(key, from_json(field))?;
+                                Js::String(source.to_js_string()?)
                             }
                         }
+                    };
+                    if source.get("url")?.truthy() || source.get("method")?.truthy() {
+                        for key in ["url", "method", "originalError"] {
+                            context.define(key, source.get(key)?)?;
+                        }
+                        let name = source.get("name")?;
                         context.define(
                             "errorType",
-                            value
-                                .get("name")
-                                .filter(|v| truthy(v))
-                                .map(from_json)
-                                .unwrap_or_else(|| Js::str("TradeTunnelError")),
+                            if name.truthy() {
+                                name
+                            } else {
+                                Js::str("TradeTunnelError")
+                            },
                         )?;
+                        assign(&context, &legacy)?;
                     }
-                    if let Some(msg) = msg {
-                        json!(msg)
-                    } else if let Some(message) = value.get("message").filter(|v| truthy(v)) {
-                        message.clone()
-                    } else {
-                        let message = safe_cex_num::js_string(Some(&value)).map_err(|cause| {
-                            let mut error = ExchangeError::new(cause.message);
-                            error.name = cause.name.into();
-                            error
-                        })?;
-                        Value::String(message)
-                    }
+                    formatted
                 };
-                (formatted, error)
-            }
+            (formatted, source.clone())
         };
-        assign(&context, &from_json(&legacy))?;
-        let correlation = if !error.context.as_ref().is_some_and(truthy) {
+        assign(&context, &legacy)?;
+        let correlation = if source.is_nullish() || !source.get("context")?.truthy() {
             let record = self.last_http_failure.borrow_mut().take();
             read_http_failure_context(record.as_ref(), self.runtime.now_ms())
                 .map(|context| serde_json::to_value(context).expect("context"))
@@ -1211,42 +1166,54 @@ impl BaseExchange {
             ("severity", Js::str("error")),
         ]);
         assign(&tags, &context)?;
-        assign(&tags, &from_json(&sentry_tags))?;
+        assign(&tags, &sentry_tags)?;
         assign(&tags, &from_json(&correlation))?;
-        let data = Js::object(vec![("originalMessage", from_json(&formatted))]);
-        let mut options = Map::new();
-        if let Some(testnet) = self.options().testnet {
-            options.insert("testnet".into(), json!(testnet));
-        }
-        if let Some(public) = self.options().public_data_only {
-            options.insert("publicDataOnly".into(), json!(public));
-        }
-        data.define("exchangeOptions", from_json(&Value::Object(options)))?;
+        let options = self.options();
+        let options = Js::object(vec![
+            (
+                "testnet",
+                options.testnet.map(Js::Bool).unwrap_or(Js::Undefined),
+            ),
+            (
+                "publicDataOnly",
+                options
+                    .public_data_only
+                    .map(Js::Bool)
+                    .unwrap_or(Js::Undefined),
+            ),
+        ]);
+        let data = Js::object(vec![
+            ("originalMessage", formatted.clone()),
+            ("exchangeOptions", options),
+        ]);
         assign(&data, &context)?;
-        assign(&data, &from_json(&sentry_extra))?;
-        let report = Js::object(vec![("tags", tags), ("extra", data)]);
-        let metadata = Js::object(vec![("suppressConsoleLog", Js::Bool(suppress))]);
-        if let Some(context) = &error.context {
-            metadata.define("enhancedContext", from_json(context))?;
-        }
+        assign(&data, &sentry_extra)?;
+        let metadata = Js::object(vec![]);
         if self.runtime.is_worker() {
+            let report = Js::object(vec![
+                ("error", error_object),
+                ("tags", tags),
+                ("extra", data),
+            ]);
             metadata.define("sendToSentry", Js::Bool(true))?;
-            report.define(
-                "error",
-                raw_error
-                    .as_ref()
-                    .map(from_json)
-                    .unwrap_or_else(|| crate::js_runtime::value::Thrown::from(error.clone()).value),
-            )?;
             metadata.define("sentryData", report)?;
         } else {
-            if let Some(raw) = &raw_error {
-                self.runtime.report_raw_exception(raw, &to_json(&report)?);
-            } else {
+            let report = Js::object(vec![("tags", tags), ("extra", data)]);
+            if let Some(error) = host_error {
                 self.runtime.report_exception(&error, &to_json(&report)?);
+            } else if error_object.truthy() {
+                self.runtime
+                    .report_raw_exception(&to_json(&error_object)?, &to_json(&report)?);
             }
         }
-        self.emit_args("error", &[from_json(&formatted), metadata])
+        let enhanced_context = if source.type_of() == "object" && !source.is_nullish() {
+            source.get("context")?
+        } else {
+            Js::Undefined
+        };
+        metadata.define("enhancedContext", enhanced_context)?;
+        metadata.define("suppressConsoleLog", Js::Bool(suppress))?;
+        self.emit_args("error", &[formatted, metadata])
     }
 }
 

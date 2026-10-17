@@ -149,7 +149,7 @@ pub enum ExchangeErrorInput {
     Message(String),
     Error(Box<ExchangeError>),
     /// A selected response value, before the source reporter inspects/coerces it.
-    Raw(Value),
+    Raw(Js),
     Missing,
 }
 pub(crate) fn truthy(value: &Value) -> bool {
@@ -167,32 +167,47 @@ pub(crate) fn insert_option(map: &mut Map<String, Value>, key: &str, value: Opti
     }
 }
 fn sentry_context(error: &Js) -> Result<Js, Thrown> {
-    let context = error.get("context")?;
     let property = |key: &str| {
+        let context = error.get("context")?;
         if context.is_nullish() {
             Ok(Js::Undefined)
         } else {
             context.get(key)
         }
     };
-    let original = error.get("originalError")?;
-    let original_message = if original.is_nullish() {
-        Js::Undefined
+    let error_type = Js::str(if property("isNetworkError")?.truthy() {
+        "network"
     } else {
-        original.get("message")?
-    };
+        "api"
+    });
     let context_code = property("errorCode")?;
     let code = if context_code.truthy() {
         context_code
     } else {
         error.get("code")?
     };
-    let config = error.get("config")?;
-    let config = if config.truthy() {
-        let headers = config.get("headers")?;
-        let headers = if headers.truthy() {
+    let status_code = property("statusCode")?;
+    let is_timeout = property("isTimeout")?;
+    let is_cors = property("isCORS")?;
+    let url = property("url")?;
+    let method = property("method")?;
+    let status_text = property("statusText")?;
+    let enhanced_message = error.get("enhancedMessage")?;
+    let original = error.get("originalError")?;
+    let original_message = if original.is_nullish() {
+        Js::Undefined
+    } else {
+        original.get("message")?
+    };
+    let timestamp = property("timestamp")?;
+    let config = if error.get("config")?.truthy() {
+        let base_url = error.get("config")?.get("baseURL")?;
+        let timeout = error.get("config")?.get("timeout")?;
+        let headers = if error.get("config")?.get("headers")?.truthy() {
             Js::array(
-                headers
+                error
+                    .get("config")?
+                    .get("headers")?
                     .own_keys()
                     .iter()
                     .map(|key| Js::utf16(key))
@@ -202,32 +217,25 @@ fn sentry_context(error: &Js) -> Result<Js, Thrown> {
             Js::Undefined
         };
         Js::object(vec![
-            ("baseURL", config.get("baseURL")?),
-            ("timeout", config.get("timeout")?),
+            ("baseURL", base_url),
+            ("timeout", timeout),
             ("headers", headers),
         ])
     } else {
         Js::Undefined
     };
     Ok(Js::object(vec![
-        (
-            "errorType",
-            Js::str(if property("isNetworkError")?.truthy() {
-                "network"
-            } else {
-                "api"
-            }),
-        ),
+        ("errorType", error_type),
         ("errorCode", code),
-        ("statusCode", property("statusCode")?),
-        ("isTimeout", property("isTimeout")?),
-        ("isCORS", property("isCORS")?),
-        ("url", property("url")?),
-        ("method", property("method")?),
-        ("statusText", property("statusText")?),
-        ("enhancedMessage", error.get("enhancedMessage")?),
+        ("statusCode", status_code),
+        ("isTimeout", is_timeout),
+        ("isCORS", is_cors),
+        ("url", url),
+        ("method", method),
+        ("statusText", status_text),
+        ("enhancedMessage", enhanced_message),
         ("originalMessage", original_message),
-        ("timestamp", property("timestamp")?),
+        ("timestamp", timestamp),
         ("config", config),
     ]))
 }
@@ -269,8 +277,8 @@ pub(crate) fn formatted_context(error: &ExchangeError) -> Js {
     ]);
     sentry_context(&source).expect("typed error metadata has ordinary data properties")
 }
-pub(crate) fn raw_formatted_context(error: &Value) -> Result<Js, ExchangeError> {
-    sentry_context(&from_json(error)).map_err(Into::into)
+pub(crate) fn raw_formatted_context(error: &Js) -> Result<Js, ExchangeError> {
+    sentry_context(error).map_err(Into::into)
 }
 
 pub fn format_error_for_sentry(error: &ExchangeError) -> Js {

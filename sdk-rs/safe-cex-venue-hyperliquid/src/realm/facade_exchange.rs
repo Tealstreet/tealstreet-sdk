@@ -34,14 +34,16 @@ fn payload(
 pub(crate) fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, Thrown> {
     Ok(match value {
         Value::Undefined => ExchangeErrorInput::Missing,
-        Value::String(u) => ExchangeErrorInput::Message(String::from_utf16_lossy(u)),
+        Value::String(u) => {
+            ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::Js::String(u.clone()))
+        }
         v if v
             .object()
             .is_some_and(|o| matches!(o.borrow().kind, Kind::Error)) =>
         {
             ExchangeErrorInput::Error(Box::new(r.exchange_error(v)))
         }
-        v => ExchangeErrorInput::Raw(r.to_serde(v)?),
+        v => ExchangeErrorInput::Raw(r.capture_typed_value(v, 0)?),
     })
 }
 

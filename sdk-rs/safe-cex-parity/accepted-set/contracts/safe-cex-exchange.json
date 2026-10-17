@@ -4661,6 +4661,8 @@
     "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:133",
     "reason": "Renders a label/status/body diagnostic and truncates text; it is not a record parser. The underlying status extractor has its own executed contract."
   },
+
+
   "safe_cex_exchange::error_reporting::is_network_error": {
     "api": {
       "kind": "function",
@@ -20603,67 +20605,6 @@
     "evidence": "safe-cex-exchange/src/client_order_id.rs::with_replacement_client_order_id; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Attaches an unparsed caller identifier to an existing Vec<String>. It performs no syntax admission or decoding and carries no one-use validation token."
   },
-  "safe_cex_exchange::error_reporting::raw_formatted_context": {
-    "category": "non-decoder",
-    "api": {
-      "kind": "function",
-      "name": "raw_formatted_context",
-      "signature": {
-        "inputs": [
-          [
-            "error",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "serde_json::value::Value",
-                    "args": null
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "core::result::Result",
-            "args": {
-              "angle_bracketed": {
-                "args": [
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                        "args": null
-                      }
-                    }
-                  },
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::runtime::ExchangeError",
-                        "args": null
-                      }
-                    }
-                  }
-                ],
-                "constraints": []
-              }
-            }
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "evidence": "safe-cex-exchange/EMITTER_CONTRACT_EVIDENCE.md; actual compiler declaration and scoped native/source emitter/formatter witnesses.",
-    "reason": "Projects already retained error JSON into outbound diagnostic fields and header names. This is the diagnostic formatter, not an input parser or a typed error decoder."
-  },
   "safe_cex_exchange::js_runtime::base_exchange::secondary_options": {
     "category": "non-decoder",
     "api": {
@@ -33284,6 +33225,192 @@
     },
     "entrypoints": []
   },
+  "safe_cex_exchange::runtime::ArgsListener": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-exchange/EMITTER_CONTRACT_EVIDENCE.md; actual compiler alias target and seven raw construction traits must execute. Native callbacks retain original Js values.",
+    "reason": "Owned Rc event callback over a borrowed native Js value or argument slice. This is the listener capability, not a string/JSON construction API; payload decoders are separate owners.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                },
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "slice": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_exchange::error_reporting::formatted_context": {
+    "api": {
+      "kind": "function",
+      "name": "formatted_context",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::runtime::ExchangeError",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::map::Map",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:169",
+    "reason": "Projects already constructed typed ExchangeError metadata into a telemetry map (tag names, optional existing fields, header names); no raw text parse or new decoded domain object."
+  },
+  "safe_cex_exchange::error_reporting::format_error_for_sentry": {
+    "api": {
+      "kind": "function",
+      "name": "format_error_for_sentry",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::runtime::ExchangeError",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "sdk-rs/safe-cex-exchange/src/error_reporting.rs:223",
+    "reason": "Partitions an existing typed error telemetry projection into tags and extra for Sentry output; serialization/telemetry formatting, not input decoding. This does not classify enhance_axios_error."
+  },
   "safe_cex_exchange::store_delivery::StoreFrame": {
     "category": "decoder",
     "shape": "map",
@@ -34034,91 +34161,5 @@
         }
       }
     ]
-  },
-  "safe_cex_exchange::runtime::ArgsListener": {
-    "category": "non-decoder",
-    "evidence": "safe-cex-exchange/EMITTER_CONTRACT_EVIDENCE.md; actual compiler alias target and seven raw construction traits must execute. Native callbacks retain original Js values.",
-    "reason": "Owned Rc event callback over a borrowed native Js value or argument slice. This is the listener capability, not a string/JSON construction API; payload decoders are separate owners.",
-    "target": {
-      "resolved_path": {
-        "path": "alloc::rc::Rc",
-        "args": {
-          "angle_bracketed": {
-            "args": [
-              {
-                "type": {
-                  "dyn_trait": {
-                    "traits": [
-                      {
-                        "trait": {
-                          "path": "core::ops::function::Fn",
-                          "args": {
-                            "parenthesized": {
-                              "inputs": [
-                                {
-                                  "borrowed_ref": {
-                                    "lifetime": null,
-                                    "is_mutable": false,
-                                    "type": {
-                                      "primitive": "str"
-                                    }
-                                  }
-                                },
-                                {
-                                  "borrowed_ref": {
-                                    "lifetime": null,
-                                    "is_mutable": false,
-                                    "type": {
-                                      "slice": {
-                                        "resolved_path": {
-                                          "path": "safe_cex_exchange::js_runtime::value::Js",
-                                          "args": null
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              ],
-                              "output": {
-                                "resolved_path": {
-                                  "path": "core::result::Result",
-                                  "args": {
-                                    "angle_bracketed": {
-                                      "args": [
-                                        {
-                                          "type": {
-                                            "tuple": []
-                                          }
-                                        },
-                                        {
-                                          "type": {
-                                            "resolved_path": {
-                                              "path": "safe_cex_exchange::runtime::ExchangeError",
-                                              "args": null
-                                            }
-                                          }
-                                        }
-                                      ],
-                                      "constraints": []
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "generic_params": []
-                      }
-                    ],
-                    "lifetime": null
-                  }
-                }
-              }
-            ],
-            "constraints": []
-          }
-        }
-      }
-    }
   }
 }

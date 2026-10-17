@@ -1510,6 +1510,13 @@ never converts through f64. The Node oracle includes finite values at +/-1e1000
 and +/-1e-1000, which overflow or underflow a Number conversion, as well as
 NaN, both infinities, signed zero, clones and arithmetic results.
 
+
+Raw error reporter inputs use `ExchangeErrorInput::Raw(Js)`. Pass the original
+shared-runtime value; already-JSON readers use explicit `from_json` at that boundary.
+The reporter retains lazy reads, native formatted messages and worker error identity.
+Optional message/extra-data and main-thread exception-host ABIs retain their stated
+UTF-8/JSON profiles; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
+
 Worker/native delivery services live in exchange-core so constructor hosts never
 depend upward on safe-cex-webworker. `delivery_timers` owns the existing timer
 capability; `store_delivery` owns its single leading/trailing Store throttle;

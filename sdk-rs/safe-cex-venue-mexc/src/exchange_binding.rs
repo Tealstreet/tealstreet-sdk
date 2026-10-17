@@ -341,14 +341,7 @@ impl Host {
             }),
             ("emitAndLogError", |h, a| {
                 let error = arg(&a, 0);
-                let input = match &error {
-                    Js::Undefined => ExchangeErrorInput::Missing,
-                    Js::String(s) => ExchangeErrorInput::Message(String::from_utf16_lossy(s)),
-                    Js::Object(o) if o.class == "Error" => ExchangeErrorInput::Error(Box::new(
-                        Thrown::new(error.clone()).to_exchange_error(),
-                    )),
-                    other => ExchangeErrorInput::Raw(to_json(other)?),
-                };
+                let input = ExchangeErrorInput::Raw(error);
                 h.venue()?.base.emit_and_log_error(input, None, None)?;
                 Ok(Js::Undefined)
             }),
