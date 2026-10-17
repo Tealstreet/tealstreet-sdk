@@ -809,150 +809,6 @@
       }
     }
   },
-  "safe_cex_registry::native_account::NativeHistoricalPositionOptions": {
-    "shape": "map",
-    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
-    "sample": {
-      "account": "sample-account",
-      "from": 1,
-      "to": 2
-    },
-    "entrypoints": [],
-    "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"account\":row.account,\"fromBits\":row.from.map(|v|v.to_bits().to_string()),\"toBits\":row.to.map(|v|v.to_bits().to_string()),\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-      "nativeFields": [
-        "account",
-        "fromBits",
-        "toBits",
-        "extraKeys"
-      ],
-      "cases": [
-        {
-          "input": "{\"account\":\"first\",\"from\":-0.0,\"to\":1.5,\"tag\":true}",
-          "output": {
-            "ok": true,
-            "account": "first",
-            "fromBits": "9223372036854775808",
-            "toBits": "4609434218613702656",
-            "extraKeys": [
-              "tag"
-            ]
-          }
-        },
-        {
-          "input": "{\"account\":\"second\"}",
-          "output": {
-            "ok": true,
-            "account": "second",
-            "fromBits": null,
-            "toBits": null,
-            "extraKeys": []
-          }
-        },
-        {
-          "input": "{\"account\":\"third\",\"from\":null,\"to\":null}",
-          "output": {
-            "ok": true,
-            "account": "third",
-            "fromBits": null,
-            "toBits": null,
-            "extraKeys": []
-          }
-        },
-        {
-          "input": "[\"first\",1,2]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"account\":\"a\",\"from\":\"1\"}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"account\":null}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
-  "safe_cex_registry::native_account::NativeOrderId": {
-    "shape": "map",
-    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
-    "sample": {
-      "id": "sample-id"
-    },
-    "entrypoints": [],
-    "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"id\":row.id,\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-      "nativeFields": [
-        "id",
-        "extraKeys"
-      ],
-      "cases": [
-        {
-          "input": "{\"id\":\"first\",\"tag\":true}",
-          "output": {
-            "ok": true,
-            "id": "first",
-            "extraKeys": [
-              "tag"
-            ]
-          }
-        },
-        {
-          "input": "{\"id\":\"second\",\"nested\":[]}",
-          "output": {
-            "ok": true,
-            "id": "second",
-            "extraKeys": [
-              "nested"
-            ]
-          }
-        },
-        {
-          "input": "[\"first\"]",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "{\"id\":7}",
-          "output": {
-            "ok": false
-          }
-        },
-        {
-          "input": "null",
-          "output": {
-            "ok": false
-          }
-        }
-      ]
-    }
-  },
   "safe_cex_registry::native_host::AdapterFactory": {
     "category": "non-decoder",
     "evidence": "safe-cex-registry/src/native_host.rs::AdapterFactory: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
@@ -1039,84 +895,6 @@
         }
       }
     }
-  },
-  "safe_cex_registry::native_host::query": {
-    "api": {
-      "kind": "function",
-      "name": "query",
-      "signature": {
-        "inputs": [
-          [
-            "value",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "serde_json::value::Value",
-                    "args": null
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "safe_cex_types::query_value::QueryValue",
-            "args": null
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "category": "decoder",
-    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
-    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
-    "cases": [
-      {
-        "input": null,
-        "output": "Null"
-      },
-      {
-        "input": false,
-        "output": "Bool(false)"
-      },
-      {
-        "input": 2.5,
-        "output": "Number(2.5)"
-      },
-      {
-        "input": "BTC $",
-        "output": "String(\"BTC $\")"
-      },
-      {
-        "input": [
-          true,
-          3,
-          "ETH",
-          null
-        ],
-        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
-      },
-      {
-        "input": {
-          "coin": [
-            "BTC",
-            "ETH"
-          ],
-          "nested": {
-            "enabled": false
-          }
-        },
-        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
-      }
-    ]
   },
   "safe_cex_registry::public_data::get_candle_subscription_key": {
     "api": {
@@ -2178,6 +1956,1274 @@
           }
         }
       }
+    }
+  },
+  "safe_cex_registry::native_host::query": {
+    "api": {
+      "kind": "function",
+      "name": "query",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::query_value::QueryValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
+    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
+    "cases": [
+      {
+        "input": null,
+        "output": "Null"
+      },
+      {
+        "input": false,
+        "output": "Bool(false)"
+      },
+      {
+        "input": 2.5,
+        "output": "Number(2.5)"
+      },
+      {
+        "input": "BTC $",
+        "output": "String(\"BTC $\")"
+      },
+      {
+        "input": [
+          true,
+          3,
+          "ETH",
+          null
+        ],
+        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
+      },
+      {
+        "input": {
+          "coin": [
+            "BTC",
+            "ETH"
+          ],
+          "nested": {
+            "enabled": false
+          }
+        },
+        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
+      }
+    ]
+  },
+  "safe_cex_registry::external_public_data::lookup": {
+    "category": "non-decoder",
+    "reason": "Searches the existing ListenerMap by exact string equality and clones the retained ListenerSet handle. It neither parses the key nor constructs a decoded payload.",
+    "evidence": "safe-cex-registry/src/external_public_data.rs::lookup; TS external-public-data.ts callback Map.get(symbol) and Map.get(key).",
+    "api": {
+      "kind": "function",
+      "name": "lookup",
+      "signature": {
+        "inputs": [
+          [
+            "map",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "tuple": [
+                                                        {
+                                                          "resolved_path": {
+                                                            "path": "alloc::string::String",
+                                                            "args": null
+                                                          }
+                                                        },
+                                                        {
+                                                          "resolved_path": {
+                                                            "path": "alloc::rc::Rc",
+                                                            "args": {
+                                                              "angle_bracketed": {
+                                                                "args": [
+                                                                  {
+                                                                    "type": {
+                                                                      "resolved_path": {
+                                                                        "path": "core::cell::RefCell",
+                                                                        "args": {
+                                                                          "angle_bracketed": {
+                                                                            "args": [
+                                                                              {
+                                                                                "type": {
+                                                                                  "resolved_path": {
+                                                                                    "path": "alloc::vec::Vec",
+                                                                                    "args": {
+                                                                                      "angle_bracketed": {
+                                                                                        "args": [
+                                                                                          {
+                                                                                            "type": {
+                                                                                              "resolved_path": {
+                                                                                                "path": "core::option::Option",
+                                                                                                "args": {
+                                                                                                  "angle_bracketed": {
+                                                                                                    "args": [
+                                                                                                      {
+                                                                                                        "type": {
+                                                                                                          "resolved_path": {
+                                                                                                            "path": "safe_cex_registry::external_public_data::Observer",
+                                                                                                            "args": null
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    ],
+                                                                                                    "constraints": []
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        ],
+                                                                                        "constraints": []
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            ],
+                                                                            "constraints": []
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                ],
+                                                                "constraints": []
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      ]
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "core::cell::RefCell",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "alloc::vec::Vec",
+                                                "args": {
+                                                  "angle_bracketed": {
+                                                    "args": [
+                                                      {
+                                                        "type": {
+                                                          "resolved_path": {
+                                                            "path": "core::option::Option",
+                                                            "args": {
+                                                              "angle_bracketed": {
+                                                                "args": [
+                                                                  {
+                                                                    "type": {
+                                                                      "resolved_path": {
+                                                                        "path": "safe_cex_registry::external_public_data::Observer",
+                                                                        "args": null
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                ],
+                                                                "constraints": []
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    ],
+                                                    "constraints": []
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_registry::external_public_data::remove": {
+    "category": "non-decoder",
+    "reason": "Clears the first retained ListenerMap slot whose key equals the supplied key. This mutates listener bookkeeping without decoding strings or Values.",
+    "evidence": "safe-cex-registry/src/external_public_data.rs::remove; TS external-public-data.ts callback Map.delete after final cleanup.",
+    "api": {
+      "kind": "function",
+      "name": "remove",
+      "signature": {
+        "inputs": [
+          [
+            "map",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "tuple": [
+                                                        {
+                                                          "resolved_path": {
+                                                            "path": "alloc::string::String",
+                                                            "args": null
+                                                          }
+                                                        },
+                                                        {
+                                                          "resolved_path": {
+                                                            "path": "alloc::rc::Rc",
+                                                            "args": {
+                                                              "angle_bracketed": {
+                                                                "args": [
+                                                                  {
+                                                                    "type": {
+                                                                      "resolved_path": {
+                                                                        "path": "core::cell::RefCell",
+                                                                        "args": {
+                                                                          "angle_bracketed": {
+                                                                            "args": [
+                                                                              {
+                                                                                "type": {
+                                                                                  "resolved_path": {
+                                                                                    "path": "alloc::vec::Vec",
+                                                                                    "args": {
+                                                                                      "angle_bracketed": {
+                                                                                        "args": [
+                                                                                          {
+                                                                                            "type": {
+                                                                                              "resolved_path": {
+                                                                                                "path": "core::option::Option",
+                                                                                                "args": {
+                                                                                                  "angle_bracketed": {
+                                                                                                    "args": [
+                                                                                                      {
+                                                                                                        "type": {
+                                                                                                          "resolved_path": {
+                                                                                                            "path": "safe_cex_registry::external_public_data::Observer",
+                                                                                                            "args": null
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    ],
+                                                                                                    "constraints": []
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        ],
+                                                                                        "constraints": []
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            ],
+                                                                            "constraints": []
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                ],
+                                                                "constraints": []
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      ]
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_registry::external_public_data::has_listener": {
+    "category": "non-decoder",
+    "reason": "Checks whether exact-key lookup retains at least one occupied observer slot. The string is a map key, not an encoded input.",
+    "evidence": "safe-cex-registry/src/external_public_data.rs::has_listener; TS external-public-data.ts callback Map.has and Set.size guards.",
+    "api": {
+      "kind": "function",
+      "name": "has_listener",
+      "signature": {
+        "inputs": [
+          [
+            "map",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "tuple": [
+                                                        {
+                                                          "resolved_path": {
+                                                            "path": "alloc::string::String",
+                                                            "args": null
+                                                          }
+                                                        },
+                                                        {
+                                                          "resolved_path": {
+                                                            "path": "alloc::rc::Rc",
+                                                            "args": {
+                                                              "angle_bracketed": {
+                                                                "args": [
+                                                                  {
+                                                                    "type": {
+                                                                      "resolved_path": {
+                                                                        "path": "core::cell::RefCell",
+                                                                        "args": {
+                                                                          "angle_bracketed": {
+                                                                            "args": [
+                                                                              {
+                                                                                "type": {
+                                                                                  "resolved_path": {
+                                                                                    "path": "alloc::vec::Vec",
+                                                                                    "args": {
+                                                                                      "angle_bracketed": {
+                                                                                        "args": [
+                                                                                          {
+                                                                                            "type": {
+                                                                                              "resolved_path": {
+                                                                                                "path": "core::option::Option",
+                                                                                                "args": {
+                                                                                                  "angle_bracketed": {
+                                                                                                    "args": [
+                                                                                                      {
+                                                                                                        "type": {
+                                                                                                          "resolved_path": {
+                                                                                                            "path": "safe_cex_registry::external_public_data::Observer",
+                                                                                                            "args": null
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    ],
+                                                                                                    "constraints": []
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        ],
+                                                                                        "constraints": []
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            ],
+                                                                            "constraints": []
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                ],
+                                                                "constraints": []
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      ]
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_registry::external_public_data::message": {
+    "category": "non-decoder",
+    "reason": "Constructs an outbound GatewayMessage from already typed tags, channel and timeframe, copying exchange/symbol text and leaving response-only fields absent. It does not parse an incoming gateway frame.",
+    "evidence": "safe-cex-registry/src/external_public_data.rs::message; TS external-public-data.ts outbound subscribe/unsubscribe object literals. Incoming GatewayMessage decoding is a separate owner.",
+    "api": {
+      "kind": "function",
+      "name": "message",
+      "signature": {
+        "inputs": [
+          [
+            "kind",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::gateway::GatewayMessageType",
+                "args": null
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "channel",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::gateway::GatewayChannel",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "interval",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::Timeframe",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::gateway::GatewayMessage",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_registry::module_host::native_load": {
+    "category": "non-decoder",
+    "reason": "Calls the supplied NativeModuleHost require capability and constructor_export lookup, preserving errors and constructor identity before wrapping the result in Ready. Module/export strings are host lookup arguments, not serialized constructors.",
+    "evidence": "safe-cex-registry/src/module_host.rs::native_load; TS exchanges/registry.native.ts load initializer; tests/loaders.rs exercises the production host boundary.",
+    "api": {
+      "kind": "function",
+      "name": "native_load",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_registry::module_host::NativeModuleHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "specifier",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "export",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_registry::module_host::NativeConstructorResult",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_registry::module_host::web_load": {
+    "category": "non-decoder",
+    "reason": "Starts the supplied WebModuleHost import and awaits its module before constructor_export lookup. It forwards host lookup strings without decoding module payloads or constructing a replacement export.",
+    "evidence": "safe-cex-registry/src/module_host.rs::web_load; TS exchanges/registry.ts import/export loaders; tests/loaders.rs executes the production host boundary.",
+    "api": {
+      "kind": "function",
+      "name": "web_load",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_registry::module_host::WebModuleHost",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "specifier",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "export",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_registry::module_host::ConstructorFuture",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "lifetime": "'a"
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_registry::rust_venues::external_factory": {
+    "category": "non-decoder",
+    "reason": "Selects an already supplied ExternalPublicDataFactory capability, rejects configured options without that capability, or returns an unreachable sentinel when external data is unset. Venue text appears only in the refusal message; no raw options are decoded here.",
+    "evidence": "safe-cex-registry/src/rust_venues.rs::external_factory; typed ExchangeOptions was decoded before construction. Actual providers and options decoders retain independent contracts.",
+    "api": {
+      "kind": "function",
+      "name": "external_factory",
+      "signature": {
+        "inputs": [
+          [
+            "venue",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "factory",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_registry::module_host::ExchangeConstructor": {
+    "shape": "typed",
+    "evidence": "safe-cex-registry/src/module_host.rs::ExchangeConstructor::new stores the caller-supplied typed constructor closure in Rc. The compiler inventories this constructor entrypoint with rawEntrypoints=false; it accepts a Fn capability over ExchangeName, ExchangeOptions and Store, not raw JSON. Construction and identity are exercised by tests/loaders.rs, independently of this accepted-input classification.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "factory",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::ExchangeName",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::ExchangeOptions",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::rc::Rc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "dyn_trait": {
+                                                "traits": [
+                                                  {
+                                                    "trait": {
+                                                      "path": "safe_cex_store::contract::Store",
+                                                      "args": null
+                                                    },
+                                                    "generic_params": []
+                                                  }
+                                                ],
+                                                "lifetime": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "safe_cex_exchange::exchange::Exchange",
+                                                                "args": null
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    },
+                    {
+                      "outlives": "'static"
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Stores the supplied typed constructor factory without interpreting or deserializing its future call arguments."
+      }
+    ]
+  },
+  "safe_cex_registry::native_account::NativeHistoricalPositionOptions": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "account": "sample-account",
+      "from": 1,
+      "to": 2
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"account\":row.account,\"fromBits\":row.from.map(|v|v.to_bits().to_string()),\"toBits\":row.to.map(|v|v.to_bits().to_string()),\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "account",
+        "fromBits",
+        "toBits",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"account\":\"first\",\"from\":-0.0,\"to\":1.5,\"tag\":true}",
+          "output": {
+            "ok": true,
+            "account": "first",
+            "fromBits": "9223372036854775808",
+            "toBits": "4609434218613702656",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"account\":\"second\"}",
+          "output": {
+            "ok": true,
+            "account": "second",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "{\"account\":\"third\",\"from\":null,\"to\":null}",
+          "output": {
+            "ok": true,
+            "account": "third",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "[\"first\",1,2]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":\"a\",\"from\":\"1\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_registry::native_account::NativeOrderId": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "id": "sample-id"
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"id\":row.id,\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"first\",\"tag\":true}",
+          "output": {
+            "ok": true,
+            "id": "first",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"id\":\"second\",\"nested\":[]}",
+          "output": {
+            "ok": true,
+            "id": "second",
+            "extraKeys": [
+              "nested"
+            ]
+          }
+        },
+        {
+          "input": "[\"first\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"id\":7}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   }
 }
