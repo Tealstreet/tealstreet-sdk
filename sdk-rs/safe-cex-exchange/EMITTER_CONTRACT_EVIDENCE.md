@@ -14,7 +14,7 @@ outputs retain own undefined keys and source property order; throwing code
 getters report their cause without recursive error projection.
 
 The constructed Aster private-frame witness is
-`safe-cex-venue-asterdex/src/native_emitter_tests.rs`:
+`safe-cex-parity/tests/aster_worker_emitter.rs`:
 `native_private_fill_keeps_infinite_price_through_event_and_worker_post`.
 It feeds actual New/Filled frames, observes Infinity in the fill event, and
 checks that the required worker DATA capability receives the same object.
