@@ -22,6 +22,7 @@ try:
     result = subprocess.run(COMMAND, cwd=ROOT, capture_output=True, text=True)
     output = result.stdout + result.stderr
     sys.stdout.write(output)
+    sys.stdout.flush()
     assert result.returncode == 101 and "could not compile" not in output
     for kind in ["public", "private"]:
         assert f"typed_{kind}_reconnect_renews_kucoin_session ... FAILED" in output
