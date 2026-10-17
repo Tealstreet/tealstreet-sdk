@@ -117,18 +117,6 @@ impl<'de> IntoDeserializer<'de, Error> for NativeInput {
         self
     }
 }
-macro_rules! integer_input {
-    ($($method:ident, $visit:ident, $kind:ty, $min:expr, $max:expr);* $(;)?) => {
-        $(fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-            if let Input::Float(value) = self.0
-                && value.is_finite() && value.fract() == 0.0
-                && ($min..$max).contains(&value) {
-                return visitor.$visit(value as $kind);
-            }
-            self.deserialize_any(visitor)
-        })*
-    };
-}
 impl<'de> Deserializer<'de> for NativeInput {
     type Error = Error;
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -206,17 +194,105 @@ impl<'de> Deserializer<'de> for NativeInput {
             )),
         }
     }
-    integer_input! {
-        deserialize_i8, visit_i8, i8, -128.0, 128.0;
-        deserialize_i16, visit_i16, i16, -32768.0, 32768.0;
-        deserialize_i32, visit_i32, i32, -2147483648.0, 2147483648.0;
-        deserialize_i64, visit_i64, i64, -2.0f64.powi(63), 2.0f64.powi(63);
-        deserialize_i128, visit_i128, i128, -2.0f64.powi(127), 2.0f64.powi(127);
-        deserialize_u8, visit_u8, u8, 0.0, 256.0;
-        deserialize_u16, visit_u16, u16, 0.0, 65536.0;
-        deserialize_u32, visit_u32, u32, 0.0, 4294967296.0;
-        deserialize_u64, visit_u64, u64, 0.0, 2.0f64.powi(64);
-        deserialize_u128, visit_u128, u128, 0.0, 2.0f64.powi(128);
+    fn deserialize_i8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-128.0..128.0).contains(&value)
+        {
+            return visitor.visit_i8(value as i8);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-32768.0..32768.0).contains(&value)
+        {
+            return visitor.visit_i16(value as i16);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-2147483648.0..2147483648.0).contains(&value)
+        {
+            return visitor.visit_i32(value as i32);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-2.0f64.powi(63)..2.0f64.powi(63)).contains(&value)
+        {
+            return visitor.visit_i64(value as i64);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_i128<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (-2.0f64.powi(127)..2.0f64.powi(127)).contains(&value)
+        {
+            return visitor.visit_i128(value as i128);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..256.0).contains(&value)
+        {
+            return visitor.visit_u8(value as u8);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..65536.0).contains(&value)
+        {
+            return visitor.visit_u16(value as u16);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..4294967296.0).contains(&value)
+        {
+            return visitor.visit_u32(value as u32);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..2.0f64.powi(64)).contains(&value)
+        {
+            return visitor.visit_u64(value as u64);
+        }
+        self.deserialize_any(visitor)
+    }
+    fn deserialize_u128<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if let Input::Float(value) = self.0
+            && value.is_finite()
+            && value.fract() == 0.0
+            && (0.0..2.0f64.powi(128)).contains(&value)
+        {
+            return visitor.visit_u128(value as u128);
+        }
+        self.deserialize_any(visitor)
     }
     serde::forward_to_deserialize_any! {
         bool f32 f64 char str string bytes byte_buf
