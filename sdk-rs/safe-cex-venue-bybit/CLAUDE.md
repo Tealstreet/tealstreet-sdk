@@ -802,11 +802,13 @@ and Spot retain their own source layouts. Real socket regressions cover all four
 account constructors and partial updates; the maintained-source ticker corpus
 now covers both primary categories in 1,944 cases and 21,384 field comparisons.
 
-Market base/quote remain strict strings under the approved row-admission policy.
-Primary/demo and Spot defer typed asset refusals until source mapping completes;
-dedicated inverse admits assets after building its native rows. Each refused row
+Market id/symbol/base/quote remain strict strings under the approved row-admission policy.
+Primary/demo and Spot defer typed string refusals until source mapping completes;
+dedicated inverse admits strings after building its native rows. Each refused row
 reports its identity and field values, while valid siblings survive fetch/refresh.
-This intentionally differs from TS retaining malformed asset fields.
+This intentionally differs from TS retaining malformed string fields. Fee joins compare primitive symbol values strictly; distinct
+JSON objects/arrays never match by contents. Source numeric/property errors retain
+priority over typed row refusals.
 
 Primary/demo single-order routing rechecks truthiness after price/trigger rounding.
 A conditional trigger rounded to zero rejects before placement; a zero-rounded
