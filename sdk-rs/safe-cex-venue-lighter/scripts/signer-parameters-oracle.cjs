@@ -10,11 +10,15 @@ vm.runInNewContext(compiled.outputText, context, {filename:file});
 const client = new context.exports.TransactionClient({chainId:304,accountIndex:42n,apiKeyIndex:3,privateKey:'',crypto:{},httpClient:{}});
 const cases = ['triggerPrice','orderExpiry','expiredAt'].map(field=>({field,value:null}));
 for (const field of ['orderType','timeInForce']) for (const value of [null,false,0,1,'','GTC','unknown',{},[]]) cases.push({field,value});
+for (const [field,values] of [
+ ['orderType',['limit','market','stop_loss','stop_loss_limit','take_profit','take_profit_limit']],
+ ['timeInForce',['GoodTillCancel','ImmediateOrCancel','FillOrKill','PostOnly']],
+]) for (const value of values) cases.push({field,value});
 for (const [index,row] of cases.entries()) {
  const params = {orderId:1n,marketId:1,isBuy:true,price:100n,amount:1n,[row.field]:row.value};
  const value = client.buildCreateOrderData(params,BigInt(index+7));
  row.expected = {data:value.messageHex,expiredAt:String(value.expiredAt),orderTypeValue:String(value.orderTypeValue),
   timeInForceValue:String(value.timeInForceValue),triggerPrice:String(value.triggerPrice),orderExpiry:String(value.orderExpiry)};
 }
-assert.equal(cases.length,21);
+assert.equal(cases.length,31);
 process.stdout.write(JSON.stringify(cases));

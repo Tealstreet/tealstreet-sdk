@@ -628,7 +628,7 @@ fn transaction_client_preserves_source_nullish_and_unknown_enum_defaults() {
     );
     let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
     let cases = cases.as_array().unwrap();
-    assert_eq!(cases.len(), 21);
+    assert_eq!(cases.len(), 31);
     let w = World::new();
     let init = w
         .realm
