@@ -441,6 +441,57 @@ fn money_amend_preflight_failure_uses_the_source_error_reporter() {
     );
     assert!(h.runtime.logs.borrow().iter().any(|line| line == "trace: "));
 }
+
+#[test]
+fn money_cancel_failures_use_the_source_error_reporter() {
+    for symbol in [None, Some(SYMBOL)] {
+        let h = setup();
+        let path = "/lite/v1/cancel_all_orders";
+        h.http.routes.borrow_mut().retain(|(_, p, _)| p != path);
+        h.http.route(
+            "POST",
+            path,
+            400.0,
+            json!({"code":17,"message":"cancel denied"}),
+        );
+        let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let saved = calls.clone();
+        h.venue().base().on_args(
+            "error",
+            std::rc::Rc::new(move |_, args| {
+                saved.borrow_mut().push(args.len());
+                Ok(())
+            }),
+        );
+        let result = match symbol {
+            None => h.drive(h.venue().cancel_all_orders()),
+            Some(symbol) => h.drive(h.venue().cancel_symbol_orders(symbol.into())),
+        };
+        assert!(result.is_err());
+        assert_eq!(
+            h.http.calls(path).len(),
+            1,
+            "one real SDK cancellation write"
+        );
+        assert!(!calls.borrow().is_empty());
+        assert!(
+            calls.borrow().iter().all(|count| *count == 2),
+            "GRVT money cancellation reporter must retain metadata: {:?}",
+            calls.borrow()
+        );
+        let prefix = symbol.map_or_else(
+            || "Cancel all failed: ".to_owned(),
+            |symbol| format!("Cancel {symbol} orders failed: "),
+        );
+        assert!(
+            h.runtime
+                .logs
+                .borrow()
+                .iter()
+                .any(|line| { line.starts_with(&format!("error: exchange error {prefix}")) })
+        );
+    }
+}
 #[test]
 fn start_public_only_loads_markets_tickers_and_opens_public_socket() {
     let mut options = options();
