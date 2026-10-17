@@ -23,7 +23,7 @@ use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -217,6 +217,7 @@ pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
+    pub instrument_responses: RefCell<HashMap<(String, String), Value>>,
     pub held_instrument: RefCell<Option<(String, String, Rc<release::Release>)>>,
 }
 impl Http {
@@ -233,6 +234,12 @@ impl Http {
             path,
             200.0,
             json!({"code": "0", "msg": "", "data": data}),
+        );
+    }
+    pub fn ok_for_instrument(&self, path: &str, instrument: &str, data: Value) {
+        self.instrument_responses.borrow_mut().insert(
+            (path.into(), instrument.into()),
+            json!({"code":"0","msg":"","data":data}),
         );
     }
     pub fn calls(&self, path: &str) -> Vec<Request> {
@@ -276,7 +283,18 @@ impl JsHttpHost for Http {
             .and_then(|(path, instrument, gate)| {
                 (url == *path && read("params")["instType"] == *instrument).then(|| gate.clone())
             });
-        let response = {
+        let instrument = read("params")["instType"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let selected = self
+            .instrument_responses
+            .borrow()
+            .get(&(url.clone(), instrument))
+            .cloned();
+        let response = if let Some(body) = selected {
+            Some((200.0, body))
+        } else {
             let mut routes = self.routes.borrow_mut();
             routes
                 .iter_mut()
