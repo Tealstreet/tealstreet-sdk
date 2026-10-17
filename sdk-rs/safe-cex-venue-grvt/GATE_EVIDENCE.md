@@ -22,6 +22,13 @@ compiler APIs, TypeScript sources, fixture bytes, adapters and expectations.
 Their whole-file source hash and +13-line spans were independently reviewed
 against a frozen candidate by the shared accepted-set owner.
 
+Fresh complete stored-owner gates pass on native and actual Wasm: each reports
+117 production runtime results, 17 explicit classifications and zero failed
+owners, including all 19 compiler aliases. The 268 receipts pass the scoped
+ratchet. Strict host all-target/all-feature and Wasm all-feature clippy, package
+formatting and three pure inherited-policy tests also pass. This verifies the
+existing 134 stored owners; the remaining unreviewed owners stay open.
+
 Reproduce the 27 scoped tests with `SAFE_CEX_TYPESCRIPT_PATH` set to the actual
 TypeScript package, using `cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml
 --locked -p safe-cex-venue-grvt --jobs 2 --test exchange_binding --test markets`.

@@ -158,7 +158,7 @@ note = "MIXED: FORCED actual fetchMarkets returns two markets with D800/DC00 in 
 ts = "GrvtExchange.refreshMarkets"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-grvt/src/markets.rs::refresh_markets", "safe-cex-venue-grvt/src/binding/exchange.rs::GrvtExchange::refresh_markets" ]
+rs = "safe-cex-venue-grvt/src/markets.rs::refresh_markets"
 status = "divergent"
 note = "CHOSEN: old values, replacement arrays, and event payloads use owned values through the shared Store contract and immutable callback borrows rather than live JavaScript aliases. In-place JS subscriber/listener changes to arrays can also change the post-callback log counts/results; native callbacks can update Store but cannot mutate the owned emitted changes. Retaining JS identity would require a second object model; the actual-source alias witness changes a removed hash during await while native output intentionally retains the captured old hash. Extracted safe-cex-venue-grvt/src/markets.rs::refresh_markets captures old ID map before the eager fetch hook, always replaces markets including signing metadata, then emits membership changes and logs in source order. Actual-source/native floor stops at seven metadata/membership/reorder/error cases plus the measured owned/live alias boundary; deliberate skipped Store replacement fails REFRESH native replaced signing hash, restoration passes. Production trait entry safe-cex-venue-grvt/src/binding/exchange.rs::GrvtExchange::refresh_markets invokes this mapped override rather than the membership-only shared default. Two constructed trait witnesses check metadata-only tick/limit/ih/bd/qd replacement and native added/removed projections; the metadata-only witness compiled and failed before this entrypoint was added."
 
