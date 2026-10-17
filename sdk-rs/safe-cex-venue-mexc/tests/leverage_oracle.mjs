@@ -60,4 +60,18 @@ const notifying=new Holder();
 Object.assign(notifying,{isPublicDataOnly:false,store:actualStore,symbolSettings:new Map([['BTCUSDT',{...config}]]),xhr:{async get(){return {data:[{positionType:1,leverage:'31',maxLeverageView:'80',openType:2},{positionType:2,leverage:'12',maxLeverage:'60',openType:1}]};}},log(){}});
 try{await notifying.fetchLeverageForSymbol('BTCUSDT');results.subscriberThrow={rejected:false};}
 catch(error){results.subscriberThrow={rejected:true,message:error.message,marketMax:actualStore.marketsBySymbol.BTCUSDT.limits.leverage.max,fetchedBuy:actualStore.fetchedLeverage.BTCUSDT.buyLeverage,subscriberCalls};}
+// Supplement: stored source settings must short-circuit deriveSymbolConfig even
+// while the Store still holds a position from the previous configuration.
+results.storedConfig={};
+for(const name of ['emptyRows','untypedRows','missingMarket']){
+ const settings={buyLeverage:50,sellLeverage:50,marginType:'cross',positionMode:'hedged'};
+ const market={id:'BTC_USDT',symbol:'BTCUSDT',limits:{amount:{min:0,max:10},leverage:{min:1,max:125}}};
+ const stale={id:'stale',symbol:'BTCUSDT',side:'long',contracts:2,leverage:20,marginType:'isolated',positionMode:'oneway',info:{openType:1}};
+ const store={marketsBySymbol:name==='missingMarket'?{}:{BTCUSDT:market},positions:[stale],fetchedLeverage:{},updateMarket(){throw Error('unexpected market update');},update(patch){Object.assign(this,patch);}};
+ let requests=0;
+ const instance=new Holder();
+ Object.assign(instance,{isPublicDataOnly:false,store,symbolSettings:new Map([['BTCUSDT',settings]]),deriveSymbolConfig(){throw Error('stored settings must skip derivation');},xhr:{async get(){requests++;return {data:name==='untypedRows'?[{}]:[]};}},log(){}});
+ const fetched=await instance.fetchLeverageForSymbol('BTCUSDT');
+ results.storedConfig[name]={fetched,stored:store.fetchedLeverage.BTCUSDT,config:instance.symbolSettings.get('BTCUSDT'),requests};
+}
 process.stdout.write(JSON.stringify(results));

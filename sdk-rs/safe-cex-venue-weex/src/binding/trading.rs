@@ -57,7 +57,11 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 &h.0.shared.runtime.unique_id().replace(['-', '_'], ""),
             ))
         },
-        method: |h, name| v::method(h, &h.this(), name),
+        method: |h, name| match name {
+            // Resolve the lowered Store operation with its source receiver.
+            "updateStoredOrder" => v::method(h, &h.root("store")?, "updateOrder"),
+            _ => v::method(h, &h.this(), name),
+        },
         call: v::invoke,
         call_async: v::invoke_async,
         request: |h, method, endpoint, data| {
@@ -157,7 +161,7 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 leverage.to_number()?,
             ))
         },
-        extract_array: |h, value| v::extract(h, value, &["items", "list", "rows"]),
+        extract_array: |h, value| v::extract(h, value, &[]),
         join: |_, value, sep| value.call_method("join", std::vec![Js::str(sep)]),
         unique_id: |h, value| {
             h.global("uniqBy")?

@@ -647,6 +647,13 @@ Spot retains its existing spot-only body. Retirement consumes only `id` and
 without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
 four production constructors and the real retained receiver/HTTP client path.
 
+Retry-condition coverage uses the real HTTP factory in `tests/api_factory.rs`.
+The dead `api::should_retry_bybit_request` copy and its fake-only optional-config
+supplement were removed. Keep the factory attempt, HMAC, effective error-config
+and retained-error assertions. `scripts/factory-retry-condition-control.py`
+inverts the production instruments-info exclusion, requires a compiled attempt
+count failure and restores exact source bytes before requiring a passing run.
+
 The Exchange candle-read override reaches the concrete receiver for all four bound
 families. `binding/members/ohlcv.rs` preserves primary validation/errors and the
 dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
@@ -708,3 +715,26 @@ rearms existing handlers, and final cleanup cancels the primary timer/retry.
 Dedicated Spot/Inverse retain their delayed-retry and topic/stats cleanup quirks.
 The sequence oracle replays 72 maintained source frames through actual bindings;
 the wired kline mapper retains its 2172-outcome source corpus.
+
+Income history and range reads now bind primary/demo and dedicated inverse to the
+maintained transaction-log helpers. Spot retains inherited empty history. Keep
+linear/inverse context order, source combined-category sort/limit rules, inclusive
+windows and repeated IDs. The mapper stays native until the typed public output;
+its ordinary lookup tables retain actual Object.prototype members.
+
+Spot trailing-order placement retains the source `Ticker <symbol> not found`
+error when market or ticker data is missing. The SessionHost intrinsic builds
+the source template in UTF-16 before the existing Error construction. The real
+Spot binding witness seeds a market without tickers and verifies no order write.
+
+Historical order reads now bind primary/demo to the native mapper and signed
+history client. Dedicated Spot/Inverse keep Base's empty method. Keep ascending
+inclusive windows, category order and first-seen ID deduplication before sorting
+and limits. All three ledger mappers share native numeric coercion.
+
+Historical fills now bind primary/demo and dedicated inverse through their real
+receiver, signed clients and native execution/fallback mappers. Keep the primary
+valid prefix on mapping errors, but discard a failed recovery accumulator. Source
+primary short/extended recovery differs from dedicated inverse single recovery;
+Spot inherits empty history. The full reader source corpus covers requests, results
+and diagnostics; mapper source corpora retain their separate scalar contracts.
