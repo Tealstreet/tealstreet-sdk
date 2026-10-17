@@ -126,5 +126,6 @@ the source transformMarket default of 10. The helper still retains original Map
 identity, duplicate last-write precedence, log cardinality and partial entries
 before a later parse error. `exchange_trait` compares fifteen payloads in V1/V3
 against actual TS fetch/transform methods through the real production HTTP binding.
-Truthy nonnumeric leverage remains the pre-existing declared typed-output finding;
-this repair does not coerce it or claim a wider Market limit representation.
+Leverage Map values retain their raw shared Js value through the source truthy
+fallback. The approved numeric-limit policy then applies Number at the final max
+field, preserving zero, signed zero, NaN and infinities without widening types.
