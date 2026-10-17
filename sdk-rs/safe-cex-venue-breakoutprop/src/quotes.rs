@@ -1,5 +1,4 @@
 //! Market and quote reads over shared Store, transport requests and numeric ingress.
-use crate::types::TickerResponse;
 use safe_cex_exchange::{
     js_runtime::value::{Js, Thrown, from_json, to_typed},
     runtime::ExchangeError,
@@ -171,30 +170,46 @@ where
             }
         };
         let data = raw(&input)?;
-        if data.is_null() {
-            report(
-                ExchangeError::new("Cannot read properties of null (reading 'events')"),
-                logger,
-            )?;
-            return Ok(Some(store.tickers().to_vec()));
-        }
-        if data.get("events").is_none_or(Value::is_null) {
-            return Ok(None);
-        }
-        // ts-bug CHOSEN declared records; malformed event shapes refuse.
-        let typed: TickerResponse = input
-            .decode()
-            .map_err(|e| ExchangeError::new(e.to_string()))?;
-        let mut tickers = Vec::with_capacity(typed.events.len());
-        for (index, event) in typed.events.iter().enumerate() {
+        let mapped: Result<_, Thrown> = (|| {
+            let events = from_json(&data).get("events")?;
+            if events.is_nullish() {
+                return Ok(None);
+            }
+            let events = events
+                .array_values()
+                .ok_or_else(|| Thrown::type_error("data.events?.map is not a function"))?;
+            let mut fields = Vec::with_capacity(events.len());
+            for (index, event) in events.iter().enumerate() {
+                fields.push((
+                    event.get("symbol")?,
+                    event.get("bid")?,
+                    event.get("ask")?,
+                    index,
+                ));
+            }
+            Ok(Some(fields))
+        })();
+        let fields = match mapped {
+            Ok(Some(fields)) => fields,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                report(error.to_exchange_error(), logger)?;
+                return Ok(Some(store.tickers().to_vec()));
+            }
+        };
+        let mut tickers = Vec::with_capacity(fields.len());
+        for (symbol, bid, ask, index) in fields {
+            let symbol: String = to_typed(&symbol)?;
+            let bid = to_typed(&bid)?;
+            let ask = to_typed(&ask)?;
             tickers.push(Ticker {
-                id: event.symbol.clone(),
-                symbol: event.symbol.clone(),
-                bid: event.bid,
-                ask: event.ask,
-                last: event.bid,
-                mark: event.bid,
-                index: event.bid,
+                id: symbol.clone(),
+                symbol,
+                bid,
+                ask,
+                last: bid,
+                mark: bid,
+                index: bid,
                 mid_price: None,
                 percentage: 0.0,
                 open_interest: 0.0,

@@ -192,8 +192,10 @@ These extracted helpers have no Store effects; mapOrder has separate runtime tes
 
 Market reads now use src/markets.rs and the shared optional Market.is_perpetual.
 The configured post hook supplies already transformed response.data. Keep native
-representation refusal after source mapping and logging; earlier malformed base
-fields must not conceal a later null row's source error. Refresh always replaces
+representation admission after source mapping and logging; earlier malformed base
+fields must not conceal a later null row's source error. Strict base/quote refusals
+now omit only that row and log its index/id and exact field values at Warning,
+under the approved per-row policy; valid surrounding markets remain available. Refresh always replaces
 signing metadata before membership events. Its old snapshots and callback values
 are owned; the manifest names the measured difference from live JS aliases.
 

@@ -1377,7 +1377,10 @@ fn exchange_helpers_match_typescript() {
                     v => panic!("unknown number {v}"),
                 }
             });
-            brackets.insert("BTC".to_owned(), value);
+            brackets.insert(
+                "BTC".to_owned(),
+                safe_cex_exchange::js_runtime::value::Js::Number(value),
+            );
         }
         let market = transform_market(&input, &brackets).unwrap();
         let mut actual = json!(market);
