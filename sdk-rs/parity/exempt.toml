@@ -2281,6 +2281,10 @@ rs = "safe-cex-transport/src/provider.rs::RestAdapter::query_in_url"
 reason = "Host adapter capability identifies the external Axios buildURL boundary; custom HOW transports retain config params in their own frame. No source declaration names this native interface operation. Adapter wrappers forward it rather than assuming every adapter renders a URL."
 
 [[exempt]]
+rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::schedule_ping"
+reason = "C3 socket-host capability exposes the existing core Ping timer slot to the Apex private ping body. The source assigns pingTimeoutId through setTimeout; pong and close share that field. This Rust accessor only delegates to the core scheduler and adds no independent venue behavior or TypeScript declaration. The real Apex binding regressions exercise staggered pong replacement and close cancellation."
+
+[[exempt]]
 rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::has_websocket"
 reason = "Native accessor for source BaseWebSocket.ws truthiness at venue callback guards; exposes existing core-owned socket presence, including CONNECTING/CLOSED sockets, without leaking the host socket or duplicating lifecycle state. Data field ws is outside callable extraction."
 
@@ -2889,11 +2893,7 @@ rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::set_ping_at"
 reason = "C3 imported BaseWebSocket, runtime, DOM listener, transport, timer or signer capability/carrier. No separate local TypeScript declaration names this host ABI. Mapped public/private bodies retain their own venue control flow and compare consumed primitive arguments; this interface does not stand in for a pending venue method. Host implementations own inherited Base socket state rather than creating a second venue runtime."
 
 [[exempt]]
-rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::ping_timeout"
-reason = "C3 imported BaseWebSocket, runtime, DOM listener, transport, timer or signer capability/carrier. No separate local TypeScript declaration names this host ABI. Mapped public/private bodies retain their own venue control flow and compare consumed primitive arguments; this interface does not stand in for a pending venue method. Host implementations own inherited Base socket state rather than creating a second venue runtime."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::set_ping_timeout"
+rs = "safe-cex-venue-apexomni/src/socket_host.rs::ApexSocketHost::schedule_ping"
 reason = "C3 imported BaseWebSocket, runtime, DOM listener, transport, timer or signer capability/carrier. No separate local TypeScript declaration names this host ABI. Mapped public/private bodies retain their own venue control flow and compare consumed primitive arguments; this interface does not stand in for a pending venue method. Host implementations own inherited Base socket state rather than creating a second venue runtime."
 
 [[exempt]]
@@ -3423,6 +3423,10 @@ reason = "Partial receiver for nine mapped read bodies, composing the shared Bas
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/data_reads.rs::BingxDataReads::new"
 reason = "Injection-only partial receiver construction; no source constructor, API factory, startup or websocket implementation is claimed."
+
+[[exempt]]
+rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::PortfolioState"
+reason = "Rust receiver storage behind the Portfolio handle: carries the uuid/type fields observed by mapped portfolio selection and retains unused response metadata. It has no independent source declaration or selection/balance algorithm; the strict source declaration DTO remains separately mapped. Runtime projection behavior belongs to the mapped portfolio bodies, with real-binding missing/malformed metadata regressions."
 
 [[exempt]]
 rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::Portfolio"
@@ -6711,34 +6715,6 @@ reason = "Native primitive/event/object/callee bindings for the mapped core publ
 [[exempt]]
 rs = "safe-cex-venue-hyperliquid/src/core_public_message.rs::CorePublicMessageHost::json_parse"
 reason = "Native primitive/event/object/callee bindings for the mapped core public frame body; full socket class composition remains separate."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotLimiterCallback"
-reason = "Rust carrier for the two anonymous source arrows inside spot waitForToken; captures native waitTime, receiver and original weight. Its execution body maps with waitForToken, and adds no independently named TypeScript export."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost"
-reason = "Rust native-operation binding for the mapped spot limiter bodies; property access, assignment, primitive arithmetic, callback allocation and Promise construction remain explicit host operations, not an extra TypeScript algorithm. Class allocation stays pending."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::number"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::is_undefined"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::binary"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::construct"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::limiter_callback"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
 
 [[exempt]]
 rs = "safe-cex-venue-hyperliquid/src/candle_listeners.rs::CandleVenue"

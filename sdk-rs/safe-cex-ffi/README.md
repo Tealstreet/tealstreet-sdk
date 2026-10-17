@@ -42,6 +42,10 @@ JSON account host. Events and private Store slices are forwarded to JS; signing
 and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
+Rejections are JavaScript Error objects with the source `name`, plain `message`
+and optional `code`. An absent source code stays absent; callers do not parse
+error messages as JSON. `tests/native-account-errors.test.mjs` checks this
+through the actual registry and native transport.
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
 
 Streaming uses the same command channel: call `listenOHLCV([options])`,
@@ -73,3 +77,13 @@ node --test safe-cex-ffi/tests/native-account-methods.test.mjs
 
 Both suites construct real registry accounts and read orders over loopback HTTP.
 The Node suite loads the compiled napi addon and observes its Store callbacks.
+
+`tests/native-account-factory-errors.test.mjs` exercises shared-factory proxy
+auth and server errors through a real Bitrue account. The corresponding Rust
+`native_account_factory_errors` target also checks request outcome counters on
+the native registry path. Both use loopback HTTP.
+
+`tests/native-account-callback-lifetime.test.mjs` checks account close in a child
+Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
+closures hold weak references so disposal releases callbacks even when a venue
+runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.

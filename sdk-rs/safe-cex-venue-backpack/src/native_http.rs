@@ -274,7 +274,7 @@ impl api::Host for Factory {
         secret: String,
         window: f64,
     ) -> Result<api::Task<Vec<(String, JsJsonValue)>, ExchangeError>, ExchangeError> {
-        let now = self.base.runtime.now_ms();
+        let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let future = crate::signing::generate_auth_headers(
             instruction,
             &params,

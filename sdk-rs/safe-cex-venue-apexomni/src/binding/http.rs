@@ -94,7 +94,7 @@ impl ApexApiHost for ApiHost {
         &self,
         config: ApexApiConfiguration,
         options: &ExchangeOptions,
-        _: &Rc<BaseExchange>,
+        base: &Rc<BaseExchange>,
     ) -> Result<(), ExchangeError> {
         let provider = self.scope.runtime.transport();
         let serializer = config.params_serializer;
@@ -115,7 +115,7 @@ impl ApexApiHost for ApiHost {
                 ),
             ]),
             &safe_cex_exchange::js_runtime::value::from_typed(options).map_err(error)?,
-            ExchangeName::Apexomni,
+            base,
         )
         .map_err(error)?;
         self.client

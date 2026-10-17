@@ -140,7 +140,7 @@ impl ReadHost for Rt {
         global_call(self, "omitUndefined", vec![v])
     }
     fn items(&self, v: Js) -> Result<Vec<Js>, Thrown> {
-        items(&v)
+        v.iterable_values()
     }
     fn map(&self, v: Js, f: impl FnMut(Js) -> Result<Js, Thrown>) -> Result<Js, Thrown> {
         Ok(Js::array(

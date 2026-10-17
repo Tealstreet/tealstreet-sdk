@@ -341,3 +341,9 @@ The same socket-event fixture covers private order and position Store commits,
 fill emission, and the real REST balance refresh triggered by an order-fill frame.
 
 The constructed native HTTP client acquires its rate slot before invoking the signing interceptor, including network retry attempts. `tests/rate_limit_signing.rs` fills the real ten-request window and verifies the queued request reads its timestamp after dequeue.
+
+Native REST and private subscription signatures read the synchronized shared
+virtual clock. REST ticker IDs and position timestamps use that same source
+clock. Rate limiting, heartbeat timing and private refresh throttles retain their
+source monotonic or Date.now clocks. The native routing and private reopen
+regressions distinguish synced time from an unrelated host clock.

@@ -94,49 +94,6 @@ pub struct PlaceAlgoOrderResponse {
     pub data: PlaceAlgoOrderResponseData,
 }
 
-// ts: WOOX_ORDER
-#[derive(Debug, Clone, PartialEq)]
-pub struct WooxOrder {
-    pub symbol: String,
-    pub status: String,
-    pub side: String,
-    pub created_time: String,
-    pub updated_time: String,
-    pub order_id: f64,
-    pub order_tag: String,
-    pub price: f64,
-    pub r#type: String,
-    pub quantity: f64,
-    pub amount: f64,
-    pub visible: f64,
-    pub executed: f64,
-    pub total_fee: f64,
-    pub fee_asset: String,
-    pub total_rebate: f64,
-    pub rebate_asset: String,
-    pub client_order_id: f64,
-    pub reduce_only: bool,
-    pub realized_pnl: f64,
-    pub average_executed_price: f64,
-    pub position_side: String,
-}
-
-// ts: FETCH_ORDER_RESPONSE
-#[derive(Debug, Clone, PartialEq)]
-pub struct FetchOrderResponseMeta {
-    pub total: f64,
-    pub records_per_page: f64,
-    pub current_page: f64,
-}
-
-// ts: FETCH_ORDER_RESPONSE
-#[derive(Debug, Clone, PartialEq)]
-pub struct FetchOrderResponse {
-    pub success: bool,
-    pub meta: FetchOrderResponseMeta,
-    pub rows: Vec<WooxOrder>,
-}
-
 // ts: GET_FUTURES_LEVERAGE_RESPONSE
 #[derive(Debug, Clone, PartialEq)]
 pub struct GetFuturesLeverageResponseDataDetailsItem {
@@ -364,93 +321,6 @@ impl<'de> Deserialize<'de> for PlaceAlgoOrderResponse {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(remote = "WooxOrder")]
-struct WooxOrderWire {
-    symbol: String,
-    status: String,
-    side: String,
-    created_time: String,
-    updated_time: String,
-    order_id: f64,
-    order_tag: String,
-    price: f64,
-    r#type: String,
-    quantity: f64,
-    amount: f64,
-    visible: f64,
-    executed: f64,
-    total_fee: f64,
-    fee_asset: String,
-    total_rebate: f64,
-    rebate_asset: String,
-    client_order_id: f64,
-    reduce_only: bool,
-    realized_pnl: f64,
-    average_executed_price: f64,
-    position_side: String,
-}
-impl Serialize for WooxOrder {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        WooxOrderWire::serialize(self, serializer)
-    }
-}
-impl<'de> Deserialize<'de> for WooxOrder {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?
-            .decode_with(|decoder| {
-                WooxOrderWire::deserialize(safe_cex_types::strict_decode::object(decoder))
-            })
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "FetchOrderResponseMeta")]
-struct FetchOrderResponseMetaWire {
-    total: f64,
-    records_per_page: f64,
-    current_page: f64,
-}
-impl Serialize for FetchOrderResponseMeta {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        FetchOrderResponseMetaWire::serialize(self, serializer)
-    }
-}
-impl<'de> Deserialize<'de> for FetchOrderResponseMeta {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?
-            .decode_with(|decoder| {
-                FetchOrderResponseMetaWire::deserialize(safe_cex_types::strict_decode::object(
-                    decoder,
-                ))
-            })
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "FetchOrderResponse")]
-struct FetchOrderResponseWire {
-    success: bool,
-    meta: FetchOrderResponseMeta,
-    rows: Vec<WooxOrder>,
-}
-impl Serialize for FetchOrderResponse {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        FetchOrderResponseWire::serialize(self, serializer)
-    }
-}
-impl<'de> Deserialize<'de> for FetchOrderResponse {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?
-            .decode_with(|decoder| {
-                FetchOrderResponseWire::deserialize(safe_cex_types::strict_decode::object(decoder))
-            })
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Serialize, Deserialize)]
 #[serde(remote = "GetFuturesLeverageResponseDataDetailsItem")]
 struct GetFuturesLeverageResponseDataDetailsItemWire {
     position_side: String,
@@ -652,21 +522,6 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for PlaceAlgoOrderResponseDat
 impl safe_cex_num::numeric_ingress::JsNumberOutput for PlaceAlgoOrderResponse {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self, struct { success, timestamp, data });
-    }
-}
-impl safe_cex_num::numeric_ingress::JsNumberOutput for WooxOrder {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self, struct { symbol, status, side, created_time, updated_time, order_id, order_tag, price, r#type, quantity, amount, visible, executed, total_fee, fee_asset, total_rebate, rebate_asset, client_order_id, reduce_only, realized_pnl, average_executed_price, position_side });
-    }
-}
-impl safe_cex_num::numeric_ingress::JsNumberOutput for FetchOrderResponseMeta {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self, struct { total, records_per_page, current_page });
-    }
-}
-impl safe_cex_num::numeric_ingress::JsNumberOutput for FetchOrderResponse {
-    fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self, struct { success, meta, rows });
     }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for GetFuturesLeverageResponseDataDetailsItem {
