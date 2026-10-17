@@ -789,3 +789,85 @@ fn resolved_signature_type_error_reaches_the_bingx_exchange() {
 fn rejected_signature_type_error_reaches_the_bingx_exchange() {
     signature_type_error(400.0);
 }
+
+struct ResetModelClock;
+impl Drop for ResetModelClock {
+    fn drop(&mut self) {
+        let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+        clock.sync_from_server_time((clock.now)());
+    }
+}
+
+#[test]
+fn native_synced_clock_reaches_all_order_mapping_paths() {
+    let _reset = ResetModelClock;
+    let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    clock.sync_from_server_time((clock.now)() + 40_000.0);
+    let h = started_private_fixture();
+    let before = clock.get_current_time_ms();
+    let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    let mut stamps = vec![("REST", orders[0].last_update)];
+    private_frame(&h, private_order("NEW", "0"));
+    stamps.push((
+        "private frame",
+        h.store
+            .orders()
+            .iter()
+            .find(|o| o.id == "frame-order")
+            .unwrap()
+            .last_update,
+    ));
+    let ids = h
+        .drive(h.venue().base().place_order(h.venue(), placed()))
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+    stamps.push((
+        "placement",
+        h.store
+            .orders()
+            .iter()
+            .find(|o| o.id == ids[0])
+            .unwrap()
+            .last_update,
+    ));
+    let mut raw = raw_order();
+    raw["clientOrderId"] = json!("original-clock-client");
+    let original = safe_cex_venue_bingx::private_events::map_order(&raw, &[], 0.0)
+        .unwrap()
+        .unwrap();
+    h.store.add_or_update_order(original.clone()).unwrap();
+    const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
+    h.http.ok("POST", REPLACE, json!({"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"replacement-clock-id"}));
+    let update = serde_json::from_value(json!({"order":original,"update":{"price":110}})).unwrap();
+    assert_eq!(
+        h.drive(h.venue().update_order(update)).unwrap(),
+        ["replacement-clock-id"]
+    );
+    stamps.push((
+        "replacement",
+        h.store
+            .orders()
+            .iter()
+            .find(|o| o.id == "replacement-clock-id")
+            .unwrap()
+            .last_update,
+    ));
+    let after = clock.get_current_time_ms();
+    let failures: Vec<_> = stamps
+        .into_iter()
+        .filter(|(_, stamp)| !(before..=after).contains(stamp))
+        .collect();
+    assert!(
+        h.http
+            .calls(ORDERS)
+            .iter()
+            .any(|r| r.params["signature"].is_string())
+    );
+    assert_eq!(h.http.calls(REPLACE).len(), 1);
+    done(&h);
+    assert!(
+        failures.is_empty(),
+        "all real order mapper callers must use synced clock: {failures:?}"
+    );
+}
