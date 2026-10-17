@@ -1,5 +1,10 @@
 # Worker port
 
+The production exchange event bridge subscribes with `on_args` for log events
+and posts that list once. Fill messages contain the first emitted argument.
+`install_exchange_event_bridge` is shared by worker startup and native venue
+regressions, so tests exercise its actual registration and forwarding logic.
+
 Behavioral source: [worker guidance](../../packages/safe-cex/src/webworker/CLAUDE.md)
 and its linked subsystem guidance. This crate consumes Exchange and Store
 directly; hosts provide the existing ExchangeRuntime clock and local scheduler.

@@ -179,7 +179,7 @@ fn fixture(input: Value) -> (BingxDataReads, Rc<DefaultStore>, Rc<Transport>, Rc
     base.on(
         "error",
         Rc::new(move |_, value| {
-            events.borrow_mut().push(value[0].as_str().unwrap().into());
+            events.borrow_mut().push(value.as_str().unwrap().into());
             Ok(())
         }),
     );

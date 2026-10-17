@@ -505,187 +505,193 @@
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . start ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . dispose ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . validate_account ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . get_account ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_markets ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . refresh_markets ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_tickers ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_positions (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_and_set_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
+    "call": "venue . find_order_by_client_order_id (arg (& args , 0) ? , arg (& args , 1) ?)",
+    "file": "safe-cex-registry/src/native_account.rs"
+  },
+  {
+    "function": "native_account_call",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_and_set_private_snapshot (1)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . update_order (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . cancel_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . cancel_symbol_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . cancel_all_orders ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . set_leverage (arg (& args , 0) ? , arg (& args , 1) ? , arg (& args , 2) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . set_all_leverage (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . change_position_mode (arg (& args , 0) ? , arg (& args , 1) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . change_margin_type (arg (& args , 0) ? , arg (& args , 1) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_leverage_for_symbol (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_symbol_max_leverage (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . schedule_cancel (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_ohlcv (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_public_trades (arg (& args , 0) ? , arg (& args , 1) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_historical_positions (safe_cex_exchange :: journal :: HistoricalPositionOptions { account : options . account , from : options . from , to : options . to , } ,)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_historical_fills (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_income_history (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_income_history_range (arg (& args , 0) ? , arg (& args , 1) ? , arg (& args , 2) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_closed_pnl (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . fetch_historical_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "8c721f3828540e91",
+    "body": "9575f9b33c16141a",
     "call": "venue . update_symbol_metadata (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
@@ -1560,6 +1566,12 @@
     "file": "safe-cex-venue-backpack/src/public_adapter.rs"
   },
   {
+    "function": "fetch_and_set_private_snapshot",
+    "body": "f5abe5f29022a2ae",
+    "call": "owner . fetch_and_set_private_snapshot (tries as u32)",
+    "file": "safe-cex-venue-backpack/src/socket_parent.rs"
+  },
+  {
     "function": "invoke",
     "body": "035d30fc7b6c230f",
     "reference": "class_jobs :: start",
@@ -1873,13 +1885,13 @@
   },
   {
     "function": "new",
-    "body": "4c2f44aa3c532007",
+    "body": "81e0492ab08192a6",
     "call": "v . start ()",
     "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
   },
   {
     "function": "new",
-    "body": "4c2f44aa3c532007",
+    "body": "81e0492ab08192a6",
     "call": "v . fetch_historical_fills (o)",
     "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
   },
@@ -6241,73 +6253,73 @@
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "order :: start",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "data :: fetch_markets",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "data :: fetch_positions",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "data :: fetch_orders",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "data :: fetch_historical_fills",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "data :: fetch_ohlcv",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "order :: update_order",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "cancel :: cancel_orders",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "cancel :: cancel_orders",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "settings :: change_position_mode",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "settings :: change_margin_type",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
   {
     "function": "async_method",
-    "body": "ad9debb9bd2648ab",
+    "body": "7a7ce64c8efe375b",
     "reference": "settings :: set_leverage",
     "file": "safe-cex-venue-phemex/src/binding/methods.rs"
   },
@@ -6745,19 +6757,19 @@
   },
   {
     "function": "bind",
-    "body": "2f1e737352cecffd",
+    "body": "de2b0235e9f6881d",
     "reference": "legacy_lifecycle :: start",
     "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
   },
   {
     "function": "bind",
-    "body": "2f1e737352cecffd",
+    "body": "de2b0235e9f6881d",
     "reference": "legacy_lifecycle :: fetch_historical_positions",
     "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
   },
   {
     "function": "bind",
-    "body": "2f1e737352cecffd",
+    "body": "de2b0235e9f6881d",
     "reference": "historical_fills :: fetch_historical_fills",
     "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
   },

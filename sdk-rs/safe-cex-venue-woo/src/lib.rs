@@ -101,3 +101,6 @@ pub mod exchange_class;
 
 pub mod binding;
 pub use binding::exchange::{WooDependencies, WooExchange};
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_woo;
