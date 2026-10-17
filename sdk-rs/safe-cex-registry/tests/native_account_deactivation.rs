@@ -55,19 +55,26 @@ fn expired_key_posts_worker_status_without_posting_the_disposal_reset() {
             Rc::new(move |data| snapshots.borrow_mut().push(data)),
         );
         call(&account, "start").await;
-        let events = events.borrow();
-        assert!(events.iter().any(|(name,data)|name=="error" && data.to_string().contains("API key expired")),"{events:?}");
-        assert!(
-            events
-                .iter()
-                .any(|(name, data)| name == "deactivate-status" && data == &json!(true)),
-            "{events:?}"
-        );
+        {
+            let events = events.borrow();
+            assert!(
+                events
+                    .iter()
+                    .any(|(name, data)| name == "error"
+                        && data.to_string().contains("API key expired")),
+                "{events:?}"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|(name, data)| name == "deactivate-status" && data == &json!(true)),
+                "{events:?}"
+            );
+        }
         assert!(
             stores.borrow().is_empty(),
             "the worker clears store delivery before disposal resets it"
         );
-        drop(events);
         unwatch();
         call(&account, "dispose").await;
     });
