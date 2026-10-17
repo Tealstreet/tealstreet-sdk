@@ -354,6 +354,7 @@ fn bound_fetch_public_trades() {
 
 #[test]
 fn signature_refusal_replays_serialized_write_once() {
+    let _clock = ResetModelClock;
     for status in [200.0, 400.0] {
         let h = fixture();
         h.http.advance_ms.set(1.0);
@@ -437,6 +438,7 @@ fn ambiguous_write_failure_is_not_replayed() {
 
 #[test]
 fn retryable_read_gets_a_fresh_signature() {
+    let _clock = ResetModelClock;
     let h = fixture();
     h.http.advance_ms.set(1.0);
     let original = h
