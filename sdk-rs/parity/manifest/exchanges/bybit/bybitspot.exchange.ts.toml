@@ -278,9 +278,9 @@ note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/ohlcv.rs::
 ts = "BybitSpotExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv" ]
 status = "ported"
-note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv."
+note = "Concrete Exchange listener routes to the maintained socket and returns its real cleanup. Four master-red binding controls now deliver klines and trades; native sequence corpus covers minute/week buckets, stale frames and nonfinite values. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv."
 
 [[symbol]]
 ts = "BybitSpotExchange.listenOrderBook"
