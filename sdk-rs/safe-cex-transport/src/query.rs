@@ -233,7 +233,9 @@ fn from_wire_capture_at(value: RetainedJsonInput, depth: usize) -> Result<QueryV
         RetainedJsonInput::Undefined => QueryValue::Undefined,
         RetainedJsonInput::Null => QueryValue::Null,
         RetainedJsonInput::Bool(value) => QueryValue::Bool(value),
-        RetainedJsonInput::Text(value) => QueryValue::String(value),
+        RetainedJsonInput::Text(value) => {
+            QueryValue::String(String::from_utf16(&value).map_err(|error| error.to_string())?)
+        }
         RetainedJsonInput::Float(value) => QueryValue::Number(value),
         RetainedJsonInput::Lexeme(value) => {
             QueryValue::Number(value.parse::<f64>().map_err(|error| error.to_string())?)
@@ -248,7 +250,12 @@ fn from_wire_capture_at(value: RetainedJsonInput, depth: usize) -> Result<QueryV
         RetainedJsonInput::Object(values) => QueryValue::Object(
             values
                 .into_iter()
-                .map(|(key, value)| Ok((key, from_wire_capture_at(value, depth + 1)?)))
+                .map(|(key, value)| {
+                    Ok((
+                        String::from_utf16(&key).map_err(|error| error.to_string())?,
+                        from_wire_capture_at(value, depth + 1)?,
+                    ))
+                })
                 .collect::<Result<_, String>>()?,
         ),
     })

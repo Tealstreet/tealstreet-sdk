@@ -3,36 +3,11 @@
 use super::{
     promise,
     scope::{ScopeShared, scope_of},
-    value::{Js, Thrown, arg, error_object},
+    value::{Js, Thrown, arg, error_constructor},
 };
 use std::rc::{Rc, Weak};
 
-fn json_quote(text: &[u16], out: &mut Vec<u16>) {
-    out.push(b'"' as u16);
-    for (i, &c) in text.iter().enumerate() {
-        let lone = match c {
-            0xD800..=0xDBFF => !matches!(text.get(i + 1), Some(0xDC00..=0xDFFF)),
-            0xDC00..=0xDFFF => i == 0 || !matches!(text[i - 1], 0xD800..=0xDBFF),
-            _ => false,
-        };
-        let escaped = match c {
-            0x22 => "\\\"".to_owned(),
-            0x5C => "\\\\".to_owned(),
-            0x08 => "\\b".to_owned(),
-            0x0C => "\\f".to_owned(),
-            0x0A => "\\n".to_owned(),
-            0x0D => "\\r".to_owned(),
-            0x09 => "\\t".to_owned(),
-            c if c < 0x20 || lone => format!("\\u{c:04x}"),
-            c => {
-                out.push(c);
-                continue;
-            }
-        };
-        out.extend(escaped.encode_utf16());
-    }
-    out.push(b'"' as u16);
-}
+use safe_cex_types::js_coercion::json_quote_utf16 as json_quote;
 
 /// SerializeJSONProperty with an optional callable replacer; `None` is undefined.
 fn json_stringify(
@@ -420,24 +395,8 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "Boolean",
         Js::function("Boolean", |_, a| Ok(Js::Bool(arg(&a, 0).truthy()))),
     );
-    def(
-        "Error",
-        Js::constructor("Error", |_, a| {
-            let message = arg(&a, 0);
-            let message = if message.is_undefined() {
-                String::new()
-            } else {
-                message.to_display()
-            };
-            Ok(error_object("Error", &message))
-        }),
-    );
-    def(
-        "SyntaxError",
-        Js::constructor("SyntaxError", |_, a| {
-            Ok(error_object("SyntaxError", &arg(&a, 0).to_display()))
-        }),
-    );
+    def("Error", error_constructor("Error"));
+    def("SyntaxError", error_constructor("SyntaxError"));
     def(
         "BigInt",
         Js::function("BigInt", |_, a| {
@@ -503,12 +462,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             ))
         }),
     );
-    def(
-        "TypeError",
-        Js::constructor("TypeError", |_, a| {
-            Ok(error_object("TypeError", &arg(&a, 0).to_display()))
-        }),
-    );
+    def("TypeError", error_constructor("TypeError"));
     def(
         "Array",
         Js::object(vec![
@@ -619,7 +573,11 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             (
                 "parse",
                 Js::function("parse", |_, a| {
-                    super::json_parse::parse(&arg(&a, 0).to_js_string()?)
+                    safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                        &arg(&a, 0).to_js_string()?,
+                    )
+                    .map(super::value::from_retained_input)
+                    .map_err(|error| Thrown::error("SyntaxError", &error.to_string()))
                 }),
             ),
         ]),
