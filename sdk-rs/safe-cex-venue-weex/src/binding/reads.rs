@@ -95,7 +95,7 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
         },
         copy_properties: |_, value| value.spread_object(),
         define_property: v::define,
-        extract_array: |h, value| v::extract(h, value, &["items", "list", "rows"]),
+        extract_array: |h, value| v::extract(h, value, &[]),
         omit_undefined: v::omit,
         public_only: |h| Ok(h.root("isPublicDataOnly")?.truthy()),
         provider: |h| h.root("externalPublicDataProvider"),
@@ -211,21 +211,6 @@ pub(super) fn account_runtime() -> a::WeexAccountReadRuntime<Host, Js, Thrown> {
         },
         error_message: |_, error| v::units(&v::optional_dummy(&error.value, "message")?),
         warning: |h, s| h.warn(Js::utf16(&s)),
-        report_order_error: |h, error| {
-            let result = (|| {
-                let response = v::optional_dummy(&error.value, "response")?;
-                let data = v::optional_dummy(&response, "data")?;
-                let msg = v::optional_dummy(&data, "msg")?;
-                h.emit(if msg.truthy() {
-                    msg
-                } else {
-                    v::optional_dummy(&error.value, "message")?
-                })
-            })();
-            if let Err(error) = result {
-                h.0.report(&error, "WEEX fetchOrders");
-            }
-        },
     }
 }
 pub(super) fn income_runtime() -> i::WeexIncomeRuntime<Host, Js, Thrown> {

@@ -1226,6 +1226,12 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
+It rejects signs inside radix digits (for example `0x+1`) and preserves the shared
+full-string, whitespace and arbitrary-length binary64 rounding rules. The native
+host `js_string_number` target compares 93 Node results through installed Number,
+including signed radix refusals, large values, overflow and signed zero.
+
 Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
 JavaScript callbacks need not define a Rust total order: NaN comparison results
 mean equality, and inconsistent callbacks must not panic. The first source throw
@@ -1323,8 +1329,6 @@ including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
 
-
-
 Singular JS Store order/position/market mutators read the selector's `id` and
 compare it strictly with native string IDs. Non-string IDs and bare primitives
 do not identify those rows; nullish selectors and throwing getters propagate
@@ -1340,3 +1344,21 @@ exceed one. It resolves every selector before patches, preserves unmatched rows
 as `None` in the Store batch, and avoids reading patches for unmatched IDs.
 `tests/js_store_position_batch_ids.rs` compares156 maintained Store cases with
 real DefaultStore, including empty, single, distinct and duplicate-ID states.
+
+The JS Axios dispatcher lets installed callable adapters own response settlement,
+as Axios does. HOW fulfills non-2xx and zero-status responses, so their configured
+transforms and fulfilled response interceptors run; default native HTTP responses
+still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
+the actual native runtime, factory, transport and HOW protocol against scripted
+socket I/O and compares four statuses with the maintained HOW adapter and Axios.
+
+For array inputs, JS Store `removeOrders` reads each element's `id` and applies
+source object-key coercion; it never treats a bare element as the ID itself.
+Property access and string-hint conversion failures propagate after the source's
+empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
+24 maintained Store cases through the production facade, including numeric keys,
+primitive elements, nullish elements and throwing getters/conversions.
+
+The numeric patch witnesses pass entity selectors (`{id}`), matching the source
+Store signatures, while retaining all numeric-bit, null and omission assertions.
+Bare primitive selectors remain negative cases in the source ID corpus.
