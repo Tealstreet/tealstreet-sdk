@@ -95,3 +95,7 @@ operation. Cancel a topic handle before replacing it; cancellation removes its
 registration and captured callback before the host's next scheduler turn. A
 handle's Drop is intentionally inert. Socket disposal closes this owner before
 host I/O closes, so no protocol dispose hook or venue registry is required.
+
+An offline-to-online transition runs each registered socket’s offline recovery.
+That path clears native retry backoff, failure pauses and close/reconnect counters,
+then runs a pending reconnect immediately. Repeated online notifications do nothing.
