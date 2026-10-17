@@ -89,7 +89,7 @@ impl CoinbaseApiHost for Host {
                 ),
             ]),
             &to_js(&_options),
-            to_typed(&to_js(&_exchange).get("name").map_err(from_thrown)?).map_err(from_thrown)?,
+            self.base(),
         )
         .map_err(from_thrown)?;
         Ok(self.register_client(client))

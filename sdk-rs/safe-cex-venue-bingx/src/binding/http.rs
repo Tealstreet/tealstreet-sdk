@@ -281,7 +281,7 @@ impl ApiHost for Host {
                 ),
             ]),
             &from_typed(options).map_err(error)?,
-            ExchangeName::Bingx,
+            base,
         )
         .map_err(error)?;
         client

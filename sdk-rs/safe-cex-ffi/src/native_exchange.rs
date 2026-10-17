@@ -15,7 +15,11 @@ use safe_cex_registry::native_account::{
     open_native_account,
 };
 use serde_json::{Value, json};
-use std::{collections::HashMap, rc::Rc, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    rc::{Rc, Weak},
+    sync::OnceLock,
+};
 use tokio::sync::{mpsc, oneshot};
 
 type Request = ThreadsafeFunction<String, Promise<String>, String, Status, false>;
@@ -58,6 +62,9 @@ enum Command {
 struct Open {
     account: Rc<NativeAccount>,
     unwatch: Box<dyn Fn()>,
+    // Venue runtimes can outlive disposal; only an open account owns JS callbacks.
+    _sign: Option<Rc<Request>>,
+    _proxy_token: Option<Rc<Request>>,
 }
 
 fn commands() -> &'static mpsc::UnboundedSender<Command> {
@@ -164,9 +171,12 @@ fn error_json(message: &str) -> String {
 }
 
 /// A JS callback returning Promise<string>, as a JSON future on the host thread.
-fn request(callback: Rc<Request>, payload: String) -> JsonFuture<String> {
+fn request(callback: Weak<Request>, payload: String) -> JsonFuture<String> {
     Box::pin(async move {
         let failed = |message: String| json!({"name":"Error","message":message});
+        let callback = callback
+            .upgrade()
+            .ok_or_else(|| failed("native account callback is closed".into()))?;
         let pending = callback
             .call_async_catch(payload)
             .await
@@ -185,7 +195,9 @@ fn open(
 ) -> Result<Open, String> {
     let options: Value =
         serde_json::from_str(&init.options_json).map_err(|e| error_json(&e.to_string()))?;
-    let sign = sign.map(Rc::new).map(|callback| {
+    let sign = sign.map(Rc::new);
+    let proxy_token = proxy_token.map(Rc::new);
+    let sign_source = sign.as_ref().map(Rc::downgrade).map(|callback| {
         Rc::new(move |payload: Value| {
             let pending = request(callback.clone(), payload.to_string());
             Box::pin(async move {
@@ -195,7 +207,7 @@ fn open(
             }) as JsonFuture<Value>
         }) as Rc<dyn Fn(Value) -> JsonFuture<Value>>
     });
-    let proxy_token = proxy_token.map(Rc::new).map(|callback| {
+    let proxy_source = proxy_token.as_ref().map(Rc::downgrade).map(|callback| {
         Rc::new(move || request(callback.clone(), String::new()))
             as Rc<dyn Fn() -> JsonFuture<String>>
     });
@@ -204,8 +216,8 @@ fn open(
         exchange: init.exchange,
         options,
         account_name: init.account_name,
-        sign,
-        proxy_token,
+        sign: sign_source,
+        proxy_token: proxy_source,
     })
     .map_err(|error| error.to_string())?;
     let unwatch = native_account_watch(
@@ -220,7 +232,12 @@ fn open(
             on_store.call(slices.to_string(), ThreadsafeFunctionCallMode::NonBlocking);
         }),
     );
-    Ok(Open { account, unwatch })
+    Ok(Open {
+        account,
+        unwatch,
+        _sign: sign,
+        _proxy_token: proxy_token,
+    })
 }
 
 fn rejected(error: String) -> napi::Error {

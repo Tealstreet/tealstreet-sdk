@@ -98,7 +98,7 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 ))
             }))
         },
-        create: |h, config, options, exchange| {
+        create: |h, config, options, _exchange| {
             // The shared wire host supplies original tokens. Install this venue's
             // explicit transform before its response/error status handling.
             let transform = config.get("transformResponse")?;
@@ -108,7 +108,7 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 h.0.shared.runtime.transport().as_ref(),
                 config,
                 &options,
-                to_typed(&exchange.get("name")?)?,
+                h.0.base(),
             )?;
             let apply = std::rc::Rc::new(move |response: &Js| -> Result<(), Thrown> {
                 let data = transform.call(Js::Undefined, std::vec![response.get("data")?])?;
