@@ -389,7 +389,13 @@ impl Js {
     }
     /// GetIterator for iterable spread and for-of consumers.
     pub fn iterator(&self) -> Result<Js, Thrown> {
+        if self.is_nullish() {
+            return Err(super::globals::not_iterable(self));
+        }
         let method = self.get_property(&Js::SymbolIterator)?;
+        if !method.is_callable() {
+            return Err(super::globals::not_iterable(self));
+        }
         let iterator = method.call(self.clone(), vec![])?;
         if !iterator.is_object() {
             return Err(Thrown::type_error("Iterator result is not an object"));

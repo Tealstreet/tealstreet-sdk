@@ -401,6 +401,7 @@ impl RustVenueHost for NativeVenueHost {
                 self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
+            local_wall_time_to_utc: Rc::new(|ms| ms),
         })
     }
 

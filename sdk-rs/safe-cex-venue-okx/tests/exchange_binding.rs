@@ -469,6 +469,30 @@ fn source_identity_flags_survive_demo_facade_construction() {
     }
 }
 
+fn private_topic_names() -> [ExchangeName; 4] {
+    [
+        ExchangeName::Okx,
+        ExchangeName::Okxdemo,
+        ExchangeName::Okxeu,
+        ExchangeName::Okxeudemo,
+    ]
+}
+fn private_topic_scene(name: &ExchangeName) -> Harness {
+    harness(name.clone(), options(), |http| {
+        okx(http);
+        for (path, rows) in [
+            (MARKETS, json!([instrument()])),
+            ("/api/v5/account/instruments", json!([instrument()])),
+            (TICKERS, json!([ticker()])),
+            (ORDERS, json!([order()])),
+            (POSITIONS, json!([position()])),
+        ] {
+            http.ok_for_instrument(path, "SWAP", rows);
+            http.ok_for_instrument(path, "FUTURES", json!([]));
+        }
+    })
+}
+
 fn private_frame(h: &Harness, channel: &str, rows: Value) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
@@ -503,15 +527,16 @@ fn record_private_fills(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value
     fills
 }
 
-#[test]
-fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snapshots() {
+fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snapshots_for_name(
+    name: ExchangeName,
+) {
     let mut checked = 0;
     for (state, status) in [
         ("filled", OrderStatus::Closed),
         ("canceled", OrderStatus::Canceled),
         ("mmp_canceled", OrderStatus::Canceled),
     ] {
-        let h = harness(ExchangeName::Okx, options(), okx);
+        let h = private_topic_scene(&name);
         h.drive(h.venue().start()).unwrap();
         h.runtime.advance(50.);
         let stale = h.store.orders().to_vec();
@@ -610,8 +635,18 @@ fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snap
 }
 
 #[test]
-fn private_positions_frame_updates_native_position_and_balance_without_a_fill() {
-    let h = harness(ExchangeName::Okx, options(), okx);
+fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snapshots() {
+    for name in private_topic_names() {
+        private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snapshots_for_name(
+            name,
+        );
+    }
+}
+
+fn private_positions_frame_updates_native_position_and_balance_without_a_fill_for_name(
+    name: ExchangeName,
+) {
+    let h = private_topic_scene(&name);
     h.drive(h.venue().start()).unwrap();
     h.runtime.advance(50.);
     let fills = record_private_fills(&h);
@@ -662,8 +697,14 @@ fn private_positions_frame_updates_native_position_and_balance_without_a_fill() 
 }
 
 #[test]
-fn private_account_frame_updates_balance_and_emits_no_fill() {
-    let h = harness(ExchangeName::Okx, options(), okx);
+fn private_positions_frame_updates_native_position_and_balance_without_a_fill() {
+    for name in private_topic_names() {
+        private_positions_frame_updates_native_position_and_balance_without_a_fill_for_name(name);
+    }
+}
+
+fn private_account_frame_updates_balance_and_emits_no_fill_for_name(name: ExchangeName) {
+    let h = private_topic_scene(&name);
     h.drive(h.venue().start()).unwrap();
     h.runtime.advance(50.);
     let fills = record_private_fills(&h);
@@ -699,6 +740,13 @@ fn private_account_frame_updates_balance_and_emits_no_fill() {
     assert!(h.runtime.reports.borrow().is_empty());
     drop(balance);
     h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_account_frame_updates_balance_and_emits_no_fill() {
+    for name in private_topic_names() {
+        private_account_frame_updates_balance_and_emits_no_fill_for_name(name);
+    }
 }
 
 fn record_errors(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
