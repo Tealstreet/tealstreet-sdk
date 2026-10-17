@@ -206,3 +206,26 @@ fn private_host_body_throw_closes_iterator_and_keeps_original_failure() {
     assert!(error.value.strict_equals(&original));
     assert_eq!(closed.get(), 1, "production loop must close on body throw");
 }
+
+#[test]
+fn production_get_key_reads_inherited_aliases_and_keeps_shadowing() {
+    let h = harness::harness(ExchangeName::Bitget, harness::options(), |_| {});
+    let helper = h.exchange.rt.global("v").unwrap();
+    let parent = Js::object(vec![("some_field", Js::Number(23.0))]);
+    let object = Js::object(vec![]);
+    let Js::Object(data) = &object else {
+        unreachable!()
+    };
+    *data.proto.borrow_mut() = Some(parent);
+    let get = || {
+        helper
+            .call(Js::Undefined, vec![object.clone(), Js::str("someField")])
+            .unwrap()
+    };
+    assert!(
+        get().strict_equals(&Js::Number(23.0)),
+        "inherited snake-case key must resolve"
+    );
+    object.define("someField", Js::Undefined).unwrap();
+    assert!(get().is_undefined(), "own undefined shadows later alias");
+}

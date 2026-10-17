@@ -181,7 +181,7 @@ impl CoinbaseOrderHost for OrderHost {
             .map_err(|error| order_error(failure(error)))
     }
     fn uuid(&mut self) -> String {
-        self.host.shared.runtime.unique_id()
+        super::crypto::uuid(self.host.shared.runtime.as_ref())
     }
     fn post_create_order(
         &mut self,
