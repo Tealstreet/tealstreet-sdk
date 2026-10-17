@@ -326,7 +326,7 @@ test('WOO root command includes every source oracle without masking', () => {
   // Algo response membership and ownership witnesses run through the existing native target.
   // Account alias/freeze and guard witnesses use the account targets; pricing checks error fixtures.
   const pkg = JSON.parse(readFileSync(manifestFor(workflowUrlUsed), 'utf8'));
-  assert.equal(pkg.scripts['venue-oracle:woo'], 'node sdk-rs/safe-cex-venue-woo/scripts/types-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/constants-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/signing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/contracts-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/journal-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/fills-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/history-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/utils-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/pricing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/response-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-dispatch-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/isolation-control.cjs && node sdk-rs/safe-cex-venue-woo/scripts/order-output-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-canonical-oracle.cjs --check && cargo test --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-woo --test public_canonical_semantics --test public_canonical_isolation --test public_canonical --test shadow_compare --test legacy_lifecycle --test public_streams --jobs 2 --test class_construction --test socket_classes --test exchange_class --test response --test utils --test regular_writes --test algo_writes --test account_leverage --test position_mode --test pricing');
+  assert.equal(pkg.scripts['venue-oracle:woo'], 'node sdk-rs/safe-cex-venue-woo/scripts/types-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/constants-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/signing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/contracts-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/journal-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/fills-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/history-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/utils-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/pricing-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/response-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/public-dispatch-oracle.cjs --check && node sdk-rs/safe-cex-venue-woo/scripts/isolation-control.cjs && node sdk-rs/safe-cex-venue-woo/scripts/order-output-oracle.cjs --check && cargo test --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-woo --test legacy_lifecycle --test public_streams --jobs 2 --test class_construction --test socket_classes --test exchange_class --test response --test utils --test regular_writes --test algo_writes --test account_leverage --test position_mode --test pricing');
 });
 
 test('removing Hyperliquid state comparisons fails wiring',()=>assert.throws(()=>auditHl(hlWorkflow,hlCommand.replace('--lib exchange::tests','')),/required/));
@@ -641,8 +641,8 @@ function auditRunner(source) {
  assert.throws(()=>probeRunner(source,expectedOracles.length), /native SDK boundary oracle failed/);
  assert.deepEqual(calls.at(-2),{command:'git',args:['diff','--exit-code','--','sdk-rs/safe-cex-crypto/tests/fixtures/*.json']});
  assert.throws(()=>probeRunner(source,expectedOracles.length+1), /fixture regeneration drift/);
- assert.deepEqual(calls.at(-1),{command:'cargo',args:['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--jobs','1']});
- assert.throws(()=>probeRunner(source,expectedOracles.length+2), /native Stark domain field identity supplement failed/);
+ assert.deepEqual(calls.at(-1),{command:'cargo',args:['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--test','live_poseidon_types','--jobs','1','--','--include-ignored']}, 'native identity and ignored Poseidon tests must execute');
+ assert.throws(()=>probeRunner(source,expectedOracles.length+2), /native cryptographic identity supplements failed/);
 }
 test('all seven oracle families execute and propagate every failure',()=>auditRunner(oracleRunner));
 test('removing independent Lighter venue oracle is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("  ['../../scripts/check-independent-lighter.cjs'],\n",'')),/required/));
@@ -657,7 +657,17 @@ test('masking child oracle failures is rejected',()=>assert.throws(()=>auditRunn
 test('removing native SDK oracle setup is rejected',()=>assert.throws(()=>audit(workflow.replace(/      - name: Prepare pinned zkLink native oracle\n[\s\S]*?(?=      - name:)/,'')),/missing Prepare pinned/));
 test('masking native SDK oracle failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(native.status,0,'native SDK boundary oracle failed');",'')),/Missing expected exception/));
 test('removing Stark identity SDK oracle is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("  ['starknet/domain-field-identities.cjs'],\n",'')),/required/));
-test('masking native Stark identity failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(identity.status,0,'native Stark domain field identity supplement failed');",'')),/Missing expected exception/));
+test('masking native identity failure is rejected',()=>assert.throws(()=>auditRunner(oracleRunner.replace("assert.equal(identity.status,0,'native cryptographic identity supplements failed');",'')),/Missing expected exception/));
+test('removing ignored Poseidon record target is rejected',()=>{
+ const changed=oracleRunner.replace(",'--test','live_poseidon_types'",'');
+ assert.notEqual(changed,oracleRunner,'Poseidon target mutation must apply');
+ assert.throws(()=>auditRunner(changed),/native identity and ignored Poseidon tests must execute/);
+});
+test('omitting include-ignored for Poseidon records is rejected',()=>{
+ const changed=oracleRunner.replace(",'--','--include-ignored'",'');
+ assert.notEqual(changed,oracleRunner,'include-ignored mutation must apply');
+ assert.throws(()=>auditRunner(changed),/native identity and ignored Poseidon tests must execute/);
+});
 
 }
 

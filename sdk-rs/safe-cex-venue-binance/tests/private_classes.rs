@@ -3579,6 +3579,91 @@ fn production_native_private_position_frames_update_the_real_store() {
 
 #[test]
 #[cfg(feature = "native")]
+fn production_native_pm_position_info_does_not_grow_per_frame() {
+    let owner = production_native_owner(Venue::PM);
+    let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{
+        "s":"BTCUSDT","pa":"2","ep":"110","up":"7","ps":"BOTH"
+    }],"B":[]}})
+    .to_string();
+    let mut first_depth = None;
+    for index in 0..8 {
+        owner.private.on_message(string(frame.clone())).unwrap();
+        let positions = owner.base.store.positions();
+        let position = positions.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+        assert_eq!((position.contracts, position.entry_price), (2.0, 110.0));
+        let mut info = position.info.as_ref();
+        let mut depth = 0;
+        while let Some(value) = info {
+            depth += 1;
+            info = value.get("info");
+        }
+        let expected = *first_depth.get_or_insert(depth);
+        assert_eq!(
+            depth, expected,
+            "identical PM frame {index} must not append a previous-position info snapshot"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_position_info_is_the_current_position_without_info() {
+    let owner = production_native_owner(Venue::PM);
+    for index in 0..16 {
+        let amount: f64 = if index % 2 == 0 { 2.0 } else { -3.0 };
+        let entry = 110.0 + f64::from(index);
+        let upnl = 7.0 - f64::from(index);
+        let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{
+            "s":"BTCUSDT","pa":amount.to_string(),"ep":entry.to_string(),
+            "up":upnl.to_string(),"ps":"BOTH"
+        }],"B":[]}});
+        owner.private.on_message(string(frame.to_string())).unwrap();
+        let positions = owner.base.store.positions();
+        let position = positions.iter().find(|p| p.symbol == "BTCUSDT").unwrap();
+        assert_eq!(position.entry_price, entry);
+        assert_eq!(position.contracts, amount.abs());
+        assert_eq!(position.unrealized_pnl, upnl);
+        assert_eq!(position.notional, amount.abs() * entry);
+        assert_eq!(
+            position.side,
+            if amount > 0.0 {
+                safe_cex_types::PositionSide::Long
+            } else {
+                safe_cex_types::PositionSide::Short
+            }
+        );
+        let mut expected = serde_json::to_value(position).unwrap();
+        expected.as_object_mut().unwrap().remove("info");
+        let info = position
+            .info
+            .as_ref()
+            .expect("PM keeps a position snapshot");
+        assert!(
+            info.get("info").is_none(),
+            "snapshot must have exactly one info depth"
+        );
+        let expected = expected.as_object().unwrap();
+        assert_eq!(info.as_object().unwrap().len(), expected.len());
+        for (field, value) in expected {
+            if let Some(number) = value.as_f64() {
+                assert_eq!(
+                    info.get(field).and_then(Value::as_f64).map(f64::to_bits),
+                    Some(number.to_bits()),
+                    "frame {index}: info numeric field {field} uses the current position"
+                );
+            } else {
+                assert_eq!(
+                    info.get(field),
+                    Some(value),
+                    "frame {index}: info field {field}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
 fn production_native_private_balance_frames_follow_each_source_family() {
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let owner = production_native_owner(venue);
