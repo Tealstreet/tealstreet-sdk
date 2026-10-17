@@ -380,3 +380,15 @@ Strict host all-target and WASM library lint pass. The override contract passes
 inventory passes 25 tests. After the shared ModelField and library-pin merges,
 all 23 constructed tests and the all-features cancellation inventory (6 tests,
 explicit export ignored) pass.
+
+Private feed/stream for-of and spread consume the shared GetIterator protocol,
+including iterator objects and live collection mutations. A for-of body throw
+runs IteratorClose while preserving its original cause; next/done/value failures
+escape without closing. Registered private-class regressions cover live Set,
+Map-values and array traces plus these four abrupt-completion boundaries.
+This slice is scoped to binding/ws_private/slots.rs, rather than every venue host.
+The supplementary close-spread regression substitutes an iterator-valued helper
+result and restores the real DefaultStore mutator. On the master slot body the
+position remains open; the repaired spread delivers the close pair, clears margin
+through own undefined, and increments the position revision once. It exercises
+latent iterable admission; maintained wire payloads still provide arrays.

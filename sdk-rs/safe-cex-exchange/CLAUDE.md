@@ -1268,6 +1268,14 @@ regression additionally observes final signed GET query ordering through the
 production HTTP client and verifies the signature against the source preimage.
 Other qs options remain outside this imported runtime surface.
 
+Installed Promise.all/allSettled consume the shared synchronous iterator protocol,
+including Map/Set iterators and Unicode strings. Iterator acquisition/step errors
+reject the returned Promise. Inputs remain native Js values until existing
+combinator settlement; pending members, object identity, negative zero and NaN
+payloads survive. `js_runtime`'s two promise_combinators tests compare eighteen
+Node outcomes and exercise native pending members; both compile/fail on the old
+array-only globals dispatch. Promise scheduling remains in the shared promise core.
+
 Map/Set `forEach` uses stable insertion positions, like the live iterators, and
 releases its collection borrow before each callback. Deletions, clear/reinsert,
 updates and new entries are observed during traversal. Callbacks receive the
@@ -1284,3 +1292,10 @@ Registry `native_host_phemex_clock` exercises the real dayjs consumer through a
 signed native HTTP request, verifying its HMAC and expiry after a 90-second
 server correction. The core virtual-clock regression checks both getters and
 the independent raw Date clock.
+
+String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
+units and honor their position argument after search-string coercion. Positions
+truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
+endsWith defaults to the full length only for undefined. The native Node corpus
+covers surrogate halves, empty needles, all position boundaries and thrown
+position conversion identity.
