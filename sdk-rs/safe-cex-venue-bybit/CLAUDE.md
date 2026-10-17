@@ -685,6 +685,12 @@ Core-owned retry/resync timers and retained topic maps preserve delayed connecti
 sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
 four families; the maintained source book oracle includes array-like level lists.
 
+Closed-PnL reads now dispatch through Exchange for primary/demo and dedicated
+inverse, preserving each source category/refusal policy; Spot keeps Base's empty
+history. Native mapper/iterator values survive until typed output. The actual
+signed-client tests cover windows, cursors, cap warnings, malformed rows and the
+shared signing virtual clock; do not replace it with the runtime wall clock.
+
 Bulk candle streaming now binds primary/demo and dedicated Inverse Exchange calls
 to their live public socket handlers. The maintained Spot Exchange inherits the
 base bulk no-op, although its socket declares a separate bulk member. Source

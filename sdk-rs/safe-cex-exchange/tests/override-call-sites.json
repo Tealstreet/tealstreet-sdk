@@ -6063,6 +6063,19 @@
     ]
   },
   {
+    "file": "safe-cex-venue-bybit/src/binding/members/history.rs",
+    "function": "fetch_closed_pnl",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_closed_pnl",
+        "callee": "crate :: ledger_history :: fetch_closed_pnl",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-venue-bybit/src/binding/members/inverse.rs",
     "function": "install",
     "edges": [
@@ -6212,6 +6225,13 @@
         "kind": "reference",
         "hook": "fetch_and_set_private_snapshot",
         "callee": "snapshot :: fetch_and_set_private_snapshot",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_closed_pnl",
+        "callee": "members :: history :: fetch_closed_pnl",
         "count": 1
       },
       {
