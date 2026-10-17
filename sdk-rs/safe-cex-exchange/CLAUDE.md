@@ -1190,6 +1190,13 @@ then restores exact source bytes. Algorithms follow
 and [CreateSetIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createsetiterator)
 within the runtime's existing value/property profile.
 
+The five iterator-related accepted owners have separate reviews in
+[ITERATOR_CONTRACT_EVIDENCE.md](ITERATOR_CONTRACT_EVIDENCE.md). Three private
+callable factories retain specific non-decoder classifications; `Collection`'s
+native `Deref` view and the added `Js` protocol APIs have executed output
+observations. Independently authored Node fixtures and per-owner compiled
+controls supplement these bounded native/default receipts.
+
 The JS Store facade exposes `markOrdersTerminal` by delegating to the existing
 native terminal-memory operation. It remembers IDs even when the Store has no
 orders, and preserves committed-state subscriber errors through the existing
