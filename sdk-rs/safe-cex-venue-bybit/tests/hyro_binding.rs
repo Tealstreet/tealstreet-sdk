@@ -1407,3 +1407,78 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     assert_eq!(h.wire.requests.borrow().len(), requests);
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn hyro_option_reads_reject_with_inherited_source_guard() {
+    if configured_child("hyro_option_reads_reject_with_inherited_source_guard") {
+        return;
+    }
+    let mut options = support::options();
+    options.enable_option_markets = Some(true);
+    let h = support::harness_as(ExchangeName::Hyrotrader, options, |_| {});
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/hyro_option_refusal_source.cjs"
+        ))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["calls"], 0);
+    let mut failures = vec![];
+    for dynamic in [false, true] {
+        let v = h.venue();
+        let query = serde_json::from_value(json!({"underlying":"BTC"})).unwrap();
+        let results = [
+            h.drive(if dynamic {
+                v.capabilities().fetch_option_chain(v, query)
+            } else {
+                v.fetch_option_chain(query)
+            })
+            .map(|_| ()),
+            h.drive(if dynamic {
+                v.capabilities().fetch_option_expiries(v, "BTC".into())
+            } else {
+                v.fetch_option_expiries("BTC".into())
+            })
+            .map(|_| ()),
+            h.drive(if dynamic {
+                v.capabilities().fetch_account_greeks(v)
+            } else {
+                v.fetch_account_greeks()
+            })
+            .map(|_| ()),
+        ];
+        for (result, row) in results
+            .into_iter()
+            .zip(expected["rows"].as_array().unwrap())
+        {
+            let error =
+                result.expect_err("Hyro source disables options even when inherited methods exist");
+            if error.name != row["name"].as_str().unwrap()
+                || error.message != row["message"].as_str().unwrap()
+            {
+                failures.push(format!(
+                    "dynamic={dynamic} {}: {}: {}; expected {row}",
+                    row["method"], error.name, error.message
+                ));
+            }
+        }
+    }
+    assert!(
+        h.wire.requests.borrow().is_empty(),
+        "source guard must reject before HTTP"
+    );
+    h.venue().dispose().unwrap();
+    assert!(
+        failures.is_empty(),
+        "Hyro inherited option refusals: {}",
+        failures.join("\n")
+    );
+}

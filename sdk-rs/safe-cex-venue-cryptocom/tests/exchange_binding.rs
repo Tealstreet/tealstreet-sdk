@@ -1354,3 +1354,77 @@ fn releasing_shared_http_gate_resumes_both_native_market_reads() {
         assert_eq!(rows[0].symbol, SYMBOL);
     }
 }
+
+#[test]
+fn order_book_rows_require_iterable_pairs_through_real_socket() {
+    use std::{cell::RefCell, rc::Rc};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/book-pair-oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "actual source book parser: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.as_array().unwrap().len(), 2);
+    for case in cases.as_array().unwrap() {
+        assert_eq!(case["error"]["name"], "TypeError");
+        let h = started(|_| {});
+        let books = Rc::new(RefCell::new(vec![]));
+        let sink = books.clone();
+        let errors = Rc::new(RefCell::new(vec![]));
+        let failures = errors.clone();
+        base(&h).on(
+            "error",
+            Rc::new(move |_, error| {
+                failures.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        let cleanup = h
+            .venue()
+            .listen_order_book(
+                SYMBOL.into(),
+                Rc::new(move |book| {
+                    sink.borrow_mut().push(book);
+                }),
+            )
+            .unwrap();
+        h.runtime.advance(50.0);
+        let mut frame = case["update"].clone();
+        frame["channel"] = json!("book");
+        frame["subscription"] = json!(format!("book.{SYMBOL}.50"));
+        public_frame(&h, frame);
+        assert_eq!(
+            books.borrow().len(),
+            case["callbacks"].as_u64().unwrap() as usize,
+            "Crypto.com {} plain numeric-key row must throw before book callback, matching source",
+            case["side"]
+        );
+        assert!(
+            errors
+                .borrow()
+                .iter()
+                .any(|e| e.to_string().contains("TypeError")),
+            "pair refusal must retain a visible TypeError cause: {:?}",
+            errors.borrow()
+        );
+        public_frame(
+            &h,
+            json!({"channel":"book", "subscription":format!("book.{SYMBOL}.50"),
+            "instrument_name":SYMBOL,"data":[{"bids":[["30000","1"]],"asks":[["30001","2"]],"t":2}]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "valid array pair still reaches listener after refusal"
+        );
+        cleanup().unwrap();
+        h.venue().dispose().unwrap();
+    }
+}

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/apexomni/zklink/signer/transactions/transfer.ts"
-rust_files = [ "safe-cex-venue-apexomni/src/transaction_records.rs", "safe-cex-venue-apexomni/src/transaction_signing.rs" ]
+rust_files = [ "safe-cex-venue-apexomni/src/transaction_records.rs" ]
 
 [[symbol]]
 ts = "SignTransferPayload"
@@ -29,7 +29,7 @@ note = "FORCED sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and #sha
 [[symbol]]
 ts = "signTransfer"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-venue-apexomni/src/transaction_signing.rs::sign_transfer"
-status = "divergent"
-note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Typed source payload records and explicit ZkLinkHost capabilities replace arbitrary JS heap objects and global WASM/wallet state; duplicating those inside the venue would detach wallet lifecycle from its host. The complete source orchestration preserves validation ordering, subsidy defaulting, pack/build/new/sign calls, opaque handle identity, timestamps and authentication selection. Native results are owned prepared data; host ExchangeError values propagate unchanged. Futures require host polling instead of JS eager Promise scheduling. Six actual-source cases per body compare native results, errors and ordered argument values. A compiled builder argument control fails its named native operation assertion and restores. This is not an independent proof of host WASM cryptography. Renamed to `safe-cex-venue-apexomni/src/transaction_signing.rs::sign_transfer`."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Not applicable: test/oracle-only zkLink transaction helper. The SDK package index exports no entry for this helper and repository production TS callers use only signContract/initSdk; registry/FFI/venue Rust callers likewise never reach this function. The uncalled Rust counterpart, unused native SDK host operations and their oracle-only execution cases were deleted under the same rule as HL #665. The TypeScript file remains owned by tealstreet-next. Payload declaration rows retain their separate schema obligations; this row makes no native wallet/provider or transaction-signing claim."
