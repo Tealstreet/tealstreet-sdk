@@ -409,7 +409,9 @@ pub fn native_account_call(
                 done(venue.cancel_symbol_orders(arg(&args, 0)?).await).map(|_| Value::Null)
             }
             "cancelAllOrders" => done(venue.cancel_all_orders().await).map(|_| Value::Null),
-            "mintClientOrderId" => encode(base.mint_client_order_id(&arg(&args, 0)?)),
+            "mintClientOrderId" => {
+                encode(base.mint_client_order_id(&arg::<safe_cex_types::PlaceOrderOpts>(&args, 0)?))
+            }
             "placeOrderWithClientOrderId" => {
                 let order: PlaceOrderOpts = arg(&args, 0)?;
                 done(base.place_order_with_client_order_id(venue, order).await).map(|placed| {

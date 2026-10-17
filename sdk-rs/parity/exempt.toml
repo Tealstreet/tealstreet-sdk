@@ -7396,3 +7396,7 @@ reason = "Internal prepared placement input representation for mapped amendment 
 [[exempt]]
 rs = "safe-cex-venue-asterdex/src/order_execution.rs::PreparedExecutionOrder"
 reason = "Internal prepared placement input representation for mapped amendment paths copying Order.type/side, which can be undefined at runtime. Public PlaceOrderOpts remains strict. This carrier adds no placement algorithm or fallback."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::get_or_insert_with"
+reason = "Shared model presence mutation used by the webworker Order.extra postprocessor: reads absent and undefined as undefined, and creates a present value when the source initializes that property. No additional TypeScript symbol or venue policy."
