@@ -214,3 +214,12 @@ failure sends nothing; a submission rejection still allows later payloads to be
 attempted before the final error is thrown. Real binding regressions verify a
 rejected take profit does not suppress the stop loss, and a later invalid full
 stop prevents an earlier entry from being submitted.
+
+The binding witnesses now cover a replacement listen-key request held across an
+old socket Close event: only one replacement request/socket is created. The shared
+close-listener ownership provides this behavior; no venue fallback
+or replacement reconnect path is needed. Private text frames cover order Store
+writes, terminal fill emission/status, and position writes before REST healing.
+Balance-only account rows remain ignored as in TS; this socket has no balance
+handler and the REST balance stays unchanged. Refused typed market rows emit an
+error containing their cause and retain the stored market snapshot.

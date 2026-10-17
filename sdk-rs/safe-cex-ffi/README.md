@@ -73,3 +73,13 @@ node --test safe-cex-ffi/tests/native-account-methods.test.mjs
 
 Both suites construct real registry accounts and read orders over loopback HTTP.
 The Node suite loads the compiled napi addon and observes its Store callbacks.
+
+`tests/native-account-factory-errors.test.mjs` exercises shared-factory proxy
+auth and server errors through a real Bitrue account. The corresponding Rust
+`native_account_factory_errors` target also checks request outcome counters on
+the native registry path. Both use loopback HTTP.
+
+`tests/native-account-callback-lifetime.test.mjs` checks account close in a child
+Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
+closures hold weak references so disposal releases callbacks even when a venue
+runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.

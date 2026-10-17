@@ -16,6 +16,18 @@ helper with runtime entropy: generate 21 nanoid characters, then strip `-` and
 `_`, as `utils/uuid.ts` does. The runtime's generic `unique_id` contract does not
 specify that format. The trait-level wire test pins length and separator removal.
 
+The unused generic `private_session`, `public_subscriptions` and `ws_lifecycle`
+socket bodies and their fake-host tests/oracles/controls were removed after the
+wave2-vacuous-tests audit. Shared value traits and owned-method completion helpers
+are still production dependencies; their bodies moved unchanged to `method_tasks`.
+The old isolated-body manifest claims now point at production owners and retain an
+explicit coverage finding rather than reporting those removed tests as proof.
+`safe-cex-registry/tests/native_host_mexc_private_frames.rs` covers authenticated
+regular orders, partial/full fills and cancellation, the emitted fill event,
+positions and debounced balance refresh over real native HTTP/WebSocket servers.
+Disconnecting all four production topic routes makes all four named tests fail;
+restoring those routes and removing the duplicate bodies keeps them passing.
+
 Protocol tables are maintained in `src/types.rs` and compared in full to live
 TypeScript by `tests/tables.rs`. The envelope uses a private map-only decoder;
 absent optional fields differ from present null, while unknown data retains null.
@@ -315,3 +327,9 @@ values/keys/entries and raw Map, including insertion/deletion, native numeric bi
 and reference identity. `scripts/iterator-consumer-controls.py` compiles an
 iterator-object rejection, requires both named failures and restores exact bytes.
 Its Cargo subprocesses have deadlines and private temporary logs.
+
+The production private asset handler debounces `fetchBalance` for 1000ms and
+swallows both fetch and Store-update failures, matching the TypeScript callback's
+empty catch. `socket_assembly::registered_private_asset_refresh_swallows_balance_fetch_failure`
+drives a real registered private frame, advances the host monotonic timer, and
+requires one attempted balance read with no host exception report.

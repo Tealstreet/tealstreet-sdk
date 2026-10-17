@@ -137,8 +137,13 @@ pub async fn serve_http(listener: TcpListener, handler: Handler, seen: Rc<RefCel
                 // A handler picks a non-200 status with {"__status": 400, "body": ...}.
                 Some(reply) if reply.get("__status").is_some() => (
                     match reply["__status"].as_u64() {
+                        Some(200) => "200 OK",
                         Some(400) => "400 Bad Request",
                         Some(401) => "401 Unauthorized",
+                        Some(403) => "403 Forbidden",
+                        Some(418) => "418 I'm a teapot",
+                        Some(429) => "429 Too Many Requests",
+                        Some(500) => "500 Internal Server Error",
                         Some(502) => "502 Bad Gateway",
                         other => panic!("unsupported fixture status {other:?}"),
                     },

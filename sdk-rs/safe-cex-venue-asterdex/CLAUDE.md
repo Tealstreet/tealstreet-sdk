@@ -103,3 +103,11 @@ V1 and V3. Missing notional remains NaN; raw info retains the original keys and
 values through the shared numeric and owned-snapshot boundaries.
 `tests/exchange_trait.rs::sparse_position_risk_rows_use_source_coercion_in_v1_and_v3`
 exercises the constructed binding, signed clients and placeholder leverage.
+
+The private socket inherits the shared primary-private reopen resync policy,
+matching its TypeScript class. Do not opt out merely because the native host has
+`enable_reconnecting = false`: the shared open listener still refreshes private
+state on native reconnects. `exchange_trait::private_reopen_refreshes_orders_missed_during_disconnect`
+closes/redials the real production socket and requires a new signed order read and
+replacement Store snapshot. It fails without the inherited policy. The same target
+covers private order/fill/position/balance frames through production handlers.
