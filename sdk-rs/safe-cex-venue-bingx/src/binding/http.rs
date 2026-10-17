@@ -447,6 +447,6 @@ impl ApiHost for Host {
             .map_err(error)
     }
     fn now_ms(&self) -> f64 {
-        self.scope.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
 }

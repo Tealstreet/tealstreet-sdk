@@ -4,7 +4,7 @@ use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
 };
-use safe_cex_types::{FetchedLeverage, Order, PlaceOrderOpts};
+use safe_cex_types::{FetchedLeverage, Order, PreparedOrderOpts as PlaceOrderOpts};
 use safe_cex_venue_blofin::{
     modes::AccountModes,
     order_formatters::OrderPayload,
@@ -91,12 +91,12 @@ fn native_opts(opts: &PlaceOrderOpts, raw: &Value) {
     // Enum equality is performed against an independently decoded source literal.
     assert_eq!(
         opts.r#type,
-        js_from_value(raw["type"].clone()).unwrap(),
+        js_from_value::<safe_cex_types::OrderType>(raw["type"].clone()).unwrap(),
         "native opts type"
     );
     assert_eq!(
         opts.side,
-        js_from_value(raw["side"].clone()).unwrap(),
+        js_from_value::<safe_cex_types::OrderSide>(raw["side"].clone()).unwrap(),
         "native opts side"
     );
     assert_eq!(

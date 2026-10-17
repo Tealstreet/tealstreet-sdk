@@ -315,6 +315,12 @@ r/s/v values across both networks, order kinds, Number integer boundaries and
 builder-address casing. It requires Node, TypeScript and vendored SDK dependencies;
 missing dependencies fail the oracle rather than silently skipping signing checks.
 
+The accepted signing-metadata row includes 66/67-character hash boundaries.
+`exchange_binding` sends both through actual market loading and placement, comparing
+with the maintained TS method: 66 characters signs/submits, 67 refuses before
+builder lookup. `hash-length-binding-control.py` removes the production bound,
+requires a compiled placement diagnostic failure and restores/reruns the witness.
+
 The accepted builder fee contract includes negative-half and signed-zero bits.
 The production placement witness feeds negative authorization caps through the
 real client/builder check and verifies its refusal message before any order write.

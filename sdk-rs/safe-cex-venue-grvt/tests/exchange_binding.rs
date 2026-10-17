@@ -101,6 +101,89 @@ fn order_opts(id: &str) -> PlaceOrderOpts {
     serde_json::from_value(json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":0.125,"price":50000,"timeInForce":"GoodTillCancel","clientOrderId":id})).unwrap()
 }
 #[test]
+fn placement_enforces_instrument_hash_length_before_builder_lookup_and_signing() {
+    let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+    });
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/signing_metadata.cjs"
+        ))
+        .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(source["rows"].as_array().unwrap().len(), 3204);
+    for digits in [65, 64] {
+        let hash = format!("0x{}", "f".repeat(digits));
+        let source_rows: Vec<_> = source["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| {
+                let market: Value = serde_json::from_str(row["raw"].as_str().unwrap()).unwrap();
+                market["info"]["ih"] == hash
+                    && market["info"]["bd"].as_f64() == Some(3.0)
+                    && market["info"]["qd"].as_f64() == Some(3.0)
+            })
+            .collect();
+        assert_eq!(source_rows.len(), 1, "source boundary census");
+        let source = source_rows[0];
+        let h = setup();
+        let mut market = instrument();
+        market["ih"] = json!(hash);
+        market["qd"] = json!(3);
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/lite/v1/all_instruments");
+        h.http.route(
+            "POST",
+            "/lite/v1/all_instruments",
+            200.0,
+            json!({"r":[market]}),
+        );
+        loaded(&h);
+        let result = h.drive(Box::pin(
+            h.venue().base().place_order(h.venue(), order_opts("71")),
+        ));
+        if digits == 65 {
+            let expected = "Market BTC_USDT_Perp does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order";
+            assert_eq!(source["error"]["name"], "Error");
+            assert_eq!(
+                source["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .replace("BTC mixed 😀", "BTC_USDT_Perp"),
+                expected
+            );
+            assert_eq!(
+                result.unwrap_err().message,
+                expected,
+                "placement hash-length boundary"
+            );
+            assert!(
+                h.http.calls("/full/v1/get_authorized_builders").is_empty(),
+                "refuse before builder authorization"
+            );
+            assert!(
+                h.http.calls("/lite/v1/create_order").is_empty(),
+                "refuse before order submission"
+            );
+        } else {
+            assert_eq!(source["hash"], hash);
+            assert_eq!(result.unwrap(), vec!["71"]);
+            assert_eq!(h.http.calls("/lite/v1/create_order").len(), 1);
+        }
+    }
+}
+#[test]
 fn fetch_markets_uses_public_gateway_and_keeps_signing_metadata() {
     let h = setup();
     let markets = h.drive(h.venue().fetch_markets()).unwrap();

@@ -30,7 +30,7 @@ fn native(p: Position) -> Value {
         extra.unrealized_pnl_native.is_none(),
         "positions_extra_absent"
     );
-    json!({"id":p.id,"symbol":p.symbol,"side":match p.side{PositionSide::Long=>"long",PositionSide::Short=>"short"},"entryPrice":bits(p.entry_price),"notional":bits(p.notional),"leverage":bits(p.leverage),"unrealizedPnl":bits(p.unrealized_pnl),"contracts":bits(p.contracts),"liquidationPrice":bits(p.liquidation_price),"marginType":match p.margin_type.unwrap(){MarginType::Isolated=>"isolated",MarginType::Cross=>"cross"},"positionMode":match p.position_mode.unwrap(){PositionMode::OneWay=>"oneway",PositionMode::Hedged=>"hedged"},"extra":{"contractsNative":bits(extra.contracts_native.unwrap())},"info":info(p.info.expect("positions_info"))})
+    json!({"id":p.id,"symbol":p.symbol,"side":match p.side.value().expect("present source enum in fixture"){PositionSide::Long=>"long",PositionSide::Short=>"short"},"entryPrice":bits(p.entry_price),"notional":bits(p.notional),"leverage":bits(p.leverage),"unrealizedPnl":bits(p.unrealized_pnl),"contracts":bits(p.contracts),"liquidationPrice":bits(p.liquidation_price),"marginType":match p.margin_type.unwrap(){MarginType::Isolated=>"isolated",MarginType::Cross=>"cross"},"positionMode":match p.position_mode.unwrap(){PositionMode::OneWay=>"oneway",PositionMode::Hedged=>"hedged"},"extra":{"contractsNative":bits(extra.contracts_native.unwrap())},"info":info(p.info.expect("positions_info"))})
 }
 #[test]
 fn live_positions_corpus() {
