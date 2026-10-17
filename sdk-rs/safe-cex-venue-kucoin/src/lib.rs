@@ -16,8 +16,6 @@ pub mod ws_helpers;
 
 pub mod spot_helpers;
 
-pub mod accounts;
-
 pub mod api;
 
 pub mod spot_topics;
@@ -47,8 +45,6 @@ pub mod spot_bodies;
 pub mod order_lifecycle;
 
 pub mod class_construction;
-
-mod response_default;
 
 pub mod spot_private_class;
 
