@@ -127,7 +127,7 @@ impl Exchange for ApexOmniExchange {
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
         Box::pin(async move {
             Ok(ValidateAccountResult {
-                error: self.inner.validate_account().await?.into(),
+                error: self.inner.validate_account().await?,
                 balance: None,
             })
         })
