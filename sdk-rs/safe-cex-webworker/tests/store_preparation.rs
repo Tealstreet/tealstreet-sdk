@@ -1,7 +1,7 @@
 #[path = "support/model_identity.rs"]
 mod model_identity;
+use safe_cex_exchange::store_payload::*;
 use safe_cex_types::StoreData;
-use safe_cex_webworker::store_payload::*;
 use serde_json::{Value, json};
 fn normalized(v: Value) -> Value {
     match v {
