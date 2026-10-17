@@ -700,3 +700,118 @@ fn private_account_frame_updates_balance_and_emits_no_fill() {
     drop(balance);
     h.venue().dispose().unwrap();
 }
+
+fn record_errors(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, data| {
+            sink.borrow_mut().push(data.to_string());
+            Ok(())
+        }),
+    );
+    errors
+}
+
+// ts: okx.api.ts formatOkxApiErrorMessage through the createAPI response interceptor,
+// observed by setLeverage's `err?.response?.data?.msg || err?.message`.
+fn rejected_set_leverage(body: Value) -> (String, Vec<String>) {
+    let h = harness(ExchangeName::Okx, options(), |http| {
+        http.route("POST", SET_LEVERAGE, 200.0, body.clone());
+        okx(http);
+    });
+    loaded(&h);
+    let positions = h.drive(h.venue().fetch_positions(None)).expect("positions");
+    Store::add_or_update_positions(&*h.store, positions).expect("store positions");
+    let errors = record_errors(&h);
+    let error = h
+        .drive(h.venue().set_leverage("BTCUSDT".into(), 5.0, None))
+        .expect_err("setLeverage rejects");
+    let emitted = errors.borrow().clone();
+    (error.message, emitted)
+}
+
+#[test]
+fn okx_api_error_without_msg_names_the_full_code() {
+    let (message, emitted) = rejected_set_leverage(json!({"code": "50011", "msg": "", "data": []}));
+    assert_eq!(message, "OKX API error (code 50011)");
+    assert!(
+        emitted
+            .iter()
+            .any(|e| e.contains("OKX API error (code 50011)")),
+        "{emitted:?}"
+    );
+}
+
+#[test]
+fn okx_api_error_row_message_carries_its_code() {
+    let (message, _) = rejected_set_leverage(json!({
+        "code": "1", "msg": "",
+        "data": [{"sCode": "0", "sMsg": ""}, {"sCode": "51008", "sMsg": " Insufficient margin "}]
+    }));
+    assert_eq!(message, "Insufficient margin (code 51008)");
+}
+
+// setLeverage reads the attached response's raw msg before the trimmed error message.
+#[test]
+fn okx_api_error_top_level_msg_reaches_the_caller_through_response() {
+    let (message, _) = rejected_set_leverage(
+        json!({"code": "51603", "msg": " Order does not exist ", "data": []}),
+    );
+    assert_eq!(message, " Order does not exist ");
+}
+
+#[test]
+fn okx_place_rejection_reads_the_attached_response() {
+    let h = harness(ExchangeName::Okx, options(), |http| {
+        http.route(
+            "POST",
+            PLACE,
+            200.0,
+            json!({"code": "1", "msg": "All operations failed",
+                   "data": [{"sCode": "51008", "sMsg": "Insufficient margin"}]}),
+        );
+        okx(http);
+    });
+    loaded(&h);
+    let errors = record_errors(&h);
+    let error = h
+        .drive(Box::pin(
+            h.venue().base().place_order(h.venue(), limit_order(10.0)),
+        ))
+        .expect_err("placeOrder rejects");
+    assert_eq!(error.message, "Insufficient margin (code 51008)");
+    assert!(
+        errors
+            .borrow()
+            .iter()
+            .any(|e| e.contains("Insufficient margin (code 51008)")),
+        "{:?}",
+        errors.borrow()
+    );
+}
+
+// ts: okx.exchange.ts fetchIncomeHistory `rowsSeen += rows.length`.
+#[test]
+fn fetch_income_history_maps_a_nonempty_bills_page() {
+    let h = harness(ExchangeName::Okx, options(), |http| {
+        okx(http);
+        http.ok(
+            "GET",
+            "/api/v5/account/bills",
+            json!([{"billId": "1", "ts": "1700000000000", "balChg": "-0.1", "fee": "-0.1",
+                    "pnl": "0", "type": "2", "instId": "BTC-USDT-SWAP", "ccy": "USDT"}]),
+        );
+    });
+    loaded(&h);
+    let errors = record_errors(&h);
+    let records = h
+        .drive(h.venue().fetch_income_history(None))
+        .expect("fetchIncomeHistory");
+    assert!(errors.borrow().is_empty(), "{:?}", errors.borrow());
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].income_type, "COMMISSION");
+    assert_eq!(records[0].income, -0.1);
+    assert_eq!(records[0].symbol, "BTCUSDT");
+}
