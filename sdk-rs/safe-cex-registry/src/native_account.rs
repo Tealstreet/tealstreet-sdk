@@ -14,6 +14,7 @@ use safe_cex_store::Store;
 use safe_cex_transport::{
     RestAdapter, TransportError, TransportFuture,
     native::reqwest_adapter,
+    query_signing::{HttpSigningRequest, HttpSigningResponse},
     signing::{RemoteSignerRequest, RemoteSignerResponse},
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts};
@@ -68,6 +69,22 @@ impl safe_cex_transport::signing::RemoteSigner for HostSigner {
                 .await
                 .map_err(|error| TransportError::Host(error_text(&error)))?;
             request.decode_response(&response.to_string())
+        })
+    }
+    // ts: createRemoteSigningAdapter signs every config, query params included.
+    fn sign_query(&self, request: HttpSigningRequest) -> TransportFuture<'_, HttpSigningResponse> {
+        let sign = self.sign.clone();
+        Box::pin(async move {
+            let mut wire = serde_json::Map::from_iter([("type".into(), json!("http"))]);
+            match serde_json::to_value(&request).map_err(|e| TransportError::Host(e.to_string()))? {
+                Value::Object(fields) => wire.extend(fields),
+                other => return Err(TransportError::Host(format!("signing request: {other}"))),
+            }
+            let response = sign(Value::Object(wire))
+                .await
+                .map_err(|error| TransportError::Host(error_text(&error)))?;
+            serde_json::from_str(&response.to_string())
+                .map_err(|error| TransportError::Host(error.to_string()))
         })
     }
 }
