@@ -1695,9 +1695,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "83988742cbde1334fcca1a524e2e69ede703c26e72518faf8e37eb077f0751fc",
+      "producer_sha256": "7d35559af9ea020da369e9d24efdeee7233ee26cf8bfd972f706177930b75fb9",
       "classification": "no-owned-latch",
-      "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement. Reviewed callable adapter dispatch: awaits the selected source adapter Promise instead of host send, after the same throttle. No new reservation, RefCell borrow or independent retry/task registry is introduced. Reviewed configured response transforms: synchronous transforms run after the adapter await and before status handling, adding no future, reservation or borrow across an await."
+      "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement. Reviewed callable adapter dispatch: awaits the selected source adapter Promise instead of host send, after the same throttle. No new reservation, RefCell borrow or independent retry/task registry is introduced. Reviewed configured response transforms: synchronous transforms run after the adapter await and before status handling, adding no future, reservation or borrow across an await. Reviewed callable-adapter settlement: the local boolean and conditional status check add no awaits, shared state or cancellation ownership; HOW fulfillment and default-host rejection retain the same child futures."
     },
     {
       "owner": "src/js_runtime/client.rs::send_once",
