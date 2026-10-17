@@ -281,3 +281,8 @@ lifetime/type argument, or the behavior of a module/browser/transport host.
 
 
 
+
+MEXC native construction uses the shared secondary-key option derivation. Its
+source xhr.get reads use the secondary credentials/proxy; writes remain primary.
+Both clients retain their signing, retry and receipt behavior. The actual account
+HTTP/HMAC witness is tests/native_account_mexc_secondary.rs.
