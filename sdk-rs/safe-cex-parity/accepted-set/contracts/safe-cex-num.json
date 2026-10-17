@@ -11014,7 +11014,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ fn fields(v:&crate::numeric_ingress::JsNumberInput)->serde_json::Value { match &v.0 { crate::numeric_ingress::Node::Null=>serde_json::json!({\"kind\":\"null\"}),crate::numeric_ingress::Node::Bool(b)=>serde_json::json!({\"kind\":\"bool\",\"value\":b}),crate::numeric_ingress::Node::Text(s)=>serde_json::json!({\"kind\":\"text\",\"value\":s}),crate::numeric_ingress::Node::Lexeme(s)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":s}),crate::numeric_ingress::Node::Float(n)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",n.to_bits())}),crate::numeric_ingress::Node::Array(a)=>serde_json::json!({\"kind\":\"array\",\"values\":a.iter().map(fields).collect::<Vec<_>>()}),crate::numeric_ingress::Node::Object(o)=>serde_json::json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|serde_json::json!([k,fields(v)])).collect::<Vec<_>>()}) } } let raw=$value.as_str().expect(\"raw JSON fixture\");let input:$type=serde_json::from_str(raw).expect(\"valid raw JSON fixture\");let actual=fields(&input);let data=actual.get(\"values\").or_else(||actual.get(\"entries\")).or_else(||actual.get(\"value\")).or_else(||actual.get(\"bits\")).cloned().unwrap_or(serde_json::Value::Null);serde_json::json!({\"ok\":true,\"kind\":actual[\"kind\"],\"data\":data}) }",
+      "call": "{ fn fields(v:&crate::numeric_ingress::JsNumberInput)->serde_json::Value { match &v.0 { crate::numeric_ingress::Node::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),crate::numeric_ingress::Node::Null=>serde_json::json!({\"kind\":\"null\"}),crate::numeric_ingress::Node::Bool(b)=>serde_json::json!({\"kind\":\"bool\",\"value\":b}),crate::numeric_ingress::Node::Text(s)=>serde_json::json!({\"kind\":\"text\",\"value\":s}),crate::numeric_ingress::Node::Lexeme(s)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":s}),crate::numeric_ingress::Node::Float(n)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",n.to_bits())}),crate::numeric_ingress::Node::Array(a)=>serde_json::json!({\"kind\":\"array\",\"values\":a.iter().map(fields).collect::<Vec<_>>()}),crate::numeric_ingress::Node::Object(o)=>serde_json::json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|serde_json::json!([k,fields(v)])).collect::<Vec<_>>()}) } } let input:$type=match $value.get(\"native\").and_then(serde_json::Value::as_str) { Some(\"undefined\")=>$type::from_retained(crate::numeric_ingress::js_capture_output(&safe_cex_types::ModelField::<f64>::Undefined).expect(\"native undefined capture\")).expect(\"native undefined ingress\"),Some(\"undefined-array\")=>$type::from_retained(crate::numeric_ingress::js_capture_output(&[safe_cex_types::ModelField::<f64>::Undefined,safe_cex_types::ModelField::Value(1.25)]).expect(\"native array capture\")).expect(\"native array ingress\"),None=>{let raw=$value.as_str().expect(\"raw JSON fixture\");serde_json::from_str(raw).expect(\"valid raw JSON fixture\")},Some(other)=>panic!(\"unknown native fixture {other}\") };let actual=fields(&input);let data=actual.get(\"values\").or_else(||actual.get(\"entries\")).or_else(||actual.get(\"value\")).or_else(||actual.get(\"bits\")).cloned().unwrap_or(serde_json::Value::Null);serde_json::json!({\"ok\":true,\"kind\":actual[\"kind\"],\"data\":data}) }",
       "cases": [
         {
           "input": "null",
@@ -11085,6 +11085,34 @@
                   "value": "2"
                 }
               ]
+            ]
+          }
+        },
+        {
+          "input": {
+            "native": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "kind": "undefined",
+            "data": null
+          }
+        },
+        {
+          "input": {
+            "native": "undefined-array"
+          },
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "data": [
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "float",
+                "bits": "3ff4000000000000"
+              }
             ]
           }
         }

@@ -82,3 +82,11 @@ generic implementation or a feature/wasm coverage claim. The maintained
 [numeric ingress contract](../parity/MANIFEST-SPEC.md#numeric-ingress-defect)
 and [representation boundaries](../parity/MANIFEST-SPEC.md#divergence-taxonomy)
 remain unchanged.
+
+JsNumberInput's native observation covers the internal Undefined variant as well
+as every pre-existing raw JSON case. Two additional fixtures capture ModelField
+Undefined directly and inside an array through the real js_capture_output API,
+then enter through the production from_retained conversion. The observed kind
+keeps Undefined distinct from Null; the second array member independently pins
+native 1.25 bits. This repairs stale generated observation code after the
+presence cutover, without changing production decoder admission or APIs.
