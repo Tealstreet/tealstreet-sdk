@@ -488,3 +488,57 @@ unchanged. Independent review strengthened event-name and surviving-fee fixtures
 before publication. Complete-package/local-owner and feature/WASM matrices, full
 telemetry/console, concrete socket integration and source-object boundaries retain
 their independent obligations.
+
+## Blofin configured reads, services and projections
+
+Twenty specific native owners use 78 independently authored finite cases. The
+127 existing Blofin classifications are preserved. No production source, source
+corpus, manifest or shared policy changes are part of this batch.
+
+The two account-mode readers distinguish Store-before-cache precedence, explicit
+refetch, strict string-zero responses and the different zero-contract position
+rules. Leverage reads observe both native sides, mode/margin cells, the committed
+Store record and preservation of an unrelated symbol. Symbol cancellation checks
+the complete selected native snapshots and numeric bits before the single awaited
+delegation. Cancellation requests forward two distinct payload items and complete
+native responses; application responses remain outside the transport-only catch.
+
+Ticker and market projections inspect every native field, optional presence and
+number bit, plus recursively retained values. Two distinct successful outputs and
+two distinct cached fallback outputs prevent partial-loss false greens. The real
+shared Store strips truthy ticker info but retains false, matching the maintained
+TypeScript Store. Market filtering, lot-size fallback, contract/base-size axes and
+source error traces stay explicit.
+
+Position projection and its configured readers use the real Store, modes and
+PositionReadHost. Price step 0.25 and amount step 0.01 are distinguished independently
+at both notional and unrealized-PnL sites: 4 contracts at mark 5.123 produce 20.5,
+and PnL 0.37 produces 0.25. Complete native position fields include raw contracts,
+retained info, leverage/liquidation fallback and every optional. The orchestration
+profiles exclude a live BTC row when only ETH is requested, retain the first of
+two same-ID records with unequal leverage/PnL, select cached positions after auth
+failure and construct both metadata-derived zero-position sides. Metadata mode
+filtering, disposal, warning and detailed original-error paths execute separately.
+
+Raw fills, active-order pagination and closed-position rows retain complete
+ordered multi-element outputs, exact query spreads and cursor/error behavior.
+Closed rows use historyId rather than their shared positionId. Executions inspect
+all native fields and aliases, native commission/position-side presence, timestamp
+units and explicit contract scaling, including a sizing argument unequal to the
+market field. Income range reads retain all source PnL,
+commission and rebate types even when incomeType is supplied: the maintained source
+does not apply that filter. Complete records retain stable time ordering, first
+trade-ID deduplication and client-side bounds. PositionRecord mapping separately
+checks optional explicit scale, fee sign, history identity, settlement fallback,
+callback order and unattributed funding; it assigns no journal grade.
+
+All twenty selected native owners pass. Sixty-one independent compiling mutations of copied
+production source fail their intended native output assertions, then all
+78 restored cases pass. Native receipts, independent review and these
+mutation controls are scoped to these selected default/native owners. Collection
+controls consume complete inputs before returning empty or partial outputs.
+Fallback-specific partial-loss, both precision swaps, symbol filtering,
+first-record retention and outgoing cancellation-batch truncation have their own
+controls. Restored complete native cases pass with real source bytes unchanged.
+Complete-package/local-owner, feature/WASM, long-page bounds, arbitrary callbacks,
+source-object aliases and encoded-ingress obligations remain separate.
