@@ -135,3 +135,56 @@ fn private_balance_follows_source_position_sync_and_ignores_wallet_frames() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn spot_unknown_stop_types_survive_rest_and_private_store_projection() {
+    for stop_type in ["tpslOrder", "OcoOrder", "BidirectionalTpslOrder"] {
+        let (h, fills, symbol) = setup(ExchangeName::Bybitspot);
+        let known = order(&symbol);
+        let mut unknown = order(&symbol);
+        unknown["orderId"] = json!("unknown-stop");
+        unknown["stopOrderType"] = json!(stop_type);
+        unknown["triggerPrice"] = json!("90");
+        h.wire.ok(
+            "GET",
+            "/v5/order/realtime",
+            json!({
+                "list":[known.clone(),unknown.clone()],"nextPageCursor":""
+            }),
+        );
+        let fetched = h.drive(h.venue().fetch_orders(None)).unwrap();
+        assert_eq!(fetched.len(), 2);
+        assert_eq!(fetched[0].r#type, safe_cex_types::OrderType::Limit);
+        assert_eq!(fetched[1].id, "unknown-stop");
+        assert!(matches!(
+            fetched[1].r#type,
+            safe_cex_types::ModelField::Undefined
+        ));
+        assert_eq!(fetched[1].price, 90.);
+        assert!(
+            serde_json::to_value(&fetched[1])
+                .unwrap()
+                .get("type")
+                .is_none()
+        );
+        push(&h, "order", json!([known, unknown]));
+        let orders = h.store.orders();
+        assert_eq!(orders.len(), 2);
+        let retained = orders.iter().find(|o| o.id == "unknown-stop").unwrap();
+        assert!(matches!(
+            retained.r#type,
+            safe_cex_types::ModelField::Undefined
+        ));
+        assert_eq!(retained.price, 90.);
+        assert!(
+            serde_json::to_value(retained)
+                .unwrap()
+                .get("type")
+                .is_none()
+        );
+        assert!(fills.borrow().is_empty());
+        assert!(h.runtime.reports.borrow().is_empty());
+        drop(orders);
+        h.venue().dispose().unwrap();
+    }
+}

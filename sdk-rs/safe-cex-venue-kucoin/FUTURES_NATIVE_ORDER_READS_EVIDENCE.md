@@ -128,3 +128,12 @@ binding witness at duplicated algo IDs. Exact restoration passes. The new
 witness also checks ordered endpoints/params, native contract-size scaling and
 failed-normal/empty-algo Store category preservation. This deletion changes no
 production algorithm or shared representation policy.
+
+## Typed helper retirement (2026-10-18)
+
+The snapshot supplement now observes the canonical decoded Order directly. The
+unused typed sizing reconcile copy is deleted; its empty-Store call was an
+identity. Every decoded field, row floor, info-marker ownership and numeric-bit
+assertion remains. Native/source reconciliation and its alias observations are
+unchanged. The typed-route paragraph above records the earlier instrument and
+must not be read as a surviving production venue helper.
