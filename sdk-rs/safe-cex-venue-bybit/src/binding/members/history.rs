@@ -1,6 +1,5 @@
 //! History receiver adapters retain native values until the public model projection.
 use crate::binding::{
-    host::text,
     rt::{Rt, venue},
     value::{Js, Thrown, arg},
 };
@@ -30,19 +29,8 @@ pub(crate) fn query_windows(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     ))
 }
 
-pub(crate) fn refuse_option_symbol(_: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
-    let symbol = arg(&args, 0);
-    if symbol.truthy() && crate::options::is_bybit_option_symbol(&text(&symbol)?) {
-        return Err(Thrown::error(
-            "Error",
-            &format!(
-                "Bybit has no {} for options ({})",
-                text(&arg(&args, 1))?,
-                text(&symbol)?
-            ),
-        ));
-    }
-    Ok(Js::Undefined)
+pub(crate) fn refuse_option_symbol(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
+    crate::ledger_history::refuse_option_symbol(rt, &arg(&args, 0), &arg(&args, 1))
 }
 
 pub(crate) fn fetch_closed_pnl(rt: &Rt, opts: Js) -> Result<Js, Thrown> {

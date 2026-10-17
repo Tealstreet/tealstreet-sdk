@@ -289,6 +289,9 @@ impl SnapshotHost for Rt {
                     arg(&args, 2).truthy(),
                 )
             })),
+            "isBybitOptionSymbol" => Ok(Js::Bool(crate::options::is_bybit_option_symbol(&text(
+                &arg(&args, 0),
+            )?))),
             "isBybitInverseSymbol" => Ok(Js::Bool(crate::inverse_symbol::is_bybit_inverse_symbol(
                 &text(&arg(&args, 0))?,
             ))),

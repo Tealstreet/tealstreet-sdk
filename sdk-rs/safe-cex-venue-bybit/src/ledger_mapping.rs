@@ -26,14 +26,7 @@ pub fn to_optional_number(value: Option<&Value>) -> Result<Option<f64>, &'static
     let parsed = parse_float(raw);
     Ok((parsed.is_finite() && parsed != 0.).then_some(parsed))
 }
-pub fn to_timestamp(value: Option<&Value>) -> Result<f64, &'static str> {
-    let parsed = parse_int(&text(value)?, Some(10));
-    Ok(if parsed.is_finite() && parsed > 0. {
-        parsed
-    } else {
-        0.
-    })
-}
+
 fn inherited(key: &str) -> bool {
     matches!(
         key,

@@ -66,7 +66,18 @@ fn ledger_native_source_parity() {
         let e = &c["result"];
         match c["name"].as_str().unwrap() {
             "toNumber" => {
-                if let Some(v) = outcome(to_number(value.as_ref()), e) {
+                if c["family"] == "closed" {
+                    let native = value
+                        .as_ref()
+                        .map(safe_cex_exchange::js_runtime::value::from_json)
+                        .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined);
+                    if let Some(v) = outcome(
+                        closed_number(&native).map_err(|e| e.to_exchange_error().message),
+                        e,
+                    ) {
+                        number(v, &e["ok"], "toNumber");
+                    }
+                } else if let Some(v) = outcome(to_number(value.as_ref()), e) {
                     number(v, &e["ok"], "toNumber");
                 }
             }
@@ -76,7 +87,14 @@ fn ledger_native_source_parity() {
                 }
             }
             "toTimestamp" => {
-                if let Some(v) = outcome(to_timestamp(value.as_ref()), e) {
+                let native = value
+                    .as_ref()
+                    .map(safe_cex_exchange::js_runtime::value::from_json)
+                    .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined);
+                if let Some(v) = outcome(
+                    closed_timestamp(&native).map_err(|e| e.to_exchange_error().message),
+                    e,
+                ) {
                     number(v, &e["ok"], "toTimestamp");
                 }
             }
