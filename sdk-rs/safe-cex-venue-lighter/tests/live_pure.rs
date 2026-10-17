@@ -665,6 +665,15 @@ fn lighter_pure_helpers_match_live_typescript() {
     );
     for case in oracle["stringBoundaries"].as_array().unwrap() {
         let units: Vec<u16> = serde_json::from_value(case["inputUnits"].clone()).unwrap();
+        if case["symbol"] == "normalizeNonNegativeNumber" {
+            let value = safe_cex_exchange::js_runtime::value::Js::utf16(&units);
+            assert_eq!(
+                serde_json::json!({"okJson":safe_cex_num::js_number_string(normalize_non_negative_number(&value).unwrap())}),
+                serde_json::json!({"okJson":case["okJson"]}),
+                "native UTF16 normalization {case}",
+            );
+            continue;
+        }
         let input = serde_json::from_str::<String>(case["inputJson"].as_str().unwrap());
         if String::from_utf16(&units).is_err() {
             assert!(
@@ -710,9 +719,6 @@ fn lighter_pure_helpers_match_live_typescript() {
             }
             "isLighterL1Address" => {
                 serde_json::json!({"okJson":is_lighter_l1_address(Some(&Value::String(input))).unwrap().to_string()})
-            }
-            "normalizeNonNegativeNumber" => {
-                serde_json::json!({"okJson":safe_cex_num::js_number_string(normalize_non_negative_number(Some(&Value::String(input))).unwrap())})
             }
             other => panic!("unrecognized boundary {other}"),
         };

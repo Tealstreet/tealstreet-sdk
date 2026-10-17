@@ -297,3 +297,10 @@ hook regressions fail the original defaults. Run
 `scripts/stream-binding-controls.py` exclusively for compiled dispatch, cleanup,
 empty/subset collection and TimeClip faults with exact restored passes. The
 runner checks disk space and restricts any required clean to this worktree target.
+
+
+Authentication is installed in the native client's request interceptor before
+constructor rate limiting. It reads the current session after dequeue and on
+every network retry; the one-shot 401 recovery remains in DxApi. The three
+`auth_pipeline_` production binding regressions fail on the previous early-auth
+placement and pass with the native pipeline hook.

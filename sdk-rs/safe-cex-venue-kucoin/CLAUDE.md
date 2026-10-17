@@ -135,14 +135,6 @@ and transport cancellation tests drop twice, including after a retry; no venue
 latch, task registry or timer is introduced. Default retry delay is zero, so
 there is no venue retry-sleep future to own.
 
-`accounts::validate_spot_account` preserves the account probe followed by a
-balance fetch whose failure is swallowed. Its explicit async balance dependency
-does not implement the pending Spot balance mapper. No Store write or task is
-introduced; dropping either await releases the dependency future. Non-string
-error values remain a shared typed-output FINDING, distinct from chosen UTF-8,
-owned-balance alias and optional-property-presence boundaries. Raw failure-body
-representation refusals are emitted explicitly rather than becoming a fallback.
-
 The validation oracle uses actual Axios default response transformation: empty
 and non-JSON bodies remain strings in source and cause a non-emitting fallback.
 Current shared byte responses instead produce a logged decode diagnostic;
@@ -275,10 +267,17 @@ algorithms. Its four-group proof counts clocks independently; the earlier
 constant-clock oracle survivor and its repair are recorded in
 `FUTURES_PUBLIC_CLASS_EVIDENCE.md`.
 
-`spot_native_accounts` adds value-preserving Spot account/validation bodies for
-exchange assembly. The existing typed adapters stay maintained and their two
-manifest rows remain divergent. These native components are not yet installed
-by the owning exchange class; see `SPOT_NATIVE_ACCOUNT_EVIDENCE.md`.
+Production account/validation operations use `futures_native_accounts` and
+`spot_native_accounts` through their constructed classes. The unused typed
+`accounts` module and its private `response_default` parser are removed, with
+exclusive account/validation/notification tests and oracles. Shared transport
+parsing stays canonical and untouched. Existing native/source account cases
+remain, and the paired package/CI guard now includes `exchange_trait` in the venue oracle command for real
+constructed HTTP/account field observations. A compiled native user-ID mutation
+leaves all eight retired copy tests green and fails that actual binding test;
+exact restoration passes. Historical typed-account parser/refusal measurements
+in evidence files are not production coverage. Shared typed account projections
+retain their separate declared limitations.
 
 `spot_native_policy` adds native value bodies for Spot pricing, position
 projection and leverage/mode policy. Existing typed helpers remain mapped;

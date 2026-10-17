@@ -426,3 +426,7 @@ message coercion failures. Unread surrogate fields and cycles stay untouched.
 Signer class flag inputs use JavaScript truthiness for preimage bits and preserve
 original JS values in returned order metadata. Group validation shares one body
 with typed callers and receives strict raw-side equality from the JS binding.
+
+Cancellation and market-precision/minimum helper globals consume native JS fields,
+without whole Order/Market decoding. Keep market lookup and precision fallback
+lazy; unused properties and metadata must not be inspected or serialized.

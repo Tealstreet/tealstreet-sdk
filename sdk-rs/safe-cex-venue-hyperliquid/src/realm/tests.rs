@@ -775,3 +775,109 @@ fn market_host_iterator_rejects_primitive_iterator_before_first_step() {
         "actual market host must reject a primitive iterator before reading next"
     );
 }
+
+#[test]
+fn production_order_wire_import_keeps_native_nonfinite_fields() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/native-order-wire.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(), 6);
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("orderRequestToOrderWire").unwrap();
+    for (index, number) in [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -0.0,
+        60000.125,
+        1e30,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let trigger = r.object_from(vec![
+            ("isMarket", Value::Bool(true)),
+            ("triggerPx", Value::Number(number)),
+            ("tpsl", Value::str("sl")),
+        ]);
+        let order_type = r.object_from(vec![("trigger", trigger)]);
+        let order = r.object_from(vec![
+            ("is_buy", Value::Bool(true)),
+            ("limit_px", Value::Number(number)),
+            ("sz", Value::Number(number)),
+            ("reduce_only", Value::Bool(false)),
+            ("order_type", order_type),
+        ]);
+        let wire = r
+            .call(&imported, &Value::Undefined, &[order, Value::Number(7.)])
+            .unwrap_or_else(|error| {
+                panic!("native wire case {index}: {}", message(&mut r, &error))
+            });
+        assert_eq!(r.get_str(&wire, "a").unwrap().as_number(), Some(7.));
+        assert!(
+            r.get_str(&wire, "b")
+                .unwrap()
+                .strict_equal(&Value::Bool(true))
+        );
+        assert!(
+            r.get_str(&wire, "r")
+                .unwrap()
+                .strict_equal(&Value::Bool(false))
+        );
+        let expected = ["NaN", "Infinity", "-Infinity", "0", "60000.125", "1e+3"][index];
+        for field in ["p", "s"] {
+            let value = r.get_str(&wire, field).unwrap();
+            assert_eq!(
+                text(&mut r, &value),
+                expected,
+                "native {field} case {index}"
+            );
+        }
+        assert_eq!(
+            r.to_serde(&wire).unwrap(),
+            source[index],
+            "maintained source case {index}"
+        );
+    }
+}
+
+#[test]
+fn production_order_wire_import_retains_undefined_and_limit_alias() {
+    let (mut r, _) = production_realm();
+    let imported = r.global_binding("orderRequestToOrderWire").unwrap();
+    let limit = r.object_from(vec![("tif", Value::str("Gtc"))]);
+    let order_type = r.object_from(vec![("limit", limit.clone())]);
+    let order = r.object_from(vec![
+        ("limit_px", Value::Number(11.25)),
+        ("sz", Value::Number(3.5)),
+        ("order_type", order_type),
+        ("cloid", Value::Null),
+    ]);
+    let wire = r
+        .call(&imported, &Value::Undefined, &[order, Value::Undefined])
+        .unwrap();
+    assert_eq!(r.own_entries(&wire).unwrap().len(), 7);
+    for key in ["a", "b", "r"] {
+        assert!(
+            matches!(r.get_str(&wire, key).unwrap(), Value::Undefined),
+            "native own-undefined {key}"
+        );
+    }
+    assert!(matches!(r.get_str(&wire, "c").unwrap(), Value::Null));
+    let order_type = r.get_str(&wire, "t").unwrap();
+    let retained = r.get_str(&order_type, "limit").unwrap();
+    assert!(retained.strict_equal(&limit));
+    r.set_str(&limit, "tif", Value::str("Alo")).unwrap();
+    let observed = r.get_str(&retained, "tif").unwrap();
+    assert_eq!(text(&mut r, &observed), "Alo");
+}
