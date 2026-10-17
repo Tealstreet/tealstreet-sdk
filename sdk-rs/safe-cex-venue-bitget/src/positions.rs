@@ -57,7 +57,7 @@ pub fn map_uta_position(
     Ok(Position {
         id: id.clone(),
         symbol,
-        side,
+        side: side.into(),
         entry_price,
         notional: safe_cex_num::multiply(
             contracts,
@@ -71,27 +71,28 @@ pub fn map_uta_position(
         unrealized_pnl: finite(&["unrealisedPnl", "unrealizedPL", "upl"], 0.0),
         // Unified v3 uses funding and separate open/close fees. Classic v2's
         // achievedProfits + totalFee formula must not be folded into this one.
-        realized_pnl: Some(
+        realized_pnl: (Some(
             finite(&["curRealisedPnl"], 0.0)
                 + finite(&["totalFunding"], 0.0)
                 + finite(&["openFeeTotal"], 0.0)
                 + finite(&["closeFeeTotal"], 0.0)
                 - finite(&["deductedFee"], 0.0),
-        ),
+        ))
+        .into(),
         contracts,
         liquidation_price: resolve_liquidation_price(&id, raw_liquidation_price, positions)
             .map_err(coercion)?,
         margin_size: if margin_size > 0.0 {
-            Some(margin_size)
+            (Some(margin_size)).into()
         } else {
-            None
+            (None).into()
         },
-        position_mode: Some(position_mode),
-        margin_type: Some(margin_mode),
-        info: Some(p.clone()),
-        last_update: Some(now()),
-        extra: None,
-        option: None,
+        position_mode: (Some(position_mode)).into(),
+        margin_type: (Some(margin_mode)).into(),
+        info: (Some(p.clone())).into(),
+        last_update: (Some(now())).into(),
+        extra: (None).into(),
+        option: (None).into(),
     })
 }
 
@@ -111,21 +112,21 @@ pub fn map_position(
             return Ok(Position {
                 id: create_position_id(&symbol, Some(side), Some(mode)),
                 symbol,
-                side,
+                side: side.into(),
                 entry_price: 0.0,
                 notional: 0.0,
                 leverage: 1.0,
                 unrealized_pnl: 0.0,
-                realized_pnl: Some(0.0),
+                realized_pnl: (Some(0.0)).into(),
                 contracts: 0.0,
                 liquidation_price: 0.0,
-                position_mode: Some(mode),
-                margin_type: Some(safe_cex_types::MarginType::Cross),
-                info: p.cloned(),
-                last_update: Some(now()),
-                margin_size: None,
-                extra: None,
-                option: None,
+                position_mode: (Some(mode)).into(),
+                margin_type: (Some(safe_cex_types::MarginType::Cross)).into(),
+                info: (p.cloned()).into(),
+                last_update: (Some(now())).into(),
+                margin_size: (None).into(),
+                extra: (None).into(),
+                option: (None).into(),
             });
         }
     };
@@ -178,7 +179,7 @@ pub fn map_position(
     Ok(Position {
         id: id.clone(),
         symbol,
-        side,
+        side: side.into(),
         entry_price,
         notional: safe_cex_num::multiply(
             contracts,
@@ -191,23 +192,24 @@ pub fn map_position(
         leverage: finite(&["leverage", "lever"], 1.0),
         unrealized_pnl: finite(&["unrealizedPL", "unrealisedPnl", "upl"], 0.0),
         // Classic v2 realized PnL excludes Unified funding/open/close fields.
-        realized_pnl: Some(
+        realized_pnl: (Some(
             finite(&["achievedProfits"], 0.0) + finite(&["totalFee"], 0.0)
                 - finite(&["deductedFee"], 0.0),
-        ),
+        ))
+        .into(),
         contracts,
         liquidation_price: resolve_liquidation_price(&id, raw_liquidation_price, positions)
             .map_err(coercion)?,
         margin_size: if margin_size > 0.0 {
-            Some(margin_size)
+            (Some(margin_size)).into()
         } else {
-            None
+            (None).into()
         },
-        position_mode: Some(position_mode),
-        margin_type: Some(margin_mode),
-        info: Some(p.clone()),
-        last_update: Some(now()),
-        extra: None,
-        option: None,
+        position_mode: (Some(position_mode)).into(),
+        margin_type: (Some(margin_mode)).into(),
+        info: (Some(p.clone())).into(),
+        last_update: (Some(now())).into(),
+        extra: (None).into(),
+        option: (None).into(),
     })
 }

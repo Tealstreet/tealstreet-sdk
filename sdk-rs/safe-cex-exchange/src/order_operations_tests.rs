@@ -29,12 +29,12 @@ fn client_lookup_uses_every_mapper_field_and_js_numeric_coercion() {
         "client_order_id",
         "clientId",
     ] {
-        order.info = Some(json!({field:123.0}));
+        order.info = (Some(json!({field:123.0}))).into();
         assert!(carries_client_id(&order, "123"), "mapper field {field}");
         assert!(!carries_client_id(&order, "124"));
     }
-    order.info = None;
-    order.parent_id = Some("caller".into());
+    order.info = (None).into();
+    order.parent_id = (Some("caller".into())).into();
     assert!(carries_client_id(&order, "caller"));
     order.id = "direct-caller".into();
     assert!(carries_client_id(&order, "direct-caller"));
@@ -43,7 +43,7 @@ fn client_lookup_uses_every_mapper_field_and_js_numeric_coercion() {
 #[test]
 fn client_lookup_matches_the_top_level_client_order_id() {
     let mut order = order();
-    order.client_order_id = Some("0x0123456789abcdef0123456789abcdef".into());
+    order.client_order_id = (Some("0x0123456789abcdef0123456789abcdef".into())).into();
     assert!(carries_client_id(
         &order,
         "0x0123456789abcdef0123456789abcdef"
@@ -52,9 +52,9 @@ fn client_lookup_matches_the_top_level_client_order_id() {
         &order,
         "0x0123456789abcdef0123456789abcdee"
     ));
-    order.client_order_id = Some("0".into());
+    order.client_order_id = (Some("0".into())).into();
     assert!(!carries_client_id(&order, "0"));
-    order.client_order_id = None;
+    order.client_order_id = (None).into();
     let mut wire = serde_json::to_value(&order).unwrap();
     wire["clientOrderId"] = json!("0xfeed");
     let decoded: Order = serde_json::from_value(wire).unwrap();
@@ -88,12 +88,12 @@ fn client_lookup_rejects_sentinel_ids_even_if_venue_matches() {
     for sentinel in ["", "0", "undefined"] {
         let mut order = order();
         order.id = sentinel.into();
-        order.parent_id = Some(sentinel.into());
-        order.info = Some(json!({"clientOrderId":sentinel}));
+        order.parent_id = (Some(sentinel.into())).into();
+        order.info = (Some(json!({"clientOrderId":sentinel}))).into();
         assert!(!carries_client_id(&order, sentinel));
     }
     let mut order = order();
-    order.info = Some(json!({"clientOrderId":null}));
+    order.info = (Some(json!({"clientOrderId":null}))).into();
     assert!(!carries_client_id(&order, "null"));
 }
 
@@ -106,7 +106,9 @@ fn regular_client_id_shape_checks_presence_not_numeric_truthiness() {
     for key in ["triggerPrice", "stopLoss", "takeProfit"] {
         let mut value = serde_json::to_value(&options).unwrap();
         value[key] = json!(0);
-        assert!(!regular_shape(&serde_json::from_value(value).unwrap()));
+        assert!(!regular_shape(
+            serde_json::from_value::<safe_cex_types::PlaceOrderOpts>(value).unwrap()
+        ));
     }
     options.r#type = OrderType::StopLoss;
     assert!(!regular_shape(&options));

@@ -12,7 +12,8 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_types::{
-    Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts, PositionSide,
+    ModelField, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PlaceOrderOpts,
+    PositionSide,
 };
 use serde_json::Value;
 use std::{
@@ -467,8 +468,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
                             )
                             .await?;
                         if let Some(order) = order {
-                            if !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
-                            {
+                            if !matches!(
+                                order.status,
+                                ModelField::Value(OrderStatus::Closed | OrderStatus::Canceled)
+                            ) {
                                 ids = vec![order.id];
                             } else {
                                 instance.set_filled_amount(&order.id, placement_filled(&order));
@@ -792,7 +795,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
             let price = orders
                 .iter()
                 .find(|o| o.status == OrderStatus::Open)
-                .map(|o| o.price);
+                .and_then(|o| o.price.value().copied());
             let last = chaser_manager::find_best_price(&self.instance)?;
             let options = self.instance.options();
             let options = options.borrow().clone();
@@ -840,7 +843,7 @@ impl<H: ChaserHost> ChaserMonitor<H> {
     if monitor.instance.last_partial_fill_at()>0.&&monitor.engine.host.now_ms()-monitor.instance.last_partial_fill_at()<1000.{chaser_manager::log(&format!("hold steady: {}ms since last partial fill",num(monitor.engine.host.now_ms()-monitor.instance.last_partial_fill_at())),&monitor.instance)?;return Ok(())}
     if price==Some(last){return Ok(())} // Option preserves source undefined !== any numeric last.
     monitor.instance.increment_attempts();if monitor.instance.is_stopped(){monitor.cleanup();monitor.engine.cleanup_instance(monitor.instance.clone()).await?;return Ok(())}
-    let cancel:Vec<Order>=orders.into_iter().filter(|o|!matches!(o.status,OrderStatus::Closed|OrderStatus::Canceled)).collect();if !cancel.is_empty(){chaser_manager::log("cancelling orders",&monitor.instance)?;if let Err(e)=monitor.engine.host.construct_cancel(monitor.instance.exchange.clone(),cancel.into_iter().map(|o| ChaserCancel::Full(Box::new(o))).collect()).await{let message=if e.message.is_empty(){e.js_error_string()}else{e.message};let expected=message.contains("already canceled")||message.contains("already filled")||message.contains("never placed");if monitor.use_fills&&expected{chaser_manager::log(&format!("cancel failed (order may be filled): {message}"),&monitor.instance)?;}else{monitor.cleanup();ChaserEngine::<H>::emit_error(&monitor.instance,"Chaser failed to cancel orders, stopping")?;monitor.instance.mark_complete(Some("Failed to cancel orders"));chaser_manager::log("failed to cancel orders",&monitor.instance)?;return Err(ExchangeError::new("Failed to cancel orders"))}}}
+    let cancel:Vec<Order>=orders.into_iter().filter(|o|!matches!(o.status,ModelField::Value(OrderStatus::Closed|OrderStatus::Canceled))).collect();if !cancel.is_empty(){chaser_manager::log("cancelling orders",&monitor.instance)?;if let Err(e)=monitor.engine.host.construct_cancel(monitor.instance.exchange.clone(),cancel.into_iter().map(|o| ChaserCancel::Full(Box::new(o))).collect()).await{let message=if e.message.is_empty(){e.js_error_string()}else{e.message};let expected=message.contains("already canceled")||message.contains("already filled")||message.contains("never placed");if monitor.use_fills&&expected{chaser_manager::log(&format!("cancel failed (order may be filled): {message}"),&monitor.instance)?;}else{monitor.cleanup();ChaserEngine::<H>::emit_error(&monitor.instance,"Chaser failed to cancel orders, stopping")?;monitor.instance.mark_complete(Some("Failed to cancel orders"));chaser_manager::log("failed to cancel orders",&monitor.instance)?;return Err(ExchangeError::new("Failed to cancel orders"))}}}
     if monitor.use_fills{let reconcile:Result<(),ExchangeError>=async{let method=monitor.engine.host.fill_lookup(monitor.instance.exchange.clone()).ok_or_else(||ExchangeError::new("fill reconciliation is unavailable"))?;let fills=method(monitor.instance.exchange.clone(),monitor.instance.current_order_ids()).await?;for(id,n)in fills{chaser_manager::log(&format!("REST fills check: orderId={id}, filledAmount={}",num(n)),&monitor.instance)?;monitor.instance.set_filled_amount(&id,n);}if monitor.instance.is_stopped(){chaser_manager::log("fully filled after REST check - marking ourselves completed",&monitor.instance)?;monitor.cleanup();monitor.engine.cleanup_instance(monitor.instance.clone()).await?;}Ok(())}.await;
      if let Err(e)=reconcile{let message=format!("Chaser reconciliation failed after cancellation; stopped before replacement: {}",e.js_error_string());chaser_manager::log(&message,&monitor.instance)?;monitor.instance.mark_complete(Some("Failed to reconcile fills after cancellation"));ChaserEngine::<H>::emit_error(&monitor.instance,&message)?;monitor.engine.cleanup_instance(monitor.instance.clone()).await?;return Ok(())}
      if monitor.instance.is_stopped(){return Ok(())}

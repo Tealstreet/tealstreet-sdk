@@ -117,7 +117,13 @@ fn domain_native_field_identity_supplement() {
             "FIELD IDENTITY order strings"
         );
         numbers(
-            &[v.price, v.amount, v.filled, v.remaining, v.last_update],
+            &[
+                v.price.to_number(),
+                v.amount,
+                v.filled,
+                v.remaining,
+                v.last_update,
+            ],
             &[1., 2., 3., 4., 5.],
             "order numbers",
         );

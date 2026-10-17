@@ -7,8 +7,8 @@ use safe_cex_num::{
 };
 use safe_cex_store::Store;
 use safe_cex_types::{
-    Balance, MarginType, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType, Position,
-    PositionMode, PositionSide, model_utils::create_position_id,
+    Balance, MarginType, ModelField, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType,
+    Position, PositionMode, PositionSide, model_utils::create_position_id,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -60,13 +60,15 @@ pub fn format_open_positions(
         let notional = position.quantity_notional.abs();
         let unrealized_pnl = direction * (mark_price - position.open_price) * position.quantity;
         let last_update = js_date_parse(&position.last_update_time, local_to_utc);
-        // The source calculations run before the closed shared-model refusal.
-        let side = match position.side.as_str() {
-            "BUY" => PositionSide::Long,
-            "SELL" => PositionSide::Short,
-            other => {
+        let side = match safe_cex_num::js_table_lookup(crate::types::POSITION_SIDE, &position.side)
+        {
+            safe_cex_num::TableHit::Mapped(&"long") => ModelField::Value(PositionSide::Long),
+            safe_cex_num::TableHit::Mapped(_) => ModelField::Value(PositionSide::Short),
+            safe_cex_num::TableHit::Missing => ModelField::Undefined,
+            safe_cex_num::TableHit::Inherited(_) => {
                 return Err(ExchangeError::new(format!(
-                    "Unrepresentable position side: {other}"
+                    "Unrepresentable position side: {}",
+                    position.side
                 )));
             }
         };
@@ -79,15 +81,15 @@ pub fn format_open_positions(
             unrealized_pnl,
             contracts: position.quantity,
             liquidation_price: 0.0,
-            margin_size: Some(notional * position.margin_rate),
+            margin_size: (Some(notional * position.margin_rate)).into(),
             id: create_position_id(&position.symbol, None, None),
-            position_mode: Some(PositionMode::OneWay),
-            margin_type: Some(MarginType::Cross),
-            last_update: Some(last_update),
-            info: Some(raw["portfolios"][0]["positions"][index].clone()),
-            realized_pnl: None,
-            extra: None,
-            option: None,
+            position_mode: (Some(PositionMode::OneWay)).into(),
+            margin_type: (Some(MarginType::Cross)).into(),
+            last_update: (Some(last_update)).into(),
+            info: (Some(raw["portfolios"][0]["positions"][index].clone())).into(),
+            realized_pnl: (None).into(),
+            extra: (None).into(),
+            option: (None).into(),
         });
     }
     Ok(Some(positions))
@@ -163,21 +165,21 @@ pub fn format_positions(
         positions.push(Position {
             id: create_position_id(symbol, None, None),
             symbol: symbol.clone(),
-            side: PositionSide::Long,
+            side: (PositionSide::Long).into(),
             leverage: 0.0,
-            margin_type: Some(MarginType::Cross),
-            position_mode: Some(PositionMode::OneWay),
+            margin_type: (Some(MarginType::Cross)).into(),
+            position_mode: (Some(PositionMode::OneWay)).into(),
             entry_price: 0.0,
             notional: 0.0,
             unrealized_pnl: 0.0,
             contracts: 0.0,
             liquidation_price: 0.0,
-            margin_size: None,
-            info: None,
-            extra: None,
-            realized_pnl: None,
-            last_update: None,
-            option: None,
+            margin_size: (None).into(),
+            info: (None).into(),
+            extra: (None).into(),
+            realized_pnl: (None).into(),
+            last_update: (None).into(),
+            option: (None).into(),
         });
     }
     Ok(positions)
@@ -202,53 +204,58 @@ pub fn format_orders(
             return Ok(Some(store.orders().to_vec()));
         };
         let last_update = js_date_parse(&order.transaction_time, local_to_utc);
-        let status = match order.status.as_str() {
-            "WORKING" => OrderStatus::Open,
-            other => {
-                refusal.get_or_insert_with(|| format!("Unrepresentable order status: {other}"));
-                OrderStatus::Open
+        let mut mapped = |table, key: &str, field| match safe_cex_num::js_table_lookup(table, key) {
+            safe_cex_num::TableHit::Mapped(value) => Some(*value),
+            safe_cex_num::TableHit::Missing => None,
+            safe_cex_num::TableHit::Inherited(_) => {
+                refusal.get_or_insert_with(|| format!("Unrepresentable order {field}: {key}"));
+                None
             }
         };
-        let order_type = match order.r#type.as_str() {
-            "LIMIT" => OrderType::Limit,
-            "MARKET" => OrderType::Market,
-            "STOP" => OrderType::StopLoss,
-            other => {
-                refusal.get_or_insert_with(|| format!("Unrepresentable order type: {other}"));
-                OrderType::Limit
-            }
-        };
-        let side = match leg.side.as_str() {
-            "BUY" => OrderSide::Buy,
-            "SELL" => OrderSide::Sell,
-            other => {
-                refusal.get_or_insert_with(|| format!("Unrepresentable order side: {other}"));
-                OrderSide::Buy
-            }
-        };
+        let status = mapped(crate::types::ORDER_STATUS, &order.status, "status")
+            .map(|_| ModelField::Value(OrderStatus::Open))
+            .unwrap_or(ModelField::Undefined);
+        let order_type = mapped(crate::types::ORDER_TYPE, &order.r#type, "type")
+            .map(|kind| {
+                ModelField::Value(match kind {
+                    "limit" => OrderType::Limit,
+                    "market" => OrderType::Market,
+                    _ => OrderType::StopLoss,
+                })
+            })
+            .unwrap_or(ModelField::Undefined);
+        let side = mapped(crate::types::ORDER_SIDE, &leg.side, "side")
+            .map(|side| {
+                ModelField::Value(if side == "buy" {
+                    OrderSide::Buy
+                } else {
+                    OrderSide::Sell
+                })
+            })
+            .unwrap_or(ModelField::Undefined);
         orders.push(Order {
-            client_order_id: None,
+            client_order_id: (None).into(),
             id: order.order_code.clone(),
             status,
             symbol: order.instrument.clone(),
             r#type: order_type,
             side,
-            price: leg.price,
+            price: (leg.price).into(),
             amount: leg.quantity,
             filled: leg.filled_quantity,
             remaining: leg.remaining_quantity,
             reduce_only: leg.position_effect == "CLOSE",
-            info: Some(raw["portfolios"][0]["orders"][index].clone()),
-            time_in_force: Some(OrderTimeInForce::GoodTillCancel),
+            info: (Some(raw["portfolios"][0]["orders"][index].clone())).into(),
+            time_in_force: (Some(OrderTimeInForce::GoodTillCancel)).into(),
             last_update,
-            parent_id: None,
-            close: None,
-            trigger_type: None,
-            tp_trigger_type: None,
-            sl_trigger_type: None,
-            take_profit: None,
-            stop_loss: None,
-            extra: None,
+            parent_id: (None).into(),
+            close: (None).into(),
+            trigger_type: (None).into(),
+            tp_trigger_type: (None).into(),
+            sl_trigger_type: (None).into(),
+            take_profit: (None).into(),
+            stop_loss: (None).into(),
+            extra: (None).into(),
         });
     }
     if let Some(error) = refusal {

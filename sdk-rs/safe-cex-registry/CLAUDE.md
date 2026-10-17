@@ -241,3 +241,8 @@ decoders with ordinary accepted-set map and raw member observations. Positional
 Serde struct arrays are refused at this typed JSON boundary; surplus object fields
 remain ignored. History from/to retain their existing omitted/null None semantics.
 This does not establish runtime validation in TypeScript's unchecked worker casts.
+The native Hyperliquid JSON-to-query adapter lives at module scope so the accepted-set
+compiler inventory covers it directly. Its finite witnesses inspect QueryValue enum
+outputs for all JSON container/scalar kinds. The installed repeat serializer remains
+covered through the real native HTTP host; this owned Value input excludes undefined
+and nonfinite JSON values.
