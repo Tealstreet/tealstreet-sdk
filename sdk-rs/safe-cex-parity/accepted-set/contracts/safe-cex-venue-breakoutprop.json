@@ -12845,7 +12845,7 @@
         ]
       }
     },
-    "evidence": "Uncached account lookup decodes USER_RESPONSE, filters FULL_TRADING, selects the first substring match and caches the exact selected account; username/request effects remain actual host seams. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
+    "evidence": "Uncached account lookup retains native input, reads only first-user accounts, filters FULL_TRADING, selects the first substring match and caches the exact selected account; username/request effects remain actual host seams. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
     "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let cache = std::cell::RefCell::new(None); let logger = |_:serde_json::Value| Ok(()); let future = super::get_account_code(&cache,\"user\".into(),None,||async {Ok(\"token\".into())},|_|async move {Ok(input)},&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(account) => serde_json::json!({\"ok\":true,\"account\":account,\"cached\":cache.borrow().clone()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
@@ -12916,6 +12916,50 @@
           "ok": true,
           "account": "demo:B",
           "cached": "demo:B"
+        }
+      },
+      {
+        "input": {
+          "userDetails": [
+            {
+              "accounts": [
+                {
+                  "accountStatus": "DISABLED"
+                },
+                {
+                  "account": "default:A",
+                  "accountStatus": "FULL_TRADING"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "account": "default:A",
+          "cached": "default:A"
+        }
+      },
+      {
+        "input": {
+          "userDetails": [
+            {
+              "fullName": false,
+              "accounts": [
+                {
+                  "owner": [],
+                  "account": "default:A",
+                  "accountStatus": "FULL_TRADING"
+                }
+              ]
+            },
+            null
+          ]
+        },
+        "output": {
+          "ok": true,
+          "account": "default:A",
+          "cached": "default:A"
         }
       }
     ]

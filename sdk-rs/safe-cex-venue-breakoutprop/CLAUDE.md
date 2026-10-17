@@ -219,6 +219,8 @@ NaN bounds, an ignored lone surrogate and discarded Promise continuation.
 Session acquisition remains its own pending row. Invalidation borrows only token
 and expiry, so it cannot clear the separate in-flight request. Cache lookup and
 session factory invocation occur eagerly; an empty cached string is not a hit.
+Native account discovery reads only first-user accounts, accountStatus and the
+selected account code. Unread metadata and later users never validate a response.
 Accounts filter FULL_TRADING and use the first substring match, not equality or
 the last match. Both cached values and mutations are observed directly.
 
@@ -226,7 +228,9 @@ Validation logs response.data.message but RETURNS response.data.msg; preserve
 that difference. Logger failures propagate original metadata. Logger arguments,
 returned error values and options are owned snapshots, with actual callback
 mutation and late-option-change witnesses. All candidate counts and identities
-are pinned independently: dropping a redundant matching account can leave the
+are pinned independently. Twelve additional maintained-source profiles cover
+missing/poisoned unused fields, array-like users and consumed-field TypeErrors.
+Dropping a redundant matching account can leave the
 selected result unchanged, so result equality alone is insufficient coverage.
 
 ## Production binding
