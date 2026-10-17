@@ -461,7 +461,7 @@ pub fn harness_as(
     options: ExchangeOptions,
     script: impl FnOnce(&Wire),
 ) -> Harness {
-    configured_harness(name, options, None, script)
+    configured_harness(name, options, None, None, script)
         .expect("BybitExchange constructs from real options")
 }
 
@@ -470,7 +470,16 @@ pub fn try_harness_as(
     options: ExchangeOptions,
     script: impl FnOnce(&Wire),
 ) -> Result<Harness, ExchangeError> {
-    configured_harness(name, options, None, script)
+    configured_harness(name, options, None, None, script)
+}
+
+pub fn harness_with_signer(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    signer: safe_cex_exchange::js_runtime::base_exchange::HostedSigner,
+    script: impl FnOnce(&Wire),
+) -> Harness {
+    configured_harness(name, options, None, Some(signer), script).expect("hosted Bybit constructs")
 }
 
 pub fn harness_with_external(
@@ -478,7 +487,7 @@ pub fn harness_with_external(
     factory: safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
     script: impl FnOnce(&Wire),
 ) -> Harness {
-    configured_harness(ExchangeName::Bybit, options, Some(factory), script)
+    configured_harness(ExchangeName::Bybit, options, Some(factory), None, script)
         .expect("BybitExchange constructs from real options")
 }
 
@@ -492,6 +501,7 @@ fn configured_harness(
     external_public_data: Option<
         safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
     >,
+    remote_signer: Option<safe_cex_exchange::js_runtime::base_exchange::HostedSigner>,
     script: impl FnOnce(&Wire),
 ) -> Result<Harness, ExchangeError> {
     let runtime = Rc::new(Runtime::default());
@@ -508,7 +518,7 @@ fn configured_harness(
         store.clone(),
         BybitDependencies {
             runtime: runtime.clone(),
-            remote_signer: None,
+            remote_signer,
             wire: wire.clone(),
             http_host: Rc::new(Host),
             rate_limit_clock: Arc::new(Clock(runtime.now.clone())),

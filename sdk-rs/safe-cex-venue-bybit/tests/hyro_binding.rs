@@ -985,3 +985,182 @@ fn hyro_history_fallback_and_seconds_refusal_do_not_send_requests() {
         "receiver callbacks must not retain the native venue"
     );
 }
+
+#[test]
+fn hyro_hosted_private_auth_preserves_bybit_scope_and_refuses_missing_signatures() {
+    if configured_child(
+        "hyro_hosted_private_auth_preserves_bybit_scope_and_refuses_missing_signatures",
+    ) {
+        return;
+    }
+    use safe_cex_exchange::runtime::{Cleanup, RemoteSigner};
+    use safe_cex_transport::signing::{
+        HttpSigningResponse, RemoteSignerRequest, RemoteSignerResponse, SignedConfig,
+    };
+    use std::{cell::RefCell, rc::Rc};
+    struct Signer {
+        calls: RefCell<Vec<serde_json::Value>>,
+        failure: &'static str,
+    }
+    impl safe_cex_transport::signing::RemoteSigner for Signer {
+        fn sign(
+            &self,
+            request: RemoteSignerRequest,
+        ) -> safe_cex_transport::TransportFuture<'_, RemoteSignerResponse> {
+            self.calls
+                .borrow_mut()
+                .push(serde_json::to_value(&request).unwrap());
+            let response = match request {
+                RemoteSignerRequest::Http(request) => {
+                    RemoteSignerResponse::Http(HttpSigningResponse {
+                        id: request.id,
+                        config: Some(SignedConfig::default()),
+                        error: None,
+                    })
+                }
+                RemoteSignerRequest::WsAuth { request, .. } => {
+                    RemoteSignerResponse::WsAuth(safe_cex_types::ws_auth::WsAuthResponse {
+                        id: request.id,
+                        ws_auth_signature: (self.failure.is_empty())
+                            .then(|| "hosted-hyro-signature".into()),
+                        error: (self.failure == "denied").then(|| "denied".into()),
+                    })
+                }
+            };
+            Box::pin(async move { Ok(response) })
+        }
+    }
+    impl RemoteSigner for Signer {
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn on_availability_change(&self, _: Rc<dyn Fn(bool)>) -> Cleanup {
+            Box::new(|| {})
+        }
+    }
+    for failure in ["", "denied", "missing"] {
+        let signer = Rc::new(Signer {
+            calls: RefCell::new(vec![]),
+            failure,
+        });
+        let capability: Rc<dyn RemoteSigner> = signer.clone();
+        let mut options = support::options();
+        options.secret.clear();
+        let h = support::harness_with_signer(
+            ExchangeName::Hyrotrader,
+            options,
+            (capability, Some("hyro-account".into())),
+            private_fixture,
+        );
+        h.drive(h.venue().start()).unwrap();
+        h.advance(50.);
+        let private = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url.contains("/private"))
+            .unwrap()
+            .1
+            .clone();
+        let calls = signer.calls.borrow();
+        let call = calls
+            .iter()
+            .find(|call| call["type"] == "ws-auth")
+            .expect("actual source session invokes hosted WS signer");
+        assert_eq!(call["exchangeName"], "bybit");
+        assert_eq!(call["accountName"], "hyro-account");
+        assert_eq!(call["wsAuth"]["outputFormat"], "hex");
+        let expires = call["wsAuth"]["extraData"]["expires"].as_f64().unwrap() as u64;
+        assert_eq!(call["wsAuth"]["toSign"], format!("GET/realtime{expires}"));
+        let auth = frames(&private, "auth");
+        if failure.is_empty() {
+            assert_eq!(auth.len(), 1);
+            assert_eq!(
+                auth[0]["args"],
+                json!(["fixture-key", expires, "hosted-hyro-signature"])
+            );
+            assert!(frames(&private, "subscribe").is_empty());
+        } else {
+            assert!(auth.is_empty());
+            let message = if failure == "denied" {
+                "Remote WS signing unavailable: denied"
+            } else {
+                "Remote WS signing unavailable: missing signature"
+            };
+            assert!(
+                h.runtime
+                    .logs
+                    .borrow()
+                    .iter()
+                    .any(|line| line.contains(message)),
+                "{:?}",
+                h.runtime.logs.borrow()
+            );
+            assert!(private.closed.get());
+        }
+        drop(calls);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
+    if configured_child("hyro_concurrent_identical_batches_share_one_submission_sequence") {
+        return;
+    }
+    use safe_cex_exchange::exchange::Exchange;
+    use std::{
+        cell::Cell,
+        future::Future,
+        rc::Rc,
+        task::{Context, Poll, Waker},
+    };
+    let (h, private, _) = start_private();
+    ack_private(&h, &private, "auth");
+    ack_private(&h, &private, "subscribe");
+    h.wire.ok(
+        "POST",
+        "/v5/order/create",
+        json!({"orderId":"hyro-batch-first"}),
+    );
+    h.wire.ok(
+        "POST",
+        "/v5/order/create",
+        json!({"orderId":"hyro-batch-second"}),
+    );
+    let gate = Rc::new(Cell::new(false));
+    h.wire
+        .response_gates
+        .borrow_mut()
+        .push(("/v5/order/create".into(), gate.clone()));
+    let mut second = hyro_limit();
+    second["price"] = json!(25001.0);
+    let orders: Vec<safe_cex_venue_bybit::order_params::BybitPlaceOrderOpts> = vec![
+        serde_json::from_value(hyro_limit()).unwrap(),
+        serde_json::from_value(second).unwrap(),
+    ];
+    let mut first = Box::pin(
+        h.exchange
+            .base()
+            .place_orders(h.exchange.as_ref(), orders.clone()),
+    );
+    let mut duplicate = Box::pin(h.exchange.base().place_orders(h.exchange.as_ref(), orders));
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(first.as_mut().poll(&mut cx), Poll::Pending));
+    h.runtime.pump();
+    assert!(matches!(duplicate.as_mut().poll(&mut cx), Poll::Pending));
+    h.runtime.pump();
+    assert_eq!(
+        h.wire.calls("/v5/order/create").len(),
+        1,
+        "the same pending batch does not start a replacement"
+    );
+    gate.set(true);
+    let ids = h.drive(first).unwrap();
+    assert_eq!(ids, ["hyro-batch-first", "hyro-batch-second"]);
+    assert_eq!(h.drive(duplicate).unwrap(), ids);
+    assert_eq!(h.wire.calls("/v5/order/create").len(), 2);
+    assert_eq!(h.store.orders().len(), 2);
+    h.venue().dispose().unwrap();
+}
