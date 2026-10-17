@@ -332,3 +332,13 @@ pong latencies and pushes private orders/fills/positions/account frames into the
 production handlers, asserting Store contents and the complete emitted fill.
 The baseline ping regression fails at latency 0 versus 13 ms; all five scoped
 checks pass after the timestamp forwarding.
+
+Already-gone normal cancellation response IDs use shared ECMAScript String
+coercion before the native Store key lookup, matching TS DefaultStore's object
+keys. This differs from protective cancellation's strict root-ID comparison,
+where numeric123 cannot remove string123's legs. `tests/native_cancel.rs` drives
+public cancel_orders through the real signed REST host and Store for eight
+actual-source cases, including nonstring normal IDs, a falsy-ID refusal and
+numeric/string protective controls. The optional goneIdLookup oracle mode uses
+actual cancelOrders/cancelNormalOrders/cancelAlgoOrders and TS DefaultStore;
+the original53-case orchestration corpus remains unchanged.
