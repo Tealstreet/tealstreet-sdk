@@ -9,13 +9,16 @@ import {loadPolicy} from '../../safe-cex-parity/scripts/accepted-policy-files.mj
 import {runProbes} from '../../safe-cex-parity/scripts/accepted-probes.mjs';
 
 const workspace = fileURLToPath(new URL('../..', import.meta.url));
-const owners = [
+const registry = process.argv.includes('--registry');
+const packageName = registry ? 'safe-cex-registry' : 'safe-cex-exchange';
+const owners = registry ? ['safe_cex_registry::native_account::host_error'] : [
   'safe_cex_exchange::exchange::BaseExchange',
   'safe_cex_exchange::exchange::emit_listeners',
   'safe_cex_exchange::error_reporting::raw_formatted_context',
   'safe_cex_exchange::runtime::ExchangeError',
 ];
-const aliases = ['safe_cex_exchange::runtime::Listener', 'safe_cex_exchange::runtime::ArgsListener'];
+const aliases = registry ? ['safe_cex_registry::native_account::NativeAccountFuture'] :
+  ['safe_cex_exchange::runtime::Listener', 'safe_cex_exchange::runtime::ArgsListener'];
 function cargo(args, extra = {}) {
   const result = spawnSync('cargo', ['+1.99.0', ...args], {
     cwd: workspace, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 900_000,
@@ -31,11 +34,11 @@ const source = spawnSync('node', [fileURLToPath(new URL('../tests/core-emitter-s
 });
 assert.equal(source.status, 0, `maintained emitter/formatter witness must execute\n${source.stderr}`);
 const metadata = JSON.parse(cargo(['metadata', '--locked', '--format-version=1']));
-const pkg = metadata.packages.find(pkg => pkg.name === 'safe-cex-exchange');
-assert.ok(pkg && metadata.workspace_members.includes(pkg.id), 'actual exchange package required');
+const pkg = metadata.packages.find(pkg => pkg.name === packageName);
+assert.ok(pkg && metadata.workspace_members.includes(pkg.id), 'actual production package required');
 cargo(['rustdoc', '--locked', '--jobs=1', '-p', pkg.name, '--lib', '--', '-Z', 'unstable-options',
   '--output-format=json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], {RUSTC_BOOTSTRAP: '1'});
-const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'doc/safe_cex_exchange.json')));
+const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, `doc/${packageName.replaceAll('-', '_')}.json`)));
 const found = inventory(doc, {
   defaultTraits: loadPolicy('default-traits'), receiverTraits: loadPolicy('receiver-traits'),
   readSource: filename => fs.readFileSync(path.join(workspace, filename)),
@@ -45,11 +48,11 @@ const selected = {
   types: found.types.filter(owner => owners.includes(owner.name)),
   publicAliases: found.publicAliases.filter(owner => aliases.includes(owner.name)),
 };
-assert.deepEqual(selected.types.map(owner => owner.name).sort(), [...owners].sort(), 'all four selected production owners required');
-assert.deepEqual(selected.publicAliases.map(owner => owner.name).sort(), [...aliases].sort(), 'both actual callback aliases required');
+assert.deepEqual(selected.types.map(owner => owner.name).sort(), [...owners].sort(), 'all selected production owners required');
+assert.deepEqual(selected.publicAliases.map(owner => owner.name).sort(), [...aliases].sort(), 'all selected actual aliases required');
 const receipts = runProbes(workspace, metadata, [selected], loadContracts(), {target: 'native', features: [], jobs: 1});
 const failures = receipts.filter(receipt => receipt.failures.length);
 for (const receipt of failures) console.error(JSON.stringify(receipt));
 assert.equal(receipts.length, owners.length + aliases.length, 'all selected APIs and alias traits must execute');
 assert.equal(failures.length, 0, 'selected emitter native/default contracts must pass');
-console.log('Six selected emitter owner/alias receipts pass; this is not a full-package or feature-matrix claim.');
+console.log(`${receipts.length} selected ${packageName} emitter owner/alias receipts pass; this is not a full-package or feature-matrix claim.`);

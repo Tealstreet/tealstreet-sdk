@@ -31,3 +31,18 @@ they do not establish an arbitrary-value ingress or host capability.
 Runtime exception-report callbacks and main-thread worker RPC arguments/success
 results retain their separately scoped JSON ABIs. Raw error-input widening is a
 separate follow-up, and Candle widening remains held.
+
+The selected native/default contract runner is
+`scripts/emitter-accepted-probes.mjs`; `--registry` selects the registry host-error
+owner and `NativeAccountFuture` alias. Both runs use fresh compiler discovery and
+the ordinary raw conversion trait probes, rather than a replacement contract gate.
+The future's expanded error type is the canonical `OwnedJsValue`; the public
+registry `NativeValue` re-export remains the same type.
+
+`native_account.rs::emitter_error_tests` checks absent versus own Undefined,
+null, exact nonfinite/signed-zero bits, UTF-16 and nested own Undefined in the
+actual outbound error envelope. It also polls the actual account future and
+observes a retained NaN payload. Fresh registry compiler inventory no longer
+selects `exchange_error` or `error_text`: both consume an already typed native
+value and return typed native data/text, with no raw schema decoder entrypoint.
+Their error-envelope behavior remains covered by these direct production tests.

@@ -676,6 +676,79 @@ pub fn native_account_call(
 }
 
 #[cfg(test)]
+mod emitter_error_tests {
+    use super::{NativeAccountFuture, NativeValue, exchange_error, host_error};
+    use safe_cex_exchange::{js_runtime::value::Js, runtime::ExchangeError};
+    use std::{future::Future, pin::Pin};
+
+    #[test]
+    fn account_error_envelope_retains_native_code_presence_and_bits() {
+        let cases = [
+            None,
+            Some(Js::Undefined),
+            Some(Js::Null),
+            Some(Js::Number(-0.0)),
+            Some(Js::Number(f64::from_bits(0x7ff8_0000_0000_0042))),
+            Some(Js::Number(f64::INFINITY)),
+            Some(Js::Number(f64::NEG_INFINITY)),
+            Some(Js::String(vec![0xd800].into())),
+            Some(Js::object(vec![("missing", Js::Undefined)])),
+        ];
+        for code in cases {
+            let mut error = ExchangeError::new("native failure");
+            error.name = "TypeError".into();
+            error.code = code.clone();
+            let wire = exchange_error(&error);
+            assert_eq!(wire.get("name"), Some(&NativeValue::string("TypeError")));
+            assert_eq!(
+                wire.get("message"),
+                Some(&NativeValue::string("native failure"))
+            );
+            match code {
+                None => assert!(wire.get("code").is_none()),
+                Some(Js::Number(expected)) => assert_eq!(
+                    wire.get("code").unwrap().as_f64().unwrap().to_bits(),
+                    expected.to_bits()
+                ),
+                Some(Js::Undefined) => {
+                    assert!(matches!(wire.get("code"), Some(NativeValue::Undefined)))
+                }
+                Some(Js::Null) => assert!(matches!(wire.get("code"), Some(NativeValue::Null))),
+                Some(Js::String(_)) => {
+                    assert_eq!(wire.get("code"), Some(&NativeValue::String(vec![0xd800])))
+                }
+                Some(Js::Object(_)) => assert_eq!(
+                    wire.get("code"),
+                    Some(&NativeValue::object([("missing", NativeValue::Undefined)]))
+                ),
+                Some(_) => panic!("unexpected authored code fixture"),
+            }
+        }
+        let host = host_error("literal host failure");
+        assert_eq!(host.get("name"), Some(&NativeValue::string("Error")));
+        assert_eq!(
+            host.get("message"),
+            Some(&NativeValue::string("literal host failure"))
+        );
+        assert!(host.get("code").is_none());
+    }
+
+    #[test]
+    fn account_future_returns_owned_native_error_without_json() {
+        let future: NativeAccountFuture<bool> =
+            Box::pin(async { Err(NativeValue::Number(f64::from_bits(0x7ff8_0000_0000_0042))) });
+        let mut expected: Pin<Box<dyn Future<Output = Result<bool, NativeValue>>>> = future;
+        let context = &mut std::task::Context::from_waker(std::task::Waker::noop());
+        match expected.as_mut().poll(context) {
+            std::task::Poll::Ready(Err(NativeValue::Number(number))) => {
+                assert_eq!(number.to_bits(), 0x7ff8_0000_0000_0042);
+            }
+            _ => panic!("native account future must retain its actual error type"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod model_codec_tests {
     use super::encode;
     use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
