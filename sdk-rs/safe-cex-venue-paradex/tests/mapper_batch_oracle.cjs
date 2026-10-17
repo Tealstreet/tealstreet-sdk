@@ -87,7 +87,16 @@ for (const raw of ['1784505600000', '-1784505600000', '7.9', '-7.9', '0', '-0',
   '8640000000000000', '8640000000000001', '-8640000000000000', '-8640000000000001', '1e400', '-1e400']) {
   defs.push({ raw: JSON.stringify({ ...base, created_at: 'TOKEN' }).replace('"TOKEN"', raw), refused: false });
 }
-assert.equal(defs.length, 128, 'batch_fixture_count');
+for (const created_at of [null, false, true]) add({created_at});
+add({}, ['created_at']);
+for (const field of ['size', 'remaining_size']) {
+  for (const raw of ['0.006', '-0', 'null', 'true', 'false', '["17.25tail"]', '{}']) {
+    defs.push({raw: JSON.stringify({...base, [field]: 'TOKEN'}).replace('"TOKEN"', raw), refused: false});
+  }
+  add({}, [field]);
+}
+for (const created_at of [{}, [], [null], ['2026-07-20T00:00:00Z']]) add({created_at});
+assert.equal(defs.length, 152, 'batch_fixture_count');
 const orders = defs.map(c => {
   const input = JSON.parse(c.raw), output = h.mapOrder(input);
   return { ...c, input: observe(input), output: observe(output), ownsUndefined: Object.hasOwn(output, 'timeInForce'), aliasesInput: output.info === input };

@@ -114,12 +114,7 @@ fn listen(h: &Harness, event: &str) -> Rc<RefCell<Vec<Value>>> {
     h.venue().base().on(
         event,
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(
-                data.as_array()
-                    .and_then(|a| a.first())
-                    .cloned()
-                    .unwrap_or(data.clone()),
-            );
+            sink.borrow_mut().push(data.clone());
             Ok(())
         }),
     );

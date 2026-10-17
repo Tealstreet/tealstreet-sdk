@@ -18,7 +18,10 @@ use crate::websocket::BaseWebSocket;
 use crate::worker::CallableMethodsInWorker;
 use crate::{
     capabilities::ExchangeCapabilities,
-    runtime::{Cleanup, ExchangeError, ExchangeFuture, ExchangeRuntime, Listener, ListenerCleanup},
+    runtime::{
+        ArgsListener, Cleanup, ExchangeError, ExchangeFuture, ExchangeRuntime, Listener,
+        ListenerCleanup,
+    },
 };
 use safe_cex_store::Store;
 use safe_cex_store::StoreUpdate;
@@ -50,7 +53,7 @@ use std::{
     task::{Poll, Waker},
 };
 
-type ListenerRows = Rc<RefCell<HashMap<String, Vec<(String, Listener, bool)>>>>;
+type ListenerRows = Rc<RefCell<HashMap<String, Vec<(String, ArgsListener, bool)>>>>;
 
 struct WorkerReplyGuard {
     listeners: ListenerRows,
@@ -68,14 +71,14 @@ impl Drop for WorkerReplyGuard {
 fn emit_listeners(
     listeners: &ListenerRows,
     event: &str,
-    data: &Value,
+    args: &[Value],
 ) -> Result<(), ExchangeError> {
     let callbacks = listeners.borrow().get(event).cloned().unwrap_or_default();
     for (id, callback, once) in callbacks {
         if once && let Some(rows) = listeners.borrow_mut().get_mut(event) {
             rows.retain(|row| row.0 != id);
         }
-        callback(event, data)?;
+        callback(event, args)?;
     }
     Ok(())
 }
@@ -540,7 +543,7 @@ impl BaseExchange {
         let unsubscribe = store.subscribe(Box::new(move |data, _| {
             let data = serde_json::to_value(data)
                 .map_err(|error| safe_cex_types::StoreSubscriberError::new(error.to_string()))?;
-            emit_listeners(&events, "update", &data).map_err(Into::into)
+            emit_listeners(&events, "update", &[data]).map_err(Into::into)
         }));
         let active = options
             .tuning
@@ -582,6 +585,12 @@ impl BaseExchange {
         }
     }
     pub fn on(&self, event: &str, callback: Listener) -> String {
+        self.on_args(
+            event,
+            Rc::new(move |event, args| callback(event, args.first().unwrap_or(&Value::Null))),
+        )
+    }
+    pub fn on_args(&self, event: &str, callback: ArgsListener) -> String {
         let id = self.runtime.unique_id();
         self.listeners
             .borrow_mut()
@@ -591,6 +600,12 @@ impl BaseExchange {
         id
     }
     pub fn once(&self, event: &str, callback: Listener) -> String {
+        self.once_args(
+            event,
+            Rc::new(move |event, args| callback(event, args.first().unwrap_or(&Value::Null))),
+        )
+    }
+    pub fn once_args(&self, event: &str, callback: ArgsListener) -> String {
         let id = self.runtime.unique_id();
         self.listeners
             .borrow_mut()
@@ -610,7 +625,10 @@ impl BaseExchange {
         }
     }
     pub fn emit(&self, event: &str, data: serde_json::Value) -> Result<(), ExchangeError> {
-        emit_listeners(&self.listeners, event, &data)
+        self.emit_args(event, &[data])
+    }
+    pub fn emit_args(&self, event: &str, args: &[Value]) -> Result<(), ExchangeError> {
+        emit_listeners(&self.listeners, event, args)
     }
 
     pub fn name(&self) -> &ExchangeName {
@@ -669,9 +687,12 @@ impl BaseExchange {
             self.runtime.console(severity, message);
         }
         let name = serde_json::to_value(&self.name).unwrap();
-        self.emit(
+        self.emit_args(
             "log",
-            serde_json::json!([format!("[{}] {message}", name.as_str().unwrap()), severity]),
+            &[
+                json!(format!("[{}] {message}", name.as_str().unwrap())),
+                json!(severity),
+            ],
         )
     }
     pub fn reject_preflight<T>(&self, message: String) -> Result<T, ExchangeError> {
@@ -1211,7 +1232,7 @@ impl BaseExchange {
                 self.runtime.report_exception(&error, &report);
             }
         }
-        self.emit("error", json!([formatted, metadata]))
+        self.emit_args("error", &[json!(formatted), Value::Object(metadata)])
     }
 }
 
@@ -1326,7 +1347,7 @@ impl BaseExchange {
             waker: RefCell::new(None),
             unsubscribe: RefCell::new(None),
             on_available: Box::new(move || {
-                emit_listeners(&listeners, "remoteSignerStatus", &json!("connected"))
+                emit_listeners(&listeners, "remoteSignerStatus", &[json!("connected")])
             }),
         });
         let guard = SignerWaitGuard(waiter.clone());

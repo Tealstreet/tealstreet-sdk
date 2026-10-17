@@ -80,6 +80,55 @@ pub(crate) fn bind(realm: &Realm) {
              body: fn(&mut Realm, &[Value]) -> Result<Value, Thrown>| {
         realm.bind_import(name, realm.native(name, length, move |r, _, a| body(r, a)));
     };
+    b("isOnlyHyperliquidTerminalCancelError", 1, |_, a| {
+        let Value::String(message) = arg(a, 0) else {
+            return Ok(Value::Bool(false));
+        };
+        Ok(Value::Bool(
+            crate::order_response::is_only_hyperliquid_terminal_cancel_error(
+                &String::from_utf16_lossy(&message),
+            ),
+        ))
+    });
+    b("deriveHyperliquidClosedPositions", 3, |r, a| {
+        income::derive_hyperliquid_closed_positions(r, &arg(a, 0), &arg(a, 1), &arg(a, 2))
+    });
+    b("collapseHyperliquidOrderHistory", 1, |r, a| {
+        let rows = r.to_serde(&arg(a, 0))?;
+        let rows = rows
+            .as_array()
+            .ok_or_else(|| r.type_error("historical order rows must be an array"))?;
+        let collapsed = crate::order_history::collapse_hyperliquid_order_history(rows)
+            .map_err(|error| r.error_of(&error.name, &error.message))?;
+        Ok(r.from_serde(&serde_json::Value::Array(collapsed)))
+    });
+    b("mapHyperliquidHistoricalOrder", 2, |r, a| {
+        let row = r.to_serde(&arg(a, 0))?;
+        let resolve = arg(a, 1);
+        let mut original_throw = None;
+        let mapped = crate::order_history::map_hyperliquid_historical_order(&row, |coin| {
+            let value = r
+                .call(&resolve, &Value::Undefined, &[Value::str(coin)])
+                .and_then(|value| {
+                    if value.truthy() {
+                        r.to_rust_string(&value).map(Some)
+                    } else {
+                        Ok(None)
+                    }
+                });
+            value.map_err(|error| {
+                original_throw = Some(error);
+                // Only unwind the native DTO mapper. Never inspect the original
+                // thrown value: its identity and getters belong to the Realm.
+                safe_cex_exchange::runtime::ExchangeError::new("historical order resolver threw")
+            })
+        });
+        if let Some(error) = original_throw {
+            return Err(error);
+        }
+        let mapped = mapped.map_err(|error| r.error_of(&error.name, &error.message))?;
+        r.from_typed(&mapped)
+    });
     b("mapHyperliquidFillToIncomeRecords", 2, |r, a| {
         income::map_hyperliquid_fill_to_income_records(r, &arg(a, 0), &arg(a, 1))
     });
@@ -138,6 +187,30 @@ pub(crate) fn bind(realm: &Realm) {
             exchange_helpers::calculate_price_change_percentage(p, prev),
         ))
     });
+    b("isFinitePositiveNumber", 1, |r, a| {
+        // This predicate never coerces a non-number or reads object properties.
+        let Value::Number(number) = arg(a, 0) else {
+            return Ok(Value::Bool(false));
+        };
+        let Some(number) = serde_json::Number::from_f64(number) else {
+            return Ok(Value::Bool(false));
+        };
+        exchange_helpers::is_finite_positive_number(&serde_json::Value::Number(number))
+            .map(Value::Bool)
+            .map_err(|error| r.error_of(error.name, &error.message))
+    });
+    b(
+        "hyperliquidOrderResponseHasDeferredOrderStatus",
+        1,
+        |r, a| {
+            let response = r.to_serde(&arg(a, 0))?;
+            Ok(Value::Bool(
+                crate::order_response::hyperliquid_order_response_has_deferred_order_status(
+                    &response,
+                ),
+            ))
+        },
+    );
     b("parseFiniteNumber", 1, |r, a| {
         let v = r.to_serde(&arg(a, 0))?;
         exchange_helpers::parse_finite_number(&v)

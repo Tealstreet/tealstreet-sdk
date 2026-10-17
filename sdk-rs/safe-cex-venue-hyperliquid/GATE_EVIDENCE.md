@@ -1,3 +1,155 @@
+# Production emitter argument lists
+
+The Realm BaseExchange facade forwards TinyEmitter arguments through the shared
+BaseExchange::emit_args API. Empty calls retain an empty list, one array remains
+one argument, and separate message/metadata arguments remain separate. The
+existing per-value JSON boundary and native callback error propagation remain.
+
+The production-facade regression constructs the actual Realm superclass over a
+real BaseExchange and observes native on_args listeners. The old bridge compiles
+and fails: empty calls produce [null], and the warning pair produces one nested
+array. The single-array payload and inherited native log already match. After
+the bridge change, all 40 library, 24 production Perpetual binding and 21 Spot
+binding tests pass (85 total). Scoped formatting and strict native all-target
+Clippy pass. Independent review reports no findings; CodeRabbit is rate limited.
+This test scripts only the runtime boundary; the facade, native emitter and JSON conversions are real.
+
+The three existing enclosing-function pins for base_exchange_class are reviewed
+manually. Only b.emit becomes b.emit_args; the existing b.dispose, b.can_sign and
+b.name edges are unchanged. The token hash changes from d0b3260d4e9cb7dc to
+87e8a021dad29e72. No other call-site inventory or shared runtime code is authored
+in this slice. The required shared emitter API is inherited from PR425.
+Initial global parity reported five missing mappings in that shared dependency: emit_args,
+on_args, once_args, ArgsListener and install_exchange_event_bridge. No Hyperliquid
+finding is reported; the shared owner has the exact list. This is not a global
+gate clearance claim. The supported scoped Hyperliquid check passes using the
+unchanged existing exemption subset: 554 rows, 1243 public Rust items, zero
+invention/status findings. After inheriting the shared mapping repair at
+795d8691d6 through PR425 head ee665ced69, ordinary global parity passes with
+7459 rows and 17219 public Rust items, zero findings. The merged source/history
+and emitter slices retain all production test cases independently.
+
+# Production history, listeners and private snapshot dispatch
+
+The production perpetual Exchange now forwards candles, historical fills/orders,
+income history/range, client-ID lookup and private reconnect snapshots to the
+maintained Realm methods. Both public listeners use the existing Realm callback
+and cleanup boundary, matching the spot binding. Lookup preserves the source
+orderStatus request by cloid and its non-mutating behavior; reconnect runs the
+source parallel orders/core-state snapshot instead of the generic order-only
+fallback. Terminal-cancel classification, history collapse/mapping and derived
+closed-position imports now delegate to their existing maintained helpers.
+Derived closed positions remain distinct from fetchClosedPnl.
+
+Nine actual production-binding baselines fail before these overrides/imports:
+the read defaults return empty results, lookup takes the generic open-order path,
+reconnect skips core state and failed cancels replace the venue message with a
+ReferenceError. Both separately authored public listener baselines also fail
+against the defaults. After wiring, all fourteen new binding regressions pass.
+They observe real native candle/execution/history/income values, signed cancel
+cleanup, original nonterminal error preservation, precise REST queries, listener
+subscription/delivery/cleanup, and Store updates from actual private order,
+position and balance frames. The merged fill regression checks actual private
+userFills notifications, Store positions and emitted fill events; non-fill topic
+witnesses assert that those frames do not manufacture fill events. Only external
+HTTP, socket transport and clocks are scripted; imported names and mappers are
+production implementations. Startup order reads are joined before assertions so
+background startup completion cannot erase seeded orders or contaminate counts.
+
+Wiring exposed an additional native candle panic: the destructuring host returns
+only selected bindings, but fetchOHLCV indexed as if the leading skipped element
+occupied a slot. The compiled production candle case panics before this fix;
+reading selected slots zero and one matches the maintained TS destructuring and
+returns the authored candle/window values. Regex and arithmetic implementations
+are unchanged. Income-range expectations preserve the source's non-funding
+selection of both PnL and fee rows; balance total excludes unrealized PnL, and
+execution timestamps remain seconds while income timestamps remain milliseconds.
+
+Independent review caught an error bridge that inspected a resolver's thrown
+value before returning it. Its compiled Realm regression observes unwanted
+ordinary-object toString/code/response reads. The corrected bridge retains the
+original Value and uses an inert native sentinel only to unwind the DTO mapper.
+The restored test checks original identity and zero extra reads for both ordinary
+objects and Error values.
+
+Four additional production Realm tests execute the history imports, strict
+terminal classifier and derived native fields; retain callback throw identity;
+read all five actual class timeout properties; and exercise the four guarded
+browser network/approval flows without any window/ethers/browser stand-ins.
+Those guarded calls return their explicit missing-wallet refusal. This does not
+claim that every generic browser helper is directly callable on an unconfigured
+Realm. Browser workflow exports are not installed as Exchange class methods;
+the native class's builder-fee checker receives an explicit fourth fee argument.
+The production spot constructor aliases perp.createAPI to the native HTTP client,
+so its alternate generic spot_client factory and interceptor-only names are not
+assembled into the native path. These source-call graph distinctions retain the
+separate generic-helper/accepted-set obligations; no globals or exemptions were
+invented to suppress static leads.
+
+Seven independently compiled controls remove each of the four new import
+registrations, disconnect the orderUpdates and clearinghouseState dispatch
+branches, and invert the missing-window guard. They produce eight named native
+failures, including both clearinghouse positions and balance assertions. Every
+mutation is restored byte-for-byte. A first browser-control attempt failed to
+compile and is excluded; the corrected control compiles and fails its native
+missing-wallet assertion. The restored library, binding and placement targets
+pass 43 + 38 + 1 tests. Fourteen of the binding tests and four library tests are
+new in this slice. All 21 existing production Spot binding tests also pass after
+the shared import additions. Scoped formatting and strict native all-target Clippy
+pass. Global parity:check passes with 7459 rows and 17214 public Rust items,
+zero invention/status findings. Independent final review reports no remaining findings.
+
+The shared updateOrder result still returns Vec<String> and discards the named
+replacement clientOrderId property. The existing ReplacementOrderIds type and
+required common-trait/caller/dispatch migration are recorded for the overseer's
+shared API cutover; this venue slice does not claim to resolve that boundary.
+
+# Production TP/SL, fills and serial placement imports
+
+The production Realm now registers `hasSeenFill`, `markFillSeen`,
+`isFinitePositiveNumber`, `mapSeries` and
+`hyperliquidOrderResponseHasDeferredOrderStatus`. The fill wrappers share the
+same existing per-Realm cross-cache module as `getCrossCache`. The numeric
+predicate delegates only actual finite numbers to the existing native helper;
+non-number objects are never serialized or coerced. The deferred-status wrapper
+uses the ordinary native REST response DTO boundary.
+
+`mapSeries` keeps Realm values, receiver/error identity and promises intact.
+It reads live length and present slots, resolves `callback.call` before reading
+and awaiting an item, invokes that member with the callback as receiver, then
+awaits the result before moving on. Its default receiver is the retained module
+object, with a weak function capture. The installed p-iteration implementation
+independently agrees on the accessor/own-call order and serial live-length cases.
+
+Six `production_import_` regressions in `tests/binding.rs` construct the real
+production Exchange and Realm. Only external HTTP, sockets and runtime clocks
+are scripted. They observe signed zero-size position and partial TP/SL requests,
+a posted waiting trigger returning no IDs and scheduling a refresh without a
+duplicate POST, two ordered signed batch requests, first-error short-circuit,
+and real private userFills notifications. The fill case checks all three emitter
+events, the later BTC position update, replay deduplication and actual HIP-3
+clearinghouse HTTP after debounce and shared limiter pacing. Four additional
+Realm tests check the shared cache, strict numeric inputs, serial input/callback
+awaits, live length, module/custom receivers, own-call access order and original
+rejection identity. Unknown imports remain ReferenceErrors. The finite placement
+semantics host now refuses unreviewed names; its source-level stubs provide no
+production registration evidence.
+
+The compiled baseline fails all six production regressions. Five separate
+registration-name removals preserve helper bodies but fail the named production
+binding test for each missing import. The fill removals yield zero events; the
+numeric and mapping removals yield their named ReferenceErrors; the deferred
+removal fails after the trigger has already been posted. Each source is restored
+byte-for-byte before the next control. A restored replay runs the complete Realm,
+binding and placement-dispatch test targets: 39 library tests, 24 production
+binding tests and one native/source placement oracle, all passing.
+
+This slice covers these five imports and production paths. Cancellation,
+history and remaining static-name reachability, browser-only boundaries and
+missing perpetual trait wiring remain separate follow-up work. The current
+accepted-set preflight/refusals and contract backlog are unchanged; this is no
+whole-venue parity claim.
+
 # Request-weight nested helper ownership
 
 The local-functions policy previously delegated `rate_limit.rs::LOCAL_FUNCTION:text`

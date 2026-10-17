@@ -249,6 +249,23 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
         }),
     );
     method(
+        "markOrdersTerminal",
+        Rc::new(|st, a| {
+            let orders = arg(&a, 0)
+                .array_values()
+                .ok_or_else(|| Thrown::type_error("orders.forEach is not a function"))?;
+            let mut keys = vec![];
+            for order in orders {
+                keys.push(to_typed::<String>(&order.get("id")?)?);
+            }
+            let status: OrderStatus = to_typed(&arg(&a, 1))?;
+            let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+            // Remember IDs even before any matching order reaches the Store.
+            st.mark_orders_terminal(&refs, status).map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
         "updateOrdersStatus",
         Rc::new(|st, a| {
             let orders = arg(&a, 0).array_values().unwrap_or_default();

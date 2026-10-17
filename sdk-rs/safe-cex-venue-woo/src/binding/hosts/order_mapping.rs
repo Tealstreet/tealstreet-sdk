@@ -1,5 +1,5 @@
-//! Live order mapper outputs stay in the runtime value domain. The separate
-//! typed mapper is a closed-model facade and must not gate execution reports.
+//! Live order mapper outputs preserve the source runtime value domain, including
+//! undefined fields, copied values and original order references.
 use crate::binding::{
     rt::Rt,
     value::{Js, Thrown},
@@ -94,4 +94,122 @@ pub(crate) fn map_limit_order(rt: &Rt, row: Js) -> Result<Js, Thrown> {
         ("lastUpdate", Js::Number(rt.now())),
         ("info", row),
     ]))
+}
+
+// ts: WOOXExchange.mapAlgoOrder
+pub(crate) fn map_algo_order(rt: &Rt, row: Js) -> Result<Js, Thrown> {
+    let symbol = rt
+        .global("normalizeSymbol")?
+        .call(Js::Undefined, vec![row.get("symbol")?])?;
+    let market = rt
+        .this
+        .get("store")?
+        .get("marketsBySymbol")?
+        .get_key(&symbol.to_js_string()?)?;
+    if !market.truthy() {
+        return Ok(Js::array(Vec::new()));
+    }
+    let children = row.get("childOrders")?;
+    let children = if children.truthy() {
+        children
+    } else {
+        Js::array(vec![row.clone()])
+    };
+    let filter = children.get("filter")?;
+    if !filter.is_callable() {
+        return Err(Thrown::type_error("arr.filter is not a function"));
+    }
+    let filter_rt = rt.clone();
+    let filter_child = Js::function("", move |_, args| {
+        let child = super::super::value::arg(&args, 0);
+        if !child.is_nullish() && !child.is_object() {
+            return Err(Thrown::type_error(&format!(
+                "Cannot use 'in' operator to search for 'triggerPrice' in {}",
+                child.to_display()
+            )));
+        }
+        let v = |key: &str| {
+            filter_rt
+                .global("v")?
+                .call(Js::Undefined, vec![child.clone(), Js::str(key)])
+        };
+        let trigger_price = v("triggerPrice")?;
+        Ok(if trigger_price.truthy() {
+            trigger_price
+        } else {
+            Js::Bool(v("algoType")?.strict_equals(&Js::str("TRAILING_STOP")))
+        })
+    });
+    // The complete filter runs before any mapper, coercion or clock call.
+    let filtered = filter.call(children, vec![filter_child])?;
+    let map = filtered.get("map")?;
+    if !map.is_callable() {
+        return Err(Thrown::type_error("arr.filter(...).map is not a function"));
+    }
+    let rt = rt.clone();
+    let map_child = Js::function("", move |_, args| {
+        let child = super::super::value::arg(&args, 0);
+        let v = |key: &str| {
+            rt.global("v")?
+                .call(Js::Undefined, vec![child.clone(), Js::str(key)])
+        };
+        let filled = v("totalExecutedQuantity")?;
+        let price = v("triggerPrice")?;
+        let price = if price.truthy() {
+            price
+        } else {
+            rt.global("subtract")?
+                .call(Js::Undefined, vec![v("extremePrice")?, v("callbackValue")?])?
+        };
+        let kind = rt
+            .global("ORDER_TYPE")?
+            .get_key(&v("algoType")?.to_js_string()?)?;
+        let id = Js::utf16(&v("algoOrderId")?.to_js_string()?);
+        let parent_id = rt
+            .global("v")?
+            .call(Js::Undefined, vec![row.clone(), Js::str("rootAlgoOrderId")])?;
+        let parent_id = if parent_id.truthy() {
+            parent_id
+        } else {
+            v("rootAlgoOrderId")?
+        };
+        let parent_id = Js::utf16(&parent_id.to_js_string()?);
+        let trigger = rt
+            .global("ORDER_TRIGGER_TYPE")?
+            .get_key(&v("triggerPriceType")?.to_js_string()?)?;
+        let stop = kind.strict_equals(&Js::str("trailing_stop_market"))
+            || kind.strict_equals(&Js::str("stop_market"));
+        let side = rt
+            .global("ORDER_SIDE")?
+            .get_key(&child.get("side")?.to_js_string()?)?;
+        let quantity = child.get("quantity")?;
+        let reduce_only = v("reduceOnly")?;
+        let remaining = rt
+            .global("subtract")?
+            .call(Js::Undefined, vec![child.get("quantity")?, filled.clone()])?;
+        Ok(Js::object(vec![
+            ("id", id),
+            ("parentId", parent_id),
+            ("status", Js::str("open")),
+            ("symbol", symbol.clone()),
+            ("type", kind),
+            (
+                if stop {
+                    "slTriggerType"
+                } else {
+                    "tpTriggerType"
+                },
+                trigger,
+            ),
+            ("side", side),
+            ("price", price),
+            ("amount", quantity),
+            ("reduceOnly", reduce_only),
+            ("filled", filled),
+            ("remaining", remaining),
+            ("lastUpdate", Js::Number(rt.now())),
+            ("info", row.clone()),
+        ]))
+    });
+    map.call(filtered, vec![map_child])
 }

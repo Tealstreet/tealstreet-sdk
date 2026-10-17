@@ -22,17 +22,9 @@ fn thrown(r: &Realm, e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
     }
     error
 }
-/// TinyEmitter.emit arguments as the Rust listener payload: one argument as
-/// itself, several as an array (the shape `BaseExchange::log` emits).
-fn payload(r: &mut Realm, args: &[Value]) -> Result<serde_json::Value, Thrown> {
-    match args {
-        [] => Ok(serde_json::Value::Null),
-        [one] => r.to_serde(one),
-        many => {
-            let array = r.new_array(many.to_vec());
-            r.to_serde(&array)
-        }
-    }
+/// Keep the argument list distinct from a single argument that is itself an array.
+fn payload(r: &mut Realm, args: &[Value]) -> Result<Vec<serde_json::Value>, Thrown> {
+    args.iter().map(|value| r.to_serde(value)).collect()
 }
 pub(crate) fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, Thrown> {
     Ok(match value {
@@ -70,7 +62,7 @@ pub(crate) fn base_exchange_class(
             let emit = r.native("emit", 1, move |r, _, a| {
                 let event = r.to_rust_string(&arg(a, 0))?;
                 let data = payload(r, a.get(1..).unwrap_or_default())?;
-                b.emit(&event, data).map_err(|e| thrown(r, e))?;
+                b.emit_args(&event, &data).map_err(|e| thrown(r, e))?;
                 Ok(Value::Undefined)
             });
             r.define_str(&emitter, "emit", emit)?;

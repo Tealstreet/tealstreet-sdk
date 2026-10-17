@@ -93,6 +93,9 @@ impl WsHost for Host {
         Host::store(self, name)
     }
     fn field(&mut self, name: &'static str) -> Result<Js, Thrown> {
+        if name == "timeframes" {
+            return Host::get(self, "parent")?.get("timeframes");
+        }
         Host::get(
             self,
             match name {
@@ -108,12 +111,32 @@ impl WsHost for Host {
         super::methods::call(self, name, args)
     }
     fn read(&mut self, endpoint: &'static str, params: Js) -> Result<JsFuture<'static>, Thrown> {
-        Ok(self.http(
+        // The public socket snapshot reads this.parent.xhr in the source.
+        let parent = self.child(Host::get(self, "parent")?);
+        let request = parent.http(
             "xhr",
             "get",
             endpoint,
             vec![Js::object(vec![("params", params)])],
-        ))
+        );
+        Ok(Box::pin(async move {
+            let result = request.await;
+            // JS resumes after await in a later job even for an already
+            // settled HTTP response. Let the parser buffer its first delta
+            // before the snapshot continuation consumes that buffer.
+            let mut yielded = false;
+            std::future::poll_fn(|cx| {
+                if yielded {
+                    std::task::Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+            result
+        }))
     }
     fn spawn(
         &mut self,

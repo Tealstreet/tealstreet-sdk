@@ -4480,10 +4480,10 @@ fn mexc_validation_keeps_raw_detail_and_error_precedence() {
         });
         let emitted = Rc::new(RefCell::new(Vec::new()));
         let events = emitted.clone();
-        exchange.base.on(
+        exchange.base.on_args(
             "error",
             Rc::new(move |_, event| {
-                events.borrow_mut().push(event.clone());
+                events.borrow_mut().push(serde_json::json!(event));
                 Ok(())
             }),
         );
@@ -4603,10 +4603,10 @@ fn mexc_snapshot_reporters_preserve_object_detail_and_listener_failure() {
             let mut original = ExchangeError::new("listener stopped reporting");
             original.code = Some(json!(777));
             let failure = original.clone();
-            exchange.base.on(
+            exchange.base.on_args(
                 "error",
                 Rc::new(move |_, value| {
-                    events.borrow_mut().push(value.clone());
+                    events.borrow_mut().push(serde_json::json!(value));
                     if throws { Err(failure.clone()) } else { Ok(()) }
                 }),
             );
@@ -4752,10 +4752,10 @@ fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
     });
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = events.clone();
-    exchange.base.on(
+    exchange.base.on_args(
         "error",
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut().push(serde_json::json!(value));
             Ok(())
         }),
     );

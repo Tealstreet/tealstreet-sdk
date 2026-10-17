@@ -3,6 +3,16 @@
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/coinbase/CLAUDE.md).
 Core contract: [shared exchange trait](../safe-cex-exchange/CLAUDE.md).
 
+The concrete API host uses the shared client factory and optional transport adapter
+from the runtime provider. Preserve executable adapter and query-serializer handles
+across the native signing carrier; neither is a JSON field. Real constructor/read
+witnesses and eight maintained TS factory/API scenes cover provider selection,
+no-adapter fallback, tunnel gating and Authorization header selection. Run
+`scripts/transport-binding-controls.py` for four independent compiled production
+reversions, and `scripts/private-binding-controls.py` for real private frame and
+fill-dispatch controls. Private user orders map snapshots/updates into Store and
+emit fills; the source does not dispatch balance or position topics.
+
 `tables.rs` mirrors every exported protocol table in `coinbase.types.ts`.
 `protocol.rs` mirrors the inert Starbase exported protocol constants, including
 closed activation flags, refresh periods, timeframe resolutions, and evidence.

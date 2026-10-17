@@ -7,7 +7,7 @@ use crate::{
 };
 use safe_cex_exchange::{
     http::{HttpClientOptions, install_transport_adapter, safe_cex_axios_create},
-    native::{NativeHttpHost, nanoid},
+    native::{NativeHttpEvents, NativeHttpHost, nanoid},
     runtime::{ExchangeError, ExchangeRuntime},
     websocket::WsRuntime,
 };
@@ -37,7 +37,7 @@ pub fn native_inputs(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
 ) -> NativeBackpackInputs {
-    native_inputs_signed(runtime, adapter, None)
+    native_inputs_signed(runtime, adapter, None, NativeHttpEvents::default())
 }
 
 /// Native inputs retaining one account's common HTTP signing capability.
@@ -46,6 +46,7 @@ pub fn native_inputs_signed(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
     remote: Option<safe_cex_exchange::js_runtime::base_exchange::HostedSigner>,
+    events: NativeHttpEvents,
 ) -> NativeBackpackInputs {
     let registry = Rc::new(TransportRegistry::default());
     let (build_runtime, build_registry) = (runtime.clone(), registry.clone());
@@ -78,7 +79,9 @@ pub fn native_inputs_signed(
                 }),
                 account_name: remote.as_ref().and_then(|(_, name)| name.clone()),
                 adapter,
-                host: Rc::new(NativeHttpHost),
+                host: Rc::new(NativeHttpHost {
+                    events: events.clone(),
+                }),
                 runtime: exchange_runtime,
                 store: None,
                 stats: None,

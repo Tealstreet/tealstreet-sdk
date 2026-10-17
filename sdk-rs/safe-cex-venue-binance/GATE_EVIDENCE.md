@@ -3652,3 +3652,50 @@ runtime results and seven explicit classifications in these disjoint selected
 scopes. This does not turn classification receipts into behavioral execution or
 establish coverage for the remaining inventory. Post-integration formatting,
 frozen installation and parity-check pass (7,459 rows; 17,204 public Rust items).
+
+### Production native client-order IDs (2026-10-17)
+
+The real `native_dependencies` import previously returned RFC UUID-v4 (36 bytes).
+The source utility uses default21 nanoid with `-` and `_` removed. With the actual
+10-byte `x-s3vFFRQp` broker prefix the old payload was46 bytes; the repaired maximum
+is31, within Futures/Spot36 and PM32. PM trailing stops keep the source's bare ID.
+The host now calls the existing `safe_cex_crypto::uuid::uuid`; no new generator or
+fixed-length padding is introduced. The maintained entropy interface remains the
+[declared utility choice](../parity/MANIFEST-SPEC.md#utility-capability-choice).
+
+`production_native_client_ids_fit_every_family_and_payload_path` constructs real
+native dependencies and all three production owners. Its128 actual OS-entropy
+samples check the stripped alphabet and maximum length. Real owner methods cover
+rule minting, regular orders, split lots, attached SL/TP, standalone stop/TP and
+both trailing formatter routes, with venue length checks and unchanged caller IDs.
+The four `production_native_private_*` topic witnesses use these actual imports,
+parents, private bindings and DefaultStore: orders/fills/positions/balance frames
+assert native store fields and exact emitted fill payloads or absence. Derivative
+balance rows are source-ignored; Spot's account topic changes balance without
+inventing derivative positions. A deterministic scheduler and rejecting terminal
+HTTP adapter bound these immediate formatting/frame observations; neither UUID
+production nor the host/binding/store step is replaced.
+
+The final isolated control restored only the old `uuid_v4()` expression. It compiled
+and failed the exact named production-ID length assertion at exit101. Restoring
+the complete host source byte-for-byte passed all five focused native tests.
+Earlier fixture authoring errors (CurrencyBalance projection and a prefix bound)
+are excluded from negative evidence. The shared crypto UUID known-answer witness
+also passes, covering21-byte entropy ingress, alphabet masking, both removed
+characters, an empty result and entropy failure.
+
+The full native-feature/all-target suite, including ignored live TS oracles,
+passes **332 /zero failed /zero ignored across79 target receipts**. Native
+all-feature/all-target and wasm default-feature/all-target Clippy pass with
+warnings denied (1m37s /2m03s). Generated-source freshness passes for all three
+source modules. After merging master `e58fb67060` without conflicts, exact diff
+checks show the Binance implementation/tests and compiled dependency Rust/Cargo
+inputs unchanged; only unrelated transport docs/scripts and TS audit tests differ.
+The maintained structural gate now passes globally (7459 rows /17214 public Rust
+items) and with Binance obligations (822 public items), with zero exemptions.
+Cached checker reuse is verified against its actual Rust/Cargo/lock/config inputs;
+the sole difference is documentation. Frozen install, format and diff checks pass.
+
+Independent draft review found only the corrected test prefix bound. CodeRabbit
+returned its review limit and has not completed a bot review. These are native-host
+ID and topic witnesses; they do not claim whole-venue parity or live order probes.

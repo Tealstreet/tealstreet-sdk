@@ -56,8 +56,9 @@ pub fn map_order(
     } else {
         0.0
     };
-    let amount = parse_float(text("size")?);
-    let remaining = parse_float(text("remaining_size")?);
+    let amount = parse_float(&js_string(row.get("size")).map_err(|error| error.to_string())?);
+    let remaining =
+        parse_float(&js_string(row.get("remaining_size")).map_err(|error| error.to_string())?);
     Ok(Order {
         client_order_id: (None).into(),
         id: text("id")?.to_owned(),
@@ -71,11 +72,26 @@ pub fn map_order(
         filled: amount - remaining,
         remaining,
         reduce_only,
-        time_in_force: (None).into(),
-        // Date(number) applies TimeClip directly; only strings are date-parsed.
-        last_update: match row.get("created_at").and_then(js_value_as_f64) {
-            Some(value) => js_time_clip(value),
-            None => js_date_parse(text("created_at")?, local_to_utc),
+        time_in_force: None.into(),
+        // Date distinguishes missing, null and booleans before primitive/string parsing.
+        last_update: match row.get("created_at") {
+            None => f64::NAN,
+            Some(Value::Null) => 0.0,
+            Some(Value::Bool(value)) => {
+                if *value {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Some(value) => match js_value_as_f64(value) {
+                Some(number) => js_time_clip(number),
+                None => js_date_parse(
+                    &js_string(Some(value)).map_err(|error| error.to_string())?,
+                    local_to_utc,
+                ),
+            },
+
         },
         info: (Some(Value::Object(row.clone()))).into(),
         close: (None).into(),

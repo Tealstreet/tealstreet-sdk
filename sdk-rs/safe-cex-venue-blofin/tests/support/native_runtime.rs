@@ -1,7 +1,7 @@
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
-    websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
+    websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
 use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{
@@ -26,6 +26,8 @@ pub struct Runtime {
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
     pub dials: RefCell<Vec<String>>,
+    pub opened: RefCell<Vec<Rc<Socket>>>,
+    pub open: Cell<bool>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -107,7 +109,14 @@ impl WsRuntime for Runtime {
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
         self.dials.borrow_mut().push(url);
-        Box::pin(std::future::pending())
+        if self.open.get() {
+            let socket = Rc::new(Socket::default());
+            socket.events.borrow_mut().push_back(WsEvent::Open);
+            self.opened.borrow_mut().push(socket.clone());
+            Box::pin(async move { Ok(socket as Rc<dyn WsSocket>) })
+        } else {
+            Box::pin(std::future::pending())
+        }
     }
     fn headers_capable(&self) -> bool {
         false
@@ -172,6 +181,8 @@ pub fn fixture() -> (
         jobs: RefCell::default(),
         errors: RefCell::default(),
         dials: RefCell::default(),
+        opened: RefCell::default(),
+        open: Cell::new(false),
     });
     let store = Rc::new(DefaultStore::new());
     let opts: ExchangeOptions =
@@ -198,4 +209,34 @@ pub fn fixture() -> (
     )
     .unwrap();
     (venue, runtime, store, wire)
+}
+
+#[derive(Default)]
+pub struct Socket {
+    pub events: Rc<RefCell<std::collections::VecDeque<WsEvent>>>,
+    pub sent: RefCell<Vec<String>>,
+}
+impl WsSocket for Socket {
+    fn ready_state(&self) -> u8 {
+        1
+    }
+    fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+        let events = self.events.clone();
+        Box::pin(std::future::poll_fn(move |_| {
+            events
+                .borrow_mut()
+                .pop_front()
+                .map_or(Poll::Pending, |e| Poll::Ready(Ok(e)))
+        }))
+    }
+    fn send(&self, message: &str) -> Result<(), ExchangeError> {
+        self.sent.borrow_mut().push(message.into());
+        Ok(())
+    }
+    fn close(&self) {}
+    fn terminate(&self) {}
+    fn reconnect(&self) {}
+    fn is_reconnecting(&self) -> bool {
+        false
+    }
 }

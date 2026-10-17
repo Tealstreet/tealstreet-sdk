@@ -23,6 +23,52 @@ use std::{
     task::Waker,
 };
 
+/// Install the source fill and variadic log bridge on a production exchange.
+/// The post callback is the worker port; no event payload is interpreted as args.
+pub fn install_exchange_event_bridge(
+    base: &safe_cex_exchange::exchange::BaseExchange,
+    post: Rc<dyn Fn(StoreWorkerPayload) -> Result<(), ExchangeError>>,
+) {
+    let fill_post = post.clone();
+    base.on(
+        "fill",
+        Rc::new(move |_, data| {
+            fill_post(StoreWorkerPayload {
+                op: StoreWorkerOp::Fill,
+                instance_id: None,
+                data: Some(data.clone()),
+            })
+        }),
+    );
+    let logs = [
+        ("error", StoreWorkerOp::Error),
+        ("warning", StoreWorkerOp::Warning),
+        ("log", StoreWorkerOp::Log),
+        ("exec-log", StoreWorkerOp::ExecLog),
+        ("exec-result", StoreWorkerOp::ExecResult),
+        ("chaser:complete", StoreWorkerOp::ChaserComplete),
+        ("grafana-info", StoreWorkerOp::GrafanaInfo),
+        ("grafana-error", StoreWorkerOp::GrafanaError),
+        ("grafana-pws", StoreWorkerOp::GrafanaPws),
+        ("grafana-pws-sub", StoreWorkerOp::GrafanaPwsSub),
+        ("grafana-http-request", StoreWorkerOp::GrafanaHttpRequest),
+        ("grafana-http-response", StoreWorkerOp::GrafanaHttpResponse),
+    ];
+    for (name, op) in logs {
+        let post = post.clone();
+        base.on_args(
+            name,
+            Rc::new(move |_, args| {
+                post(StoreWorkerPayload {
+                    op,
+                    instance_id: None,
+                    data: Some(Value::Array(args.to_vec())),
+                })
+            }),
+        );
+    }
+}
+
 pub struct ProcessorArguments {
     pub account_name: String,
     pub exchange_name: ExchangeName,
@@ -492,55 +538,17 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                 Ok(())
             }));
         let worker = Rc::downgrade(self);
-        self.exchange()
-            .ok_or_else(|| ExchangeError::new("No exchange for fill listener"))?
-            .base()
-            .on(
-                "fill",
-                Rc::new(move |_, data| {
-                    if let Some(w) = worker.upgrade() {
-                        w.construction.ctx.post_payload(StoreWorkerPayload {
-                            op: StoreWorkerOp::Fill,
-                            instance_id: None,
-                            data: Some(data.clone()),
-                        })?;
-                    }
-                    Ok(())
-                }),
-            );
-        let logs = [
-            ("error", StoreWorkerOp::Error),
-            ("warning", StoreWorkerOp::Warning),
-            ("log", StoreWorkerOp::Log),
-            ("exec-log", StoreWorkerOp::ExecLog),
-            ("exec-result", StoreWorkerOp::ExecResult),
-            ("chaser:complete", StoreWorkerOp::ChaserComplete),
-            ("grafana-info", StoreWorkerOp::GrafanaInfo),
-            ("grafana-error", StoreWorkerOp::GrafanaError),
-            ("grafana-pws", StoreWorkerOp::GrafanaPws),
-            ("grafana-pws-sub", StoreWorkerOp::GrafanaPwsSub),
-            ("grafana-http-request", StoreWorkerOp::GrafanaHttpRequest),
-            ("grafana-http-response", StoreWorkerOp::GrafanaHttpResponse),
-        ];
-        for (name, op) in logs {
-            let worker = Rc::downgrade(self);
+        install_exchange_event_bridge(
             self.exchange()
-                .ok_or_else(|| ExchangeError::new("Exchange cleared during event setup"))?
-                .base()
-                .on(
-                    name,
-                    Rc::new(move |_, data| {
-                        if let Some(w) = worker.upgrade() {
-                            w.construction.ctx.post_payload(StoreWorkerPayload {
-                                op,
-                                instance_id: None,
-                                data: Some(Value::Array(vec![data.clone()])),
-                            })?;
-                        }
-                        Ok(())
-                    }),
-                );
-        }
+                .ok_or_else(|| ExchangeError::new("No exchange for event bridge"))?
+                .base(),
+            Rc::new(move |payload| {
+                if let Some(w) = worker.upgrade() {
+                    w.construction.ctx.post_payload(payload)?;
+                }
+                Ok(())
+            }),
+        );
         let worker = Rc::downgrade(self);
         self.exchange()
             .ok_or_else(|| ExchangeError::new("No reconnect exchange"))?

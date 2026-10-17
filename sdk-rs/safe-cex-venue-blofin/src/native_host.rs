@@ -488,7 +488,7 @@ impl RateLimitClock for ApiClock {
 }
 impl crate::api::ApiRuntime for ApiClock {
     fn timestamp(&self) -> f64 {
-        self.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time()
     }
     fn nonce(&self) -> String {
         uuid()
@@ -938,7 +938,7 @@ impl pc::PrivateStreamHost for PrivateHost {
         uuid()
     }
     fn timestamp_ms(&self) -> f64 {
-        self.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn remote_signer_present(&self) -> bool {
         self.base
