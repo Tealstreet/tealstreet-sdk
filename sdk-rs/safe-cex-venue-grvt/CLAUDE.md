@@ -353,3 +353,9 @@ isGrvtRead; production request classification retains the shared transport
 predicate. The session oracle keeps its other eight groups (84 source cases).
 The helper manifest row is not-applicable, with the live predicate mapped next
 to it; this does not remove any exported builder or browser workflow.
+
+The concrete amendment and cancellation catch callbacks invoke the installed
+`emitAndLogError` reporter. Constructed binding regressions cover preflight
+amendment refusal and SDK account/symbol cancellation failures: reporter metadata,
+console error/trace effects and the absence of premature amendment writes must
+survive. Direct emitter calls lose the source reporter's second argument.

@@ -222,11 +222,11 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "getAccount",
-                "safe-cex-venue-kucoin/src/accounts.rs::get_account",
+                "safe-cex-venue-kucoin/src/futures_native_accounts.rs::get_account",
             ),
             (
                 "validateAccount",
-                "safe-cex-venue-kucoin/src/rest_reads.rs::validate_account",
+                "safe-cex-venue-kucoin/src/futures_native_accounts.rs::validate_account",
             ),
             (
                 "dispose",
@@ -442,11 +442,11 @@ fn initialize_spot_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) -> Re
             ),
             (
                 "getAccount",
-                "safe-cex-venue-kucoin/src/accounts.rs::get_spot_account",
+                "safe-cex-venue-kucoin/src/spot_native_accounts.rs::get_account",
             ),
             (
                 "validateAccount",
-                "safe-cex-venue-kucoin/src/accounts.rs::validate_spot_account",
+                "safe-cex-venue-kucoin/src/spot_native_accounts.rs::validate_account",
             ),
             ("start", "safe-cex-venue-kucoin/src/spot_bodies.rs::start"),
             (
