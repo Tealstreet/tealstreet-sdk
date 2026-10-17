@@ -185,7 +185,7 @@ fn ohlcv_native_requests_and_candles() {
         let requests = RefCell::new(Vec::new());
         let opts = OHLCVOptions {
             symbol: row["symbol"].as_str().unwrap().into(),
-            interval: Timeframe::M5,
+            interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M5),
             from: Some(if index == 14 {
                 0.0
             } else if index == 15 {
