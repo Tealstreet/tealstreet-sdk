@@ -199,3 +199,11 @@ including current-data callbacks and separately observable model reads. Its
 controls require compiling named output failures and exact restoration; run
 `scripts/accepted-body-controls.py` serially with other source-sensitive probes.
 The accompanying Axios oracle observes actual transforms and dispatch data.
+
+Signature-rejection predicate failures retain `TransportError::JavaScript`,
+including their original name/message and failed or effective request. They do
+not consume the retry stamp or schedule another attempt. The actual-source
+TypeError witness and native rejection/resend/read/write regressions live in
+`tests/signature_error_kind.rs`; `scripts/signature-error-kind-control.py`
+restores the original message-only wrapper to prove the failures, then restores
+exact source bytes and requires every witness to pass.
