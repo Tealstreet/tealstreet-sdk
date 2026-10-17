@@ -26,7 +26,7 @@ use safe_cex_exchange::{
         ValidatedBatch, ValidatedOrder,
     },
     js_runtime::base_exchange::ExternalPublicDataFactory,
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners, ListenerCleanup},
     websocket::WsRuntime,
     ws_parent::WsExchangeParent,
 };
@@ -211,6 +211,34 @@ impl HyperliquidExchange {
     ) -> Result<(), ExchangeError> {
         self.bound()?.unit(name, args).await
     }
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        name: &str,
+        first: impl serde::Serialize,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let Binding {
+            mut realm,
+            instance,
+        } = self.bound()?;
+        let listener = realm.native("callback", 1, move |realm, _, args| {
+            let value = args.first().cloned().unwrap_or(Value::Undefined);
+            callback(realm.to_typed::<T>(&value)?);
+            Ok(Value::Undefined)
+        });
+        let first = realm
+            .from_typed(&first)
+            .map_err(|error| realm.exchange_error(&error))?;
+        let cleanup = realm
+            .call_method(&instance, name, &[first, listener])
+            .map_err(|error| realm.exchange_error(&error))?;
+        Ok(Box::new(move || {
+            realm
+                .call(&cleanup, &Value::Undefined, &[])
+                .map(|_| ())
+                .map_err(|error| realm.exchange_error(&error))
+        }))
+    }
 }
 
 impl Binding {
@@ -291,6 +319,20 @@ impl Exchange for HyperliquidExchange {
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("start", |_| Ok(vec![])))
+    }
+    fn listen_ohlcv(
+        &self,
+        options: safe_cex_types::OHLCVOptions,
+        callback: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", options, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(safe_cex_types::OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", symbol, callback)
     }
     fn fetch_ohlcv(
         &self,

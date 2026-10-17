@@ -117,9 +117,10 @@ pub(crate) fn bind(realm: &Realm) {
                     }
                 });
             value.map_err(|error| {
-                let native = r.exchange_error(&error);
                 original_throw = Some(error);
-                native
+                // Only unwind the native DTO mapper. Never inspect the original
+                // thrown value: its identity and getters belong to the Realm.
+                safe_cex_exchange::runtime::ExchangeError::new("historical order resolver threw")
             })
         });
         if let Some(error) = original_throw {
