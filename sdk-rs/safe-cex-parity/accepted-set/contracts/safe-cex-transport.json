@@ -11040,5 +11040,2490 @@
         }
       }
     ]
+  },
+  "safe_cex_transport::provider::RestBody": {
+    "shape": "observed",
+    "evidence": "Complete four-API production owner. Real Untransformed/Encoded/remote-adapter Transformed inputs expose borrowed identity, signing refusal, phase retention, content-type matching, raw bytes and actual JSON/form transforms. Native Value variants and numeric bits are inspected before output projection; the body owner is never serialized to infer behavior.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "untransformed",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Inspect the actual borrowed payload and its address, including transformed adapter data; encoded bytes refuse signing rather than reconstructing JSON.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}}let input=arrange($value);match $type::untransformed(&input){Ok(v)=>{let same=match &input{crate::RestBody::Untransformed(original)=>std::ptr::eq(v,original),crate::RestBody::Transformed(d)=>std::ptr::eq(v,d.value()),_=>false};serde_json::json!({\"ok\":true,\"borrowed\":same,\"value\":observe(v)})},Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} }",
+        "cases": [
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "{\"zero\":-0}"
+            },
+            "output": {
+              "ok": true,
+              "borrowed": true,
+              "value": {
+                "kind": "object",
+                "entries": [
+                  [
+                    "zero",
+                    {
+                      "kind": "number",
+                      "bits": "9223372036854775808"
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "\"parser text\""
+            },
+            "output": {
+              "ok": true,
+              "borrowed": true,
+              "value": {
+                "kind": "string",
+                "value": "parser text"
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                123,
+                125
+              ]
+            },
+            "output": {
+              "ok": false,
+              "message": "Signing requires untransformed request data"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "with_signed_data",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Observe returned variant and signed payload, original receiver immutability and encoded-template rejection.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestBody)->serde_json::Value {use crate::RestBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(d)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(d.value())})}}let input=arrange($value);let signed=serde_json::from_str($value[\"signed\"].as_str().expect(\"signed input\")).expect(\"signed JSON\");let before=phase(&input);match $type::with_signed_data(&input,signed){Ok(actual)=>serde_json::json!({\"ok\":true,\"before\":before,\"unchanged\":phase(&input)==before,\"actual\":phase(&actual)}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string(),\"unchanged\":phase(&input)==before})} }",
+        "cases": [
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"old\"",
+              "signed": "{\"signed\":-0}"
+            },
+            "output": {
+              "ok": true,
+              "before": {
+                "phase": "untransformed",
+                "value": {
+                  "kind": "string",
+                  "value": "old"
+                }
+              },
+              "unchanged": true,
+              "actual": {
+                "phase": "untransformed",
+                "value": {
+                  "kind": "object",
+                  "entries": [
+                    [
+                      "signed",
+                      {
+                        "kind": "number",
+                        "bits": "9223372036854775808"
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "{\"old\":true}",
+              "signed": "\"new signed text\""
+            },
+            "output": {
+              "ok": true,
+              "before": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "object",
+                  "entries": [
+                    [
+                      "old",
+                      {
+                        "kind": "bool",
+                        "value": true
+                      }
+                    ]
+                  ]
+                }
+              },
+              "unchanged": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "new signed text"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                255,
+                0
+              ],
+              "signed": "null"
+            },
+            "output": {
+              "ok": false,
+              "message": "Signing requires untransformed request data",
+              "unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "transform",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "content_type",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual Axios transform with JSON/form/no content type and real retry identities; preserve native negative zero before wire stringification.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestBody)->serde_json::Value {use crate::RestBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(d)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(d.value())})}}let input=arrange($value);let before=phase(&input);match $type::transform(&input,$value.get(\"content\").and_then(serde_json::Value::as_str)){Ok(actual)=>serde_json::json!({\"ok\":true,\"actual\":phase(&actual),\"unchanged\":phase(&input)==before}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} }",
+        "cases": [
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "{\"x\":1}"
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "{\"x\":1}"
+                }
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "null"
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "null"
+                }
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"  {\\\"x\\\":1}  \"",
+              "content": "application/json"
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "{\"x\":1}"
+                }
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "{\"a\":\"x y\",\"skip\":null}",
+              "content": "application/x-www-form-urlencoded"
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "a=x+y"
+                }
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                255,
+                0,
+                34
+              ]
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "encoded",
+                "bytes": [
+                  255,
+                  0,
+                  34
+                ]
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "{\"zero\":-0}",
+              "content": "application/json"
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "object",
+                  "entries": [
+                    [
+                      "zero",
+                      {
+                        "kind": "number",
+                        "bits": "9223372036854775808"
+                      }
+                    ]
+                  ]
+                }
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "-0"
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "number",
+                  "bits": "9223372036854775808"
+                }
+              },
+              "unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "wire_bytes_for_content_type",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "content_type",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "primitive": "u8"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Inspect actual byte output including invalid UTF-8 encoded data, parse-before-trim BOM behavior, case-sensitive content type and post-transform identity.",
+        "call": "{ fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}}let input=arrange($value);match $type::wire_bytes_for_content_type(&input,$value.get(\"content\").and_then(serde_json::Value::as_str)){Ok(bytes)=>serde_json::json!({\"ok\":true,\"bytes\":bytes}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} }",
+        "cases": [
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\" raw \""
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                32,
+                114,
+                97,
+                119,
+                32
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"  {\\\"x\\\":1}  \"",
+              "content": "application/json"
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                123,
+                34,
+                120,
+                34,
+                58,
+                49,
+                125
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"  nope  \"",
+              "content": "application/json"
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                34,
+                32,
+                32,
+                110,
+                111,
+                112,
+                101,
+                32,
+                32,
+                34
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"\\ufeff{}\"",
+              "content": "application/json"
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                34,
+                239,
+                187,
+                191,
+                123,
+                125,
+                34
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"  {}  \"",
+              "content": "Application/JSON"
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                32,
+                32,
+                123,
+                125,
+                32,
+                32
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "{\"x\":\"a+b\",\"skip\":null}",
+              "content": "application/x-www-form-urlencoded"
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                120,
+                61,
+                97,
+                37,
+                50,
+                66,
+                98
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "\"already string\"",
+              "content": "application/json"
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                97,
+                108,
+                114,
+                101,
+                97,
+                100,
+                121,
+                32,
+                115,
+                116,
+                114,
+                105,
+                110,
+                103
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "{\"zero\":-0}"
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                123,
+                34,
+                122,
+                101,
+                114,
+                111,
+                34,
+                58,
+                48,
+                125
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                0,
+                255,
+                34
+              ]
+            },
+            "output": {
+              "ok": true,
+              "bytes": [
+                0,
+                255,
+                34
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_transport::provider::RestRequest": {
+    "shape": "observed",
+    "evidence": "Complete two-API request owner. Headers are observed in native insertion order after case-insensitive merge, first-spelling/last-value selection and control filtering. Actual request transform observes both mutated retry config and returned wire config, with absent/null distinction and preserved native query bits and adapter extensions.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "merge_axios_headers",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "defaults",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "indexmap::map::IndexMap",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Mutating raw header merge: inspect ordered native entries and untouched method/URL, including duplicate case variants, empty names and control filtering.",
+        "call": "{ fn headers(v:&serde_json::Value)->indexmap::IndexMap<String,String>{v.as_array().expect(\"headers\").iter().map(|pair|(pair[0].as_str().expect(\"name\").into(),pair[1].as_str().expect(\"value\").into())).collect()}let mut input=$type {method:\"GET\".into(),url:\"/kept\".into(),headers:headers(&$value[\"request\"]),..Default::default()};input.merge_axios_headers(&headers(&$value[\"defaults\"]));serde_json::json!({\"headers\":input.headers.iter().collect::<Vec<_>>(),\"method\":input.method,\"url\":input.url}) }",
+        "cases": [
+          {
+            "input": {
+              "defaults": [
+                [
+                  " X-Token ",
+                  " first "
+                ],
+                [
+                  "Accept",
+                  "json"
+                ]
+              ],
+              "request": [
+                [
+                  "x-token",
+                  "\tlast\r\n\u0000\t"
+                ],
+                [
+                  " New ",
+                  " a\tb "
+                ],
+                [
+                  " ﻿ ",
+                  "skip"
+                ]
+              ]
+            },
+            "output": {
+              "headers": [
+                [
+                  "X-Token",
+                  "last"
+                ],
+                [
+                  "Accept",
+                  "json"
+                ],
+                [
+                  "New",
+                  "a\tb"
+                ]
+              ],
+              "method": "GET",
+              "url": "/kept"
+            }
+          },
+          {
+            "input": {
+              "defaults": [
+                [
+                  "Content-Type",
+                  "one"
+                ],
+                [
+                  "X-A",
+                  "a"
+                ]
+              ],
+              "request": [
+                [
+                  "content-type",
+                  " two "
+                ],
+                [
+                  "x-a",
+                  " b "
+                ],
+                [
+                  "X-B",
+                  "\u0001z\u001f"
+                ]
+              ]
+            },
+            "output": {
+              "headers": [
+                [
+                  "Content-Type",
+                  "two"
+                ],
+                [
+                  "X-A",
+                  "b"
+                ],
+                [
+                  "X-B",
+                  "z"
+                ]
+              ],
+              "method": "GET",
+              "url": "/kept"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "transform_axios_request",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the self-only transform rather than relabel it typed; observe BOTH retry and wire phases, null/absence, default content headers and retained unrelated native state.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestBody)->serde_json::Value {use crate::RestBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(d)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(d.value())})}}fn headers(v:&serde_json::Value)->indexmap::IndexMap<String,String>{v.as_array().expect(\"headers\").iter().map(|pair|(pair[0].as_str().expect(\"name\").into(),pair[1].as_str().expect(\"value\").into())).collect()}fn inspect(row:&crate::RestRequest)->serde_json::Value{serde_json::json!({\"body\":row.body.as_ref().map(phase),\"headers\":row.headers.iter().collect::<Vec<_>>(),\"method\":row.method,\"url\":row.url,\"timeout\":row.timeout_ms,\"skip\":row.skip_remote_signing,\"queryBits\":match row.query_params.as_ref(){Some(safe_cex_types::QueryValue::Number(v))=>Some(v.to_bits().to_string()),_=>None},\"extension\":row.config_extensions.get(\"kept\")})}let mut input=$type{method:$value[\"method\"].as_str().expect(\"method\").into(),url:\"/kept\".into(),timeout_ms:Some(27),skip_remote_signing:true,query_params:Some(safe_cex_types::QueryValue::Number(-0.0)),config_extensions:[(\"kept\".into(),serde_json::json!({\"cookie\":\"session\"}))].into_iter().collect(),headers:headers(&$value[\"headers\"]),body:$value.get(\"body\").filter(|v|!v.is_null()).map(arrange),..Default::default()};match input.transform_axios_request(){Ok(wire)=>serde_json::json!({\"ok\":true,\"retry\":inspect(&input),\"wire\":inspect(&wire)}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} }",
+        "cases": [
+          {
+            "input": {
+              "method": "POST",
+              "headers": [],
+              "body": {
+                "phase": "untransformed",
+                "raw": "{\"x\":1}"
+              }
+            },
+            "output": {
+              "ok": true,
+              "retry": {
+                "body": {
+                  "phase": "transformed",
+                  "value": {
+                    "kind": "string",
+                    "value": "{\"x\":1}"
+                  }
+                },
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/json"
+                  ]
+                ],
+                "method": "POST",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              },
+              "wire": {
+                "body": {
+                  "phase": "encoded",
+                  "bytes": [
+                    123,
+                    34,
+                    120,
+                    34,
+                    58,
+                    49,
+                    125
+                  ]
+                },
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/json"
+                  ]
+                ],
+                "method": "POST",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "method": "get",
+              "headers": [],
+              "body": {
+                "phase": "untransformed",
+                "raw": "null"
+              }
+            },
+            "output": {
+              "ok": true,
+              "retry": {
+                "body": {
+                  "phase": "transformed",
+                  "value": {
+                    "kind": "null"
+                  }
+                },
+                "headers": [],
+                "method": "get",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              },
+              "wire": {
+                "body": null,
+                "headers": [],
+                "method": "get",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "method": "PUT",
+              "headers": [],
+              "body": null
+            },
+            "output": {
+              "ok": true,
+              "retry": {
+                "body": null,
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/x-www-form-urlencoded"
+                  ]
+                ],
+                "method": "PUT",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              },
+              "wire": {
+                "body": null,
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/x-www-form-urlencoded"
+                  ]
+                ],
+                "method": "PUT",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "method": "PATCH",
+              "headers": [
+                [
+                  " content-type ",
+                  "application/json"
+                ]
+              ],
+              "body": {
+                "phase": "untransformed",
+                "raw": "\"  {}  \""
+              }
+            },
+            "output": {
+              "ok": true,
+              "retry": {
+                "body": {
+                  "phase": "transformed",
+                  "value": {
+                    "kind": "string",
+                    "value": "{}"
+                  }
+                },
+                "headers": [
+                  [
+                    "content-type",
+                    "application/json"
+                  ]
+                ],
+                "method": "PATCH",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              },
+              "wire": {
+                "body": {
+                  "phase": "encoded",
+                  "bytes": [
+                    123,
+                    125
+                  ]
+                },
+                "headers": [
+                  [
+                    "content-type",
+                    "application/json"
+                  ]
+                ],
+                "method": "PATCH",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "method": "post",
+              "headers": [],
+              "body": {
+                "phase": "encoded",
+                "bytes": [
+                  0,
+                  255
+                ]
+              }
+            },
+            "output": {
+              "ok": true,
+              "retry": {
+                "body": {
+                  "phase": "encoded",
+                  "bytes": [
+                    0,
+                    255
+                  ]
+                },
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/x-www-form-urlencoded"
+                  ]
+                ],
+                "method": "post",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              },
+              "wire": {
+                "body": {
+                  "phase": "encoded",
+                  "bytes": [
+                    0,
+                    255
+                  ]
+                },
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/x-www-form-urlencoded"
+                  ]
+                ],
+                "method": "post",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "method": "GET",
+              "headers": [],
+              "body": {
+                "phase": "transformed",
+                "raw": "{\"native\":true}"
+              }
+            },
+            "output": {
+              "ok": true,
+              "retry": {
+                "body": {
+                  "phase": "transformed",
+                  "value": {
+                    "kind": "object",
+                    "entries": [
+                      [
+                        "native",
+                        {
+                          "kind": "bool",
+                          "value": true
+                        }
+                      ]
+                    ]
+                  }
+                },
+                "headers": [],
+                "method": "GET",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              },
+              "wire": {
+                "body": {
+                  "phase": "encoded",
+                  "bytes": [
+                    123,
+                    34,
+                    110,
+                    97,
+                    116,
+                    105,
+                    118,
+                    101,
+                    34,
+                    58,
+                    116,
+                    114,
+                    117,
+                    101,
+                    125
+                  ]
+                },
+                "headers": [],
+                "method": "GET",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "method": "POST",
+              "headers": [
+                [
+                  "Content-Type",
+                  "application/x-www-form-urlencoded"
+                ]
+              ],
+              "body": {
+                "phase": "untransformed",
+                "raw": "{\"list\":[1,null,2]}"
+              }
+            },
+            "output": {
+              "ok": true,
+              "retry": {
+                "body": {
+                  "phase": "transformed",
+                  "value": {
+                    "kind": "string",
+                    "value": "list%5B%5D=1&list%5B%5D=2"
+                  }
+                },
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/x-www-form-urlencoded"
+                  ]
+                ],
+                "method": "POST",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              },
+              "wire": {
+                "body": {
+                  "phase": "encoded",
+                  "bytes": [
+                    108,
+                    105,
+                    115,
+                    116,
+                    37,
+                    53,
+                    66,
+                    37,
+                    53,
+                    68,
+                    61,
+                    49,
+                    38,
+                    108,
+                    105,
+                    115,
+                    116,
+                    37,
+                    53,
+                    66,
+                    37,
+                    53,
+                    68,
+                    61,
+                    50
+                  ]
+                },
+                "headers": [
+                  [
+                    "Content-Type",
+                    "application/x-www-form-urlencoded"
+                  ]
+                ],
+                "method": "POST",
+                "url": "/kept",
+                "timeout": 27,
+                "skip": true,
+                "queryBits": "9223372036854775808",
+                "extension": {
+                  "cookie": "session"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_transport::provider::RestResponseBody": {
+    "shape": "observed",
+    "evidence": "Complete five-API response owner. Encoded text, native adapter values and prior parser output remain distinct arrangements. Every actual method executes with native variants/bits observed before projection; parser callbacks are counted, current input is recorded and fallible callback errors retain Rc identity. Axios transforms and model JSON reads have independent expectations.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "into_data",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Physical bytes become raw lossy UTF-8 text; native adapter and prior parser values retain their current type and numeric bits.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}}let actual=$type::into_data(arrange($value));observe(&actual) }",
+        "cases": [
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                123,
+                34,
+                120,
+                34,
+                58,
+                49,
+                125
+              ]
+            },
+            "output": {
+              "kind": "string",
+              "value": "{\"x\":1}"
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                255,
+                65
+              ]
+            },
+            "output": {
+              "kind": "string",
+              "value": "�A"
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "{\"zero\":-0}"
+            },
+            "output": {
+              "kind": "object",
+              "entries": [
+                [
+                  "zero",
+                  {
+                    "kind": "number",
+                    "bits": "9223372036854775808"
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "\"prior parser\""
+            },
+            "output": {
+              "kind": "string",
+              "value": "prior parser"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "transform",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "transform",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual FnOnce callback executes exactly once on current data, including a Transformed string; callback return is placed in Transformed provenance.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let mut seen=serde_json::Value::Null;let mut calls=0;let actual=$type::transform(arrange($value),|input|{calls+=1;seen=observe(&input);serde_json::Value::String(\"callback output\".into())});serde_json::json!({\"calls\":calls,\"seen\":seen,\"actual\":phase(&actual)}) }",
+        "cases": [
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                123,
+                34,
+                120,
+                34,
+                58,
+                49,
+                125
+              ]
+            },
+            "output": {
+              "calls": 1,
+              "seen": {
+                "kind": "string",
+                "value": "{\"x\":1}"
+              },
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "callback output"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                255,
+                65
+              ]
+            },
+            "output": {
+              "calls": 1,
+              "seen": {
+                "kind": "string",
+                "value": "�A"
+              },
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "callback output"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "{\"zero\":-0}"
+            },
+            "output": {
+              "calls": 1,
+              "seen": {
+                "kind": "object",
+                "entries": [
+                  [
+                    "zero",
+                    {
+                      "kind": "number",
+                      "bits": "9223372036854775808"
+                    }
+                  ]
+                ]
+              },
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "callback output"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "\"prior parser\""
+            },
+            "output": {
+              "calls": 1,
+              "seen": {
+                "kind": "string",
+                "value": "prior parser"
+              },
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "callback output"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "try_transform",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "transform",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "serde_json::value::Value",
+                                              "args": null
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "generic": "E"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Observe callback count, exact current native input, success phase and unmodified caller error identity without requiring an error serialization bound.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let mut seen=serde_json::Value::Null;let mut calls=0;let sentinel=std::rc::Rc::new(String::from(\"source parser failure\"));let actual=$type::try_transform(arrange($value),|input|{calls+=1;seen=observe(&input);if $value[\"fail\"]==true {Err(sentinel.clone())}else{Ok(serde_json::Value::String(\"success output\".into()))}});match actual {Ok(v)=>serde_json::json!({\"ok\":true,\"calls\":calls,\"seen\":seen,\"actual\":phase(&v)}),Err(e)=>serde_json::json!({\"ok\":false,\"calls\":calls,\"seen\":seen,\"sameError\":std::rc::Rc::ptr_eq(&e,&sentinel),\"message\":e.as_str()})} }",
+        "cases": [
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                123,
+                34,
+                120,
+                34,
+                58,
+                49,
+                125
+              ],
+              "fail": false
+            },
+            "output": {
+              "ok": true,
+              "calls": 1,
+              "seen": {
+                "kind": "string",
+                "value": "{\"x\":1}"
+              },
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "success output"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "\"prior parser\"",
+              "fail": true
+            },
+            "output": {
+              "ok": false,
+              "calls": 1,
+              "seen": {
+                "kind": "string",
+                "value": "prior parser"
+              },
+              "sameError": true,
+              "message": "source parser failure"
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "{\"zero\":-0}",
+              "fail": false
+            },
+            "output": {
+              "ok": true,
+              "calls": 1,
+              "seen": {
+                "kind": "object",
+                "entries": [
+                  [
+                    "zero",
+                    {
+                      "kind": "number",
+                      "bits": "9223372036854775808"
+                    }
+                  ]
+                ]
+              },
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "success output"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "transform_axios_response",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Decode BOM only at physical-byte ingress, parse current strings, preserve native values and numeric bits, and expose valid-but-unrepresentable JSON refusal.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}match $type::transform_axios_response(arrange($value)){Ok(v)=>serde_json::json!({\"ok\":true,\"actual\":phase(&v)}),Err(crate::TransportError::Host(message))=>serde_json::json!({\"ok\":false,\"representationRefused\":message.starts_with(\"Axios response representation refused: \")}),Err(e)=>panic!(\"unexpected error: {e}\")} }",
+        "cases": [
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                239,
+                187,
+                191,
+                123,
+                34,
+                120,
+                34,
+                58,
+                49,
+                125
+              ]
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "object",
+                  "entries": [
+                    [
+                      "x",
+                      {
+                        "kind": "number",
+                        "bits": "4607182418800017408"
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"\\ufeff{}\""
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "﻿{}"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "\"-0\""
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "number",
+                  "bits": "9223372036854775808"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"1e400\""
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "number",
+                  "bits": "9218868437227405312"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                57,
+                48,
+                48,
+                55,
+                49,
+                57,
+                57,
+                50,
+                53,
+                52,
+                55,
+                52,
+                48,
+                57,
+                57,
+                51
+              ]
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "number",
+                  "bits": "4845873199050653696"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "{\"z\":-0}"
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "object",
+                  "entries": [
+                    [
+                      "z",
+                      {
+                        "kind": "number",
+                        "bits": "9223372036854775808"
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"invalid JSON\""
+            },
+            "output": {
+              "ok": true,
+              "actual": {
+                "phase": "transformed",
+                "value": {
+                  "kind": "string",
+                  "value": "invalid JSON"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                34,
+                92,
+                117,
+                100,
+                56,
+                48,
+                48,
+                34
+              ]
+            },
+            "output": {
+              "ok": false,
+              "representationRefused": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "json_value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual model-read parser preserves literal reserved-looking keys and number tokens, leaves native strings unparsed and does not mutate response provenance.",
+        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let input=arrange($value);let before=phase(&input);match $type::json_value(&input){Ok(v)=>serde_json::json!({\"ok\":true,\"value\":observe(&v),\"unchanged\":phase(&input)==before}),Err(_)=>serde_json::json!({\"ok\":false,\"unchanged\":phase(&input)==before})} }",
+        "cases": [
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                123,
+                34,
+                36,
+                115,
+                101,
+                114,
+                100,
+                101,
+                95,
+                106,
+                115,
+                111,
+                110,
+                58,
+                58,
+                112,
+                114,
+                105,
+                118,
+                97,
+                116,
+                101,
+                58,
+                58,
+                78,
+                117,
+                109,
+                98,
+                101,
+                114,
+                34,
+                58,
+                34,
+                45,
+                48,
+                34,
+                44,
+                34,
+                122,
+                101,
+                114,
+                111,
+                34,
+                58,
+                45,
+                48,
+                125
+              ]
+            },
+            "output": {
+              "ok": true,
+              "value": {
+                "kind": "object",
+                "entries": [
+                  [
+                    "$serde_json::private::Number",
+                    {
+                      "kind": "string",
+                      "value": "-0"
+                    }
+                  ],
+                  [
+                    "zero",
+                    {
+                      "kind": "number",
+                      "bits": "9223372036854775808"
+                    }
+                  ]
+                ]
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "untransformed",
+              "raw": "\"{\\\"x\\\":1}\""
+            },
+            "output": {
+              "ok": true,
+              "value": {
+                "kind": "string",
+                "value": "{\"x\":1}"
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "transformed",
+              "raw": "-0"
+            },
+            "output": {
+              "ok": true,
+              "value": {
+                "kind": "number",
+                "bits": "9223372036854775808"
+              },
+              "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "phase": "encoded",
+              "bytes": [
+                110,
+                111,
+                116,
+                45,
+                106,
+                115,
+                111,
+                110
+              ]
+            },
+            "output": {
+              "ok": false,
+              "unchanged": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_transport::secondary::apply_secondary_options": {
+    "api": {
+      "kind": "function",
+      "name": "apply_secondary_options",
+      "signature": {
+        "inputs": [
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "proxy",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::ExchangeOptions",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual typed account-options conversion is executed: copy the typed options, overlay exactly the declared secondary credentials and selected proxy, preserve absent versus empty values and native nested signerType bits. The constructor regression and maintained-source oracle independently cover all five numeric profiles and 729 credential/proxy arrangements. Fixture decoding only arranges typed input; decoded output is never serialized.",
+    "call": "{let mut input:safe_cex_types::ExchangeOptions=serde_json::from_value($value[\"options\"].clone()).expect(\"typed options arrangement\");input.polymarket=Some(safe_cex_types::ExchangeOptionsPolymarket{api_key:Some(\"retained credential\".into()),signer_type:Some(f64::from_bits($value[\"bits\"].as_str().expect(\"bits\").parse().expect(\"native bits\"))),..Default::default()});let before_key=input.key.clone();let before_secret=input.secret.clone();let before_proxy=input.override_proxy_url.clone();let actual=$type(&input,$value[\"proxy\"].as_str().map(str::to_owned));let nested=actual.polymarket.as_ref().expect(\"native nested options retained\");serde_json::json!({\"key\":actual.key,\"secret\":actual.secret,\"passphrase\":actual.passphrase,\"proxy\":actual.override_proxy_url,\"testnet\":actual.testnet,\"nestedKey\":nested.api_key,\"bits\":nested.signer_type.expect(\"native signer type retained\").to_bits().to_string(),\"originalUnchanged\":input.key==before_key&&input.secret==before_secret&&input.override_proxy_url==before_proxy})}",
+    "cases": [
+      {
+        "input": {
+          "options": {
+            "key": "primary",
+            "secret": "secret",
+            "passphrase": "pass",
+            "overrideProxyUrl": "old",
+            "testnet": true
+          },
+          "proxy": null,
+          "bits": "9223372036854775808"
+        },
+        "output": {
+          "key": "primary",
+          "secret": "secret",
+          "passphrase": "pass",
+          "proxy": null,
+          "testnet": true,
+          "nestedKey": "retained credential",
+          "bits": "9223372036854775808",
+          "originalUnchanged": true
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "key": "primary",
+            "secret": "secret",
+            "passphrase": "pass",
+            "overrideProxyUrl": "old",
+            "testnet": true,
+            "secondary_key": "next",
+            "secondary_secret": "",
+            "secondary_passphrase": ""
+          },
+          "proxy": "selected://proxy",
+          "bits": "9221120237041090626"
+        },
+        "output": {
+          "key": "next",
+          "secret": "",
+          "passphrase": "",
+          "proxy": "selected://proxy",
+          "testnet": true,
+          "nestedKey": "retained credential",
+          "bits": "9221120237041090626",
+          "originalUnchanged": true
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "key": "primary",
+            "secret": "secret",
+            "passphrase": "pass",
+            "overrideProxyUrl": "old",
+            "testnet": true,
+            "secondary_key": "",
+            "secondary_secret": "next-secret"
+          },
+          "proxy": "",
+          "bits": "9218868437227405312"
+        },
+        "output": {
+          "key": "",
+          "secret": "next-secret",
+          "passphrase": "pass",
+          "proxy": "",
+          "testnet": true,
+          "nestedKey": "retained credential",
+          "bits": "9218868437227405312",
+          "originalUnchanged": true
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "key": "primary",
+            "secret": "secret",
+            "passphrase": "pass",
+            "overrideProxyUrl": "old",
+            "testnet": true,
+            "secondary_passphrase": "next-pass"
+          },
+          "proxy": "alternate",
+          "bits": "18442240474082181120"
+        },
+        "output": {
+          "key": "primary",
+          "secret": "secret",
+          "passphrase": "next-pass",
+          "proxy": "alternate",
+          "testnet": true,
+          "nestedKey": "retained credential",
+          "bits": "18442240474082181120",
+          "originalUnchanged": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::secondary::secondary_proxy": {
+    "api": {
+      "kind": "function",
+      "name": "secondary_proxy",
+      "signature": {
+        "inputs": [
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "provider",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::TransportProvider",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "proxy_url",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Specific typed selector returns the nonempty existing secondary proxy, otherwise nonempty explicit proxy, otherwise the provider public proxy unchanged. It clones an existing String and performs no parsing, coercion or schema construction. The provider capability is invoked only for fallback; conversion of secondary account options is classified separately.",
+    "evidence": "Reviewed exact secondary.rs body; maintained_typescript_secondary_options_empty_strings_and_proxy_precedence executes the actual constructed clients against 729 maintained-source cases, observing credential/proxy values and provider/factory/limiter call order. Empty terminal provider strings remain Some(empty). A separate fallback-disconnect control must fail that named native/source test and exact restoration must pass."
   }
 }

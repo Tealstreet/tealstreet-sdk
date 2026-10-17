@@ -867,6 +867,74 @@ local functions, construction, features and wasm behavior remain independent
 obligations. No whole-venue completion is claimed.
 
 
+## Twenty-two transaction/order/signer map owners (2026-10-17)
+
+Starting from master `723da2dd14`, then fast-forwarding to `31917cde56` (including
+#374), all19 transaction structs plus CreateOrderOptionsObject,
+OrderResponseObject and TxEthSignature are individually reviewed against their
+actual TS declarations, enums/unions and complete native decoder bodies.
+Only their ordinary local Fields schemas become private Serde remote schemas.
+All167 declared fields keep their original types/order/rename/default/custom
+field decoder attributes. Surrounding enum, flag, helper, Serialize and output
+code is unchanged; the two undefined-only records remain independent obligations.
+Every prior master Apex contract remains exactly preserved as a JSON value;
+only22 genuinely new owner rows are appended.
+
+The original21-owner baseline passed, then the independently witnessed one-field
+Onchain record expanded this coherent cohort to22. The final original-boundary
+baseline and converted-boundary suite each pass **22 / zero failed / zero ignored**
+on **835 cases through seven decoder routes** (5845 actual decoder observations).
+Fixed per-owner cases/positive counts and actual route counters are enforced.
+Native expectations are525 positive all-field/presence/variant/bit observations
+and310 invalid field/shape cases. They include every direct enum tag, actual
+ISO8601 and auth-union branches, nonempty nested signature/transaction records,
+nullable null versus absence, optional booleans false, all numeric0|1 flags with
+negative-zero bits and wrong-value/type refusals, two independently varied fee
+rate tuple elements and wrong tuple lengths, and raw binary64 rounding,
+subnormal and positive/negative overflow tokens. Every owner has its literal
+complete valid Serde-order array; the existing object boundaries reject them.
+
+Fresh native/default actual production verification passes **22 runtime results /
+zero classifications / zero failed owners**, executing560 authored production
+cases. Each private companion's entire actual nonblanket compiler implementation
+set is inspected, including the exact returned owner identity/source span.
+ChangePubKeyOnchain uses the maintained ordinary observation path, which directly
+matches its only actual native field before the wire audit. This avoids an
+invented field or an exemption; its native unit witness still executes all seven
+routes. Native all-target Clippy passes with warnings denied (10.69s).
+Independent draft review checked all22 schemas, all835 native expectations,
+all560 production expectations and exact preservation of master26 contract rows:
+no findings.
+
+All22 isolated object-guard controls completed: each removed only that owner's
+outer object boundary, compiled, and failed its exact named complete-valid-array
+admission assertion at exit101. Each control restored all three source modules
+byte-for-byte and passed all22 native witnesses; the final restoration repeated
+the exact byte check and all22 tests. No compiler/tooling failure is evidence.
+The shared pure exact-span selector's three isolation regressions also pass.
+
+After merging master `41e20791f8` without conflicts, frozen install and format
+checks pass. The full scoped ApexOmni suite passes **237 / zero failed / zero
+ignored**, with14 target receipts including the maintained live TS oracles.
+Separate host and wasm all-target Clippy runs pass with warnings denied
+(11.55s /25.82s). Final fresh native/default production verification passes
+**22 actual runtime owners / zero classifications / zero failures**, including
+all560 authored production cases and complete actual companion inspection.
+
+The maintained invention gate passes globally (7459 manifest rows /17214 public
+Rust items) and with Apex-only public obligations (287 items), retaining exactly
+the same82 existing Apex exemptions and adding zero. The cached checker is
+reused only after checking its actual Rust/Cargo/lock/config inputs are identical
+to its build; the sole source-directory difference is CLAUDE documentation.
+Every existing master Apex contract is preserved exactly as a JSON value.
+
+CodeRabbit returned a review limit and did not complete a bot review. This
+classifies only the selected22 native/default decoder owners. Other owners,
+undefined-only records, functions, aliases, receiver policies, local helpers,
+construction, feature and wasm accepted behavior remain independent obligations.
+No whole-venue completion is claimed.
+
+
 ## Twenty-three scalar/validation helper bodies (2026-10-17, in progress)
 
 The full actual signer-utils source and selected exchange/utility declarations

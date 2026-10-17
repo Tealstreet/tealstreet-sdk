@@ -30,21 +30,18 @@ pub struct TxEthSignature {
     pub kind: EthSignatureKind,
     pub signature: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "TxEthSignature")]
+struct TxEthSignatureWire {
+    #[serde(rename = "type")]
+    kind: EthSignatureKind,
+    signature: String,
+}
 impl<'de> serde::Deserialize<'de> for TxEthSignature {
     fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        struct Fields {
-            #[serde(rename = "type")]
-            kind: EthSignatureKind,
-            signature: String,
-        }
         JsNumberInput::deserialize(decoder)?
             .decode_with(|decoder| {
-                let fields = Fields::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    kind: fields.kind,
-                    signature: fields.signature,
-                })
+                TxEthSignatureWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
