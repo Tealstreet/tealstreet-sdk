@@ -423,7 +423,16 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
             self.runtime.as_ref(),
             self.category,
             parent.uses_bybit_demo_environment(),
-            if self.category == "spot" {
+            if parent.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+                Some(parent.get_bybit_public_ws_url(
+                    crate::exchange::PublicCategory::Linear,
+                    if parent.base.options().testnet == Some(true) {
+                        crate::exchange::Network::Testnet
+                    } else {
+                        crate::exchange::Network::Livenet
+                    },
+                )?)
+            } else if self.category == "spot" {
                 let network = if parent.base.options().testnet == Some(true) {
                     "testnet"
                 } else {

@@ -165,6 +165,7 @@ fn native_call(
                     exchange.base.store.as_ref(),
                     &utc,
                     symbols.as_deref(),
+                    &|message| report(&exchange, message),
                     |e| e,
                 )
                 .await?;
