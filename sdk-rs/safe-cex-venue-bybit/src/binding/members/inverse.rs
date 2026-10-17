@@ -472,7 +472,24 @@ fn fetch_markets_helper(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
             market.set("info", row)?;
             out.push(market);
         }
-        Ok(Js::array(out))
+        let mut admitted = Vec::with_capacity(out.len());
+        for market in out {
+            let base = market.get("base")?;
+            let quote = market.get("quote")?;
+            let asset_string = |value: &Js| {
+                matches!(value, Js::String(_)) && to_typed::<String>(value).is_ok()
+            };
+            if asset_string(&base) && asset_string(&quote) {
+                admitted.push(market);
+            } else {
+                let message = format!(
+                    "Refused Bybit market row id={:?}: base={base:?} quote={quote:?}: expected strings",
+                    market.get("id")?
+                );
+                rt.this.call_method("log", vec![Js::str(&message), Js::str("warning")])?;
+            }
+        }
+        Ok(Js::array(admitted))
     })))
 }
 

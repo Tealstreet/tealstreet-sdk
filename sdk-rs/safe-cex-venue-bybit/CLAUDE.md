@@ -791,8 +791,19 @@ when the account option-market flag is true. hyro_binding compares all six paths
 with maintained Bybit methods and the actual Hyro guard; spot/inverse family
 routing remains independently defined.
 
+Margin and position-mode control bodies forward the generic fetched batch without
+inspecting it. The production binding carries Js directly into Store publication;
+never serialize these intermediates through JSON, which erases native NaN and
+infinities. Real HTTP control-switch regressions cover primary and demo accounts.
+
 Public ticker callbacks retain their socket category: primary/demo inverse streams
 map turnover24h to coin volume and volume24h to quote volume. Dedicated inverse
 and Spot retain their own source layouts. Real socket regressions cover all four
 account constructors and partial updates; the maintained-source ticker corpus
 now covers both primary categories in 1,944 cases and 21,384 field comparisons.
+
+Market base/quote remain strict strings under the approved row-admission policy.
+Primary/demo and Spot defer typed asset refusals until source mapping completes;
+dedicated inverse admits assets after building its native rows. Each refused row
+reports its identity and field values, while valid siblings survive fetch/refresh.
+This intentionally differs from TS retaining malformed asset fields.

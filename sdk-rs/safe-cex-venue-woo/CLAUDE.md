@@ -483,3 +483,9 @@ from TypeScript retaining malformed typed fields, per shared-type decision 3.
 The raw mapAlgoOrder/fetchAlgoOrders source-value witnesses remain unchanged.
 The real mixed-row binding regression covers amount, filled and reduceOnly via
 both the public read and actual configured fetch-to-Store path.
+
+
+The constructed clientOrderIdRule retains its source Number(input) conversion and
+uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
+compares26 maintained-source identifiers, including safe-range and canonical-decimal
+boundaries, without replacing the rule or its operation table.

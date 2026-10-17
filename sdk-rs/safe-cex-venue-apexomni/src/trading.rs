@@ -450,11 +450,11 @@ impl ApexOmniExchange {
             .collect::<Result<Vec<_>, _>>()?;
         services.throttle_fetch_orders()?;
         ids.into_iter()
-            .map(|id| match id {
-                J::String(id) => Ok(id),
-                _ => Err(failure(
-                    "typed order ID refuses a non-string response field".into(),
-                )),
+            .map(|id| {
+                if matches!(id, J::Undefined) {
+                    return Err(failure("ApexOmni placement response is missing id".into()));
+                }
+                text(&id)
             })
             .collect()
     }

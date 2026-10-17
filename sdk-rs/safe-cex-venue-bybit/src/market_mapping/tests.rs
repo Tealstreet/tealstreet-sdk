@@ -29,6 +29,8 @@ fn market_mapping_matches_each_live_family_source() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    let mut regular = 0;
+    let mut asset_refusals = 0;
     for (index, case) in cases.iter().enumerate() {
         let family = match case["variant"].as_str().unwrap() {
             "bybit" => Family::Linear,
@@ -42,6 +44,21 @@ fn market_mapping_matches_each_live_family_source() {
             case["category"].as_str().unwrap(),
             family,
         );
+        if case["assetRefusal"] == true {
+            assert!(
+                case.get("error").is_none(),
+                "source keeps the malformed asset row: {case}"
+            );
+            assert_eq!(case["ownAssets"], serde_json::json!([true, true]));
+            assert_eq!(case["assetIdentity"], serde_json::json!([true, true]));
+            let refusal = result
+                .expect("source evaluation completes")
+                .expect_err("strict asset refusal");
+            assert!(refusal.contains("Refused Bybit market row"));
+            asset_refusals += 1;
+            continue;
+        }
+        regular += 1;
         if let Some(error) = case.get("error") {
             assert_eq!(
                 result.unwrap_err(),
@@ -50,7 +67,9 @@ fn market_mapping_matches_each_live_family_source() {
             );
             continue;
         }
-        let market = result.unwrap_or_else(|error| panic!("case {index}: {error}: {case}"));
+        let market = result
+            .unwrap_or_else(|error| panic!("case {index}: {error}: {case}"))
+            .unwrap_or_else(|error| panic!("case {index}: {error}: {case}"));
         assert_eq!(
             binary64(&serde_json::to_value(&market).unwrap()),
             binary64(&case["result"]),
@@ -89,5 +108,7 @@ fn market_mapping_matches_each_live_family_source() {
             "number classes case {index}"
         );
     }
-    assert_eq!(cases.len(), 549);
+    assert_eq!(regular, 549);
+    assert_eq!(asset_refusals, 30);
+    assert_eq!(cases.len(), 579);
 }

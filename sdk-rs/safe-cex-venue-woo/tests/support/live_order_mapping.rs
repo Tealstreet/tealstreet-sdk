@@ -1,6 +1,7 @@
 //! Real production class members, with native values observed before projection.
 use crate::binding_test_harness as binding_harness;
 use binding_harness::{Harness, harness, options};
+use safe_cex_exchange::exchange::Exchange;
 use safe_cex_exchange::js_runtime::{
     promise::await_js,
     value::{Js, from_json},
@@ -389,4 +390,45 @@ fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
             h.exchange.dispose().unwrap();
         }
     }
+}
+
+#[test]
+fn real_client_id_rule_matches_source_safe_integer_limits() {
+    let h = setup(|_| {});
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/client-id-rule-source.cjs"
+        ))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["rows"].as_array().unwrap().len(), 26);
+    let rule = h.exchange.rt.this.get("clientOrderIdRule").unwrap();
+    assert_eq!(
+        rule.get("label").unwrap().to_display(),
+        source["label"].as_str().unwrap()
+    );
+    assert_eq!(
+        rule.get("requirement").unwrap().to_display(),
+        source["requirement"].as_str().unwrap()
+    );
+    for row in source["rows"].as_array().unwrap() {
+        let actual = rule
+            .call_method("isValid", vec![Js::str(row["input"].as_str().unwrap())])
+            .expect(
+                "real constructed WOO client-ID rule must call the shared safe-integer builtin",
+            );
+        assert!(
+            actual.strict_equals(&Js::Bool(row["valid"].as_bool().unwrap())),
+            "source client-ID rule {row}"
+        );
+    }
+    h.exchange.dispose().unwrap();
 }
