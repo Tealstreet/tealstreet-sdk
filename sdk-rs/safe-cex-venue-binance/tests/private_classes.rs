@@ -4657,3 +4657,57 @@ fn production_depth_binding_preserves_the_source_type_error_and_recovers() {
         exchange.dispose().unwrap();
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[cfg(feature = "native")]
+fn native_ticker_coercion(venue: Venue, name: &str, count: usize) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let source = ticker_coercion::source(name);
+    assert_eq!(source["cases"].as_array().unwrap().len(), count);
+    let owner = production_native_owner(venue);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            owner.base.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed(name)),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if venue != Venue::Spot && case["channel"] != "bookTicker" {
+            owner
+                .public
+                .market_websocket
+                .get()
+                .expect("production market socket")
+        } else {
+            &owner.public
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket.on_message(frame.as_str().unwrap()).unwrap();
+        }
+        ticker_coercion::assert_native(&owner.base.store.tickers(), case);
+    }
+    owner.base.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Futures, "binance", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_pm_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::PM, "binancepm", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Spot, "binancespot", 48);
+}
