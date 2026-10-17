@@ -5,8 +5,8 @@ use super::{
     value::{Thrown, Value},
 };
 use crate::{
-    constants::{self, HyperliquidBuilderConfig, HyperliquidBuilderProvider},
-    exchange_helpers, income, json_boundaries, market_helpers, order_inference, rate_limit,
+    constants, exchange_helpers, income, json_boundaries, market_helpers, order_inference,
+    rate_limit,
 };
 use std::borrow::Cow;
 
@@ -20,29 +20,38 @@ fn opt_js(v: Option<crate::spot_json::JsString>) -> Value {
     v.map_or(Value::Undefined, |s| Value::js(&s))
 }
 
-/// `Pick<ExchangeOptions, 'hyperliquidBuilder' | 'testnet'>` read from a JS object.
-struct BuilderOptions {
-    builder: Option<HyperliquidBuilderConfig>,
-    testnet: Option<bool>,
-}
-impl HyperliquidBuilderProvider for BuilderOptions {
-    type Error = std::convert::Infallible;
-    fn hyperliquid_builder(
-        &self,
-    ) -> Result<Option<Cow<'_, HyperliquidBuilderConfig>>, Self::Error> {
-        Ok(self.builder.as_ref().map(Cow::Borrowed))
-    }
-    fn testnet(&self) -> Result<Option<bool>, Self::Error> {
-        Ok(self.testnet)
-    }
-}
-
 struct WalletKey(String);
 struct SignedView(safe_cex_num::JsJsonValue);
 impl crate::signing::SigningInput for SignedView {
     fn encoding_view(&self) -> Cow<'_, safe_cex_num::JsJsonValue> {
         Cow::Borrowed(&self.0)
     }
+}
+
+fn resolve_builder(r: &mut Realm, options: Value) -> Result<Value, Thrown> {
+    let builder = if options.is_nullish() {
+        Value::Undefined
+    } else {
+        r.get_str(&options, "hyperliquidBuilder")?
+    };
+    if !builder.is_nullish() {
+        return Ok(builder);
+    }
+    let testnet = if options.is_nullish() {
+        Value::Undefined
+    } else {
+        r.get_str(&options, "testnet")?
+    };
+    Ok(r.object_from(vec![
+        (
+            "address",
+            Value::str(constants::get_builder_address(testnet.truthy())),
+        ),
+        (
+            "feeTenthsBps",
+            Value::Number(constants::TEALSTREET_BUILDER_FEE),
+        ),
+    ]))
 }
 
 // Source signing helpers operate on native values before the HTTP JSON boundary.
@@ -320,36 +329,7 @@ pub(crate) fn bind(realm: &Realm) {
         Ok(Value::str(&constants::builder_fee_rate_from_tenths_bps(n)))
     });
     b("resolveHyperliquidBuilder", 1, |r, a| {
-        let options = arg(a, 0);
-        let provider = if options.is_nullish() {
-            None
-        } else {
-            let builder = r.get_str(&options, "hyperliquidBuilder")?;
-            let builder = if builder.is_nullish() {
-                None
-            } else {
-                let address = r.get_str(&builder, "address")?;
-                let fee = r.get_str(&builder, "feeTenthsBps")?;
-                Some(HyperliquidBuilderConfig {
-                    address: r.to_string(&address)?.to_vec(),
-                    fee_tenths_bps: r.to_number(&fee)?,
-                })
-            };
-            let testnet = r.get_str(&options, "testnet")?;
-            Some(BuilderOptions {
-                builder,
-                testnet: if testnet.is_nullish() {
-                    None
-                } else {
-                    Some(testnet.truthy())
-                },
-            })
-        };
-        let Ok(resolved) = constants::resolve_hyperliquid_builder(provider.as_ref());
-        Ok(r.object_from(vec![
-            ("address", Value::units(&resolved.address)),
-            ("feeTenthsBps", Value::Number(resolved.fee_tenths_bps)),
-        ]))
+        resolve_builder(r, arg(a, 0))
     });
     b("maskHyperliquidAddress", 1, |r, a| {
         Ok(opt_js(json_boundaries::mask_hyperliquid_address(
