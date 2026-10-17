@@ -205,3 +205,11 @@ methods, whose DELETE /orders behavior also covers orders absent from Store.
 Keep the symbol in the original params.market config so the shared HTTP adapter
 owns query serialization. Both methods preserve the existing catch/log/rethrow
 path; an empty Store must not turn a rejected venue cancellation into success.
+
+The actual SDK quantum binding calls BigNumber.isFinite before the separate NaN
+and sign checks, matching the source. Infinity/-Infinity are rejected before
+signing or order POST; finite arbitrary-precision overflow remains accepted.
+The constructed RequestSigner witness executes eight original source profiles
+plus two finite1e400 supplements, and the public placement regression observes
+zero order POSTs for infinite price. It uses the shared BigNumber facade and the
+actual SDK constructor rather than the standalone injected signing callbacks.

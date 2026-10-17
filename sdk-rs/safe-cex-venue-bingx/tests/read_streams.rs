@@ -936,10 +936,12 @@ fn stream_representation_boundaries_are_explicit() {
     );
     let mut opts = corpus()["cases"][20]["input"]["opts"].clone();
     opts["interval"] = json!("1M");
-    assert!(
-        serde_json::from_value::<OHLCVOptions>(opts).is_err(),
-        "BINGX-RS closed native timeframe refuses monthly interval"
-    );
+    let monthly = serde_json::from_value::<OHLCVOptions>(opts)
+        .expect("BINGX-RS native timeframe admits the source monthly interval");
+    assert!(matches!(
+        monthly.interval,
+        AnyTimeframe::Variant2(ExtendedTimeframe::MN1)
+    ));
 }
 #[test]
 fn polling_owner_release_is_visible() {
