@@ -543,12 +543,22 @@ impl BybitExchange {
         if venue.base.name == ExchangeName::Hyrotrader {
             venue.position_mode.set(Some(PositionMode::OneWay));
         }
-        for slot in [
-            safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
-            safe_cex_exchange::socket_lifecycle::SocketSlot::PublicSecondary,
+        for (slot, category) in [
+            (
+                safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
+                if venue.base.name == ExchangeName::Bybitspot {
+                    "spot"
+                } else {
+                    "linear"
+                },
+            ),
+            (
+                safe_cex_exchange::socket_lifecycle::SocketSlot::PublicSecondary,
+                "inverse",
+            ),
         ] {
             if let Some(socket) = venue.base.get_socket(slot) {
-                crate::ws_public::PublicProtocol::register_handlers(&socket);
+                crate::ws_public::PublicProtocol::register_handlers(&socket, category);
             }
         }
         *shared.extra.venue.borrow_mut() = Rc::downgrade(&venue);

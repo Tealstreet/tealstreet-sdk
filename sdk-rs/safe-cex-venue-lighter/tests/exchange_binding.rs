@@ -978,12 +978,12 @@ fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
     h.venue().dispose().unwrap();
 }
 
-#[test]
-fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+fn private_account_frame_for_deployment(name: ExchangeName) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
     use std::{cell::RefCell, rc::Rc};
-    let h = harness(ExchangeName::Lighter, options(), lighter);
+    let h = harness(name.clone(), options(), lighter);
+    assert_eq!(h.venue().base().name, name);
     h.drive(h.venue().start()).unwrap();
     // The source suppresses fills for five seconds after its real VirtualClock connect.
     std::thread::sleep(std::time::Duration::from_millis(5100));
@@ -1110,5 +1110,12 @@ process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
                 "known Standard tier blocks transaction send"
             );
         }
+    }
+}
+
+#[test]
+fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+    for name in [ExchangeName::Lighter, ExchangeName::LighterRobinhood] {
+        private_account_frame_for_deployment(name);
     }
 }
