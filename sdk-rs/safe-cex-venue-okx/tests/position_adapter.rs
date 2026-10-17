@@ -1,3 +1,4 @@
+use safe_cex_num::JsCoercionError;
 #[path = "support/cardinality.rs"]
 mod cardinality;
 use safe_cex_venue_okx::position_adapter::{OkxPositionAdapterDeps, map_okx_position_history};
@@ -48,15 +49,15 @@ fn maintained_typescript_round_trip_position_adapter() {
         let calls = RefCell::new(Vec::new());
         let to_base = |n, id: &str| {
             calls.borrow_mut().push(json!(["base", n, id]));
-            n * case["scale"].as_f64().unwrap()
+            Ok::<_, JsCoercionError>(n * case["scale"].as_f64().unwrap())
         };
         let symbol = |id: &str| {
             calls.borrow_mut().push(json!(["symbol", id]));
-            (case["known"] == true).then(|| "DOGEUSDC".into())
+            Ok::<_, JsCoercionError>((case["known"] == true).then(|| "DOGEUSDC".into()))
         };
         let settle = |id: &str| {
             calls.borrow_mut().push(json!(["settle", id]));
-            Some("USDC".into())
+            Ok::<_, JsCoercionError>(Some("USDC".into()))
         };
         let deps = OkxPositionAdapterDeps {
             account: "replay",

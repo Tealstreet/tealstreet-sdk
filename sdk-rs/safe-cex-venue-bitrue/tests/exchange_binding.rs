@@ -882,3 +882,256 @@ fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel
         venue.dispose().unwrap();
     }
 }
+
+struct AccountRowsHttp(Rc<Http>, Value);
+impl JsHttpHost for AccountRowsHttp {
+    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+        self.0.0.clone()
+    }
+    fn send(&self, config: Js) -> JsFuture<'static> {
+        if config.get("url").unwrap().to_display() != "/fapi/v2/account" {
+            return self.0.send(config);
+        }
+        let response = Js::object(vec![
+            ("status", Js::Number(200.)),
+            ("data", from_json(&self.1)),
+            ("config", config),
+        ]);
+        Box::pin(async move { Ok(response) })
+    }
+}
+#[test]
+fn malformed_balance_upnl_refuses_only_its_account_row() {
+    for bad in [json!("bad-pnl"), json!(null), json!({}), json!(true)] {
+        let runtime = Rc::new(support::Runtime::default());
+        let http = Rc::new(AccountRowsHttp(
+            Rc::new(Http(
+                runtime.clone(),
+                RefCell::new(vec![]),
+                Cell::new(false),
+            )),
+            json!({"code":"0","data":{"account":[
+                {"marginCoin":"USDT","totalEquity":100,"accountNormal":70,"sumOpenRealizedAmount":3},
+                {"marginCoin":"USDT","totalEquity":999,"accountNormal":900,"sumOpenRealizedAmount":bad},
+                {"marginCoin":"USDC","totalEquity":200,"accountNormal":150,"sumOpenRealizedAmount":7}
+            ]}}),
+        ));
+        let store = Rc::new(DefaultStore::new());
+        let venue = BitrueExchange::new(
+            ExchangeName::Bitrue,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store.clone(),
+            BitrueDependencies {
+                runtime: runtime.clone(),
+                http,
+                external_public_data: None,
+            },
+        )
+        .unwrap();
+        complete(&runtime, venue.start()).expect("bad upnl must not reject the valid account rows");
+        let balance = store.balance();
+        assert_eq!(
+            (balance.total, balance.free, balance.used, balance.upnl),
+            (100., 70., 30., 3.)
+        );
+        let currencies = balance.currencies.as_ref().unwrap();
+        assert_eq!(currencies.len(), 2);
+        let usdc = currencies.get("USDC").unwrap().as_balance().unwrap();
+        assert_eq!(
+            (usdc.total, usdc.free, usdc.used, usdc.upnl),
+            (200., 150., 50., 7.)
+        );
+        assert_eq!(
+            balance.info.as_ref().unwrap()["data"]["account"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        let warnings = runtime.console.borrow();
+        let refusals: Vec<_> = warnings
+            .iter()
+            .filter(|line| line.contains("Balance.upnl"))
+            .collect();
+        assert!(!refusals.is_empty());
+        assert!(
+            refusals
+                .iter()
+                .all(|line| line.contains("USDT") && line.contains(&bad.to_string())),
+            "warning must identify field, currency and original value: {warnings:?}"
+        );
+        assert!(runtime.reports.borrow().is_empty());
+        drop(balance);
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/composition-streams-oracle.cjs"
+        ))
+        .arg("--book-pairs")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let source = source["rows"]["book"].as_array().unwrap();
+    assert_eq!(source.len(), 3);
+    assert_eq!(source[2]["error"], json!({"undefined":true}));
+    for (index, pair) in [json!({"0":2,"1":3}), json!(2)].into_iter().enumerate() {
+        assert_eq!(
+            source[index]["error"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry[0] == "name")
+                .unwrap()[1],
+            "TypeError"
+        );
+        let f = PrivateFixture::new();
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let sink = books.clone();
+        let cleanup = f
+            .venue
+            .listen_order_book(
+                "E-BTC-USDT".into(),
+                Rc::new(move |book| sink.borrow_mut().push(book)),
+            )
+            .unwrap();
+        f.runtime.pump();
+        f.runtime.advance(100.0);
+        let public = f
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("listenKey="))
+            .unwrap()
+            .1
+            .clone();
+        assert!(
+            public
+                .sent
+                .borrow()
+                .iter()
+                .any(|raw| raw.contains("market_e_btcusdt_simple_depth_step0"))
+        );
+        let push = |buys: Value, asks: Value| {
+            public.events.borrow_mut().push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                safe_cex_transport::socket::SocketFrame::Text(json!({
+                    "channel":"market_e_btcusdt_simple_depth_step0","tick":{"buys":buys,"asks":asks}
+                }).to_string())));
+            f.runtime.pump();
+        };
+        push(json!([pair]), json!([]));
+        assert!(
+            books.borrow().is_empty(),
+            "source refuses noniterable book row {index}"
+        );
+        push(json!([[2, 3]]), json!([[4, 5]]));
+        let books = books.borrow();
+        assert_eq!(books.len(), 1, "next valid snapshot recovers after refusal");
+        assert_eq!(
+            (
+                books[0].bids[0].price,
+                books[0].bids[0].amount,
+                books[0].bids[0].total
+            ),
+            (2.0, 3.0, 3.0)
+        );
+        assert_eq!(
+            (
+                books[0].asks[0].price,
+                books[0].asks[0].amount,
+                books[0].asks[0].total
+            ),
+            (4.0, 5.0, 5.0)
+        );
+        drop(books);
+        cleanup().unwrap();
+    }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitrue");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 32);
+    let f = PrivateFixture::new();
+    let template = f.store.markets()[0].clone();
+    let tickers = ticker_coercion::seed("bitrue");
+    let markets = tickers
+        .iter()
+        .map(|ticker| {
+            let mut market = template.clone();
+            market.id.clone_from(&ticker.id);
+            market.symbol.clone_from(&ticker.symbol);
+            market
+        })
+        .collect();
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    f.venue
+        .base()
+        .emit(
+            "markets:changed",
+            from_json(&json!({"added":[{"symbol":"E-ETH-USDT"},{"symbol":"E-ADA-USDT"}]})),
+        )
+        .unwrap();
+    f.runtime.pump();
+    let socket = f
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.contains("listenKey="))
+        .unwrap()
+        .1
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("bitrue")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            f.runtime.pump();
+        }
+        ticker_coercion::assert_native(&f.store.tickers(), case);
+    }
+    assert!(
+        f.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        f.runtime.reports.borrow()
+    );
+}

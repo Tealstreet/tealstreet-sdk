@@ -63,8 +63,8 @@ ts = "WeexExchange.fetchMarkets"
 kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-weex/src/market_reads.rs::fetch_markets", "safe-cex-venue-weex/src/market_reads.rs::WeexMarketReadRuntime", "safe-cex-venue-weex/src/market_reads.rs::WeexMarketReadRequest" ]
-status = "ported"
-note = "Split: safe-cex-venue-weex/src/market_reads.rs::fetch_markets, safe-cex-venue-weex/src/market_reads.rs::WeexMarketReadRuntime, safe-cex-venue-weex/src/market_reads.rs::WeexMarketReadRequest. Retains exchange-info GET, USDT quote/margin short-circuit filter before market normalization, source failure message precedence and live Store fallback. Collection builtins retain method/hole/species semantics via explicit callbacks; transport returns raw response values. Imported normalizers, coercion/Map/Store/provider operations and class assembly are separate capabilities, not a new imported-primitive proof."
+status = "divergent"
+note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#weex-record-shape-choice: final strict-field policy refuses only a malformed Market row with a visible field/value warning and retains valid markets. The actual source instead retains each raw field; twelve malformed baseAsset/symbol profiles and source coercion failure are witnessed through maintained methods and the real constructed Exchange. All-refused pages return empty rather than stale cached markets. Source coercion/capture failures retain the existing outer catch and cached fallback. Split: safe-cex-venue-weex/src/market_reads.rs::fetch_markets, safe-cex-venue-weex/src/market_reads.rs::WeexMarketReadRuntime, safe-cex-venue-weex/src/market_reads.rs::WeexMarketReadRequest. Retains exchange-info GET, USDT quote/margin short-circuit filter before market normalization, source failure message precedence and live Store fallback. Collection builtins retain method/hole/species semantics via explicit callbacks; transport returns raw response values. Imported normalizers, coercion/Map/Store/provider operations and class assembly are separate capabilities, not a new imported-primitive proof."
 
 [[symbol]]
 ts = "WeexExchange.fetchTickers"
@@ -191,8 +191,8 @@ ts = "WeexExchange.fetchHistoricalFills"
 kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-weex/src/market_reads.rs::fetch_historical_fills" ]
-status = "ported"
-note = "Split: safe-cex-venue-weex/src/market_reads.rs::fetch_historical_fills. Retains public-only early return, native user-trade query helper, two row.symbol reads with market-map capture between them, imported execution normalization, truthy filter and descending stable timestamp sort."
+status = "divergent"
+note = "Split: safe-cex-venue-weex/src/market_reads.rs::fetch_historical_fills. Retains public-only early return, native user-trade query helper, two row.symbol reads with market-map capture between them, imported execution normalization, truthy filter and descending stable timestamp sort. CHOSEN final strict-field policy: the concrete native normalizer warns with the offending Execution field and raw value, then refuses only that row when maker is nonboolean or commissionAsset/coin is nonstring. Valid rows remain, without coercion/default/stringification into the model. Source conversion/capture errors and warning callback failures still propagate; public single-row utility errors retain their original shape. Maintained TS instead retains the malformed field/row. See sdk-rs/parity/MANIFEST-SPEC.md#weex-fill-projection-choice and real mixed-page production regressions in exchange_binding.rs."
 
 [[symbol]]
 ts = "WeexExchange.fetchIncomeHistory"

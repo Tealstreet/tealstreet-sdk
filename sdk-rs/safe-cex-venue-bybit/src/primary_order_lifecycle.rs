@@ -145,7 +145,7 @@ pub fn should_reconcile_local_reduce_only_limit_order<E>(
         return Ok(false);
     }
     let order = order.borrow();
-    Ok(order.r#type == OrderType::Limit && order.reduce_only)
+    Ok(order.r#type == OrderType::Limit && order.reduce_only == true)
 }
 pub fn schedule_local_reduce_only_limit_order_reconciliation<'a, T: Clone, R: 'a, E: 'a>(
     state: &PrimaryOrderState<T>,

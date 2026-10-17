@@ -303,6 +303,15 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         runtime.pump();
     }
     let socket = runtime.sockets.borrow()[1].1.clone();
+    let fills = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let observed = fills.clone();
+    venue.base().on(
+        "fill",
+        std::rc::Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
     let position_writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let capture = position_writes.clone();
     let unsubscribe = store.subscribe(std::sync::Arc::new(move |data, _| {
@@ -329,6 +338,22 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
     assert_eq!(order.remaining, 0.009);
     assert_eq!(order.filled.to_bits(), (0.012_f64 - 0.009).to_bits());
     assert_eq!(order.info.as_ref().unwrap()["market"], "BTC-USD-PERP");
+    drop(orders);
+    push(
+        "orders.ALL",
+        json!({"id":"ws-order-7","market":"BTC-USD-PERP","side":"SELL","type":"LIMIT","status":"FILLED","price":"109.25","size":"0.012","remaining_size":"0","reduce_only":false,"time_in_force":"GoodTillCancel"}),
+    );
+    let orders = store.orders();
+    let terminal = orders
+        .iter()
+        .find(|order| order.id == "ws-order-7")
+        .unwrap();
+    assert_eq!(
+        terminal.status.value(),
+        Some(&safe_cex_types::OrderStatus::Closed)
+    );
+    assert_eq!(terminal.filled, 0.012);
+    assert_eq!(terminal.remaining, 0.0);
     drop(orders);
     // The source immediately starts a REST refresh too. Observe the feed's
     // native notification independently of the subsequent snapshot replacement.
@@ -373,6 +398,11 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
             .iter()
             .any(|message| message.contains("Error handling")),
         "PARADEX source ingress must not swallow a binding error"
+    );
+    assert_eq!(
+        fills.get(),
+        0,
+        "source private orders update Store without emitting fills"
     );
     unsubscribe();
     venue.dispose().unwrap();
@@ -644,7 +674,7 @@ fn amendment_precision_keeps_amount_execution_and_trigger_axes_distinct() {
     let mut stop = reconciled_order();
     stop.id = "native-stop".into();
     stop.r#type = (safe_cex_types::OrderType::StopLoss).into();
-    stop.reduce_only = true;
+    stop.reduce_only = true.into();
     stop.price = (99.37).into();
     stop.info = (Some(
         json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}),
@@ -1475,4 +1505,152 @@ fn actual_amendment_preflight_refuses_infinite_size_before_putting() {
             .any(|request| request.method.eq_ignore_ascii_case("PUT"))
     );
     venue.dispose().unwrap();
+}
+
+fn identity_order(id: &str) -> serde_json::Value {
+    json!({"id":id,"market":"BTC-USD-PERP","side":"BUY","type":"LIMIT","status":"OPEN","price":"101.5","size":"0.006","remaining_size":"0.003","created_at":1784505600000i64,"reduce_only":false})
+}
+fn order_refusal_logs(venue: &dyn Exchange) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+    let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = logs.clone();
+    venue.base().on_args(
+        "log",
+        std::rc::Rc::new(move |_, args| {
+            if args[1].strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("warning")) {
+                captured
+                    .borrow_mut()
+                    .push(String::from_utf16(args[0].as_str().unwrap().as_ref()).unwrap());
+            }
+            Ok(())
+        }),
+    );
+    logs
+}
+#[test]
+fn order_identity_refusals_keep_good_rows_and_report_fields() {
+    for field in ["id", "market"] {
+        for bad in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(json!(17)),
+            Some(json!(false)),
+            Some(json!({})),
+            Some(json!([])),
+        ] {
+            let (venue, runtime, store, wire) =
+                support::fixture_with(private_options(), private_script);
+            drive(&runtime, venue.start()).unwrap();
+            let mut refused = identity_order("refused");
+            match &bad {
+                Some(value) => {
+                    refused[field] = value.clone();
+                }
+                None => {
+                    refused.as_object_mut().unwrap().remove(field);
+                }
+            }
+            wire.responses.borrow_mut().insert(
+                "/orders".into(),
+                json!({"results":[identity_order("before"),refused,identity_order("after")]}),
+            );
+            let logs = order_refusal_logs(venue.as_ref());
+            let before = wire.requests.borrow().len();
+            let orders = drive(&runtime, venue.fetch_orders(None))
+                .expect("one strict identity refusal must not reject the complete order snapshot");
+            let ids: Vec<_> = orders.iter().map(|o| o.id.as_str()).collect();
+            assert_eq!(ids, ["before", "after"]);
+            for order in &orders {
+                assert_eq!(order.symbol, "BTC-USD-PERP");
+                assert_eq!(order.amount.to_bits(), 0.006_f64.to_bits());
+                assert_eq!(order.last_update.to_bits(), 1784505600000_f64.to_bits());
+            }
+            assert!(
+                store.orders().is_empty(),
+                "fetch returns the snapshot; caller commits it"
+            );
+            let logs = logs.borrow();
+            assert_eq!(logs.len(), 1);
+            let message = logs[0].as_str();
+            let received = bad
+                .as_ref()
+                .map_or_else(|| "undefined".into(), serde_json::Value::to_string);
+            assert!(message.contains(&format!("Order.{field}")), "{message}");
+            assert!(
+                message.contains(&format!("received: {received}")),
+                "{message}"
+            );
+            assert_eq!(
+                wire.requests.borrow()[before..]
+                    .iter()
+                    .filter(|r| r.url == "/orders")
+                    .count(),
+                1
+            );
+            venue.dispose().unwrap();
+        }
+    }
+}
+#[test]
+fn order_identity_all_refused_rows_return_empty() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut first = identity_order("first");
+    first["id"] = json!(17);
+    let mut second = identity_order("second");
+    second["market"] = serde_json::Value::Null;
+    wire.responses
+        .borrow_mut()
+        .insert("/orders".into(), json!({"results":[first,second]}));
+    let logs = order_refusal_logs(venue.as_ref());
+    assert!(
+        drive(&runtime, venue.fetch_orders(None))
+            .expect("all refused rows resolve empty")
+            .is_empty()
+    );
+    assert_eq!(logs.borrow().len(), 2);
+    venue.dispose().unwrap();
+}
+#[test]
+fn order_identity_refusal_preserves_later_source_date_error() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut bad = identity_order("bad");
+    bad["id"] = json!(17);
+    bad["created_at"] = json!({"toString":null});
+    wire.responses.borrow_mut().insert(
+        "/orders".into(),
+        json!({"results":[identity_order("before"),bad]}),
+    );
+    let logs = order_refusal_logs(venue.as_ref());
+    let error = drive(&runtime, venue.fetch_orders(None))
+        .expect_err("a source failure still rejects the read");
+    assert!(
+        error
+            .message
+            .contains("Cannot convert object to primitive value"),
+        "{}",
+        error.message
+    );
+    assert!(
+        logs.borrow().is_empty(),
+        "a source failure must not be reported as a strict field refusal"
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn order_identity_source_keeps_raw_fields_and_date_error() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-row-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "13");
 }

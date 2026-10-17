@@ -1754,11 +1754,46 @@ impl ExchangeState {
             Venue::PM => crate::public_rest::fetch_pm_markets(&mut context).await?,
             Venue::Spot => crate::public_rest::fetch_spot_markets(&mut context).await?,
         };
-        Ok(EventValue::array(
-            rows.iter()
-                .map(market_value)
-                .collect::<Result<Vec<_>, _>>()?,
-        ))
+        let mut markets = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            let mut invalid = [
+                ("base", row.base.as_ref()),
+                ("quote", row.quote.as_ref()),
+                ("symbol", row.symbol.as_ref()),
+            ]
+            .into_iter()
+            .filter(|(_, value)| value.and_then(Value::as_str).is_none())
+            .map(|(field, value)| {
+                format!(
+                    "{field}={}: expected string",
+                    value.map_or_else(|| "undefined".into(), Value::to_string)
+                )
+            })
+            .collect::<Vec<_>>();
+            if safe_cex_num::numeric_ingress::js_value_as_f64(&row.leverage_max).is_none() {
+                invalid.push(format!(
+                    "limits.leverage.max={}: expected number",
+                    row.leverage_max
+                ));
+            }
+            if !invalid.is_empty() {
+                let symbol = row
+                    .symbol
+                    .as_ref()
+                    .map_or_else(|| "undefined".into(), Value::to_string);
+                emit_json(
+                    &self.base,
+                    &json!(format!(
+                        "Refused Binance market row {index} symbol={symbol}: {}",
+                        invalid.join(", ")
+                    )),
+                )
+                .map_err(Rc::new)?;
+                continue;
+            }
+            markets.push(market_value(row)?);
+        }
+        Ok(EventValue::array(markets))
     }
     pub async fn fetch_tickers(self: &Rc<Self>) -> Result<EventValue, Failure> {
         let mut context = RestContext(self.clone());
@@ -1973,11 +2008,33 @@ impl PrivateParent for ExchangeState {
                     .store
                     .add_or_update_position(typed(&arg(0))?)
                     .map_err(|error| Rc::new(error.into())),
-                UpdatePosition => owner
-                    .base
-                    .store
-                    .update_position(&arg(0).read("id")?.text()?, &patch(&arg(1))?)
-                    .map_err(|error| Rc::new(error.into())),
+                UpdatePosition => {
+                    let position = arg(0);
+                    let mut changes = arg(1).spread();
+                    if owner.venue == Venue::PM
+                        && changes.get("info").is_some_and(|info| info.same(&position))
+                    {
+                        // The source creates position.info === position. The owned
+                        // Store keeps the chosen depth-one snapshot of the updated
+                        // fields, excluding info so subsequent frames stay bounded.
+                        let mut snapshot = position.spread();
+                        snapshot.remove("info");
+                        for (field, value) in &changes {
+                            if field != "info" {
+                                snapshot.insert(field.clone(), value.clone());
+                            }
+                        }
+                        changes.insert("info".into(), EventValue::record_object(snapshot));
+                    }
+                    owner
+                        .base
+                        .store
+                        .update_position(
+                            &position.read("id")?.text()?,
+                            &patch(&EventValue::record_object(changes))?,
+                        )
+                        .map_err(|error| Rc::new(error.into()))
+                }
                 Fill => owner.fill(arg(0)),
                 MarkPosition => {
                     owner.mark_position_state_updated();

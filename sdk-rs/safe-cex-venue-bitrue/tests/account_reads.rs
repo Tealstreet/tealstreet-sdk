@@ -242,6 +242,7 @@ fn account_reads_match_actual_typescript() {
                         })
                     })
                 },
+                |warning| panic!("unexpected refusal: {warning}"),
             ));
             let actual = match result {
                 Ok(value) => {

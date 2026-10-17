@@ -323,10 +323,10 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 let mut reported = Value::Null;
                 let mut report = Value::Null;
                 if !coercion {
-                    assert_eq!(
-                        &events.borrow()[0][0],
+                    assert_source_tree(
                         format,
-                        "native raw formatted value {label}/{method}"
+                        &events.borrow()[0][0],
+                        &format!("native raw formatted value {label}/{method}"),
                     );
                     reported = if worker {
                         events.borrow()[0][1]["sentryData"]["error"].clone()
@@ -348,9 +348,10 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                             "native constructed string error message"
                         );
                     } else {
-                        assert_eq!(
-                            &reported, selected,
-                            "native raw host/worker value and type {label}/{method}"
+                        assert_source_tree(
+                            selected,
+                            &reported,
+                            &format!("native raw host/worker value and type {label}/{method}"),
                         );
                     }
                     report = if worker {
@@ -493,9 +494,10 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                     trace.borrow_mut().push("first".into());
                     assert_eq!(args[0], "7", "native decoded listener raw formatted value");
                     if worker {
-                        assert_eq!(
-                            args[1]["sentryData"]["error"], 7,
-                            "native worker raw report before listener"
+                        assert_source_tree(
+                            &json!(7),
+                            &args[1]["sentryData"]["error"],
+                            "native worker raw report before listener",
                         );
                     }
                     Err(thrown.clone())

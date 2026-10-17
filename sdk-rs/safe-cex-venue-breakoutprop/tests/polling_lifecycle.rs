@@ -1,4 +1,4 @@
-#[path = "../../safe-cex-webworker/tests/support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::{
     exchange::BaseExchange,
@@ -780,12 +780,20 @@ fn context(s: Rc<State>, ex: Rc<BreakoutpropExchange>) -> (Rc<BreakoutRuntime>, 
 #[derive(Default)]
 struct Wire {
     trace: RefCell<Vec<String>>,
+    interceptor: RefCell<std::rc::Weak<safe_cex_venue_breakoutprop::api::DxApi>>,
     requests: RefCell<Vec<RestRequest>>,
     unauthorized: Cell<u32>,
     status: Cell<f64>,
     faults: RefCell<VecDeque<(f64, bool)>>,
 }
 impl ApiWire for Wire {
+    fn install_request_interceptor(
+        &self,
+        api: std::rc::Weak<safe_cex_venue_breakoutprop::api::DxApi>,
+    ) -> Result<(), ExchangeError> {
+        *self.interceptor.borrow_mut() = api;
+        Ok(())
+    }
     fn rate_limit(&self, max: f64) -> Result<(), ExchangeError> {
         self.trace.borrow_mut().push(format!("limit:{max}"));
         Ok(())
@@ -794,6 +802,21 @@ impl ApiWire for Wire {
         &self,
         c: Config,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<JsNumberInput, ApiFailure>>>> {
+        if let Err(error) = self
+            .interceptor
+            .borrow()
+            .upgrade()
+            .unwrap()
+            .intercept_request(&mut c.borrow_mut())
+        {
+            return Box::pin(async move {
+                Err(ApiFailure {
+                    error,
+                    status: None,
+                    config: None,
+                })
+            });
+        }
         let request = c.borrow().request.clone();
         self.trace.borrow_mut().push(request.url.clone());
         self.requests.borrow_mut().push(request.clone());

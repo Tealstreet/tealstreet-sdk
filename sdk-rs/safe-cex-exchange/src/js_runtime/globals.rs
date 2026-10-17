@@ -154,10 +154,14 @@ fn v8_operand(value: &Js) -> String {
     }
 }
 
-fn not_iterable(value: &Js) -> Thrown {
-    Thrown::type_error(&format!(
-        "{} is not iterable (cannot read property Symbol(Symbol.iterator))",
+pub(super) fn not_iterable(value: &Js) -> Thrown {
+    let operand = if matches!(value, Js::BigInt(_)) {
+        value.type_of().to_owned()
+    } else {
         v8_operand(value)
+    };
+    Thrown::type_error(&format!(
+        "{operand} is not iterable (cannot read property Symbol(Symbol.iterator))"
     ))
 }
 
@@ -382,6 +386,15 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 Ok(Js::Bool(
                     matches!(arg(&a, 0), Js::Number(n) if n.is_finite()),
                 ))
+            }),
+        ),
+        (
+            "isSafeInteger",
+            Js::function("isSafeInteger", |_, a| {
+                Ok(Js::Bool(matches!(
+                    arg(&a, 0),
+                    Js::Number(n) if n.is_finite() && n.trunc() == n && n.abs() <= 9_007_199_254_740_991.0
+                )))
             }),
         ),
         ("MAX_SAFE_INTEGER", Js::Number(9_007_199_254_740_991.0)),

@@ -419,7 +419,7 @@ fn order(root: &SyncedOrderRoot<Frame>, e: &Value) {
         &e["extra"]["remainingNative"],
         "class native placement units",
     );
-    assert!(!o.reduce_only);
+    assert_eq!(o.reduce_only, false);
     assert!(o.info.is_none(), "raw info lives in retained native handle");
     frame(&native.info, &e["info"]);
 }

@@ -113,3 +113,27 @@ workspace or monorepo suites, other venue exact targets, host/wasm clippy, wasm
 builds or CI reruns were run. Existing Source Store __proto__ constructor
 findings are not repaired by this slice. Older helper/account receipts retain
 their own measured SHAs and have not been relabeled as new-head executions.
+
+
+## Production order-reader cleanup (2026-10-18 SGT)
+
+The old src/order_reads.rs implementation, its eight tests, source-only oracle
+and cardinality control are retired. Earlier measurements of that copy above
+are historical, not production coverage. The constructed Exchange installs
+futures_native_order_reads through binding/futures.rs. Its retained component
+tests remain; tests/order_reads_binding.rs additionally drives actual HTTP
+requests and the real Store. Redirecting the live normal reader to the algo
+endpoint compiles, leaves all eight old copy tests passing, and fails the new
+binding witness at duplicated algo IDs. Exact restoration passes. The new
+witness also checks ordered endpoints/params, native contract-size scaling and
+failed-normal/empty-algo Store category preservation. This deletion changes no
+production algorithm or shared representation policy.
+
+## Typed helper retirement (2026-10-18)
+
+The snapshot supplement now observes the canonical decoded Order directly. The
+unused typed sizing reconcile copy is deleted; its empty-Store call was an
+identity. Every decoded field, row floor, info-marker ownership and numeric-bit
+assertion remains. Native/source reconciliation and its alias observations are
+unchanged. The typed-route paragraph above records the earlier instrument and
+must not be read as a surviving production venue helper.

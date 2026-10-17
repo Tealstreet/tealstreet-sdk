@@ -1,7 +1,7 @@
 //! Inspect actual handler posts before any trace JSON serialization.
 #[path = "support/error_post.rs"]
 mod error_post_support;
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 #[allow(dead_code)]
 mod runtime;
 use safe_cex_exchange::js_runtime::value::Js;

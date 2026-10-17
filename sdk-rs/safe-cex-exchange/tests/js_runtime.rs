@@ -4110,3 +4110,46 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
         }
     }
 }
+#[test]
+fn owned_callback_error_clone_preserves_independent_native_metadata() {
+    use safe_cex_exchange::js_runtime::value::owned::{OwnedCallbackError, OwnedJsValue};
+
+    let original = OwnedCallbackError::new(OwnedJsValue::object([
+        ("name", OwnedJsValue::string("TypeError")),
+        ("message", OwnedJsValue::string("signer refused")),
+        (
+            "code",
+            OwnedJsValue::Array(vec![
+                OwnedJsValue::Number(f64::from_bits(0x7ff8000000000042)),
+                OwnedJsValue::Undefined,
+                OwnedJsValue::Number(-0.0),
+                OwnedJsValue::String(vec![0xd800, 120]),
+            ]),
+        ),
+    ]));
+    let copied = original.clone();
+    let OwnedJsValue::Array(original_code) = &original.value()["code"] else {
+        panic!("native code array")
+    };
+    let OwnedJsValue::Array(copied_code) = &copied.value()["code"] else {
+        panic!("cloned native code array")
+    };
+    assert_ne!(original_code.as_ptr(), copied_code.as_ptr());
+    drop(original);
+    assert_eq!(copied.to_string(), "signer refused");
+    assert_eq!(copied.value()["name"], OwnedJsValue::string("TypeError"));
+    let OwnedJsValue::Array(code) = &copied.value()["code"] else {
+        panic!("retained cloned native code array")
+    };
+    assert_eq!(code.len(), 4);
+    let OwnedJsValue::Number(nan) = code[0] else {
+        panic!("native NaN")
+    };
+    assert_eq!(nan.to_bits(), 0x7ff8000000000042);
+    assert!(matches!(code[1], OwnedJsValue::Undefined));
+    let OwnedJsValue::Number(zero) = code[2] else {
+        panic!("native signed zero")
+    };
+    assert_eq!(zero.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(code[3], OwnedJsValue::String(vec![0xd800, 120]));
+}
