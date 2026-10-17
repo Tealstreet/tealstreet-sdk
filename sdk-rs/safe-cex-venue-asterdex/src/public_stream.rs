@@ -324,6 +324,15 @@ impl PublicStream {
                 safe_cex_store::model_patch::PatchValue::Json(Value::Number(n)) => {
                     safe_cex_num::number_from_string(&n.to_string())
                 }
+                safe_cex_store::model_patch::PatchValue::Json(value) => {
+                    self.parent.log(
+                        &format!(
+                            "AsterDEX ticker {symbol} typed field {field} requires a number; received {value}"
+                        ),
+                        safe_cex_exchange::runtime::LogSeverity::Error,
+                    )?;
+                    return Ok(None);
+                }
                 _ => return Err(ExchangeError::new("Non-number public ticker patch")),
             };
             match field.as_str() {
