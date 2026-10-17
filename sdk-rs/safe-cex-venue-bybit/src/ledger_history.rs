@@ -301,18 +301,48 @@ pub fn fetch_historical_positions<H: SnapshotHost>(
     }))
 }
 pub fn fetch_closed_pnl<H: SnapshotHost>(h: Rc<H>, owner: H::Value, opts: H::Value) -> H::Value {
+    fetch_closed_pnl_for_category(h, owner, opts, false)
+}
+pub fn fetch_inverse_closed_pnl<H: SnapshotHost>(
+    h: Rc<H>,
+    owner: H::Value,
+    opts: H::Value,
+) -> H::Value {
+    fetch_closed_pnl_for_category(h, owner, opts, true)
+}
+fn fetch_closed_pnl_for_category<H: SnapshotHost>(
+    h: Rc<H>,
+    owner: H::Value,
+    opts: H::Value,
+    inverse: bool,
+) -> H::Value {
     let launcher = h.clone();
     launcher.launch(Box::pin(async move {
         if h.truthy(&h.get(&owner, "isPublicDataOnly")?) {
             return Ok(h.array(vec![]));
         }
-        call!(
-            h,
-            owner.clone(),
-            "refuseOptionSymbol",
-            vec![h.get(&opts, "symbol")?, h.literal("closed PnL")]
-        );
-        let (category, from, to) = closed_bounds(h.as_ref(), &owner, &opts)?;
+        if !inverse {
+            call!(
+                h,
+                owner.clone(),
+                "refuseOptionSymbol",
+                vec![h.get(&opts, "symbol")?, h.literal("closed PnL")]
+            );
+        }
+        let (category, from, to) = if inverse {
+            let to = nullish(h.as_ref(), h.get(&opts, "to")?, || {
+                h.intrinsic("virtualClock.getCurrentTimeMs", vec![])
+            })?;
+            let from = nullish(h.as_ref(), h.get(&opts, "from")?, || {
+                h.intrinsic(
+                    "subtract",
+                    vec![to.clone(), h.get(&owner, "DEFAULT_EXECUTIONS_LOOKBACK_MS")?],
+                )
+            })?;
+            (h.literal("inverse"), from, to)
+        } else {
+            closed_bounds(h.as_ref(), &owner, &opts)?
+        };
         let entries = h.array(vec![]);
         let result = async {
             let windows = call!(h, owner.clone(), "getExecutionQueryWindows", vec![from, to]);
@@ -374,10 +404,14 @@ pub fn fetch_closed_pnl<H: SnapshotHost>(h: Rc<H>, owner: H::Value, opts: H::Val
                                 let mapper = h.intrinsic("select:mapBybitClosedPnl", vec![])?;
                                 let account =
                                     or(h.as_ref(), h.get(&opts, "accountName")?, || h.literal(""));
-                                let inverse = h.intrinsic(
-                                    "isBybitInverseSymbol",
-                                    vec![h.get(&row, "symbol")?],
-                                )?;
+                                let inverse = if inverse {
+                                    h.boolean(true)
+                                } else {
+                                    h.intrinsic(
+                                        "isBybitInverseSymbol",
+                                        vec![h.get(&row, "symbol")?],
+                                    )?
+                                };
                                 let entry = h.apply(mapper, vec![row, account, inverse])?;
                                 if h.truthy(&entry) {
                                     call!(h, entries, "push", vec![entry]);

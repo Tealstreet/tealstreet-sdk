@@ -5,6 +5,7 @@ pub(crate) mod batch;
 pub(crate) mod cancel;
 pub(crate) mod controls;
 pub(crate) mod fills;
+pub(crate) mod history;
 pub(crate) mod inverse;
 mod inverse_controls;
 mod inverse_mapping;

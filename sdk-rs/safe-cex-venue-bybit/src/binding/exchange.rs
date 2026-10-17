@@ -558,6 +558,12 @@ impl Exchange for BybitExchange {
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&options)))
     }
+    fn fetch_closed_pnl(
+        &self,
+        options: HistoricalTradeOptions,
+    ) -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
+        self.invoke("fetchClosedPnl", args!(js(&options)))
+    }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
         self.invoke("fetchTickers", vec![])
     }
