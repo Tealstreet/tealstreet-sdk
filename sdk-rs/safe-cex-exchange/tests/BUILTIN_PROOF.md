@@ -15,7 +15,7 @@ restoration of the fixed files:
 | `safe-cex-venue-lighter / exchange_binding` | `place_order_merges_a_sub_minimum_trailing_lot_into_the_previous_lot` | placement rejects before expected signed lots |
 | `safe-cex-venue-orderly / exchange_trait` | `fetch_ohlcv_returns_source_rows_reversed_oldest_first` | missing reverse rejects candle history |
 | `safe-cex-venue-bitrue / exchange_binding` | `listen_ohlcv_maps_singapore_kline_times_through_the_real_dayjs_global` | no candle callbacks instead of two Singapore-adjusted rows |
-| `safe-cex-venue-phemex / exchange_binding` | `bound_daily_chart_history_ends_at_previous_utc_midnight` | missing Dayjs daily-boundary operation rejects history |
+| `safe-cex-venue-phemex / exchange_binding` | `bound_daily_chart_history_ends_at_previous_utc_midnight` | missing Dayjs daily-boundary operation yields no candle rows |
 
 Each venue witness constructs its production binding and invokes the production
 body, with deterministic transport inputs; no helper-name stub supplies these
