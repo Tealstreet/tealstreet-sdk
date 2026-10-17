@@ -192,3 +192,106 @@ fn production_subscription_body_throw_closes_and_keeps_the_original_cause() {
     );
     assert_eq!(closes.get(), 1, "source for-of performs IteratorClose");
 }
+
+#[test]
+fn production_iterator_pair_closes_early_and_checks_return_shape() {
+    use crate::{native_bindings::BoundHost, rest_reads::ReadHost};
+    for valid_return in [true, false] {
+        let h = support::harness(support::options(), |_| {});
+        let host = BoundHost {
+            ops: ops::binding_ops(Rc::downgrade(&h.exchange.rt.shared)),
+            receiver: h.exchange.rt.this.clone(),
+        };
+        let iterator = Js::new_set().call_method("values", vec![]).unwrap();
+        let pulls = Rc::new(Cell::new(0));
+        let count = pulls.clone();
+        iterator
+            .define(
+                "next",
+                Js::function("next", move |_, _| {
+                    count.set(count.get() + 1);
+                    Ok(Js::object(vec![
+                        ("done", Js::Bool(count.get() > 3)),
+                        ("value", Js::Number(count.get() as f64)),
+                    ]))
+                }),
+            )
+            .unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let count = closes.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |_, _| {
+                    count.set(count.get() + 1);
+                    Ok(if valid_return {
+                        Js::object(vec![])
+                    } else {
+                        Js::Number(7.0)
+                    })
+                }),
+            )
+            .unwrap();
+        let result = host.iterator_pair(iterator, Ok);
+        if valid_return {
+            let (a, b) = result.unwrap();
+            assert_eq!((a.as_f64(), b.as_f64()), (Some(1.0), Some(2.0)));
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
+        }
+        assert_eq!(
+            pulls.get(),
+            2,
+            "pair binding must not eagerly exhaust its input"
+        );
+        assert_eq!(closes.get(), 1, "normal early binding closes exactly once");
+    }
+}
+
+#[test]
+fn production_subscription_step_failures_do_not_close_the_iterator() {
+    for mode in ["next", "done", "value"] {
+        let (_h, socket) = connected();
+        let iterator = Js::new_set().call_method("values", vec![]).unwrap();
+        let original = Js::object(vec![("marker", Js::str(mode))]);
+        let failure = original.clone();
+        iterator
+            .define(
+                "next",
+                Js::function("next", move |_, _| {
+                    if mode == "next" {
+                        return Err(Thrown::new(failure.clone()));
+                    }
+                    let step = Js::object(vec![("done", Js::Bool(false)), ("value", Js::str("a"))]);
+                    let failure = failure.clone();
+                    step.define_accessor(
+                        mode,
+                        Some(Rc::new(move |_| Err(Thrown::new(failure.clone())))),
+                        None,
+                    );
+                    Ok(step)
+                }),
+            )
+            .unwrap();
+        let closes = Rc::new(Cell::new(0));
+        let count = closes.clone();
+        iterator
+            .define(
+                "return",
+                Js::function("return", move |_, _| {
+                    count.set(count.get() + 1);
+                    Ok(Js::object(vec![]))
+                }),
+            )
+            .unwrap();
+        let error = socket
+            .call_method("registerAndSubscribe", vec![iterator])
+            .unwrap_err();
+        assert!(
+            error.value.same_reference(&original),
+            "{mode}: original step cause"
+        );
+        assert_eq!(closes.get(), 0, "{mode}: no IteratorClose before a body");
+    }
+}
