@@ -41,6 +41,7 @@ pub(crate) struct Lane {
     timeout: f64,
     headers: Vec<(String, String)>,
     retries: Cell<u32>,
+    rate_limits: RefCell<Vec<Rc<safe_cex_transport::rate_limit::RateLimiter>>>,
     sign: Cell<Option<SignFn>>,
     receive: Cell<Option<ReceiveFn>>,
 }
@@ -141,6 +142,7 @@ impl Lane {
                     timeout,
                     headers,
                     retries: Cell::new(0),
+                    rate_limits: RefCell::new(vec![]),
                     sign: Cell::new(None),
                     receive: Cell::new(None),
                 }))
@@ -164,14 +166,13 @@ impl Lane {
     /// axios-rate-limit maxRPS over this lane's executor.
     #[expect(clippy::arc_with_non_send_sync)]
     pub(crate) fn limit(&self, runtime: Rc<dyn ExchangeRuntime>, max_rps: usize) {
-        let current = self.executor.borrow().clone();
-        *self.executor.borrow_mut() =
-            Arc::new(safe_cex_transport::rate_limit::RateLimitedAdapter::new(
-                current,
+        self.rate_limits.borrow_mut().push(Rc::new(
+            safe_cex_transport::rate_limit::RateLimiter::new(
                 Arc::new(RateClock { runtime }),
                 max_rps,
                 1000,
-            ));
+            ),
+        ));
     }
 }
 
@@ -277,6 +278,13 @@ impl Client {
             // The config stamp: one signature re-sign per call, by retry or by resend.
             let mut signature_retried = false;
             loop {
+                let limits = lane.rate_limits.borrow().clone();
+                for limit in limits {
+                    limit
+                        .acquire()
+                        .await
+                        .map_err(|error| ExchangeError::new(error.to_string()))?;
+                }
                 let mut request = RestRequest {
                     method: method.into(),
                     url: url.clone(),

@@ -325,3 +325,5 @@ checks that reconnect refreshes orders, and advances the runtime clock to verify
 that the original polling chain remains the only one.
 The same socket-event fixture covers private order and position Store commits,
 fill emission, and the real REST balance refresh triggered by an order-fill frame.
+
+The constructed native HTTP client acquires its rate slot before invoking the signing interceptor, including network retry attempts. `tests/rate_limit_signing.rs` fills the real ten-request window and verifies the queued request reads its timestamp after dequeue.

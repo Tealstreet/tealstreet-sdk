@@ -22,6 +22,7 @@ pub struct Client {
     pub executor: RefCell<std::sync::Arc<dyn safe_cex_transport::RestAdapter>>,
     pub config: api::ClientConfig<ExchangeError>,
     pub retries: Cell<u32>,
+    rate_limits: RefCell<Vec<Rc<safe_cex_transport::rate_limit::RateLimiter>>>,
     pub request: RefCell<Option<api::RequestHandler<ExchangeError>>>,
     pub success: RefCell<Option<api::ResponseHandler<ExchangeError>>>,
     pub failure: RefCell<Option<api::FailureHandler<ExchangeError>>>,
@@ -42,37 +43,44 @@ impl Client {
         self: &Rc<Self>,
         config: Rc<api::Config>,
     ) -> api::Task<Rc<api::Response>, ExchangeError> {
-        let request = self
-            .request
-            .borrow()
-            .as_ref()
-            .expect("Backpack request interceptor installed")
-            .clone()(config);
         let client = self.clone();
         Box::pin(async move {
-            let config = request.await?;
-            let mut req = RestRequest {
-                method: config.method.clone().unwrap_or_else(|| "GET".into()),
-                url: config.url.clone().unwrap_or_default(),
-                base_url: Some(client.config.base_url.into()),
-                timeout_ms: Some(client.config.timeout as i64),
-                skip_remote_signing: config.skip_remote_signing,
-                ..Default::default()
-            };
-            if let Some(headers) = &config.headers {
-                for (k, v) in &*headers.borrow() {
-                    let text = Native::from_prepared(v.clone()).utf8()?;
-                    req.headers.insert(k.clone(), text);
-                }
-            }
-            if !matches!(&*config.params, JsJsonValue::Undefined) {
-                req.params = Some(wire(&config.params)?);
-            }
-            if !matches!(&*config.data, JsJsonValue::Undefined) {
-                req.body = Some(RestBody::Untransformed(wire(&config.data)?));
-            }
             let mut attempt = 0;
-            let response = loop {
+            let (response, config, req) = loop {
+                let limits = client.rate_limits.borrow().clone();
+                for limit in limits {
+                    limit
+                        .acquire()
+                        .await
+                        .map_err(|error| ExchangeError::new(error.to_string()))?;
+                }
+                let request = client
+                    .request
+                    .borrow()
+                    .as_ref()
+                    .expect("Backpack request interceptor installed")
+                    .clone();
+                let config = request(config.clone()).await?;
+                let mut req = RestRequest {
+                    method: config.method.clone().unwrap_or_else(|| "GET".into()),
+                    url: config.url.clone().unwrap_or_default(),
+                    base_url: Some(client.config.base_url.into()),
+                    timeout_ms: Some(client.config.timeout as i64),
+                    skip_remote_signing: config.skip_remote_signing,
+                    ..Default::default()
+                };
+                if let Some(headers) = &config.headers {
+                    for (k, v) in &*headers.borrow() {
+                        let text = Native::from_prepared(v.clone()).utf8()?;
+                        req.headers.insert(k.clone(), text);
+                    }
+                }
+                if !matches!(&*config.params, JsJsonValue::Undefined) {
+                    req.params = Some(wire(&config.params)?);
+                }
+                if !matches!(&*config.data, JsJsonValue::Undefined) {
+                    req.body = Some(RestBody::Untransformed(wire(&config.data)?));
+                }
                 let executor = client.executor.borrow().clone();
                 let response = executor.execute(req.clone()).await;
                 if let Err(e) = &response {
@@ -84,7 +92,7 @@ impl Client {
                         continue;
                     }
                 }
-                break response;
+                break (response, config, req);
             };
             match response {
                 Ok(response) => {
@@ -191,6 +199,7 @@ impl api::Host for Factory {
             executor: RefCell::new(std::sync::Arc::new(HttpExecution { inner })),
             config,
             retries: Cell::new(0),
+            rate_limits: RefCell::new(vec![]),
             request: RefCell::new(None),
             success: RefCell::new(None),
             failure: RefCell::new(None),
@@ -390,13 +399,12 @@ impl Client {
         runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
         max_rps: usize,
     ) {
-        let current = self.executor.borrow().clone();
-        *self.executor.borrow_mut() =
-            std::sync::Arc::new(safe_cex_transport::rate_limit::RateLimitedAdapter::new(
-                current,
+        self.rate_limits.borrow_mut().push(Rc::new(
+            safe_cex_transport::rate_limit::RateLimiter::new(
                 std::sync::Arc::new(RateClock { runtime }),
                 max_rps,
                 1000,
-            ));
+            ),
+        ));
     }
 }

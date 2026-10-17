@@ -1675,9 +1675,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "a7e1730488d816f8a6d292977532261507f371931866858a56ee80fb3115ce89",
+      "producer_sha256": "5f287e2cb191a5d72934c9bcfe661ec720c3eb89976478c5e3924769d7e4d8d4",
       "classification": "no-owned-latch",
-      "reason": "Owns a snapshot of interceptor callbacks and the current settlement while awaiting each chain_step/adapter. Moving request and response rejection handling into this chain adds no shared latch; callback and host cancellation stay with their existing owners."
+      "reason": "Owns a snapshot of interceptor callbacks and the current settlement while awaiting each chain_step and adapter. The adapter call no longer takes client state; the registered rate-limit callback runs at its Axios LIFO position. No independent latch or waiter registry is introduced."
     },
     {
       "owner": "src/js_runtime/client.rs::spawn",
@@ -1694,9 +1694,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "4dd78754653887309585ec03d4a1f1eb73396ff20ea20e6e40c92265ec854168",
+      "producer_sha256": "36c58c5a72c0d3989607d3e47f74cc76e85eff9588a7861452ec891e73ac7161",
       "classification": "no-owned-latch",
-      "reason": "Records its window slot only once no sleep remains, with no borrow across the sleep. A failed host sleep now rejects the request rather than spinning on the window."
+      "reason": "Awaits the window belonging to this rate-limit interceptor registration. It releases the RefCell borrow before host sleep and records capacity only on successful dequeue; failure or drop while sleeping publishes no reservation. Other rate-limit registrations retain their independent chain positions."
     },
     {
       "owner": "src/js_runtime/library.rs::install_library",
@@ -2698,12 +2698,11 @@
       "boundaries": [
         "async-function",
         "await",
-        "await",
         "await"
       ],
-      "producer_sha256": "0daa4a3ec3b6604b9523c2d680e8f1c2b43f58077687019d13fffb4fbb97730c",
+      "producer_sha256": "4c081d4dbc6da96703556045d9f7146a4cb05920510870b00872806ee427ba74",
       "classification": "no-owned-latch",
-      "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement. Reviewed callable adapter dispatch: awaits the selected source adapter Promise instead of host send, after the same throttle. No new reservation, RefCell borrow or independent retry/task registry is introduced."
+      "reason": "The adapter attempt now awaits only the selected callable adapter Promise or host send. Rate waiting moved to its source registration point in the request interceptor chain. This function owns config and settlement, with no reservation, waiter registration or RefCell borrow across either await."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::js_remote_signer",
@@ -2735,6 +2734,16 @@
       "classification": "delegated",
       "delegate": "src/websocket.rs::BaseWebSocket::start_prepared_websocket",
       "reason": "The retained header provider executes inside the existing core-owned dial preparation. A thrown auth error prevents dial; generation/disposal guards and cancellation remain owned by start_prepared_websocket/spawn_owned_kind. ws_options witnesses source dial inputs, rejected preparation and real native upgrade headers."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::create",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "ddd323bd834a008d7baa700bb3404901644a96ea74def6564d12f302a8762f1f",
+      "classification": "no-owned-latch",
+      "reason": "The rate-limit request interceptor returns an eager runtime-owned Promise. Its future owns config and client state, awaits the existing throttle, then returns config to the interceptor chain. No RefCell borrow spans the wait; window capacity is recorded only at successful dequeue. Dropping the JS waiter delegates to PromiseWait cleanup while the source Promise remains runtime-owned."
     }
   ]
 }
