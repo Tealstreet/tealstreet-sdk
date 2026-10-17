@@ -15,7 +15,10 @@ Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
 native body; batch capability registration invokes the source batch algorithm.
 The trading runtime's `updateStoredOrder` capability binds the real Store's
 `updateOrder` with its Store receiver. Accepted single/batch PostOnly placements
-and TP/SL amendments then apply the source patch and return IDs. Constructed
+and TP/SL amendments then apply the source patch and return IDs.
+Successful batch replies require a positive ASCII decimal order ID, exactly like
+the source regex. Every result is validated before any PostOnly Store patch;
+leading zeroes, signs, whitespace and nondecimal strings visibly refuse the batch. Constructed
 regressions check existing and absent rows, batch-result reordering and both
 protective order types; an absent row remains absent.
 
