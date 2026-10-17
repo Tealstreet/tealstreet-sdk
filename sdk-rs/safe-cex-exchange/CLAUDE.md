@@ -1396,3 +1396,13 @@ Error prototype thread-local storage stays inside its sole private accessor.
 Module-level item macros are rejected by the parity indexer. The focused
 `safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
 module graph and requires the public Error factory to remain discoverable.
+
+Orderbook utility bindings preserve raw price/amount comparisons and the source
+binary-search read order. They read only visited prices, defer amount reads until
+lookup completes, and retain the inserted update object. Totals capture both sides
+before looping, re-read live lengths/rows and use JS addition; missing/null sides
+throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
+147 update and10 total cases against the maintained TS utility modules through
+installed NativeRuntime bindings, observing getter order, holes, duplicate amount
+reads, inserted identity and reentrant row/length changes. Both regressions compile
+and fail on the prior implementation; their inputs do not replace utility code.
