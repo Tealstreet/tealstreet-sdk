@@ -1169,3 +1169,19 @@ binding witness at duplicated algo IDs. Exact restoration passes. The new
 witness also checks ordered endpoints/params, native contract-size scaling and
 failed-normal/empty-algo Store category preservation. This deletion changes no
 production algorithm or shared representation policy.
+
+
+## Production Spot I/O cleanup (2026-10-18 SGT)
+
+The parallel typed spot_reads/spot_writes implementations, their four test
+targets and exclusive source oracles are retired. Earlier measurements of those
+copies are historical. Production already installs spot_native_order_reads
+through spot_exchange_class; its native/source component cases remain. New
+tests/spot_io_binding.rs drives the actual constructed Exchange, HTTP factory
+and Store for market precision, distinct ticker prices and fallback, active
+symbol discovery/paging and three cancellation routes with exact params. Three
+compiled mutations independently change the live ticker bid field, discovery
+endpoint and cancel-all endpoint. Each leaves its corresponding retired-copy
+tests passing but fails the constructed witness. Exact restoration passes all
+three constructed tests. This is deletion of unused code, not an algorithm
+cutover or a resolution of shared typed projection/identity policy.
