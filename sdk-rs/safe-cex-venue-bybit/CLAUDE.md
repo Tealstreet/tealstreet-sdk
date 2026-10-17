@@ -734,6 +734,13 @@ primary short/extended recovery differs from dedicated inverse single recovery;
 Spot inherits empty history. The full reader source corpus covers requests, results
 and diagnostics; mapper source corpora retain their separate scalar contracts.
 
+Primary/demo option reads now bind the chain, expiry and account-Greeks receiver
+members, including the source account opt-in guard. Quotes stay native through
+numeric coercion, duplicate-symbol joins and sorting against live Store markets.
+Dedicated Spot/Inverse retain the base options refusals. The actual HTTP/source
+comparison has 79 passing cases, including tied-right sorting through the
+canonical shared String.prototype.localeCompare implementation.
+
 ## Native HyroTrader composition
 
 `BybitExchange::create(Hyrotrader, ...)` selects its explicit simulator origin,

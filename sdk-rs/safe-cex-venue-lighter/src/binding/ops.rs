@@ -161,8 +161,20 @@ impl JsIterator {
         }
         result
     }
-    pub(crate) fn close(&self) {
-        self.0.borrow_mut().take();
+    pub(crate) fn close(&self) -> Result<(), Thrown> {
+        let Some((iterator, _)) = self.0.borrow_mut().take() else {
+            return Ok(());
+        };
+        let method = iterator.get("return")?;
+        if !method.is_nullish() {
+            let result = method.call(iterator, vec![])?;
+            if !result.is_object() {
+                return Err(Thrown::type_error(
+                    "Iterator return result is not an object",
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

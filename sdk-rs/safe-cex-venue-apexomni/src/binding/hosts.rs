@@ -102,7 +102,7 @@ impl Host {
         let public = sockets::base_websocket(&scope.sockets, parent.clone());
         let private = sockets::base_websocket(&scope.sockets, parent);
         Rc::new(Self {
-            sdk: NativeSigner::module(scope.runtime.clone()),
+            sdk: NativeSigner::module(),
             scope,
             public,
             private,
@@ -315,10 +315,7 @@ impl ApexServices for Host {
     }
     fn new_signer(&self, seed: Option<String>) -> ExchangeFuture<'_, Rc<dyn ZkLinkHost>> {
         Box::pin(async move {
-            Ok(Rc::new(NativeSigner::from_seed(
-                self.scope.runtime.clone(),
-                seed.as_deref(),
-            )?) as Rc<dyn ZkLinkHost>)
+            Ok(Rc::new(NativeSigner::from_seed(seed.as_deref())?) as Rc<dyn ZkLinkHost>)
         })
     }
     fn schedule_tick(
