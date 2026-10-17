@@ -227,6 +227,12 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let coins = venue(rt)?.get_settle_coins_for_category(&text(&arg(&a, 0))?)?;
         Ok(Js::array(coins.into_iter().map(Js::str).collect()))
     });
+    method(&this, rt, "validateCandleInterval", |rt, a| {
+        venue(rt)?
+            .validate_candle_interval(&arg(&a, 0))
+            .map_err(Thrown::from)?;
+        Ok(Js::Undefined)
+    });
     // ts: BybitExchange.getCategoryForSymbol
     method(&this, rt, "getCategoryForSymbol", |rt, a| {
         Ok(Js::str(
@@ -328,6 +334,10 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     });
     method(&this, rt, "changeMarginType", |rt, a| {
         members::controls::change_margin_type(rt, arg(&a, 0), arg(&a, 1))
+    });
+
+    method(&this, rt, "fetchOHLCV", |rt, a| {
+        members::ohlcv::fetch_ohlcv(rt, arg(&a, 0))
     });
 
     // Public data (members/markets.rs).
