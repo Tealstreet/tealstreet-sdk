@@ -607,7 +607,10 @@ impl WsParent for Parent {
         self.live()?.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.emit(event, safe_cex_exchange::js_runtime::value::Js::str(message))
+        self.live()?.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.sync_socket_health_to_store()
@@ -777,8 +780,12 @@ impl PublicStreamHost for PublicHost {
                 let Some(stream) = stream.borrow().upgrade() else {
                     return Ok(());
                 };
-                let added = data.get("added")?.array_values().unwrap_or_default()
-                    .iter().filter_map(|row| row.get("id").ok())
+                let added = data
+                    .get("added")?
+                    .array_values()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|row| row.get("id").ok())
                     .filter_map(|id| id.as_str().map(|units| String::from_utf16_lossy(units)))
                     .collect::<Vec<_>>();
                 stream.on_markets_changed(&added).map_err(public_error)
@@ -815,7 +822,13 @@ impl PublicStreamHost for PublicHost {
     fn emit_warning(&self, message: &str, force_toast: bool) -> Result<(), ExchangeError> {
         self.base()?.emit_args(
             "warning",
-            &[safe_cex_exchange::js_runtime::value::Js::str(message), safe_cex_exchange::js_runtime::value::Js::object(vec![("forceToast", safe_cex_exchange::js_runtime::value::Js::Bool(force_toast))])],
+            &[
+                safe_cex_exchange::js_runtime::value::Js::str(message),
+                safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                    "forceToast",
+                    safe_cex_exchange::js_runtime::value::Js::Bool(force_toast),
+                )]),
+            ],
         )
     }
 }

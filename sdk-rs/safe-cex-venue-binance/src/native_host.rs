@@ -485,13 +485,7 @@ fn error_value(error: &Failure) -> EventValue {
         ("message", string(&error.message)),
         ("name", string(&error.name)),
     ]);
-    value.write(
-        "code",
-        error
-            .code
-            .clone()
-            .unwrap_or(EventValue::Undefined),
-    );
+    value.write("code", error.code.clone().unwrap_or(EventValue::Undefined));
     value.write(
         "response",
         error

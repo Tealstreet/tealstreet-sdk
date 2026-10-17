@@ -391,11 +391,26 @@ impl ApexOmniPrivateWebsocket {
                 self.parent.base.emit(
                     "fill",
                     safe_cex_exchange::js_runtime::value::Js::object(vec![
-                        ("id", safe_cex_exchange::js_runtime::value::Js::str(&order.id)),
-                        ("side", safe_cex_exchange::js_runtime::value::from_typed(&order.side)?),
-                        ("symbol", safe_cex_exchange::js_runtime::value::Js::str(&order.symbol)),
-                        ("price", safe_cex_exchange::js_runtime::value::Js::Number(price)),
-                        ("amount", safe_cex_exchange::js_runtime::value::Js::Number(amount)),
+                        (
+                            "id",
+                            safe_cex_exchange::js_runtime::value::Js::str(&order.id),
+                        ),
+                        (
+                            "side",
+                            safe_cex_exchange::js_runtime::value::from_typed(&order.side)?,
+                        ),
+                        (
+                            "symbol",
+                            safe_cex_exchange::js_runtime::value::Js::str(&order.symbol),
+                        ),
+                        (
+                            "price",
+                            safe_cex_exchange::js_runtime::value::Js::Number(price),
+                        ),
+                        (
+                            "amount",
+                            safe_cex_exchange::js_runtime::value::Js::Number(amount),
+                        ),
                     ]),
                 )?;
             }

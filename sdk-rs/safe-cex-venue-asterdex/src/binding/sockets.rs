@@ -87,20 +87,29 @@ impl crate::public_stream::PublicStreamParent for Parent {
         symbol: &Value,
         ticker: &Ticker,
     ) -> Result<(), ExchangeError> {
-        self.rt()?
-            .base()
-            .emit_args(event, &[safe_cex_exchange::js_runtime::value::from_json(symbol), safe_cex_exchange::js_runtime::value::from_typed(ticker)?])
+        self.rt()?.base().emit_args(
+            event,
+            &[
+                safe_cex_exchange::js_runtime::value::from_json(symbol),
+                safe_cex_exchange::js_runtime::value::from_typed(ticker)?,
+            ],
+        )
     }
     fn emit_trade(
         &self,
         trade: &crate::ws_helpers::PublicStreamTradeEvent,
     ) -> Result<(), ExchangeError> {
         use safe_cex_exchange::js_runtime::value::{Js, from_typed};
-        self.rt()?.base().emit("trade", Js::object(vec![
-            ("symbol", Js::str(&trade.symbol)), ("price", Js::Number(trade.price)),
-            ("qty", Js::Number(trade.qty)), ("timestamp", Js::Number(trade.timestamp)),
-            ("side", from_typed(&trade.side)?),
-        ]))
+        self.rt()?.base().emit(
+            "trade",
+            Js::object(vec![
+                ("symbol", Js::str(&trade.symbol)),
+                ("price", Js::Number(trade.price)),
+                ("qty", Js::Number(trade.qty)),
+                ("timestamp", Js::Number(trade.timestamp)),
+                ("side", from_typed(&trade.side)?),
+            ]),
+        )
     }
 }
 impl crate::private_repairs::RepairParent for Parent {
@@ -219,23 +228,39 @@ impl crate::private_stream::PrivateStreamParent for Parent {
             .unwrap_or(0.0)
     }
     fn emit_order(&self, order: &Order) -> Result<(), ExchangeError> {
-        self.rt()?
-            .base()
-            .emit_args("order", &[safe_cex_exchange::js_runtime::value::Js::str(&order.id), safe_cex_exchange::js_runtime::value::from_typed(order)?])
+        self.rt()?.base().emit_args(
+            "order",
+            &[
+                safe_cex_exchange::js_runtime::value::Js::str(&order.id),
+                safe_cex_exchange::js_runtime::value::from_typed(order)?,
+            ],
+        )
     }
     fn emit_fill(&self, fill: &crate::private_stream::PrivateFill) -> Result<(), ExchangeError> {
         use safe_cex_exchange::js_runtime::value::{Js, from_typed};
-        self.rt()?.base().emit("fill", Js::object(vec![
-            ("id", from_typed(&fill.id)?), ("orderId", from_typed(&fill.order_id)?),
-            ("symbol", from_typed(&fill.symbol)?), ("side", from_typed(&fill.side)?),
-            ("price", Js::Number(fill.price)), ("amount", Js::Number(fill.amount)),
-        ]))
+        self.rt()?.base().emit(
+            "fill",
+            Js::object(vec![
+                ("id", from_typed(&fill.id)?),
+                ("orderId", from_typed(&fill.order_id)?),
+                ("symbol", from_typed(&fill.symbol)?),
+                ("side", from_typed(&fill.side)?),
+                ("price", Js::Number(fill.price)),
+                ("amount", Js::Number(fill.amount)),
+            ]),
+        )
     }
     fn emit_positions(&self, positions: &[Position]) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("positions", safe_cex_exchange::js_runtime::value::from_typed(positions)?)
+        self.rt()?.base().emit(
+            "positions",
+            safe_cex_exchange::js_runtime::value::from_typed(positions)?,
+        )
     }
     fn emit_account(&self, data: &Value) -> Result<(), ExchangeError> {
-        self.rt()?.base().emit("account", safe_cex_exchange::js_runtime::value::from_json(data))
+        self.rt()?.base().emit(
+            "account",
+            safe_cex_exchange::js_runtime::value::from_json(data),
+        )
     }
 }
 

@@ -169,12 +169,9 @@ impl SecondaryProtocol {
                 let Some(socket) = weak.upgrade() else {
                     return Ok(());
                 };
-                let rows = value
-                    .get("added")?
-                    .array_values()
-                    .ok_or_else(|| {
-                        type_error("Cannot read properties of undefined (reading 'length')")
-                    })?;
+                let rows = value.get("added")?.array_values().ok_or_else(|| {
+                    type_error("Cannot read properties of undefined (reading 'length')")
+                })?;
                 let added = rows
                     .iter()
                     .map(|row| {
@@ -293,7 +290,9 @@ impl WsProtocol for SecondaryProtocol {
             // prevent the dial. Other listener failures still propagate.
             let _ = parent.base().emit(
                 "grafana-info",
-                safe_cex_exchange::js_runtime::value::Js::str("Using tealstreet bitget proxy (secondary public)"),
+                safe_cex_exchange::js_runtime::value::Js::str(
+                    "Using tealstreet bitget proxy (secondary public)",
+                ),
             );
             url
         } else {

@@ -19,6 +19,7 @@ use std::{
 #[derive(Default)]
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+    next_id: std::cell::Cell<u64>,
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
@@ -62,7 +63,9 @@ impl ExchangeRuntime for Runtime {
             .push((severity.into(), message.into()));
     }
     fn unique_id(&self) -> String {
-        "id".into()
+        let id = self.next_id.get();
+        self.next_id.set(id + 1);
+        format!("fixture-{id}")
     }
     fn is_worker(&self) -> bool {
         false

@@ -172,7 +172,9 @@ impl PublicTopics {
             };
             // The emitter's native market records have already crossed the shared
             // typed Store boundary; no arbitrary JS getter/string coercion is claimed.
-            let added = safe_cex_exchange::js_runtime::value::to_typed::<Vec<safe_cex_types::Market>>(&payload.get("added")?)?;
+            let added = safe_cex_exchange::js_runtime::value::to_typed::<
+                Vec<safe_cex_types::Market>,
+            >(&payload.get("added")?)?;
             let topics = topics.clone();
             let output_topics = topics.clone();
             let has_ws = socket.has_websocket();
@@ -181,10 +183,7 @@ impl PublicTopics {
             let clock = runtime.clone();
             let operation: ExchangeFuture<'static, ()> = if active_symbols {
                 Box::pin(ticker::on_markets_changed(
-                    added
-                        .iter()
-                        .map(|m| m.symbol.clone())
-                        .collect(),
+                    added.iter().map(|m| m.symbol.clone()).collect(),
                     move || has_ws,
                     move || disposed,
                     move || current_topics(&topics),

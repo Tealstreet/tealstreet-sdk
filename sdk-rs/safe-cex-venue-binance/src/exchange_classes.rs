@@ -1989,9 +1989,7 @@ impl PrivateParent for ExchangeState {
         }))
     }
     fn fill(&self, payload: EventValue) -> Result<(), Failure> {
-        self.base
-            .emit("fill", payload)
-            .map_err(Rc::new)
+        self.base.emit("fill", payload).map_err(Rc::new)
     }
     fn asset_price(&self, asset: &EventValue) -> Result<f64, Failure> {
         Ok(self.asset_price(&asset.text()?))
@@ -2124,7 +2122,10 @@ impl WsParent for ExchangeState {
         self.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.base.emit(event, safe_cex_exchange::js_runtime::value::Js::str(message))
+        self.base.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.base.sync_socket_health_to_store()
