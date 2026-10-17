@@ -11141,7 +11141,7 @@
                 }
               ],
               [
-                "_",
+                "name",
                 {
                   "borrowed_ref": {
                     "lifetime": "'static",

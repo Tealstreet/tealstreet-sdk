@@ -90,3 +90,8 @@ then enter through the production from_retained conversion. The observed kind
 keeps Undefined distinct from Null; the second array member independently pins
 native 1.25 bits. This repairs stale generated observation code after the
 presence cutover, without changing production decoder admission or APIs.
+
+The same presence cutover names the newtype metadata argument `name` so the
+ModelField Undefined marker dispatches `visit_unit`; ordinary named newtypes
+still dispatch `visit_newtype_struct`. The accepted compiler signature now
+records that reviewed argument name while preserving all entrypoint witnesses.
