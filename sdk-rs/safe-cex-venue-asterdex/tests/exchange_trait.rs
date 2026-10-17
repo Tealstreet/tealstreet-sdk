@@ -1113,3 +1113,60 @@ fn algo_capacity_counts_raw_stop_info_when_normalized_type_is_undefined() {
     );
     venue.dispose().unwrap();
 }
+
+#[test]
+fn market_leverage_applies_approved_js_number_after_source_fallback() {
+    let cases = [
+        (json!("125"), 125.),
+        (json!("0"), 0.),
+        (json!("-0"), -0.),
+        (json!(" 20 "), 20.),
+        (json!("0x20"), 32.),
+        (json!("not-number"), f64::NAN),
+        (json!("Infinity"), f64::INFINITY),
+        (json!(true), 1.),
+        (json!([]), 0.),
+        (json!([20]), 20.),
+        (json!({}), f64::NAN),
+        (json!(0), 10.),
+    ];
+    for version in ["v1", "v3"] {
+        let options = if version == "v3" {
+            let secret = format!("{:064x}", 1);
+            let wallet =
+                safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&secret).unwrap();
+            json!({"key":wallet.address().to_checksum(None),"secret":secret,
+                "applicationId":"0x1111111111111111111111111111111111111111"})
+        } else {
+            json!({"key":"fixture-key","secret":"fixture-secret"})
+        };
+        for (raw, expected) in &cases {
+            let (venue, rt, _, wire) = support::fixture(options.clone());
+            script(&wire);
+            let market = wire.responses.borrow()["/fapi/v1/exchangeInfo"]["symbols"][0].clone();
+            wire.responses.borrow_mut().insert(
+                format!("/fapi/{version}/exchangeInfo"),
+                json!({"symbols":[market]}),
+            );
+            wire.responses.borrow_mut().insert(
+                format!("/fapi/{version}/leverageBracket"),
+                json!([{"symbol":"BTCUSDT","brackets":[{"initialLeverage":raw}]}]),
+            );
+            let markets = drive(&rt, venue.fetch_markets())
+                .unwrap_or_else(|error| panic!("approved Number at {version}/{raw}: {error:?}"));
+            assert_eq!(markets.len(), 1);
+            let actual = markets[0].limits.leverage.max;
+            if expected.is_nan() {
+                assert!(actual.is_nan(), "{version}/{raw} retains NaN");
+            } else {
+                assert_eq!(actual.to_bits(), expected.to_bits(), "{version}/{raw}");
+            }
+            assert!(sent(
+                &wire,
+                "GET",
+                &format!("/fapi/{version}/leverageBracket")
+            ));
+            venue.dispose().unwrap();
+        }
+    }
+}
