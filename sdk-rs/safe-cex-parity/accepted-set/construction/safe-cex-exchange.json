@@ -70,5 +70,12 @@
       "core::clone::Clone"
     ],
     "reason": "Reviewed library.rs::Decimal: derived Clone copies its owned BigInt coefficient and i64 scale for reusable bignumber arithmetic. The private fields carry numeric value data, no consumed nonce, validation witness or task authority. This classifies duplication only; parse/format/arithmetic behavior retains its separate inventory and tests."
+  },
+  "safe_cex_exchange::js_runtime::library::DayjsState": {
+    "traits": [
+      "core::clone::Clone",
+      "core::marker::Copy"
+    ],
+    "reason": "Reviewed js_runtime/library.rs::DayjsState: Copy duplicates four scalar dayjs utc-plugin fields (wall clock, offset, utc flag, local offset) that each facade method closure captures by value. Every dayjs operation returns a new facade, matching dayjs clone()/Utils.w immutability; no handle, registry, task or validation token is shared or consumed. tests/js_builtins.rs compares 420 installed-dayjs chains. This is not a decoder-domain claim."
   }
 }
