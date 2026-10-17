@@ -71,7 +71,7 @@ pub fn map_order(
         amount,
         filled: amount - remaining,
         remaining,
-        reduce_only,
+        reduce_only: reduce_only.into(),
         time_in_force: None.into(),
         // Date distinguishes missing, null and booleans before primitive/string parsing.
         last_update: match row.get("created_at") {

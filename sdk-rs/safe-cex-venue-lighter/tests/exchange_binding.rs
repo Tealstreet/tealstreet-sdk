@@ -1050,6 +1050,70 @@ fn private_account_frame_for_deployment(name: ExchangeName) {
 }
 
 #[test]
+fn private_fill_timestamp_types_match_the_maintained_handler() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, process::Command, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/fill-timestamps-oracle.cjs"
+        ))
+        .arg(h.runtime.now.get().to_string())
+        .output()
+        .expect("maintained Lighter handler oracle");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(cases.len(), 15);
+    // The production socket uses real VirtualClock time for its connect grace period.
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            observed.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    for case in cases {
+        fills.borrow_mut().clear();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({
+                    "channel":"account_all:42", "type":"update/account_all",
+                    "data":{"fills":[{"orderId":case["label"], "side":"BUY", "symbol":"BTC",
+                        "price":"49000", "size":"0.1", "timestamp":case["timestamp"]}]}
+                })
+                .to_string(),
+            )));
+        h.runtime.pump();
+        let mut expected = case["expected"].as_array().unwrap().clone();
+        for fill in &mut expected {
+            for field in ["price", "amount"] {
+                fill[field] = json!(fill[field].as_f64().unwrap());
+            }
+        }
+        assert_eq!(*fills.borrow(), expected, "real private frame: {case}");
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
 fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
     for name in [ExchangeName::Lighter, ExchangeName::LighterRobinhood] {
         private_account_frame_for_deployment(name);
