@@ -170,8 +170,7 @@ where
             }
         };
         let data = raw(&input)?;
-        let mut projection_refusal = false;
-        let mapped = (|| -> Result<Option<Vec<Ticker>>, Thrown> {
+        let mapped: Result<_, Thrown> = (|| {
             let events = from_json(&data).get("events")?;
             if events.is_nullish() {
                 return Ok(None);
@@ -179,43 +178,50 @@ where
             let events = events
                 .array_values()
                 .ok_or_else(|| Thrown::type_error("data.events?.map is not a function"))?;
-            let mut tickers = Vec::with_capacity(events.len());
+            let mut fields = Vec::with_capacity(events.len());
             for (index, event) in events.iter().enumerate() {
-                let symbol: String =
-                    to_typed(&event.get("symbol")?).inspect_err(|_| projection_refusal = true)?;
-                let bid =
-                    to_typed(&event.get("bid")?).inspect_err(|_| projection_refusal = true)?;
-                let ask =
-                    to_typed(&event.get("ask")?).inspect_err(|_| projection_refusal = true)?;
-                tickers.push(Ticker {
-                    id: symbol.clone(),
-                    symbol,
-                    bid,
-                    ask,
-                    last: bid,
-                    mark: bid,
-                    index: bid,
-                    mid_price: None,
-                    percentage: 0.0,
-                    open_interest: 0.0,
-                    funding_rate: 0.0,
-                    funding_time: 0.0,
-                    volume: 0.0,
-                    quote_volume: 0.0,
-                    timestamp: None,
-                    info: Some(data["events"][index].clone()),
-                });
+                fields.push((
+                    event.get("symbol")?,
+                    event.get("bid")?,
+                    event.get("ask")?,
+                    index,
+                ));
             }
-            Ok(Some(tickers))
+            Ok(Some(fields))
         })();
-        match mapped {
-            Ok(tickers) => Ok(tickers),
-            Err(error) if projection_refusal => Err(error.into()),
+        let fields = match mapped {
+            Ok(Some(fields)) => fields,
+            Ok(None) => return Ok(None),
             Err(error) => {
                 report(error.to_exchange_error(), logger)?;
-                Ok(Some(store.tickers().to_vec()))
+                return Ok(Some(store.tickers().to_vec()));
             }
+        };
+        let mut tickers = Vec::with_capacity(fields.len());
+        for (symbol, bid, ask, index) in fields {
+            let symbol: String = to_typed(&symbol)?;
+            let bid = to_typed(&bid)?;
+            let ask = to_typed(&ask)?;
+            tickers.push(Ticker {
+                id: symbol.clone(),
+                symbol,
+                bid,
+                ask,
+                last: bid,
+                mark: bid,
+                index: bid,
+                mid_price: None,
+                percentage: 0.0,
+                open_interest: 0.0,
+                funding_rate: 0.0,
+                funding_time: 0.0,
+                volume: 0.0,
+                quote_volume: 0.0,
+                timestamp: None,
+                info: Some(data["events"][index].clone()),
+            });
         }
+        Ok(Some(tickers))
     }
 }
 pub fn fetch_tickers<F>(store: &dyn Store, fetch: impl FnOnce(Vec<String>) -> F) -> F

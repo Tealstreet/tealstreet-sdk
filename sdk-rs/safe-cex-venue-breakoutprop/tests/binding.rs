@@ -1220,8 +1220,7 @@ fn ticker_reads_ignore_malformed_unused_declaration_fields() {
     assert_eq!(rows[0].info, Some(row));
 }
 
-#[test]
-fn ticker_reads_report_consumed_field_failure_and_return_cached_tickers() {
+fn malformed_ticker_fallback(prefix: Value) {
     let f = fixture();
     f.fetch_markets();
     let cached = f.run(f.exchange.fetch_tickers()).unwrap();
@@ -1245,7 +1244,7 @@ fn ticker_reads_report_consumed_field_failure_and_return_cached_tickers() {
         }),
     );
     *f.wire.candle_response.borrow_mut() = Some(json!({"events":[
-        {"symbol":"BTCUSD","type":"Quote","time":"unused","bid":1,"ask":2},null
+        prefix,null
     ]}));
     let rows = f.run(f.exchange.fetch_tickers()).unwrap();
     assert_eq!(rows, cached);
@@ -1419,5 +1418,19 @@ fn portfolio_absent_open_positions_retains_filter_type_error() {
     assert_eq!(
         error.message,
         "Cannot read properties of undefined (reading 'filter')"
+    );
+}
+
+#[test]
+fn ticker_reads_report_consumed_field_failure_and_return_cached_tickers() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":1,"ask":2}),
+    );
+}
+
+#[test]
+fn ticker_reads_defer_scalar_projection_until_source_mapping_completes() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":"13","ask":14}),
     );
 }

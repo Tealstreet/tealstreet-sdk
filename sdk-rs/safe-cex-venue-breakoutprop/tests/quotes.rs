@@ -634,16 +634,17 @@ fn quotes_consumed_fields_match_source() {
         "missing-events",
         "empty",
         "valid-then-null",
+        "projection-before-null",
         "logger",
     ];
-    assert_eq!(cases.len(), 20, "QUOTES-CONSUMED source census");
+    assert_eq!(cases.len(), 22, "QUOTES-CONSUMED source census");
     for (index, case) in cases.iter().enumerate() {
-        let method = if index < 10 {
+        let method = if index < 11 {
             "fetchTickersForSymbols"
         } else {
             "fetchTickers"
         };
-        let name = names[index % 10];
+        let name = names[index % 11];
         assert_eq!(case["method"], method);
         assert_eq!(case["name"], name);
         let store = store(case);

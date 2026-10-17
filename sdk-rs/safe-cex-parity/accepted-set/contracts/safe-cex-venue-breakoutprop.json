@@ -13962,7 +13962,7 @@
         ]
       }
     },
-    "evidence": "Quote reading decodes events to native Tickers, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "evidence": "Quote reading projects only source-consumed symbol/bid/ask through native property reads and retains its mapping catch/fallback, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
     "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let logger = |_:serde_json::Value| Ok(()); let future = super::fetch_tickers_for_symbols(vec![\"ETHUSD\".into()],||async {Ok(\"token\".into())},||async {Ok(\"account\".into())},|_|async move {Ok(input)},&store,&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"tickers\":rows.map(|rows| rows.iter().map(|t| serde_json::json!({\"symbol\":t.symbol,\"bid\":format!(\"{:016x}\", t.bid.to_bits()),\"ask\":format!(\"{:016x}\", t.ask.to_bits()),\"last\":format!(\"{:016x}\", t.last.to_bits()),\"mark\":format!(\"{:016x}\", t.mark.to_bits()),\"index\":format!(\"{:016x}\", t.index.to_bits())})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
@@ -14024,6 +14024,67 @@
         "output": {
           "ok": true,
           "tickers": null
+        }
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "symbol": "ETHUSD",
+              "ask": 123.5,
+              "bid": 121.25
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": [
+            {
+              "symbol": "ETHUSD",
+              "bid": "405e500000000000",
+              "ask": "405ee00000000000",
+              "last": "405e500000000000",
+              "mark": "405e500000000000",
+              "index": "405e500000000000"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "symbol": "ETHUSD",
+              "ask": 123.5,
+              "bid": 121.25,
+              "type": {},
+              "time": null
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": [
+            {
+              "symbol": "ETHUSD",
+              "bid": "405e500000000000",
+              "ask": "405ee00000000000",
+              "last": "405e500000000000",
+              "mark": "405e500000000000",
+              "index": "405e500000000000"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "events": [
+            null
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": []
         }
       }
     ]
