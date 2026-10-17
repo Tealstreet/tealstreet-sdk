@@ -250,6 +250,41 @@ fn change_position_mode_e2e() {
     assert!(h.store.options().is_hedged);
 }
 #[test]
+fn rejected_order_leg_keeps_successful_orders_without_error_event() {
+    let h = harness(options(), |http| {
+        http.route(
+            "GET",
+            endpoint("OPEN_ALGO_ORDERS"),
+            400,
+            json!({"msg":"algo endpoint unavailable"}),
+        );
+        script(http);
+    });
+    seed(&h);
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, value: &Value| {
+            captured.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let orders = h
+        .drive(h.venue().fetch_orders(None))
+        .expect("allSettled retains the successful order leg");
+    assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), 1);
+    assert_eq!(h.http.calls(endpoint("OPEN_ALGO_ORDERS")).len(), 1);
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, "native-9");
+    assert!(
+        errors.borrow().is_empty(),
+        "source allSettled must swallow rejected legs, emitted {:?}",
+        errors.borrow()
+    );
+}
+
+#[test]
 fn place_order_e2e() {
     let h = setup();
     let ids = h
