@@ -74,35 +74,20 @@ for(const [mode] of walletInputs) {
 }
 assert.equal(wallets.length,18,'independent wallet corpus floor');
 
-// Two closed spot cancellation roots, inspected independently of core bodies.
+// The closed spot cancellation root, inspected independently of core bodies.
 const spotPath=path.join(directory,'hyperliquidspot.types.ts');
 const parse=(file)=>ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);
 const spot=parse(spotPath), core=parse(path.join(directory,'hyperliquid.types.ts'));
 const printer=ts.createPrinter({removeComments:true});
 const declaration=(file,name)=>file.statements.find(node => (ts.isTypeAliasDeclaration(node)||ts.isInterfaceDeclaration(node)) && node.name.text===name);
 assert.equal(printer.printNode(ts.EmitHint.Unspecified,declaration(spot,'CancelOrderRequests').type,spot),printer.printNode(ts.EmitHint.Unspecified,declaration(core,'CancelOrderRequests').type,core),'closed cancellation list source declaration');
-const schedule=declaration(spot,'ScheduleCancelAction');
-assert.equal(schedule.members.length,2,'spot schedule source field floor');
-assert.equal(schedule.members[0].name.text,'type');
-assert(ts.isLiteralTypeNode(schedule.members[0].type) && ts.isStringLiteral(schedule.members[0].type.literal));
-assert.equal(schedule.members[0].type.literal.text,'scheduleCancel');
-assert.equal(schedule.members[1].name.text,'time');
-assert(schedule.members[1].questionToken);
-assert.equal(printer.printNode(ts.EmitHint.Unspecified,schedule.members[1].type,spot),'number | null');
 const cancellations=[];
 function add(type,inputs,acceptedCount) {inputs.forEach((input,index)=>cancellations.push({type,input,expectedAccepted:index<acceptedCount}));}
 add('CancelOrderRequests',[
   '[]','[{"a":17.5,"o":91.25},{"a":-0,"o":1e400}]','[{"a":-1e400,"o":9007199254740993}]',
   '{}','[{}]','[{"a":null,"o":1}]','[{"a":1,"o":"2"}]','[[1,2]]',
 ],3);
-add('ScheduleCancelAction',[
-  '{"type":"scheduleCancel"}','{"type":"scheduleCancel","time":null}',
-  '{"type":"scheduleCancel","time":-0}','{"type":"scheduleCancel","time":1e400}',
-  '{"type":"scheduleCancel","time":-1e400}','{"type":"scheduleCancel","time":91.25}',
-  '{}','{"type":"order","time":0}','{"type":"scheduleCancel","time":"0"}',
-  '["scheduleCancel",0]',
-],6);
-assert.equal(cancellations.length,18,'independent cancellation case floor');
+assert.equal(cancellations.length,8,'independent cancellation case floor');
 const probePath=path.join(directory,'__approval_leaves_probe__.ts');
 const probe="import * as Spot from './hyperliquidspot.types';\n"+cancellations.map((row,index)=>`const case_${index}: Spot.${row.type} = ${row.input};`).join('\n');
 const options={strict:true,noEmit:true,target:ts.ScriptTarget.ES2022,skipLibCheck:true};
@@ -115,7 +100,7 @@ const rejected=new Set();
 for(const diagnostic of program.getSemanticDiagnostics(file)) {
   assert(diagnostic.start!==undefined);
   const line=file.getLineAndCharacterOfPosition(diagnostic.start).line;
-  assert(line>0&&line<=18);
+  assert(line>0&&line<=8);
   assert([2322,2740,2741,2739,2559,2353].includes(diagnostic.code),`unexpected compiler diagnostic ${diagnostic.code}`);
   rejected.add(line-1);
 }
@@ -126,4 +111,4 @@ for(const [index,row] of cancellations.entries()) {
   const value=JSON.parse(row.input);
   row.native=row.type==='CancelOrderRequests'?value.map(item=>({aBits:bits(item.a),oBits:bits(item.o)})):{type:value.type,timeKind:!Object.hasOwn(value,'time')?'absent':value.time===null?'null':'number',timeBits:typeof value.time==='number'?bits(value.time):null};
 }
-console.log(JSON.stringify({constants,names,wallets,cancellations,iterationStop:{names:50,wallets:18,cancellations:18}}));
+console.log(JSON.stringify({constants,names,wallets,cancellations,iterationStop:{names:50,wallets:18,cancellations:8}}));

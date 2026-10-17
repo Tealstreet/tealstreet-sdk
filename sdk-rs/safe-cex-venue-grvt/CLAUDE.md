@@ -307,3 +307,10 @@ override, which always replaces stored markets. It must not inherit the shared
 membership-only refresh: unchanged IDs can carry new tick, limit and ih/bd/qd
 signing metadata. Constructed trait regressions cover that replacement and the
 added/removed native result projection.
+
+
+The SDK signature oracle runs in the ordinary native lib test suite (no ignore
+annotation). Its offline vendored-SDK matrix compares 24 complete signatures and
+r/s/v values across both networks, order kinds, Number integer boundaries and
+builder-address casing. It requires Node, TypeScript and vendored SDK dependencies;
+missing dependencies fail the oracle rather than silently skipping signing checks.

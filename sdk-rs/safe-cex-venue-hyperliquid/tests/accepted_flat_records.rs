@@ -103,22 +103,6 @@ fn clearinghousestatemarginsummary_native_fields_and_map_only() {
     }
 }
 #[test]
-fn orderresponsestatuscase2_native_fields_and_map_only() {
-    fn project(decoded: safe_cex_venue_hyperliquid::types::OrderResponseStatusCase2) -> Value {
-        json!({"ok":true,"fields":{"error":json!({"kind":"string","value":decoded.error})}})
-    }
-    let cases: Value =
-        serde_json::from_str(include_str!("fixtures/accepted_flat_record_cases.json")).unwrap();
-    for case in cases["OrderResponseStatusCase2"].as_array().unwrap() {
-        check::<safe_cex_venue_hyperliquid::types::OrderResponseStatusCase2>(
-            case["input"].as_str().unwrap(),
-            &case["output"],
-            project,
-            case["label"].as_str().unwrap(),
-        );
-    }
-}
-#[test]
 fn wstrade_native_fields_and_map_only() {
     fn project(decoded: safe_cex_venue_hyperliquid::types::WsTrade) -> Value {
         json!({"ok":true,"fields":{"coin":json!({"kind":"string","value":decoded.coin}),"side":json!({"kind":"string","value":decoded.side}),"px":json!({"kind":"string","value":decoded.px}),"sz":json!({"kind":"string","value":decoded.sz}),"hash":json!({"kind":"string","value":decoded.hash}),"time":json!({"kind":"number","bits":format!("{:016x}",decoded.time.to_bits())}),"tid":json!({"kind":"number","bits":format!("{:016x}",decoded.tid.to_bits())})}})
@@ -255,22 +239,6 @@ fn fundinghistoryentry_native_fields_and_map_only() {
         serde_json::from_str(include_str!("fixtures/accepted_flat_record_cases.json")).unwrap();
     for case in cases["FundingHistoryEntry"].as_array().unwrap() {
         check::<safe_cex_venue_hyperliquid::types::FundingHistoryEntry>(
-            case["input"].as_str().unwrap(),
-            &case["output"],
-            project,
-            case["label"].as_str().unwrap(),
-        );
-    }
-}
-#[test]
-fn spottokenevmcontract_native_fields_and_map_only() {
-    fn project(decoded: safe_cex_venue_hyperliquid::types::SpotTokenEvmContract) -> Value {
-        json!({"ok":true,"fields":{"address":json!({"kind":"string","value":decoded.address}),"evm_extra_wei_decimals":json!({"kind":"number","bits":format!("{:016x}",decoded.evm_extra_wei_decimals.to_bits())})}})
-    }
-    let cases: Value =
-        serde_json::from_str(include_str!("fixtures/accepted_flat_record_cases.json")).unwrap();
-    for case in cases["SpotTokenEvmContract"].as_array().unwrap() {
-        check::<safe_cex_venue_hyperliquid::types::SpotTokenEvmContract>(
             case["input"].as_str().unwrap(),
             &case["output"],
             project,

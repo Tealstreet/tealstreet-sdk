@@ -1,9 +1,6 @@
-//! Portfolio selection and balance field bodies over typed portfolios and plain JSON replies.
+//! Portfolio selection and balance field bodies over observed portfolio fields and JSON replies.
 //! Full exchange construction and HTTP binding remain separate. Hosts drive hot promises.
-use crate::{
-    starbase_auth::{CoinbaseStarbasePromise, CoinbaseStarbasePromiseSpawner},
-    types::ListPortfoliosResponsePortfoliosItem,
-};
+use crate::starbase_auth::{CoinbaseStarbasePromise, CoinbaseStarbasePromiseSpawner};
 use indexmap::IndexMap;
 use safe_cex_num::{js_number, js_string, js_truthy, parse_float};
 use safe_cex_types::object_map::JsObjectMap;
@@ -15,7 +12,17 @@ use std::{
 
 /// A fulfilled source Promise retains its one mutable returned array.
 pub type SupportedTypes = Rc<RefCell<Vec<String>>>;
-pub type Portfolio = Rc<RefCell<ListPortfoliosResponsePortfoliosItem>>;
+/// Mutable selection state, projected at the HTTP boundary to the two fields the
+/// source reads. Unobserved metadata is retained without applying the wire DTO's
+/// declaration-time requirements to a runtime response.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PortfolioState {
+    pub uuid: String,
+    pub r#type: String,
+    #[serde(flatten)]
+    pub metadata: serde_json::Map<String, Value>,
+}
+pub type Portfolio = Rc<RefCell<PortfolioState>>;
 pub type Portfolios = Rc<RefCell<Vec<Portfolio>>>;
 pub type PortfolioFailure = Rc<PortfolioThrown>;
 /// A thrown JSON value or an original native Store failure, shared by all callers.

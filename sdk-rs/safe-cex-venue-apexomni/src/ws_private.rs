@@ -481,7 +481,13 @@ impl ApexOmniPrivateWebsocket {
     pub fn handle_position_topic(self: &Rc<Self>, data: &J) -> Result<(), ExchangeError> {
         let mut updates = Vec::new();
         for row in crate::data::array(data).map_err(failure)? {
-            if let Some(position) = self.parent.map_position(row)? {
+            // TS binds the mapper to this socket, whose receiver has no `log`.
+            // Preserve the mapper's evaluation order before the missing log call.
+            if let Some(position) = self.parent.map_position_with_log(row, |_| {
+                let mut error = failure("this.log is not a function".into());
+                error.name = "TypeError".into();
+                Err(error)
+            })? {
                 let serde_json::Value::Object(fields) =
                     serde_json::to_value(&position).map_err(|e| failure(e.to_string()))?
                 else {
