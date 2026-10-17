@@ -2,7 +2,6 @@
 //! Actual venue assembly, native scheduler/HTTP and private-frame dispatcher.
 use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js};
 use safe_cex_exchange::{js_runtime::client, native::native_runtime};
-use safe_cex_store::Store;
 use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, OrderStatus};
 use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
