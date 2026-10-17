@@ -3,7 +3,10 @@ use crate::{
     constants::{ORDER_SIDE, is_paradex_trigger_order_type},
     order_maps::{map_order_status, reverse_map_order_type},
 };
-use safe_cex_num::{TableHit, js_date_parse, js_string, js_table_lookup, js_truthy, parse_float};
+use safe_cex_num::{
+    TableHit, js_date_parse, js_string, js_table_lookup, js_time_clip, js_truthy,
+    numeric_ingress::js_value_as_f64, parse_float,
+};
 use safe_cex_types::Order;
 use serde_json::{Map, Value};
 
@@ -69,7 +72,11 @@ pub fn map_order(
         remaining,
         reduce_only,
         time_in_force: None,
-        last_update: js_date_parse(text("created_at")?, local_to_utc),
+        // Date(number) applies TimeClip directly; only strings are date-parsed.
+        last_update: match row.get("created_at").and_then(js_value_as_f64) {
+            Some(value) => js_time_clip(value),
+            None => js_date_parse(text("created_at")?, local_to_utc),
+        },
         info: Some(Value::Object(row.clone())),
         close: None,
         trigger_type: None,

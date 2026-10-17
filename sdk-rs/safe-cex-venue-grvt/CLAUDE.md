@@ -293,3 +293,11 @@ further markers. The four inherited-refusal policies retain their exact compiler
 APIs, method bodies, TypeScript sources and native witnesses; only the import-driven
 Rust line spans and whole-file hash change. This visibility repair does not
 classify the remaining unreviewed owners.
+
+GRVT SDK OrderWithBuilderFee signing treats its 20-byte 0x-prefixed builder
+address as bytes, matching the vendored MetaMask signer rather than ethers'
+checksum admission. Normalize only that address's casing in the local typed-data
+copy before calling shared EIP-712; preserve the caller's original spelling and
+all existing integer conversion. The 24-case actual-SDK signature matrix covers
+three address spellings across both networks, order kinds and integer ranges.
+Shared ethers address validation and legacy signing retain their own boundaries.

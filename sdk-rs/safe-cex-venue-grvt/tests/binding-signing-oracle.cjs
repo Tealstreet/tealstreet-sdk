@@ -32,4 +32,16 @@ const cases = [false,true].flatMap(large=>[false,true].flatMap(isMarket=>[325,32
   return {key,typed,signature,decoded:Signer.decode(signature)};
 })));
 assert.equal(cases.length,8);
-process.stdout.write(JSON.stringify({template,cases}));
+const builders = [
+  '0xee8f3559f298fffa79b8253437969d15b5dccff3',
+  '0xEE8F3559F298FFFA79B8253437969D15B5DCCFF3',
+  '0xEe8f3559F298fffa79b8253437969d15b5dccff3',
+];
+const expanded = cases.flatMap(original => builders.map(builder => {
+  const typed = {...original.typed, message: {...original.typed.message, builder}};
+  const signature = Signer.sign(original.key, typed);
+  assert.equal(signature, original.signature, 'SDK address casing does not change signed bytes');
+  return {key:original.key, typed, signature, decoded:Signer.decode(signature)};
+}));
+assert.equal(expanded.length, 24, 'three address spellings for every native signing configuration');
+process.stdout.write(JSON.stringify({template,cases:expanded}));
