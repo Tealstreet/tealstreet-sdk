@@ -63,8 +63,20 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
         Js::Number(n) => {
             let n = *n;
             match name.as_str() {
-                "toString" => Some(method("toString", move |_| {
-                    Ok(Js::str(&safe_cex_num::js_number_string(n)))
+                "toString" => Some(method("toString", move |args| {
+                    let requested = arg(&args, 0);
+                    let radix = if requested.is_undefined() {
+                        10.0
+                    } else {
+                        requested.to_number()?.trunc()
+                    };
+                    if !(2.0..=36.0).contains(&radix) {
+                        return Err(Thrown::error(
+                            "RangeError",
+                            "toString() radix argument must be between 2 and 36",
+                        ));
+                    }
+                    Ok(Js::str(&super::number_radix::format(n, radix as u32)))
                 })),
                 "toFixed" => Some(method("toFixed", move |a| {
                     let digits = arg(&a, 0).to_number()?;

@@ -54,7 +54,7 @@ pub fn update_positions_with_leverage(
             }
             let mut patch = ModelPatch::default();
             patch.set_number("leverage", next);
-            Some((position.id.clone(), patch))
+            Some((Some(position.id.clone()), patch))
         })
         .collect();
     if !updates.is_empty() {
