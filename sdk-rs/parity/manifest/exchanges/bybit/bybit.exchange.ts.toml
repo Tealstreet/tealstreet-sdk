@@ -760,7 +760,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_chain"
 status = "ported"
-note = "Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_chain. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange.fetchOptionExpiries"
@@ -768,7 +768,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_expiries"
 status = "ported"
-note = "Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::fetch_option_expiries. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange.fetchAccountGreeks"
@@ -776,7 +776,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/binding/members/options.rs::fetch_account_greeks"
 status = "ported"
-note = "Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::fetch_account_greeks. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange#assertOptionsEnabled"
@@ -784,7 +784,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/binding/members/options.rs::assert_options_enabled"
 status = "ported"
-note = "Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/options.rs::assert_options_enabled. Primary/demo Exchange receiver calls the native option reader and source account opt-in guard; dedicated Spot/Inverse keep the base refusals. Six family reads plus opt-in diagnostic independently compile and fail on master. Maintained 79-case source corpus uses actual methods/helpers and real Rust signed HTTP; shared localeCompare dependency remains a deliberate RED until runtime integration."
 
 [[symbol]]
 ts = "BybitExchange#refuseOptionSymbol"
