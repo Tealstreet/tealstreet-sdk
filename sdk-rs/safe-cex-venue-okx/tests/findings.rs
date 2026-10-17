@@ -1,4 +1,5 @@
 use safe_cex_exchange::client_order_id::ClientOrderLookup;
+use safe_cex_num::JsCoercionError;
 use safe_cex_num::{ProtoMember, TableHit};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
@@ -226,7 +227,7 @@ fn inherited_income_refuses_only_when_category_reaches_output() {
             }
             let result = map_okx_bill_to_income_records(row.as_object().unwrap(), |_| {
                 calls.set(calls.get() + 1);
-                Some("BTCUSDT".into())
+                Ok::<_, JsCoercionError>(Some("BTCUSDT".into()))
             });
             assert_eq!(calls.get(), 1, "INCOME-RESOLVER-COUNT {key}/{shape}");
             match shape {
