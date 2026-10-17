@@ -232,10 +232,10 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                 );
                 assert_eq!(
                     request.body.as_ref().unwrap().untransformed().unwrap(),
-                    &safe_cex_types::retained_json::RetainedJsonInput::from_value(
-                        json!({"body":37})
-                    )
-                    .unwrap(),
+                    &safe_cex_types::retained_json::RetainedJsonInput::Object(vec![(
+                        "body".encode_utf16().collect(),
+                        safe_cex_types::retained_json::RetainedJsonInput::Float(37.0),
+                    )]),
                     "WOO-AUDIT native proxy body"
                 );
                 assert_eq!(
