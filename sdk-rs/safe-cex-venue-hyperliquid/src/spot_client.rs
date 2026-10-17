@@ -1,18 +1,11 @@
-//! Spot API callbacks and the independent spot token limiter.
+//! Independent Spot token limiter and its owned callbacks.
 use crate::{
     helper_tasks::{self, HelperObserver},
     spot_account_reads::SpotAccountHost,
-    spot_json::JsString,
     ws_ping_lifecycle::WsPingHost,
 };
 #[derive(Clone, Debug)]
 pub enum ClientCallback<V> {
-    Serialize,
-    Mark,
-    Throttle,
-    Response { exchange: V },
-    ErrorPredicate,
-    ErrorField,
     RateRefill,
     RateWait,
     RateExecutor { delay: V },
@@ -49,12 +42,6 @@ pub trait SpotClientHost: SpotAccountHost {
         new_target: &Self::Value,
     ) -> Result<Self::Value, Self::Error>;
 }
-fn text(s: &str) -> JsString {
-    JsString(s.encode_utf16().collect())
-}
-fn lit<H: WsPingHost>(h: &H, s: &str) -> H::Value {
-    h.literal(&text(s))
-}
 fn method<H: WsPingHost>(
     h: &mut H,
     o: &H::Value,
@@ -64,32 +51,6 @@ fn method<H: WsPingHost>(
     let f = h.get(o, key)?;
     let a = args(h)?;
     h.call(&f, o, &a)
-}
-fn free<H: SpotAccountHost>(
-    h: &mut H,
-    name: &str,
-    args: impl FnOnce(&mut H) -> Result<Vec<H::Value>, H::Error>,
-) -> Result<H::Value, H::Error> {
-    let f = h.imported(name)?;
-    let a = args(h)?;
-    h.call(&f, &h.undefined(), &a)
-}
-fn optional<H: SpotAccountHost>(h: &mut H, v: &H::Value, key: &str) -> Result<H::Value, H::Error> {
-    if h.is_nullish(v) {
-        Ok(h.undefined())
-    } else {
-        h.get(v, key)
-    }
-}
-fn path<H: SpotAccountHost>(h: &mut H, v: &H::Value, keys: &[&str]) -> Result<H::Value, H::Error> {
-    let mut v = v.clone();
-    for k in keys {
-        v = optional(h, &v, k)?
-    }
-    Ok(v)
-}
-fn field<H: WsPingHost>(h: &mut H, o: &H::Value, k: &str, v: &H::Value) -> Result<(), H::Error> {
-    h.define_data(o, k, v)
 }
 pub struct RateLimiter<V> {
     pub constructor: V,
@@ -189,154 +150,6 @@ where
     };
     helper_tasks::start(&runtime, wait_body(host, owner, weight))
 }
-pub fn create_api<H: SpotClientHost>(
-    h: &mut H,
-    options: &H::Value,
-    exchange: &H::Value,
-) -> Result<H::Value, H::Error> {
-    let urls = h.imported("spot.BASE_URLS")?;
-    let testnet = h.get(options, "testnet")?;
-    let url = h.get(
-        &urls,
-        if h.truthy(&testnet) {
-            "TESTNET"
-        } else {
-            "PRODUCTION"
-        },
-    )?;
-    let xhr = free(h, "safeCexAxiosCreate", |h| {
-        let config = h.object()?;
-        field(h, &config, "baseURL", &url)?;
-        let timeout = path(h, options, &["extra", "recvWindow"])?;
-        field(h, &config, "timeout", &timeout)?;
-        let serializer = h.object()?;
-        let cb = h.client_callback(ClientCallback::Serialize)?;
-        field(h, &serializer, "serialize", &cb)?;
-        field(h, &config, "paramsSerializer", &serializer)?;
-        let headers = h.object()?;
-        field(
-            h,
-            &headers,
-            "Content-Type",
-            &lit(h, "application/json, charset=utf-8"),
-        )?;
-        field(h, &config, "headers", &headers)?;
-        Ok(vec![config, options.clone(), exchange.clone()])
-    })?;
-    free(h, "retry", |h| {
-        let config = h.object()?;
-        field(h, &config, "retries", &h.number(3.))?;
-        let condition = free(h, "networkErrorOnRead", |h| {
-            Ok(vec![h.imported("isHyperliquidRead")?])
-        })?;
-        field(h, &config, "retryCondition", &condition)?;
-        Ok(vec![xhr.clone(), config])
-    })?;
-    let public = h.get(options, "publicDataOnly")?;
-    if !h.truthy(&public) {
-        free(h, "installTransportAdapter", |h| {
-            Ok(vec![xhr.clone(), options.clone(), h.get(exchange, "name")?])
-        })?;
-    }
-    for body in [ClientCallback::Mark, ClientCallback::Throttle] {
-        let interceptors = h.get(&xhr, "interceptors")?;
-        let request = h.get(&interceptors, "request")?;
-        method(h, &request, "use", |h| Ok(vec![h.client_callback(body)?]))?;
-    }
-    let interceptors = h.get(&xhr, "interceptors")?;
-    let response = h.get(&interceptors, "response")?;
-    method(h, &response, "use", |h| {
-        Ok(vec![h.client_callback(ClientCallback::Response {
-            exchange: exchange.clone(),
-        })?])
-    })?;
-    Ok(xhr)
-}
-fn error_branch<H: SpotClientHost>(
-    h: &mut H,
-    exchange: &H::Value,
-    msg: H::Value,
-) -> Result<H::Value, H::Error> {
-    method(h, exchange, "emitAndLogError", |_| Ok(vec![msg.clone()]))?;
-    let ctor = h.global("Error")?;
-    let error = h.construct(&ctor, &[msg])?;
-    Err(h.throw_value(error))
-}
-fn chain<H: SpotAccountHost>(
-    h: &mut H,
-    mut v: H::Value,
-    keys: &[&str],
-) -> Result<Option<H::Value>, H::Error> {
-    for key in keys {
-        if h.is_nullish(&v) {
-            return Ok(None);
-        }
-        v = h.get(&v, key)?;
-    }
-    Ok(Some(v))
-}
-async fn response_body<H: SpotClientHost>(
-    mut h: H,
-    response: H::Value,
-    exchange: H::Value,
-) -> Result<H::Value, H::Error> {
-    for nested in [false, true] {
-        let data = h.get(&response, "data")?;
-        let keys: &[&str] = if nested {
-            &["response", "data", "status"]
-        } else {
-            &["status"]
-        };
-        let status = path(&mut h, &data, keys)?;
-        if h.strict_equal(&status, &lit(&h, "err")) {
-            let data = h.get(&response, "data")?;
-            let keys: &[&str] = if nested {
-                &["response", "data", "response"]
-            } else {
-                &["response"]
-            };
-            let msg = path(&mut h, &data, keys)?;
-            let msg = h.template_string(&msg)?;
-            let msg = h.literal(&msg);
-            return error_branch(&mut h, &exchange, msg);
-        }
-    }
-    for nested in [false, true] {
-        let data = h.get(&response, "data")?;
-        let keys: &[&str] = if nested {
-            &["response", "data", "statuses"]
-        } else {
-            &["statuses"]
-        };
-        let present = path(&mut h, &data, keys)?;
-        if !h.truthy(&present) {
-            continue;
-        }
-        let data = h.get(&response, "data")?;
-        let Some(statuses) = chain(&mut h, data, keys)? else {
-            continue;
-        };
-        let some = method(&mut h, &statuses, "some", |h| {
-            Ok(vec![h.client_callback(ClientCallback::ErrorPredicate)?])
-        })?;
-        if h.truthy(&some) {
-            let data = h.get(&response, "data")?;
-            let Some(statuses) = chain(&mut h, data, keys)? else {
-                let undefined = h.undefined();
-                return error_branch(&mut h, &exchange, undefined);
-            };
-            let filtered = method(&mut h, &statuses, "filter", |h| {
-                Ok(vec![h.client_callback(ClientCallback::ErrorPredicate)?])
-            })?;
-            let errors = method(&mut h, &filtered, "map", |h| {
-                Ok(vec![h.client_callback(ClientCallback::ErrorField)?])
-            })?;
-            let errors = method(&mut h, &errors, "join", |h| Ok(vec![lit(h, ", ")]))?;
-            return error_branch(&mut h, &exchange, errors);
-        }
-    }
-    Ok(response)
-}
 pub fn run_client_callback<H>(
     h: &mut H,
     receiver: &H::Value,
@@ -350,53 +163,6 @@ where
 {
     let first = args.first().cloned().unwrap_or_else(|| h.undefined());
     match body {
-        ClientCallback::Serialize => {
-            let qs = h.imported("qs")?;
-            method(h, &qs, "stringify", |h| {
-                let options = h.object()?;
-                field(h, &options, "arrayFormat", &lit(h, "repeat"))?;
-                Ok(vec![first, options])
-            })
-        }
-        ClientCallback::Mark => {
-            let next = h.object()?;
-            h.spread_into(&next, &first)?;
-            let url = h.get(&next, "url")?;
-            let endpoints = h.imported("spot.ENDPOINTS")?;
-            let info = h.get(&endpoints, "INFO")?;
-            if h.strict_equal(&url, &info) {
-                free(h, "markSkipRemoteSigning", |_| Ok(vec![next.clone()]))?;
-            }
-            Ok(next)
-        }
-        ClientCallback::Throttle => {
-            let mut runtime = h.clone();
-            Ok(h.spawn_native(Box::pin(async move {
-                let capture = free(&mut runtime, "isSigningCaptureRequest", |_| {
-                    Ok(vec![first.clone()])
-                })?;
-                if runtime.truthy(&capture) {
-                    return Ok(first);
-                }
-                let limiter = runtime.imported("hyperliquidRestRateLimiter")?;
-                let result = method(&mut runtime, &limiter, "waitForToken", |h| {
-                    Ok(vec![free(h, "getHyperliquidRestRequestWeight", |_| {
-                        Ok(vec![first.clone()])
-                    })?])
-                })?;
-                runtime.await_value(result).await?;
-                Ok(first)
-            })))
-        }
-        ClientCallback::Response { exchange } => {
-            Ok(h.spawn_native(Box::pin(response_body(h.clone(), first, exchange.clone()))))
-        }
-        ClientCallback::ErrorPredicate => {
-            let function = h.global("Boolean")?;
-            let error = h.get(&first, "error")?;
-            h.call(&function, &h.undefined(), &[error])
-        }
-        ClientCallback::ErrorField => h.get(&first, "error"),
         ClientCallback::RateRefill => {
             refill_tokens(h, receiver)?;
             Ok(h.undefined())

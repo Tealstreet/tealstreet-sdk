@@ -1331,6 +1331,11 @@ including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
 
+Array `slice` applies ToIntegerOrInfinity's NaN-to-zero rule to both bounds,
+including malformed numeric strings. `tests/js_array_slice.rs` compares422 Node
+cases through the installed native builtins, observing each output slot's value
+and presence so copied holes stay distinct from own undefined elements.
+
 The runtime JSON builtin and default encoded-HTTP response parser decode directly
 into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
 including lone surrogates; object members use own data-property definition, and
@@ -1366,6 +1371,19 @@ Property access and string-hint conversion failures propagate after the source's
 empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
 24 maintained Store cases through the production facade, including numeric keys,
 primitive elements, nullish elements and throwing getters/conversions.
+
+Standard Error instances inherit stock names and define supplied messages with
+writable/configurable, non-enumerable descriptors. Omitted or undefined constructor
+messages stay inherited; string coercion preserves UTF-16 and propagates failures.
+The existing native string diagnostic factory shares this creation body; custom
+Axios diagnostic name/message fields retain their distinct enumerable profile.
+Stock prototypes contain no runtime captures or constructor backreferences.
+`tests/js_error_enumerability.rs` compares156 Node cases through actual installed
+constructors, Object.keys/assign, JSON and native spread, including assignments,
+message deletion, coercion failures and lone surrogates. It inspects real native
+Prop descriptors directly because Object.getOwnPropertyDescriptor is not bound;
+constructor.prototype/stack reflection is outside this instance-property repair.
+An actual installed AxiosError supplies the separate custom descriptor witness.
 
 Shared console.info/debug route to the native runtime console sink and return
 undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
