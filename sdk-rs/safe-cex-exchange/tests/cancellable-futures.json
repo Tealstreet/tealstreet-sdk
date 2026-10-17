@@ -1709,9 +1709,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "e63e86db789706fc031753ae1886eda07cf62d6faf2399d51e785ee6485db2c1",
+      "producer_sha256": "0d883869118c6e5b97fbccae91d346d227810aa7033372d481aed646e9f7c2e5",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical. Reviewed shared throttle installation: the added callback is synchronous and creates no new await or Promise; the same seven async boundaries and Promise/loop captures remain unchanged. Throttle delegates timer ownership/cancellation to Scope.set_timeout/clear_timeout, exercised by js_throttle native scheduling/cancel traces and the existing Scope timer regression."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical. Reviewed shared throttle installation: the added callback is synchronous and creates no new await or Promise; the same seven async boundaries and Promise/loop captures remain unchanged. Throttle delegates timer ownership/cancellation to Scope.set_timeout/clear_timeout, exercised by js_throttle native scheduling/cancel traces and the existing Scope timer regression. Reviewed shared builtin additions: dayjs construction now clones utc-plugin state synchronously; the same seven async boundaries and Promise/loop captures remain unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
