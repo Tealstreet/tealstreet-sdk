@@ -188,8 +188,12 @@ pub fn create(
                     "emit",
                     Js::function("emit", move |_, a| {
                         let event = text(&arg(&a, 0))?;
-                        let payload = to_json(&Js::array(a.into_iter().skip(1).collect()))?;
-                        base.emit(&event, payload)?;
+                        let args = a
+                            .iter()
+                            .skip(1)
+                            .map(to_json)
+                            .collect::<Result<Vec<_>, _>>()?;
+                        base.emit_args(&event, &args)?;
                         Ok(Js::Bool(true))
                     }),
                 ),
@@ -199,17 +203,10 @@ pub fn create(
                         let event = text(&arg(&a, 0))?;
                         let listener = arg(&a, 1);
                         let callee = listener.clone();
-                        let id = on_base.on(
+                        let id = on_base.on_args(
                             &event,
                             Rc::new(move |_, data| {
-                                let args = match super::value::from_json(data) {
-                                    Js::Array(items) => items
-                                        .borrow()
-                                        .iter()
-                                        .map(|v| v.clone().unwrap_or(Js::Undefined))
-                                        .collect(),
-                                    other => vec![other],
-                                };
+                                let args = data.iter().map(super::value::from_json).collect();
                                 callee.call(Js::Undefined, args)?;
                                 Ok(())
                             }),

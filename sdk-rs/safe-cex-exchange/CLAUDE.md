@@ -744,6 +744,11 @@ already-decoded string. Constructors must state the response representation.
 
 
 Listener callbacks and `BaseExchange::emit`, `log`, and `emit_and_log_error`
+use one variadic dispatch operation. `emit_args`/`on_args` retain the argument
+list; `emit` sends one value and `on`/`once` observe its first argument. Array
+values are never interpreted as argument lists. The JS facade and worker log
+bridge use the full list, while native fill listeners receive the fill object.
+Callbacks and emission methods
 return `Result<(), ExchangeError>`. TinyEmitter snapshots the current listener
 list, removes a once listener before invoking it, and stops on the first throw;
 Rust retains that order and invokes callbacks outside all listener-map borrows.
