@@ -657,13 +657,9 @@ impl TradingHost for Rt {
     }
     fn iterable(&self, value: &Js, expression: &str) -> ReadResult<Self, Vec<Handle<Self>>> {
         match value {
-            Js::Array(_) => Ok(value
-                .array_values()
-                .unwrap_or_default()
-                .into_iter()
-                .map(h)
-                .collect()),
-            Js::String(s) => Ok(s.iter().map(|u| h(Js::utf16(&[*u]))).collect()),
+            Js::Array(_) | Js::String(_) => {
+                Ok(value.iterable_values()?.into_iter().map(h).collect())
+            }
             _ => Err(Thrown::type_error(&if expression == "txids" {
                 "txids is not iterable".to_owned()
             } else {
