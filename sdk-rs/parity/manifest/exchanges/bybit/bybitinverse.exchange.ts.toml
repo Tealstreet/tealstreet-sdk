@@ -598,9 +598,9 @@ note = "The actual receiver uses source grouping, virtual-row handling and alrea
 ts = "BybitInverseExchange.cancelSymbolOrders"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/binding/members/cancel.rs::cancel_orders_helper"
+rs = "safe-cex-venue-bybit/src/binding/members/cancel.rs::cancel_symbol_orders"
 status = "divergent"
-note = "The source symbol/category request is the single-group shared cancellation body; inverse category selection remains live. Native facade evidence: tests/inverse_binding.rs constructs the standalone Inverse receiver and exercises reads, writes, controls, active public topics, authenticated private frames and disposal; tests/inverse_batch_binding.rs compares 36 maintained Inverse batch/cache compositions. Native models and runtime capabilities use the owned-snapshot and callback profiles at sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. This row claims the named consumer only; other pending history/candle/recovery rows remain separate. Renamed Rust targets: safe-cex-venue-bybit/src/binding/members/cancel.rs::cancel_orders_helper."
+note = "The production Exchange surface dispatches cancelSymbolOrders through the unlimited client to /v5/order/cancel-all even with an empty Store. Cancellation snapshots retain id/symbol only; non-OK retMsg reports and returns. tests/cancel_all_binding.rs prove-fails on master for all four constructors and passes after the binding and partial-row retirement fixes. Native owned snapshots and callback lifecycle retain the shared profiles at sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/cancel.rs::cancel_symbol_orders."
 
 [[symbol]]
 ts = "BybitInverseExchange.setLeverage"

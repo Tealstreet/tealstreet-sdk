@@ -1,4 +1,7 @@
 //! Production Phemex venue: the assembled class graph behind the typed Exchange trait.
+#[cfg(test)]
+#[path = "order_regressions.rs"]
+mod order_regressions;
 use super::{
     globals,
     rt::{ExternalPublicDataFactory, Extra, Host, Rt, Shared, TransportInstaller},

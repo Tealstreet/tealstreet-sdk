@@ -634,3 +634,12 @@ its named runtime assertion, then exact restored bytes must pass. Its subprocess
 have timeouts and private temporary logs. This evidence covers JSON-shaped retry
 configuration; it does not claim executable per-request retry callbacks or the
 source's arbitrary live Axios configuration objects.
+
+The Exchange cancellation surface invokes the venue `cancelSymbolOrders` member,
+so an empty local order cache still sends `/v5/order/cancel-all` through the
+unlimited client. Base `cancelAllOrders` dispatches that override once per stored
+symbol. Primary/Demo and dedicated Inverse retain the source category lookup;
+Spot retains its existing spot-only body. Retirement consumes only `id` and
+`symbol`, including cancellation snapshots, and reports resolved venue rejection
+without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
+four production constructors and the real retained receiver/HTTP client path.

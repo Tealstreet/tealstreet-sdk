@@ -406,3 +406,28 @@ Clippy separately passed before the pause; parity 7334/3238. serde_json moves
 from dev to production dependency with zero resolved package/version/feature
 delta and no lock change. Four inherited-required-number controls pin named
 refusal in the numeric and interface-derived union inventories.
+
+## SDK builder address checksum casing
+
+The actual vendored `Signer.sign` delegates to MetaMask V4, which encodes the
+SDK's 20-byte builder address without ethers' EIP-55 checksum admission. The
+shared native EIP-712 preflight previously rejected a mixed-case address which
+that signer accepts. The SDK adapter now lowercases only a valid 20-byte,
+0x-prefixed builder in its local OrderWithBuilderFee signing copy; the caller's
+original spelling is retained. Shared crypto and legacy signing are unchanged.
+
+The maintained actual-SDK oracle expands all eight network/order/integer
+configurations across lowercase, uppercase and bad-checksum mixed-case addresses.
+All 24 source signatures equal their corresponding lowercase signatures. Before
+repair, the native oracle test compiled and failed `GRVT SDK builder casing` on
+the mixed-case input. After repair, every native signature and decoded r/s/v
+matches the actual SDK, and native caller-field checks prove no input mutation.
+
+All 22 library tests (including the ignored SDK/schema/cookie witnesses) and 21
+constructed exchange tests pass. Fresh compiler inventory retains all nineteen
+reviewed aliases. Full native and actual target-specific Wasm stored-contract
+runs each pass 134 receipts (117 runtime, seventeen explicit classifications),
+and all 268 pass the scoped ratchet. Strict host all-target/all-feature and Wasm
+library all-feature Clippy, crate formatting and parity checks pass (7,459 rows,
+17,214 public Rust items). This is a casing repair for the named SDK address
+shape, not broader MetaMask/ethers encoding equivalence or whole-crate clearance.
