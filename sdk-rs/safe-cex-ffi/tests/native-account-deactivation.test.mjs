@@ -19,11 +19,11 @@ async function open(t) {
     finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   });
   const events = [], stores = [];
-  id = await native.nativeAccountOpen({ exchange: 'woofi', accountName: 'test-account', optionsJson: JSON.stringify({
+  id = await native.nativeAccountOpen({ exchange: 'woofi', accountName: 'test-account', options: {
     key: 'test-orderly-key', secret: 'ed25519:11111111111111111111111111111111', applicationId: 'test-account',
     overrideProxyUrl: `http://127.0.0.1:${server.address().port}`,
-  }) }, event => events.push(JSON.parse(event)), store => stores.push(JSON.parse(store)));
-  return { events, stores, seen, id, call: async method => JSON.parse(await native.nativeAccountCallMethod(id, method, '[]')) };
+  } }, event => events.push(event), store => stores.push(store));
+  return { events, stores, seen, id, call: async method => await native.nativeAccountCallMethod(id, method, []) };
 }
 
 test('Orderly auth expiry posts the TS deactivation status and suppresses the disposal Store reset', { timeout: 10000 }, async t => {
