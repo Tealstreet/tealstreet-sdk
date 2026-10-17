@@ -172,6 +172,13 @@ impl Exchange for ParadexExchange {
     fn cancel_orders(&self, o: Vec<Order>) -> ExchangeFuture<'_, ()> {
         self.unit("cancelOrders", args!(js(&o)))
     }
+    // Source venue-wide cancellation also covers orders absent from the local Store.
+    fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
+        self.unit("cancelAllOrders", vec![])
+    }
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        self.unit("cancelSymbolOrders", args!(js(&symbol)))
+    }
     fn schedule_cancel(&self, _: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }

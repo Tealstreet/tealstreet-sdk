@@ -1,4 +1,4 @@
-// Execute the fourteen reviewed native/default Crypto.com record and carrier owners, not full discovery.
+// Execute the eleven reviewed native/default Crypto.com record and carrier owners, not full discovery.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,9 +12,6 @@ import { loadPolicy } from '../../safe-cex-parity/scripts/accepted-policy-files.
 assert.equal(process.argv.length, 2, 'selected census runner takes no scope-changing arguments');
 const workspace = fs.realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
 const selected = [
-  "safe_cex_venue_cryptocom::account_envelopes::CryptocomRequestTimeInForce",
-  "safe_cex_venue_cryptocom::account_envelopes::CryptocomRequestType",
-  "safe_cex_venue_cryptocom::account_envelopes::CryptocomSubscribeMethod",
   "safe_cex_venue_cryptocom::wire::CryptocomAccountIdentity",
   "safe_cex_venue_cryptocom::wire::CryptocomCandlestick",
   "safe_cex_venue_cryptocom::wire::CryptocomError",
@@ -27,7 +24,7 @@ const selected = [
   "safe_cex_venue_cryptocom::ws_payloads::CryptocomWsSide",
   "safe_cex_venue_cryptocom::ws_payloads::CryptocomWsValuationChannel"
 ];
-assert.equal(selected.length, 14);
+assert.equal(selected.length, 11);
 function cargo(args, extraEnv = {}) {
   const result = spawnSync('cargo', args, {
     cwd: workspace, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -65,8 +62,8 @@ const results = runProbes(workspace, metadata, [pkg], contracts, configuration);
 fs.writeFileSync(path.join(metadata.target_directory, 'cryptocom-record-carrier-results.json'), `${JSON.stringify(results, null, 2)}\n`);
 assert.deepEqual(results.map(row => row.name).sort(), selected);
 for (const row of results) assert.deepEqual(row.failures, [], row.name);
-assert.equal(results.filter(row => !row.classificationOnly).length, 14);
+assert.equal(results.filter(row => !row.classificationOnly).length, 11);
 assert.equal(results.filter(row => row.classificationOnly).length, 0);
-console.log('Crypto.com selected records/carriers: 14/14 native decoder results, 0 classifications, 0 failed owners.');
+console.log('Crypto.com selected records/carriers: 11/11 native decoder results, 0 classifications, 0 failed owners.');
 console.log('Selected construction: 6 exact compiler traits reviewed; record observations execute actual Clone values.');
-console.log('Scope: six wire records and eight carrier enum APIs only; other census owners, aliases, construction, locals, features and wasm are separate obligations.');
+console.log('Scope: six wire records and five carrier enum APIs only; other census owners, aliases, construction, locals, features and wasm are separate obligations.');

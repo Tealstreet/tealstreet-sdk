@@ -3,8 +3,9 @@
 #[path = "support/exchange_runtime.rs"]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_transport::RestRequest;
 use safe_cex_types::{PlaceOrderOpts, PositionSide, UpdateOrderOpts};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::rc::Rc;
 use support::drive;
 
@@ -43,14 +44,108 @@ fn script(wire: &support::Wire) {
     responses.insert("/fapi/v1/trades".into(),json!([{"id":4,"price":"101","qty":"0.03","quoteQty":"3.03","time":1700000000000u64,"isBuyerMaker":true}]));
 }
 
+fn request_path(request: &RestRequest) -> &str {
+    request.url.split('?').next().unwrap()
+}
+fn wire_query(request: &RestRequest) -> &str {
+    assert!(
+        request.params.is_none(),
+        "URL-consuming terminal gets rendered params"
+    );
+    request
+        .url
+        .split_once('?')
+        .expect("signed query on the wire")
+        .1
+}
+fn signed_query_params(request: &RestRequest) -> serde_json::Map<String, Value> {
+    // These signature fixtures contain ASCII numbers, symbols and hex values.
+    // Inspect raw wire text; refusing escapes avoids hiding a rewrite before HMAC.
+    let query = wire_query(request);
+    assert!(
+        !query.contains('%') && !query.contains('+'),
+        "unexpected escaping in signing fixture: {query}"
+    );
+    query
+        .split('&')
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').expect("query key/value");
+            (key.into(), Value::String(value.into()))
+        })
+        .collect()
+}
+fn unsigned_wire_query(request: &RestRequest) -> (&str, &str) {
+    wire_query(request)
+        .rsplit_once("&signature=")
+        .expect("signature appended last")
+}
+
 fn sent(wire: &support::Wire, method: &str, path: &str) -> bool {
     wire.requests
         .borrow()
         .iter()
-        .any(|request| request.method.eq_ignore_ascii_case(method) && request.url == path)
+        .any(|request| request.method.eq_ignore_ascii_case(method) && request_path(request) == path)
 }
 fn take(wire: &support::Wire) {
     wire.requests.borrow_mut().clear();
+}
+
+fn cancel_already_gone(status: u16) {
+    let (venue, rt, _, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    script(&wire);
+    let orders = drive(&rt, venue.fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    let errors = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let capture = errors.clone();
+    venue.base().on(
+        "error",
+        Rc::new(move |_, args| {
+            capture.borrow_mut().push(args.clone());
+            Ok(())
+        }),
+    );
+    wire.responses.borrow_mut().insert(
+        "/fapi/v1/order".into(),
+        json!({"code":-2011,"msg":"Unknown order sent."}),
+    );
+    wire.statuses
+        .borrow_mut()
+        .insert("/fapi/v1/order".into(), status);
+    take(&wire);
+    drive(&rt, venue.cancel_orders(orders)).unwrap();
+    assert!(
+        errors.borrow().is_empty(),
+        "already-gone cancel must not emit an error: {:?}",
+        errors.borrow()
+    );
+    assert!(
+        rt.console
+            .borrow()
+            .iter()
+            .any(|line| line.contains("was already gone"))
+    );
+    let requests = wire.requests.borrow();
+    let cancel = requests
+        .iter()
+        .find(|r| r.method.eq_ignore_ascii_case("DELETE"))
+        .unwrap();
+    assert_eq!(
+        cancel
+            .config_extensions
+            .get("__suppressAsterUnknownOrderError"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
+fn already_gone_cancel_suppresses_success_response_errors() {
+    cancel_already_gone(200);
+}
+
+#[test]
+fn already_gone_cancel_suppresses_http_response_errors() {
+    cancel_already_gone(400);
 }
 
 #[test]
@@ -124,20 +219,14 @@ fn all_sixteen_defaults_are_bound_through_the_constructed_exchange() {
     // 9 set leverage.
     drive(&rt, venue.set_leverage("BTCUSDT".into(), 5.4, None)).unwrap();
     assert!(sent(&wire, "POST", "/fapi/v1/leverage"));
-    assert_eq!(
-        wire.requests
-            .borrow()
-            .iter()
-            .find(|r| r.url == "/fapi/v1/leverage")
-            .unwrap()
-            .params
-            .as_ref()
-            .unwrap()["leverage"]
-            .as_f64()
-            .unwrap()
-            .to_bits(),
-        5f64.to_bits()
-    );
+    let request = wire
+        .requests
+        .borrow()
+        .iter()
+        .find(|r| request_path(r) == "/fapi/v1/leverage")
+        .unwrap()
+        .clone();
+    assert_eq!(signed_query_params(&request)["leverage"], json!("5"));
     take(&wire);
     // 10 position mode.
     drive(&rt, venue.change_position_mode(true, None)).unwrap();
@@ -147,15 +236,15 @@ fn all_sixteen_defaults_are_bound_through_the_constructed_exchange() {
     // 11 margin type.
     drive(&rt, venue.change_margin_type(true, Some("BTCUSDT".into()))).unwrap();
     assert!(sent(&wire, "POST", "/fapi/v1/marginType"));
+    let request = wire
+        .requests
+        .borrow()
+        .iter()
+        .find(|r| request_path(r) == "/fapi/v1/marginType")
+        .unwrap()
+        .clone();
     assert_eq!(
-        wire.requests
-            .borrow()
-            .iter()
-            .find(|r| r.url == "/fapi/v1/marginType")
-            .unwrap()
-            .params
-            .as_ref()
-            .unwrap()["marginType"],
+        signed_query_params(&request)["marginType"],
         json!("ISOLATED")
     );
     take(&wire);
@@ -172,11 +261,11 @@ fn all_sixteen_defaults_are_bound_through_the_constructed_exchange() {
         .requests
         .borrow()
         .iter()
-        .find(|r| r.method == "post" && r.url == "/fapi/v1/order")
+        .find(|r| r.method == "post" && request_path(r) == "/fapi/v1/order")
         .unwrap()
         .clone();
-    assert_eq!(request.params.as_ref().unwrap()["quantity"], json!("0.012"));
-    assert_eq!(request.params.as_ref().unwrap()["price"], json!("101.25"));
+    assert_eq!(signed_query_params(&request)["quantity"], json!("0.012"));
+    assert_eq!(signed_query_params(&request)["price"], json!("101.25"));
     assert!(request.body.is_none());
     take(&wire);
     // 13 cancel+replace update.
@@ -215,7 +304,7 @@ fn secondary_reads_keep_their_key_secret_and_transport_options() {
         .requests
         .borrow()
         .iter()
-        .find(|request| request.url == "/fapi/v4/account")
+        .find(|request| request_path(request) == "/fapi/v4/account")
         .unwrap()
         .clone();
     assert_eq!(
@@ -223,12 +312,13 @@ fn secondary_reads_keep_their_key_secret_and_transport_options() {
         Some("read-key"),
         "GET uses secondary key"
     );
-    let mut params = read.params.unwrap().as_object().unwrap().clone();
+    let mut params = signed_query_params(&read);
     let signature = params.remove("signature").unwrap();
-    let query = safe_cex_venue_asterdex::api_helpers::build_query_string(&params).unwrap();
+    let (query, wire_signature) = unsigned_wire_query(&read);
+    assert_eq!(signature, json!(wire_signature));
     let expected = drive(
         &rt,
-        safe_cex_venue_asterdex::api_helpers::generate_v1_signature(&query, "read-secret"),
+        safe_cex_venue_asterdex::api_helpers::generate_v1_signature(query, "read-secret"),
     )
     .unwrap();
     assert_eq!(
@@ -277,7 +367,7 @@ fn secondary_reads_keep_their_key_secret_and_transport_options() {
         wire.requests
             .borrow()
             .iter()
-            .find(|r| r.url == "/fapi/v1/leverage")
+            .find(|r| request_path(r) == "/fapi/v1/leverage")
             .unwrap()
             .headers
             .get("X-MBX-APIKEY")
@@ -315,10 +405,10 @@ fn v3_clients_sign_both_the_abi_reads_and_exact_code_query_order_writes() {
         .requests
         .borrow()
         .iter()
-        .find(|r| r.url == "/fapi/v3/account")
+        .find(|r| request_path(r) == "/fapi/v3/account")
         .unwrap()
         .clone();
-    let params = account.params.as_ref().unwrap();
+    let params = signed_query_params(&account);
     assert_eq!(params["user"], json!(user));
     assert_eq!(params["signer"], json!(signer));
     assert_eq!(
@@ -329,7 +419,7 @@ fn v3_clients_sign_both_the_abi_reads_and_exact_code_query_order_writes() {
     let mut nonce = [0; 32];
     let observed_nonce = params["nonce"].as_str().unwrap().parse::<u128>().unwrap();
     nonce[16..].copy_from_slice(&observed_nonce.to_be_bytes());
-    let unsigned=json!({"recvWindow":safe_cex_num::js_number_string(params["recvWindow"].as_f64().unwrap()),"timestamp":safe_cex_num::js_number_string(params["timestamp"].as_f64().unwrap())}).to_string();
+    let unsigned=json!({"recvWindow":params["recvWindow"].as_str().unwrap(),"timestamp":params["timestamp"].as_str().unwrap()}).to_string();
     let encoded = safe_cex_crypto::ethereum::encode_string_address_address_uint256(
         &unsigned, user, &signer, &nonce,
     )
@@ -422,16 +512,12 @@ fn constructed_exchange_starts_with_real_signed_clients_and_native_sockets() {
     let account = drive(&rt, venue.get_account()).unwrap();
     assert_eq!(account.user_id, "aster-account");
     assert!(wire.requests.borrow().iter().any(|request| {
-        request.url == "/fapi/v4/account"
+        request_path(request) == "/fapi/v4/account"
             && request
                 .headers
                 .get("X-MBX-APIKEY")
                 .is_some_and(|key| key == "fixture-key")
-            && request
-                .params
-                .as_ref()
-                .and_then(|p| p.get("signature"))
-                .is_some()
+            && signed_query_params(request).get("signature").is_some()
     }));
     rt.pump();
     assert!(
@@ -487,7 +573,7 @@ fn v1_signature_rejection_resends_once_from_unsigned_parameters() {
                 .requests
                 .borrow()
                 .iter()
-                .filter(|r| r.url == "/fapi/v1/order")
+                .filter(|r| request_path(r) == "/fapi/v1/order")
                 .cloned()
                 .collect::<Vec<_>>();
             assert_eq!(
@@ -496,7 +582,7 @@ fn v1_signature_rejection_resends_once_from_unsigned_parameters() {
                 "one resend for status {status}, repeated={repeated}"
             );
             for request in requests {
-                let mut params = request.params.unwrap().as_object().unwrap().clone();
+                let mut params = signed_query_params(&request);
                 let signature = params.remove("signature").unwrap();
                 assert_eq!(params["symbol"], json!("BTCUSDT"));
                 assert_eq!(params["quantity"], json!("0.012"));
@@ -505,12 +591,12 @@ fn v1_signature_rejection_resends_once_from_unsigned_parameters() {
                     8,
                     "no old signature is retained among unsigned order fields"
                 );
-                let query =
-                    safe_cex_venue_asterdex::api_helpers::build_query_string(&params).unwrap();
+                let (query, wire_signature) = unsigned_wire_query(&request);
+                assert_eq!(signature, json!(wire_signature));
                 let expected = drive(
                     &rt,
                     safe_cex_venue_asterdex::api_helpers::generate_v1_signature(
-                        &query,
+                        query,
                         "fixture-secret",
                     ),
                 )

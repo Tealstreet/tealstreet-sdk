@@ -403,6 +403,47 @@ fn cancel_orders_routes_triggers_to_the_advanced_endpoint() {
     );
 }
 
+// ts: cryptocom.exchange.ts cancelSymbolOrders / cancelAllOrders post the venue cancel-all,
+// so orders the store has not mapped yet are cancelled too.
+#[test]
+fn cancel_symbol_and_all_orders_post_the_venue_cancel_all() {
+    let h = venue(|http| http.ok("POST", "/private/cancel-all-orders", ok(json!({}))));
+    loaded(&h);
+    h.drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect("cancelSymbolOrders");
+    assert_eq!(
+        only(&h, "/private/cancel-all-orders"),
+        json!({"instrument_name": SYMBOL})
+    );
+    h.drive(h.venue().cancel_all_orders())
+        .expect("cancelAllOrders");
+    let calls = h.http.calls("/private/cancel-all-orders");
+    assert_eq!(calls.len(), 2, "cancelAllOrders posts once");
+    assert_eq!(envelope(&calls[1])["params"], json!({}));
+    assert!(h.http.calls("/private/cancel-order").is_empty());
+}
+
+#[test]
+fn cancel_all_orders_rethrows_a_venue_rejection() {
+    let h = venue(|http| {
+        http.route(
+            "POST",
+            "/private/cancel-all-orders",
+            400.0,
+            json!({"code": 40003, "message": "BAD_REQUEST"}),
+        )
+    });
+    loaded(&h);
+    let symbol = h
+        .drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect_err("cancelSymbolOrders rethrows");
+    let all = h
+        .drive(h.venue().cancel_all_orders())
+        .expect_err("cancelAllOrders rethrows");
+    assert_eq!(symbol.message, all.message);
+    assert!(symbol.message.contains("BAD_REQUEST"), "{}", symbol.message);
+}
+
 #[test]
 fn set_leverage_posts_the_account_leverage() {
     let h = venue(|http| http.ok("POST", "/private/change-account-leverage", ok(json!({}))));
@@ -523,6 +564,168 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
         "Store preserves exact currency field names"
     );
     drop(balance);
+    h.venue().dispose().expect("dispose");
+}
+
+fn started(script: impl FnOnce(&support::Http)) -> Harness {
+    let h = venue(|http| {
+        http.ok("POST", "/private/get-open-orders", open_orders());
+        http.ok(
+            "POST",
+            "/private/advanced/get-open-orders",
+            advanced_orders(),
+        );
+        http.ok("POST", "/private/get-positions", positions());
+        http.ok("POST", "/private/user-balance", balance());
+        script(http);
+    });
+    h.drive(h.venue().start()).expect("start");
+    h
+}
+
+fn market_socket(h: &Harness) -> std::rc::Rc<support::Socket> {
+    h.runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/market"))
+        .expect("public market socket")
+        .1
+        .clone()
+}
+
+fn public_frame(h: &Harness, result: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    market_socket(h)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"id": -1, "method": "subscribe", "code": 0, "result": result}).to_string(),
+        )));
+    for _ in 0..4 {
+        h.runtime.advance(50.0);
+    }
+}
+
+fn sent_channels(h: &Harness, method: &str) -> Vec<Value> {
+    market_socket(h)
+        .sent
+        .borrow()
+        .iter()
+        .filter_map(|m| serde_json::from_str::<Value>(m).ok())
+        .filter(|m| m["method"] == method)
+        .flat_map(|m| {
+            m["params"]["channels"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+// ts: cryptocom.exchange.ts fetchOHLCV posts public/get-candlestick and maps each row.
+#[test]
+fn fetch_ohlcv_reads_venue_candlesticks() {
+    let h = venue(|http| {
+        http.ok(
+            "GET",
+            "/public/get-candlestick",
+            ok(json!({"data": [
+                {"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}
+            ]})),
+        )
+    });
+    loaded(&h);
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let candles = h.drive(h.venue().fetch_ohlcv(opts)).expect("fetchOHLCV");
+    assert_eq!(candles.len(), 1, "venue candles are returned");
+    assert_eq!(candles[0].timestamp, 1_700_000_000_000.0);
+    assert_eq!(
+        (
+            candles[0].open,
+            candles[0].high,
+            candles[0].low,
+            candles[0].close,
+            candles[0].volume
+        ),
+        (1.0, 2.0, 0.5, 1.5, 10.0)
+    );
+    let call = &h.http.calls("/public/get-candlestick")[0];
+    assert_eq!(call.method, "GET", "public reads go out as GET");
+    assert_eq!(
+        call.params,
+        json!({"instrument_name": SYMBOL, "timeframe": "1h"})
+    );
+}
+
+// ts: cryptocom.ws-public.ts listenOrderBook subscribes book.<symbol>.50 and replaces both sides.
+#[test]
+fn listen_order_book_subscribes_and_delivers_snapshots() {
+    let h = started(|_| {});
+    let books = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = books.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            std::rc::Rc::new(move |b| sink.borrow_mut().push(b)),
+        )
+        .expect("listenOrderBook");
+    h.runtime.advance(50.0);
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "book subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "book", "subscription": format!("book.{SYMBOL}.50"),
+               "instrument_name": SYMBOL,
+               "data": [{"bids": [["30000", "1", "1"]], "asks": [["30001", "2", "1"]], "t": 1}]}),
+    );
+    let books = books.borrow();
+    assert!(!books.is_empty(), "order book callback fired");
+    let last = books.last().unwrap();
+    assert_eq!((last.bids[0].price, last.bids[0].amount), (30000.0, 1.0));
+    assert_eq!((last.asks[0].price, last.asks[0].amount), (30001.0, 2.0));
+    drop(books);
+    cleanup().expect("cleanup");
+    assert!(
+        sent_channels(&h, "unsubscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "last listener unsubscribes"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+// ts: cryptocom.ws-public.ts listenOHLCV subscribes candlestick.<interval>.<symbol>.
+#[test]
+fn listen_ohlcv_subscribes_and_delivers_candles() {
+    let h = started(|_| {});
+    let candles = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = candles.clone();
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let _cleanup = h
+        .venue()
+        .listen_ohlcv(opts, std::rc::Rc::new(move |c| sink.borrow_mut().push(c)))
+        .expect("listenOHLCV");
+    h.runtime.advance(50.0);
+    let channel = format!("candlestick.1h.{SYMBOL}");
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(channel)),
+        "candlestick subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "candlestick", "subscription": channel, "instrument_name": SYMBOL,
+               "interval": "1h",
+               "data": [{"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}]}),
+    );
+    let candles = candles.borrow();
+    assert_eq!(candles.len(), 1, "candle callback fired once");
+    assert_eq!(candles[0].close, 1.5);
+    drop(candles);
     h.venue().dispose().expect("dispose");
 }
 
@@ -716,4 +919,156 @@ fn dispose_sets_source_flag_without_removing_inherited_listeners() {
         1,
         "source override does not invoke base listener cleanup"
     );
+}
+
+// ts: cryptocom.api.ts createAPI through safeCexAxiosCreate (provider baseURL and proxy
+// authorization) and, under tealstreetTunnel, installTransportAdapter.
+#[test]
+#[expect(clippy::arc_with_non_send_sync)]
+fn create_api_routes_through_the_provider_and_tunnel_adapter() {
+    use safe_cex_transport::{
+        DirectTransport, PrivateProxy, ResolvedRouting, RestAdapter, RestAdapterContext,
+        RestAdapterVariant, RestAuthorizer, RestFuture, RestRequest, RestResponse,
+        RestResponseBody, RestTransport, RestTransportContext, RoutingOptions, TransportError,
+        TransportFuture, TransportProvider, WsConnection,
+    };
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
+    const PROXIED: &str = "https://private-proxy/https://api.crypto.com/exchange/v1";
+    struct Authorize;
+    impl RestAuthorizer for Authorize {
+        fn authorize<'a>(&'a self, request: &'a mut RestRequest) -> TransportFuture<'a, ()> {
+            Box::pin(async move {
+                let Some(safe_cex_transport::RestBody::Encoded(body)) = &request.body else {
+                    panic!("ROUTING encoded body: {:?}", request.body)
+                };
+                let body: Value = serde_json::from_slice(body).unwrap();
+                assert!(
+                    body["sig"].as_str().is_some_and(|s| s.len() == 64),
+                    "ROUTING venue signs before proxy authorization"
+                );
+                request
+                    .headers
+                    .insert("Authorization".into(), "Bearer proxy-token".into());
+                Ok(())
+            })
+        }
+    }
+    struct Terminal(Rc<RefCell<Vec<RestRequest>>>);
+    impl RestAdapter for Terminal {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.borrow_mut().push(request);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Untransformed(balance()),
+                })
+            })
+        }
+    }
+    struct Provider {
+        variants: Rc<RefCell<Vec<RestAdapterVariant>>>,
+        sent: Rc<RefCell<Vec<RestRequest>>>,
+    }
+    impl TransportProvider for Provider {
+        fn name(&self) -> &str {
+            "cryptocom-routing"
+        }
+        fn rest(&self, c: RestTransportContext<'_>) -> Result<RestTransport, TransportError> {
+            assert_eq!(c.exchange, &ExchangeName::Cryptocom, "ROUTING exchange");
+            assert_eq!(
+                c.config.base_url.as_deref(),
+                Some("https://api.crypto.com/exchange/v1"),
+                "ROUTING original base"
+            );
+            Ok(RestTransport {
+                base_url: Some(PROXIED.into()),
+                proxied: true,
+                authorize: Some(Arc::new(Authorize)),
+            })
+        }
+        fn rest_adapter(&self, c: RestAdapterContext<'_>) -> Option<Arc<dyn RestAdapter>> {
+            self.variants.borrow_mut().push(c.variant);
+            Some(Arc::new(Terminal(self.sent.clone())))
+        }
+        fn proxy_prefix(&self, _: RestTransportContext<'_>) -> String {
+            String::new()
+        }
+        fn public_cors_proxy(&self) -> Option<String> {
+            None
+        }
+        fn private_proxy(&self, _: &ExchangeName) -> Option<Arc<dyn PrivateProxy>> {
+            None
+        }
+        fn require_proxy(&self, options: ExchangeOptions) -> ExchangeOptions {
+            options
+        }
+        fn server_proxy_url(&self, _: &ExchangeName) -> Option<String> {
+            None
+        }
+        fn ws_routing(&self, name: &ExchangeName, options: &RoutingOptions) -> ResolvedRouting {
+            DirectTransport.ws_routing(name, options)
+        }
+        fn ws_connection(&self, _: &str) -> Option<WsConnection> {
+            None
+        }
+    }
+    for tunnel in [false, true] {
+        let runtime = Rc::new(support::Runtime::default());
+        let variants = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        *runtime.provider.borrow_mut() = Some(Arc::new(Provider {
+            variants: variants.clone(),
+            sent: sent.clone(),
+        }));
+        let options = serde_json::from_value(json!({
+            "key": "fixture-key", "secret": "fixture-secret",
+            "tealstreetProxy": true, "tealstreetTunnel": tunnel
+        }))
+        .unwrap();
+        let h = support::harness_on(runtime, options, |http| {
+            http.ok("POST", "/private/user-balance", balance())
+        });
+        let result = h
+            .drive(h.venue().validate_account())
+            .expect("validateAccount");
+        assert_eq!(serde_json::to_value(&result.error).unwrap(), json!(""));
+        if tunnel {
+            assert_eq!(
+                *variants.borrow(),
+                [RestAdapterVariant::Default],
+                "ROUTING tunnel installs the default adapter once"
+            );
+            assert!(
+                h.http.requests.borrow().is_empty(),
+                "ROUTING adapter replaces host"
+            );
+            let requests = sent.borrow();
+            assert_eq!(
+                requests.len(),
+                2,
+                "ROUTING source validation then fetchBalance"
+            );
+            assert_eq!(requests[0].base_url.as_deref(), Some(PROXIED));
+            assert_eq!(
+                requests[0].headers.get("Authorization").map(String::as_str),
+                Some("Bearer proxy-token")
+            );
+        } else {
+            assert!(
+                variants.borrow().is_empty(),
+                "ROUTING no adapter without tunnel"
+            );
+            let calls = h.http.calls("/private/user-balance");
+            assert_eq!(
+                calls.len(),
+                2,
+                "ROUTING source validation then fetchBalance"
+            );
+            let call = &calls[0];
+            assert_eq!(call.base_url, PROXIED, "ROUTING provider base");
+            assert_eq!(call.headers["Authorization"], "Bearer proxy-token");
+        }
+    }
 }

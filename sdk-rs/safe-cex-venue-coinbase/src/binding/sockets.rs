@@ -632,7 +632,7 @@ impl PrivateStreamHost for SocketHost {
                     let _ = self.host.base().log(message, severity);
                 },
                 |message| {
-                    let _ = self.host.base().emit("warning", json!([message]));
+                    let _ = self.host.base().emit("warning", json!(message));
                 },
             )
             .map_err(|error| Rc::new(error.into()))

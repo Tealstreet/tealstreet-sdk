@@ -888,6 +888,36 @@
           "super_call": true
         }
       ]
+    },
+    {
+      "file": "safe-cex-venue-kraken/src/binding/exchange.rs",
+      "finding": "fetch_and_set_orders bypasses dynamic hook fetch_and_set_orders through base",
+      "kind": "no-venue-override",
+      "member": "fetchAndSetOrders",
+      "classes": [
+        "KrakenExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "fetchAndSetOrders = async (symbols?: string[]): Promise<Order[]> => {"
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-kraken/src/binding/exchange.rs",
+      "finding": "sign_ws_auth bypasses dynamic hook sign_ws_auth through base",
+      "kind": "no-venue-override",
+      "member": "signWsAuth",
+      "classes": [
+        "KrakenSpotExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "public signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {"
+        }
+      ]
     }
   ]
 }

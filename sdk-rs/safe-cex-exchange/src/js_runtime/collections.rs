@@ -221,3 +221,7 @@ pub(crate) fn iterator_method(value: &Js) -> Result<Js, Thrown> {
         _ => Ok(Js::Undefined),
     }
 }
+
+#[cfg(test)]
+#[path = "collection_contract_tests.rs"]
+pub(super) mod accepted_contract_tests;

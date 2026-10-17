@@ -197,3 +197,533 @@ fn number_to_string_with_radix_matches_v8() {
         assert_eq!(radix_string(v, radix), expected, "{v}.toString({radix})");
     }
 }
+
+fn production_realm() -> (Realm, Rc<TestRuntime>) {
+    let (realm, runtime) = realm();
+    super::imports::bind(&realm);
+    (realm, runtime)
+}
+
+#[test]
+fn production_emitter_preserves_empty_array_and_multiple_arguments() {
+    use std::cell::RefCell;
+
+    let (mut r, rt) = production_realm();
+    let options = serde_json::from_value(serde_json::json!({"key":"","secret":""})).unwrap();
+    let base = Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
+        safe_cex_types::ExchangeName::Hyperliquid,
+        options,
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        rt,
+        safe_cex_exchange::exchange::ExchangeSettings::default(),
+    ));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    for event in ["arity", "warning", "log"] {
+        let seen = seen.clone();
+        base.on_args(
+            event,
+            Rc::new(move |event, args| {
+                seen.borrow_mut().push((event.to_owned(), args.to_vec()));
+                Ok(())
+            }),
+        );
+    }
+    let class = super::facade_exchange::base_exchange_class(&mut r, base, None);
+    let options = r.new_object();
+    let store = r.new_object();
+    let instance = r
+        .construct(&class, &[Value::str("hyperliquid"), options, store], None)
+        .unwrap();
+    let emitter = r.get_str(&instance, "emitter").unwrap();
+    r.call_method(&emitter, "emit", &[Value::str("arity")])
+        .unwrap();
+    let array = r.new_array(vec![Value::Number(7.0), Value::str("eight")]);
+    r.call_method(&emitter, "emit", &[Value::str("arity"), array])
+        .unwrap();
+    let metadata = r.object_from(vec![("code", Value::Number(42.0))]);
+    r.call_method(
+        &emitter,
+        "emit",
+        &[Value::str("warning"), Value::str("venue warning"), metadata],
+    )
+    .unwrap();
+    r.call_method(
+        &instance,
+        "log",
+        &[Value::str("native log"), Value::str("Warning")],
+    )
+    .unwrap();
+    assert_eq!(
+        *seen.borrow(),
+        vec![
+            ("arity".into(), vec![]),
+            ("arity".into(), vec![serde_json::json!([7, "eight"])]),
+            (
+                "warning".into(),
+                vec![
+                    serde_json::json!("venue warning"),
+                    serde_json::json!({"code":42})
+                ]
+            ),
+            (
+                "log".into(),
+                vec![
+                    serde_json::json!("[hyperliquid] native log"),
+                    serde_json::json!("Warning")
+                ]
+            ),
+        ],
+        "the production facade must retain the emitter's actual argument list"
+    );
+}
+
+#[test]
+fn production_import_registry_uses_real_helpers_and_rejects_unknown_names() {
+    let (mut r, _) = production_realm();
+    for name in [
+        "hasSeenFill",
+        "markFillSeen",
+        "isFinitePositiveNumber",
+        "mapSeries",
+        "hyperliquidOrderResponseHasDeferredOrderStatus",
+    ] {
+        assert!(r.global_binding(name).unwrap().is_callable(), "{name}");
+    }
+    let error = r
+        .global_binding("__unknown_hyperliquid_import")
+        .unwrap_err();
+    assert_eq!(
+        message(&mut r, &error),
+        "__unknown_hyperliquid_import is not defined"
+    );
+    let seen = r.global_binding("hasSeenFill").unwrap();
+    let mark = r.global_binding("markFillSeen").unwrap();
+    let id = Value::str("authored-fill-id");
+    assert!(matches!(
+        r.call(&seen, &Value::Undefined, std::slice::from_ref(&id))
+            .unwrap(),
+        Value::Bool(false)
+    ));
+    assert!(matches!(
+        r.call(&mark, &Value::Undefined, std::slice::from_ref(&id))
+            .unwrap(),
+        Value::Undefined
+    ));
+    let factory = r.global_binding("getCrossCache").unwrap();
+    let cache = r.call(&factory, &Value::Undefined, &[]).unwrap();
+    assert!(matches!(
+        r.call_method(&cache, "hasSeenFill", std::slice::from_ref(&id))
+            .unwrap(),
+        Value::Bool(true)
+    ));
+    assert!(matches!(
+        r.call(&seen, &Value::Undefined, &[id]).unwrap(),
+        Value::Bool(true)
+    ));
+    let predicate = r.global_binding("isFinitePositiveNumber").unwrap();
+    for (number, expected) in [
+        (f64::NAN, false),
+        (f64::INFINITY, false),
+        (-f64::INFINITY, false),
+        (-0.0, false),
+        (0.0, false),
+        (-1.0, false),
+        (1.25, true),
+    ] {
+        assert!(
+            matches!(r.call(&predicate, &Value::Undefined, &[Value::Number(number)]).unwrap(), Value::Bool(value) if value==expected)
+        );
+    }
+    let object = r.new_object();
+    let poison = r.native("toJSON", 0, |_, _, _| {
+        panic!("strict numeric predicate must not inspect an object's toJSON")
+    });
+    r.define_hidden(&object, PropKey::str("toJSON"), poison);
+    for value in [
+        Value::Undefined,
+        Value::Null,
+        Value::Bool(true),
+        Value::str("1.25"),
+        object,
+    ] {
+        assert!(matches!(
+            r.call(&predicate, &Value::Undefined, &[value]).unwrap(),
+            Value::Bool(false)
+        ));
+    }
+}
+
+#[test]
+fn production_import_map_series_awaits_values_and_callbacks_and_reads_live_length() {
+    let (mut r, rt) = production_realm();
+    let series = r.global_binding("mapSeries").unwrap();
+    let promised = r.settled_promise(Ok(Value::Number(3.0)));
+    let input = r.new_array(vec![Value::Number(2.0), promised]);
+    let expected_input = input.clone();
+    let receiver = r.new_object();
+    let expected_receiver = receiver.clone();
+    let trace = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let recorded = trace.clone();
+    let callback = r.native("serial-callback", 3, move |r, this, args| {
+        assert!(this.strict_equal(&expected_receiver));
+        assert!(args[2].strict_equal(&expected_input));
+        let value = args[0].as_number().unwrap();
+        let index = args[1].as_number().unwrap();
+        recorded.borrow_mut().push(("start", value));
+        if index == 0.0 {
+            r.call_method(&expected_input, "push", &[Value::Number(4.0)])?;
+        }
+        let sleep = r.runtime().sleep(10);
+        let ended = recorded.clone();
+        Ok(r.spawn_value(Box::pin(async move {
+            sleep.await.unwrap();
+            ended.borrow_mut().push(("end", value));
+            Ok(Value::Number(value * 10.0))
+        })))
+    });
+    let output = r
+        .call(&series, &Value::Undefined, &[input, callback, receiver])
+        .unwrap();
+    rt.drain();
+    let cell = output.promise().unwrap();
+    let result = match &cell.borrow().state {
+        PromiseState::Fulfilled(v) => v.clone(),
+        _ => panic!("serial result must fulfill"),
+    };
+    assert_eq!(
+        *trace.borrow(),
+        [
+            ("start", 2.0),
+            ("end", 2.0),
+            ("start", 3.0),
+            ("end", 3.0),
+            ("start", 4.0),
+            ("end", 4.0)
+        ]
+    );
+    assert_eq!(r.get_str(&result, "length").unwrap().as_number(), Some(3.0));
+    for (i, n) in [20.0, 30.0, 40.0].into_iter().enumerate() {
+        assert_eq!(
+            r.get_str(&result, &i.to_string()).unwrap().as_number(),
+            Some(n)
+        );
+    }
+}
+
+#[test]
+fn production_import_map_series_retains_module_receiver_and_original_rejection() {
+    let (mut r, rt) = production_realm();
+    let series = r.global_binding("mapSeries").unwrap();
+    let expected_series = series.clone();
+    let original = r.error_of("RangeError", "authored serial rejection");
+    let thrown = original.clone();
+    let calls = Rc::new(std::cell::Cell::new(0));
+    let observed = calls.clone();
+    let callback = r.native("reject", 1, move |r, this, _| {
+        assert!(r.get_str(this, "mapSeries")?.strict_equal(&expected_series));
+        observed.set(observed.get() + 1);
+        Ok(r.settled_promise(Err(thrown.clone())))
+    });
+    let input = r.new_array(vec![Value::Number(1.0), Value::Number(2.0)]);
+    let output = r
+        .call(&series, &Value::Undefined, &[input, callback])
+        .unwrap();
+    rt.drain();
+    let cell = output.promise().unwrap();
+    match &cell.borrow().state {
+        PromiseState::Rejected(error) => assert!(error.strict_equal(&original)),
+        _ => panic!("serial error must reject"),
+    };
+    assert_eq!(calls.get(), 1, "no later callback after rejection");
+}
+
+#[test]
+fn production_import_map_series_resolves_callback_call_before_awaited_item() {
+    let (mut r, rt) = production_realm();
+    let series = r.global_binding("mapSeries").unwrap();
+    let trace = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let input = r.object_from(vec![("length", Value::Number(1.0))]);
+    let item_trace = trace.clone();
+    let item = r.native("item", 0, move |r, _, _| {
+        item_trace.borrow_mut().push("get item");
+        Ok(r.settled_promise(Ok(Value::Number(2.0))))
+    });
+    r.define_getter(&input, PropKey::str("0"), item);
+    let callback = r.native("callback", 1, |_, _, _| {
+        panic!("own call must replace direct invocation")
+    });
+    let expected_callback = callback.clone();
+    let receiver = r.new_object();
+    let expected_receiver = receiver.clone();
+    let call_trace = trace.clone();
+    let own_call = r.native("own call", 4, move |_, this, args| {
+        assert!(this.strict_equal(&expected_callback));
+        assert!(args[0].strict_equal(&expected_receiver));
+        assert_eq!(args[1].as_number(), Some(2.0));
+        assert_eq!(args[2].as_number(), Some(0.0));
+        call_trace.borrow_mut().push("own call");
+        Ok(Value::Number(20.0))
+    });
+    let getter_trace = trace.clone();
+    let getter = r.native("get call", 0, move |_, _, _| {
+        getter_trace.borrow_mut().push("get callback.call");
+        Ok(own_call.clone())
+    });
+    r.define_getter(&callback, PropKey::str("call"), getter);
+    let output = r
+        .call(&series, &Value::Undefined, &[input, callback, receiver])
+        .unwrap();
+    rt.drain();
+    assert_eq!(
+        *trace.borrow(),
+        ["get callback.call", "get item", "own call"]
+    );
+    let cell = output.promise().unwrap();
+    let result = match &cell.borrow().state {
+        PromiseState::Fulfilled(v) => v.clone(),
+        _ => panic!("own call result must fulfill"),
+    };
+    assert_eq!(r.get_str(&result, "0").unwrap().as_number(), Some(20.0));
+}
+
+#[test]
+fn production_seam_history_mapper_preserves_the_throw_without_inspecting_it() {
+    for kind in ["ordinary", "error"] {
+        let (mut r, _) = production_realm();
+        let reads = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let original = if kind == "error" {
+            r.error_of("RangeError", "authored callback throw")
+        } else {
+            r.new_object()
+        };
+        let coercions = reads.clone();
+        let to_string = r.native("toString", 0, move |_, _, _| {
+            coercions.borrow_mut().push("toString");
+            Ok(Value::str("authored ordinary throw"))
+        });
+        r.define_hidden(&original, PropKey::str("toString"), to_string);
+        for name in ["message", "code", "response"] {
+            let getters = reads.clone();
+            let getter = r.native("spy", 0, move |_, _, _| {
+                getters.borrow_mut().push(name);
+                Ok(if name == "message" {
+                    Value::str("authored callback throw")
+                } else {
+                    Value::Undefined
+                })
+            });
+            r.define_getter(&original, PropKey::str(name), getter);
+        }
+        let thrown = original.clone();
+        let calls = Rc::new(std::cell::Cell::new(0));
+        let invoked = calls.clone();
+        let resolver = r.native("throwing resolver", 1, move |_, _, _| {
+            invoked.set(invoked.get() + 1);
+            Err(thrown.clone())
+        });
+        let row=r.from_serde(&serde_json::json!({"order":{"oid":1,"coin":"BTC","timestamp":123,"side":"B","origSz":"1","sz":"0","orderType":"Limit","limitPx":"10"},"status":"filled","statusTimestamp":124}));
+        let mapper = r.global_binding("mapHyperliquidHistoricalOrder").unwrap();
+        let error = r
+            .call(&mapper, &Value::Undefined, &[row, resolver])
+            .unwrap_err();
+        assert!(
+            error.strict_equal(&original),
+            "original thrown object identity: {kind}"
+        );
+        assert_eq!(calls.get(), 1, "the real resolver must execute");
+        assert!(
+            reads.borrow().is_empty(),
+            "propagating a callback throw must not coerce or inspect it: {kind}: {:?}",
+            reads.borrow()
+        );
+    }
+}
+
+#[test]
+fn production_seam_history_imports_execute_the_maintained_helpers() {
+    let (mut r, _) = production_realm();
+    let make_row = |status: &str, sz: &str, time: u64| serde_json::json!({"order":{"oid":77,"coin":"BTC","timestamp":1699999998000u64,"side":"B","origSz":"0.25","sz":sz,"orderType":"Limit","limitPx":"60000"},"status":status,"statusTimestamp":time});
+    let input = r.from_serde(&serde_json::json!([
+        make_row("open", "0.25", 1699999998000),
+        make_row("filled", "0", 1699999999000)
+    ]));
+    let collapse = r.global_binding("collapseHyperliquidOrderHistory").unwrap();
+    let rows = r.call(&collapse, &Value::Undefined, &[input]).unwrap();
+    assert_eq!(r.get_str(&rows, "length").unwrap().as_number(), Some(1.0));
+    let row = r.get_str(&rows, "0").unwrap();
+    let resolve = r.native("resolve symbol", 1, |_, this, args| {
+        assert!(matches!(this, Value::Undefined));
+        assert!(args[0].strict_equal(&Value::str("BTC")));
+        Ok(Value::str("BTC-PERP"))
+    });
+    let mapper = r.global_binding("mapHyperliquidHistoricalOrder").unwrap();
+    let mapped = r
+        .call(&mapper, &Value::Undefined, &[row, resolve.clone()])
+        .unwrap();
+    let order: safe_cex_types::HistoricalOrder = r.to_typed(&mapped).unwrap();
+    assert_eq!(order.id, "77");
+    assert_eq!(order.symbol, "BTC-PERP");
+    assert_eq!(order.filled, 0.25);
+    assert_eq!(order.status, safe_cex_types::OrderStatus::Closed);
+    let fills=r.from_serde(&serde_json::json!([{"coin":"BTC","time":1699999999000u64,"dir":"Close Long","px":"62000","sz":"0.25","closedPnl":"125","fee":"2"}]));
+    let derive = r
+        .global_binding("deriveHyperliquidClosedPositions")
+        .unwrap();
+    let derived = r
+        .call(
+            &derive,
+            &Value::Undefined,
+            &[fills, resolve, Value::str("authored-account")],
+        )
+        .unwrap();
+    assert_eq!(
+        r.get_str(&derived, "length").unwrap().as_number(),
+        Some(1.0)
+    );
+    let entry = r.get_str(&derived, "0").unwrap();
+    for (key, expected) in [
+        ("notional", 15500.0),
+        ("contracts", 0.25),
+        ("exitPrice", 62000.0),
+        ("unrealizedPnl", 125.0),
+        ("fees", 2.0),
+        ("closedTime", 1699999999000.0),
+    ] {
+        assert_eq!(
+            r.get_str(&entry, key).unwrap().as_number(),
+            Some(expected),
+            "{key}"
+        );
+    }
+    for (key, expected) in [
+        ("provenance", "derived"),
+        ("symbol", "BTC-PERP"),
+        ("account", "authored-account"),
+        ("side", "long"),
+    ] {
+        let value = r.get_str(&entry, key).unwrap();
+        assert_eq!(text(&mut r, &value), expected, "{key}");
+    }
+    let classifier = r
+        .global_binding("isOnlyHyperliquidTerminalCancelError")
+        .unwrap();
+    for (message, expected) in [
+        (
+            "Order was never placed, already canceled, or filled. asset=0",
+            true,
+        ),
+        (
+            "Order was never placed, already canceled, or filled. asset=0, denied",
+            false,
+        ),
+        ("denied", false),
+    ] {
+        assert!(
+            matches!(r.call(&classifier,&Value::Undefined,&[Value::str(message)]).unwrap(),Value::Bool(v) if v==expected)
+        );
+    }
+    let object = r.new_object();
+    let poison = r.native("toString", 0, |_, _, _| {
+        panic!("terminal classifier must not coerce non-strings")
+    });
+    r.define_hidden(&object, PropKey::str("toString"), poison);
+    assert!(matches!(
+        r.call(&classifier, &Value::Undefined, &[object]).unwrap(),
+        Value::Bool(false)
+    ));
+}
+
+#[test]
+fn production_seam_timeout_leads_are_actual_class_properties() {
+    let (mut r, rt) = production_realm();
+    let base = Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
+        safe_cex_types::ExchangeName::Hyperliquid,
+        serde_json::from_value(serde_json::json!({"key":"","secret":""})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        rt,
+        safe_cex_exchange::exchange::ExchangeSettings::default(),
+    ));
+    let base = super::facade_exchange::base_exchange_class(&mut r, base, None);
+    let class = crate::core_exchange_class::create_core_exchange_class(&mut r, &base).unwrap();
+    for (name, expected) in [
+        ("HIP3_DEX_DISCOVERY_TIMEOUT_MS", 6000.0),
+        ("HIP3_MARKETS_LOAD_TIMEOUT_MS", 8000.0),
+        ("HIP3_MARKETS_LOAD_TIMEOUT_CAP_MS", 15000.0),
+        ("HIP3_PER_DEX_LOAD_BUDGET_MS", 2000.0),
+        ("SPOT_MARKETS_LOAD_TIMEOUT_MS", 6000.0),
+    ] {
+        assert_eq!(
+            r.get_str(&class, name).unwrap().as_number(),
+            Some(expected),
+            "{name}"
+        );
+        assert!(
+            r.global_binding(name).is_err(),
+            "{name} is read from the class, not an invented free global"
+        );
+    }
+}
+
+#[test]
+fn production_seam_browser_window_guards_refuse_before_browser_globals() {
+    let (mut r, rt) = production_realm();
+    for name in [
+        "window",
+        "ethers",
+        "hasEthereumWallet",
+        "generateAgentWalletName",
+        "switchToCorrectNetwork",
+        "reportEvent",
+    ] {
+        assert!(
+            r.global_binding(name).is_err(),
+            "native does not install browser stand-ins: {name}"
+        );
+    }
+    for mode in 0..4 {
+        let mut host = r.clone();
+        let output = r.spawn_value(Box::pin(async move {
+            use crate::browser_approval_flows as browser;
+            match mode {
+                0 => browser::agent_switch_to_correct_network(&mut host, &Value::Bool(false)).await,
+                1 => {
+                    browser::builder_switch_to_correct_network(&mut host, &Value::Bool(false)).await
+                }
+                2 => {
+                    browser::create_agent_wallet_with_browser_wallet(
+                        &mut host,
+                        &Value::Undefined,
+                        &Value::Bool(false),
+                        &Value::Undefined,
+                    )
+                    .await
+                }
+                _ => {
+                    browser::approve_builder_fee_with_browser_wallet(
+                        &mut host,
+                        &Value::Undefined,
+                        &Value::Bool(false),
+                        &Value::str("0x1111111111111111111111111111111111111111"),
+                        &Value::str("0.001%"),
+                    )
+                    .await
+                }
+            }
+        }));
+        rt.drain();
+        let cell = output.promise().unwrap();
+        let result = match &cell.borrow().state {
+            PromiseState::Fulfilled(v) => v.clone(),
+            _ => panic!(
+                "native missing-window guard must return its explicit wallet refusal: mode{mode}"
+            ),
+        };
+        assert!(matches!(
+            r.get_str(&result, "success").unwrap(),
+            Value::Bool(false)
+        ));
+        let field = if mode < 2 { "error" } else { "message" };
+        let message = r.get_str(&result, field).unwrap();
+        assert!(text(&mut r, &message).contains("No Ethereum wallet detected"));
+    }
+}

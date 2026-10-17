@@ -180,6 +180,27 @@ impl WsProtocol for Protocol {
     fn on_message(&self, _: &Rc<BaseWebSocket>, frame: &SocketFrame) -> Result<(), ExchangeError> {
         self.socket()?.on_message(frame)
     }
+    // ts: the sockets register `handleClose = () => { …; this.onClose(); }`, never the
+    // base onClose, so processClose sees no close code.
+    fn owns_close_handling(&self) -> bool {
+        true
+    }
+    fn on_transport_close(
+        &self,
+        _: &Rc<BaseWebSocket>,
+        _: Option<u16>,
+        _: &str,
+    ) -> Result<(), ExchangeError> {
+        let socket = self.socket()?;
+        let kind = socket.kind;
+        crate::session_control::connection_close(&mut Conn { socket }, kind)
+    }
+    // ts: `handleError` closes a live socket, then runs handleClose.
+    fn on_error(&self, _: &BaseWebSocket, _: &str) -> Result<(), ExchangeError> {
+        let socket = self.socket()?;
+        let kind = socket.kind;
+        crate::session_control::connection_error(&mut Conn { socket }, kind)
+    }
 }
 
 impl Socket {
@@ -247,21 +268,6 @@ impl Socket {
             next_parser: Cell::new(1),
             markets_listener: RefCell::new(None),
         });
-        let weak = Rc::downgrade(&socket);
-        socket.base.set_before_close(Rc::new(move || {
-            if let Some(socket) = weak.upgrade() {
-                let kind = socket.kind;
-                let result = crate::session_control::connection_close(
-                    &mut Conn {
-                        socket: socket.clone(),
-                    },
-                    kind,
-                );
-                if let Err(e) = result {
-                    socket.runtime().report_exception(&e, &Value::Null);
-                }
-            }
-        }));
         Ok(socket)
     }
     fn me(&self) -> Rc<Socket> {
@@ -1450,7 +1456,7 @@ impl ConnectionHost for Conn {
         Ok(!self.socket.base.is_connected())
     }
     fn close_socket(&mut self, _: Option<()>) -> Result<(), ExchangeError> {
-        self.socket.base.force_close();
+        self.socket.base.close_current_websocket();
         Ok(())
     }
     fn ping_timer(&mut self) -> Result<Option<Timer>, ExchangeError> {
@@ -1462,9 +1468,9 @@ impl ConnectionHost for Conn {
         }
         Ok(())
     }
-    // Runs inside BaseWebSocket's before-close hook; the base continues with onClose itself.
+    // ts: `this.onClose()` with no event.
     fn on_close(&mut self) -> Result<(), ExchangeError> {
-        Ok(())
+        self.socket.base.on_close(None, "")
     }
 }
 
@@ -1536,7 +1542,7 @@ impl Socket {
             let venue = socket.venue()?;
             let options = venue.base.options();
             let runtime = venue.runtime.clone();
-            let (clock, nonce, id) = (runtime.clone(), runtime.clone(), runtime.clone());
+            let (nonce, id) = (runtime.clone(), runtime.clone());
             let signer = venue.base.signers.remote_signer.clone();
             let account_name = venue.remote_account_name.clone();
             let request_account = account_name.clone();
@@ -1544,11 +1550,15 @@ impl Socket {
             let report = venue.clone();
             let sender = socket.clone();
             crate::websocket_private::send_login(
-                || Ok(clock.now_ms()),
-                || Ok(nonce.unique_id()),
+                || Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time()),
+                || Ok(nonce.unique_id().replace(['-', '_'], "")),
                 || Ok(options.key.clone()),
-                // virtualClock.syncBybitClientServerTime: the shared runtime clock is already authoritative.
-                || std::future::ready(Ok(())),
+                || async {
+                    safe_cex_store::virtual_clock::VIRTUAL_CLOCK
+                        .sync_bybit_client_server_time(None)
+                        .await;
+                    Ok(())
+                },
                 |ms| {
                     let f = runtime.sleep(ms as u64);
                     async move { f.await.map_err(|e| e.message) }
@@ -1904,8 +1914,11 @@ struct LoginRetry {
 }
 impl crate::event_models::LoginRetryHost for LoginRetry {
     type Error = ExchangeError;
-    fn sync(&mut self) -> impl Future<Output = Result<(), ExchangeError>> {
-        std::future::ready(Ok(()))
+    async fn sync(&mut self) -> Result<(), ExchangeError> {
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK
+            .sync_bybit_client_server_time(None)
+            .await;
+        Ok(())
     }
     fn sleep(&mut self, ms: f64) -> impl Future<Output = Result<(), ExchangeError>> {
         self.socket.runtime().sleep(ms as u64)

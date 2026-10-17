@@ -194,7 +194,7 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
         base.on(
             "error",
             Rc::new(move |_, data| {
-                observed.borrow_mut().push(json!(["first", data[0]]));
+                observed.borrow_mut().push(json!(["first", data]));
                 count.set(count.get() + 1);
                 if mode == "always" || (mode == "once" && count.get() == 1) {
                     Err(if count.get() == 1 {
@@ -211,7 +211,7 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
         base.on(
             "error",
             Rc::new(move |_, data| {
-                observed.borrow_mut().push(json!(["second", data[0]]));
+                observed.borrow_mut().push(json!(["second", data]));
                 Ok(())
             }),
         );

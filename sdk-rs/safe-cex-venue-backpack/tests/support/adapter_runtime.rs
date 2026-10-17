@@ -193,10 +193,20 @@ pub fn fixture() -> (
     Rc<DefaultStore>,
     Arc<Wire>,
 ) {
+    fixture_options(
+        serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true})).unwrap(),
+    )
+}
+pub fn fixture_options(
+    opts: ExchangeOptions,
+) -> (
+    Rc<BackpackExchange>,
+    Rc<Runtime>,
+    Rc<DefaultStore>,
+    Arc<Wire>,
+) {
     let runtime = Rc::new(Runtime::default());
     let store = Rc::new(DefaultStore::new());
-    let opts: ExchangeOptions =
-        serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true})).unwrap();
     let base = BaseExchange::new(
         ExchangeName::Backpack,
         opts,

@@ -32,6 +32,7 @@ pub struct Runtime {
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub console: RefCell<Vec<(String, String)>>,
+    pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -155,7 +156,10 @@ impl WsSocket for Socket {
 }
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
-        Arc::new(safe_cex_transport::DirectTransport)
+        self.provider
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| Arc::new(safe_cex_transport::DirectTransport))
     }
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("Crypto.com binding E2E never tunnels")
@@ -318,7 +322,14 @@ pub fn options() -> ExchangeOptions {
 }
 
 pub fn harness(options: ExchangeOptions, script: impl FnOnce(&Http)) -> Harness {
-    let runtime = Rc::new(Runtime::default());
+    harness_on(Rc::new(Runtime::default()), options, script)
+}
+
+pub fn harness_on(
+    runtime: Rc<Runtime>,
+    options: ExchangeOptions,
+    script: impl FnOnce(&Http),
+) -> Harness {
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
     *http.runtime.borrow_mut() = Some(runtime.clone());

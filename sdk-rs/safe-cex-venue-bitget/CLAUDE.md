@@ -1,5 +1,15 @@
 # Bitget venue family
 
+The typed `Exchange::cancel_all_orders` routes to the family's assembled override.
+Classic accounts send venue-wide cancellation even with an empty local order store;
+UTA sweeps venue normal and strategy orders before cancellation; inverse uses each
+unique market margin coin. Venue errors retain source emission and swallowing.
+`tests/cancellation_binding.rs` exercises real constructors/signing/HTTP, and
+`scripts/cancel-all-binding-controls.py` removes only the trait override to require
+four compiled named failures and exact restoration. The actual private socket
+witnesses cover Classic orders, fills, positions and account balances. Terminal
+order frames patch status only, as TS does; fill amounts come from the new frame.
+
 The concrete binding connects both signature-rejection retry imports to the
 shared client replay path and shared request-stamp key. Non-2xx refusals stamp
 the live config; resolved refusals copy and stamp it before re-entering request
@@ -8,6 +18,17 @@ the single-resend limit and unrelated failures. The signature predicate uses
 shared string-hint coercion; its source witness compares all 22 outcomes, including
 custom hooks and getter throws. Older pending notes below describe standalone
 extraction stages.
+
+The concrete HTTP globals use the shared client factory and the runtime's transport
+provider for routing and optional tunnel-adapter installation. A provider with no
+adapter retains the original HTTP host. Network read retries delegate string-code
+eligibility to the shared transport predicate, preserving GET/HEAD gating, response
+truthiness and strict non-string code behavior. `tests/transport_retry_binding.rs`
+drives real constructors and Exchange calls over scripted I/O; its live TS witness
+checks 54 retry cases and three installer scenes. Run
+`scripts/transport-retry-controls.py` to independently revert provider routing,
+tunnel installation, code exclusions and response truthiness: each must compile,
+fail its named real-host assertion and pass after exact restoration.
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bitget/CLAUDE.md).
 Variants remain modules inside this crate. The source variants are USDT, USDC,

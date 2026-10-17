@@ -132,8 +132,23 @@ and new-market topic spreads consumed only two groups, and dedupe colon joins
 replaced lone UTF-16 surrogates. The dispatcher consumes all supplied iterables
 in order and appends colon-separated strings as UTF-16. A production Exchange
 regression loads distinct normal/OCO/trailing/conditional/trigger orders and
-checks all five groups reach symbol cancellation. Four permanent controls in
-`tests/production_intrinsic_controls.py` restore each broken behavior and require
-a named compiled failure followed by an exact source restoration and passing
-case. The API/history and other private harnesses remain separate migration work;
-this slice does not claim their intrinsic coverage.
+checks all five groups reach symbol cancellation.
+
+The createAPI error interceptor's `formatOkxApiErrorMessage` needed `is-array` and
+`string`, absent from the production table, so every non-"0" OKX response threw
+"unknown OKX intrinsic is-array" with no `response`; `template-concat` also joined
+only two parts. Income paging likewise lacked `add`. `tests/exchange_binding.rs`
+drives rejected setLeverage/placeOrder and a non-empty bills page through the
+real binding. Nine permanent controls in `tests/production_intrinsic_controls.py`
+restore each broken behavior and require a named compiled failure followed by an
+exact source restoration and passing case. `tests/history_stream_api.rs` still
+supplies its own fake intrinsics; it is not evidence for the production table.
+
+The real binding's private orders, positions and account frame tests use actual
+socket dispatch, Store and event emitter. Terminal orders commit Closed/Canceled
+before the final fill, emit the exact source fill object once per execution, and
+retain terminal memory against stale REST snapshots. The JS Store bridge delegates
+to the existing native operation rather than implementing another terminal map.
+`tests/terminal_store_controls.py` faults the bridge registration, terminal-memory
+delegation, empty-Store handling, subscriber-error propagation and typed ID
+admission, requiring named compiled failures and exact restoration.

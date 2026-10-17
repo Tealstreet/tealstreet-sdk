@@ -24050,6 +24050,259 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "get_property",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Computed property access keeps the well-known iterator symbol distinct from the string key. Native observations read actual own fields and call the returned method with its original receiver.",
+        "call": "{ let owner = $type::object(vec![(\"plain\",super::Js::str(\"text\")),(\"Symbol.iterator\",super::Js::str(\"string-key\"))]); if let super::Js::Object(data) = &owner { *data.symbol_iterator.borrow_mut() = Some(super::Prop::Data(super::Js::function(\"[Symbol.iterator]\",|this,_|Ok(this)))); } let key = if $value.as_str() == Some(\"symbol\") { super::Js::SymbolIterator } else { super::Js::str(\"plain\") }; match owner.get_property(&key) { Ok(value) if value.is_callable() => serde_json::json!({\"kind\":\"function\",\"self\":value.call(owner.clone(),vec![]).is_ok_and(|value|value.same_reference(&owner))}), Ok(value) => serde_json::json!({\"kind\":value.type_of(),\"value\":value.to_display()}), Err(error) => serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()}) } }",
+        "cases": [
+          {
+            "input": "plain",
+            "output": {
+              "kind": "string",
+              "value": "text"
+            }
+          },
+          {
+            "input": "symbol",
+            "output": {
+              "kind": "function",
+              "self": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "iterator",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "GetIterator calls the actual retained protocol method and verifies its native object result. Array and astral-string fixtures step that returned iterator and observe iterable-self identity, values and exhaustion.",
+        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A😀\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
+        "cases": [
+          {
+            "input": "array",
+            "output": {
+              "self": true,
+              "values": [
+                "a",
+                "b"
+              ],
+              "done": true
+            }
+          },
+          {
+            "input": "string",
+            "output": {
+              "self": true,
+              "values": [
+                "A",
+                "😀"
+              ],
+              "done": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "iterable_values",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Consumes retained GetIterator/next values for spread adapters. Distinct native Map-entry and Set-value fixtures inspect concrete returned fields, rather than encoding the decoded owner through Serde.",
+        "call": "{ let is_map = $value.as_str() == Some(\"map\"); let owner = if is_map { let owner = $type::new_map(); owner.call_method(\"set\",vec![super::Js::str(\"a\"),super::Js::Number(41.5)]).unwrap(); owner.call_method(\"set\",vec![super::Js::str(\"b\"),super::Js::Number(43.5)]).unwrap(); owner } else { let owner = $type::new_set(); owner.call_method(\"add\",vec![super::Js::Number(47.5)]).unwrap(); owner.call_method(\"add\",vec![super::Js::Number(53.5)]).unwrap(); owner }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let values = owner.iterable_values()?; let mut fields = vec![]; for value in values { fields.push(if is_map { serde_json::json!([value.get(\"0\")?.to_display(),value.get(\"1\")?.to_number()?]) } else { serde_json::json!(value.to_number()?) }); } Ok(serde_json::Value::Array(fields)) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
+        "cases": [
+          {
+            "input": "map",
+            "output": [
+              [
+                "a",
+                41.5
+              ],
+              [
+                "b",
+                43.5
+              ]
+            ]
+          },
+          {
+            "input": "set",
+            "output": [
+              47.5,
+              53.5
+            ]
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "get",
           "signature": {
             "inputs": [
@@ -32193,6 +32446,234 @@
         "output": {
           "ok": false,
           "error_name": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::cached_iterator_member": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "cached_iterator_member",
+      "signature": {
+        "inputs": [
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "member",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/src/js_runtime/{builtins,collections}.rs; concrete native fixtures in builtin_iterator_contract_tests.rs and collection_contract_tests.rs, independently authored Node expectations in tests/iterator_contract_oracle.cjs. Classification-only receipt, with supplementary executed behavioral proof; no decoder exemption inherited by callers.",
+    "reason": "Caches an already constructed native callable by an internal static method key in Map/Set storage. It upgrades a weak FunctionData handle or records the supplied native member; it does not parse the key, decode user data, or invoke the member. Native Map/Set identity and invocation witnesses exercise the actual helper; a fresh-member substitution is the compiled control."
+  },
+  "safe_cex_exchange::js_runtime::collections::iterator_object": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "iterator_object",
+      "signature": {
+        "inputs": [
+          [
+            "tag",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "next",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::NativeFn",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/src/js_runtime/{builtins,collections}.rs; concrete native fixtures in builtin_iterator_contract_tests.rs and collection_contract_tests.rs, independently authored Node expectations in tests/iterator_contract_oracle.cjs. Classification-only receipt, with supplementary executed behavioral proof; no decoder exemption inherited by callers.",
+    "reason": "Constructs the internal iterator object from a static diagnostic brand and an already typed NativeFn continuation. It stores the capability in iterator_next, without decoding serialized data or interpreting the brand as an input language. Native Map/Set protocol-field and callback witnesses exercise this constructor; dropping its continuation slot is the compiled control."
+  },
+  "safe_cex_exchange::js_runtime::collections::iterator_next_method": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "iterator_next_method",
+      "signature": {
+        "inputs": [
+          [
+            "brand",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/src/js_runtime/{builtins,collections}.rs; concrete native fixtures in builtin_iterator_contract_tests.rs and collection_contract_tests.rs, independently authored Node expectations in tests/iterator_contract_oracle.cjs. Classification-only receipt, with supplementary executed behavioral proof; no decoder exemption inherited by callers.",
+    "reason": "Constructs a native next callable parameterized by an internal static brand. The callable validates the actual native receiver and invokes its retained iterator_next capability. Neither the factory nor that dispatch decodes a raw string or JSON record. Native extracted-method, wrong-receiver and forged-brand witnesses exercise it; inverted brand admission is the compiled control."
+  },
+  "safe_cex_exchange::js_runtime::collections::Collection": {
+    "shape": "observed",
+    "instantiation": "Collection<super::Js>",
+    "evidence": "The compiler selects only the Deref dense native view, not a Deserialize implementation. The stable ordered storage serves JS Map/Set iteration; tests/iterator_contract_oracle.cjs independently captures ordered Map values. Direct native fixtures additionally retain signed zero and object reference identity. This bounded native/default instantiation is not a generic accepted-input or feature/wasm claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::ops::deref::Deref",
+          "name": "deref",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Target",
+                    "args": null,
+                    "self_type": {
+                      "generic": "Self"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Returns a borrowed dense Vec<T> view of already native collection elements. The native observation constructs distinct ordered values and reads the actual Deref result; no serialized collection decoder is present."
+      }
+    ],
+    "call": "{ let mut collection: $type = Default::default(); for value in $value.as_array().expect(\"authored numeric rows\") { collection.push(super::Js::Number(value.as_f64().unwrap())); } let borrowed = <$type as std::ops::Deref>::deref(&collection); let values: Vec<_> = borrowed.iter().map(|value|value.to_number().unwrap()).collect(); serde_json::json!({\"len\":borrowed.len(),\"values\":values}) }",
+    "cases": [
+      {
+        "input": [
+          3.5,
+          7.25
+        ],
+        "output": {
+          "len": 2,
+          "values": [
+            3.5,
+            7.25
+          ]
+        }
+      },
+      {
+        "input": [
+          11.5,
+          19.25,
+          23.5
+        ],
+        "output": {
+          "len": 3,
+          "values": [
+            11.5,
+            19.25,
+            23.5
+          ]
         }
       }
     ]
