@@ -10,7 +10,7 @@ import {contractFor} from './accepted-contracts.mjs';
 import {runProbes} from './accepted-probes.mjs';
 
 const root=fileURLToPath(new URL('../..',import.meta.url));
-const decoders=['decode','format_open_positions','format_balance','format_positions','format_orders']
+const decoders=['decode','native_open_positions','format_open_positions','format_balance','format_positions','format_orders']
   .map(name=>`safe_cex_venue_breakoutprop::portfolio::${name}`);
 const wrappers=['fetch_balance','fetch_positions','fetch_open_positions','fetch_orders']
   .map(name=>`safe_cex_venue_breakoutprop::portfolio_reads::${name}`);
