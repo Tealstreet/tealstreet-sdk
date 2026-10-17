@@ -150,3 +150,72 @@ fn null_batch_rows_match_actual_source_errors_prefix_and_next_chunk() {
         venue.dispose().unwrap();
     }
 }
+
+#[test]
+fn native_nonfinite_placement_amounts_reach_the_source_formatter() {
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-operations-oracle.cjs"
+        ))
+        .arg("nativePlacementNumbers")
+        .arg(support::MARKET)
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let rows = source["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    for (amount, source) in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+        .into_iter()
+        .zip(rows)
+    {
+        let (venue, rt, _, wire) = support::fixture_with(false);
+        let mut opts = order();
+        opts.amount = amount;
+        opts.client_order_id = Some("caller1".into());
+        drive(&rt, venue.base().place_order(venue.as_ref(), opts)).unwrap();
+        let requests = wire.requests.lock().unwrap();
+        let requests = requests
+            .iter()
+            .filter(|request| request.url.ends_with("/place_order"))
+            .collect::<Vec<_>>();
+        let expected = source["result"]["ok"]
+            .as_array()
+            .expect("source formatter returns payloads");
+        assert_eq!(
+            requests.len(),
+            expected.len(),
+            "native amount{amount} must preserve source placement count"
+        );
+        for (request, expected) in requests.iter().zip(expected) {
+            let payload: Value =
+                serde_json::from_slice(&request.body.as_ref().unwrap().wire_bytes().unwrap())
+                    .unwrap();
+            let qty = &expected["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|pair| pair[0] == "qty")
+                .unwrap()[1];
+            let qty = String::from_utf16(
+                &qty["units"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_u64().unwrap() as u16)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+            assert_eq!(
+                payload["qty"], qty,
+                "native amount{amount} must reach adjust before JSON projection"
+            );
+        }
+        venue.dispose().unwrap();
+    }
+}
