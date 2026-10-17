@@ -4778,7 +4778,7 @@ reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or Base
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::local_to_utc"
-reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or BaseWebSocket capability for ten mapped BingX REST history/listener/routing/polling/disposal bodies. No separate TS declaration. Shared public state and real private event/listen-key adapter are linked; full exchange/socket classes and constructors remain pending. No pending venue body is delegated."
+reason = "Native local-wall-time host capability for source Date parsing. The production HistoryHost delegates to required BingxDependencies.local_wall_time_to_utc; the native registry explicitly supplies its UTC profile. Real binding historical_fills_use_host_local_time_conversion compares the actual source fill mapper in Singapore and New York winter/summer and proves explicit offsets bypass the callback. No separate TS declaration."
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::loop_after"
