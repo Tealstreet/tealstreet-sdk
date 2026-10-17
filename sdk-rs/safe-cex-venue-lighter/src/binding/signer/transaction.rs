@@ -78,7 +78,13 @@ impl TransactionApi for JsTransactionApi {
         &self,
         transactions: Shared<Vec<Shared<L2CreateOrderTxInfo>>>,
     ) -> ObjectPromise<SendTxBatchResponse> {
-        let batch = codec::create_order_txs(&transactions.borrow());
+        let batch = Js::array(
+            transactions
+                .borrow()
+                .iter()
+                .map(|tx| codec::transaction_ref(&TransactionRef::CreateOrder(tx.clone())))
+                .collect(),
+        );
         self.send("sendRawTxBatch", vec![batch], |response| {
             codec::send_tx_batch_response(&response).map(RefCell::new)
         })
@@ -221,9 +227,13 @@ fn create_orders(host: &Host, client: &Rc<TransactionClient>, params: Js) -> Js 
         Err(error) => return host.rejected(error),
     };
     let mut decoded = vec![];
+    let mut flags = vec![];
     for item in &items {
         match codec::create_order(item) {
-            Ok(order) => decoded.push(order),
+            Ok((order, raw)) => {
+                decoded.push(order);
+                flags.push(raw);
+            }
             Err(error) => {
                 let (promise, resolver) = NativePromise::pending(host.microtasks.clone());
                 let next = client.clone();
@@ -239,8 +249,8 @@ fn create_orders(host: &Host, client: &Rc<TransactionClient>, params: Js) -> Js 
             }
         }
     }
-    host.promise(client.get_create_order_transactions(decoded), |txs| {
-        Ok(codec::create_order_txs(&txs.borrow()))
+    host.promise(client.get_create_order_transactions(decoded), move |txs| {
+        Ok(codec::create_order_txs(&txs.borrow(), &flags))
     })
 }
 
@@ -249,8 +259,8 @@ const METHODS: [(&str, Method); 8] = [
     (
         "getCreateOrderTransaction",
         |host, client, params| match codec::create_order(&params) {
-            Ok(p) => host.promise(client.get_create_order_transaction(p), |tx| {
-                Ok(codec::create_order_tx(&tx.borrow()))
+            Ok((p, flags)) => host.promise(client.get_create_order_transaction(p), move |tx| {
+                Ok(codec::create_order_tx(&tx.borrow(), &flags))
             }),
             Err(error) => after_nonce(host, client, error),
         },
@@ -261,9 +271,17 @@ const METHODS: [(&str, Method); 8] = [
     (
         "getCreateGroupedOrdersTransaction",
         |host, client, params| match codec::create_grouped_orders(&params) {
-            Ok(p) => host.promise(client.get_create_grouped_orders_transaction(p), |tx| {
-                Ok(codec::create_grouped_orders_tx(&tx.borrow()))
-            }),
+            Ok((p, flags)) => {
+                let flags = Rc::new(flags);
+                let compare = flags.clone();
+                let promise = client.get_create_grouped_orders_with_side_comparison(
+                    p,
+                    Rc::new(move |a, b| compare[a].is_buy.strict_equals(&compare[b].is_buy)),
+                );
+                host.promise(promise, move |tx| {
+                    Ok(codec::create_grouped_orders_tx(&tx.borrow(), &flags))
+                })
+            }
             Err(error) => after_nonce(host, client, error),
         },
     ),
