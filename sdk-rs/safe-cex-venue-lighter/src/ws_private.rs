@@ -1,4 +1,5 @@
-//! Pure private websocket decisions; owned runtime and state transitions remain separate.
+//! Private websocket decisions and native payload flattening.
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 
 const STANDARD_PING_INTERVAL_MS: f64 = 10_000.0;
 const DEGRADED_PING_INTERVAL_MS: f64 = 20_000.0;
@@ -92,30 +93,28 @@ pub fn is_recent_stream_event(
 
 // ts: LighterPrivateWebsocket.flattenByMarketPayload
 pub fn flatten_by_market_payload(
-    payload: Option<&serde_json::Value>,
+    payload: Option<&Js>,
     include_single_objects: bool,
-) -> Vec<&serde_json::Value> {
-    use serde_json::Value;
-    let entries: Vec<&Value> = match payload {
-        Some(Value::Object(values)) => safe_cex_num::js_own_keys(values.keys().map(String::as_str))
-            .into_iter()
-            .filter_map(|key| values.get(key))
-            .collect(),
-        Some(Value::Array(values)) => values.iter().collect(),
-        _ => return Vec::new(),
+) -> Result<Js, Thrown> {
+    let Some(payload) = payload.filter(|payload| payload.truthy()) else {
+        return Ok(Js::array(vec![]));
     };
+    let entries = payload.own_entries()?;
     let mut flattened = Vec::new();
-    for entry in entries {
-        match entry {
-            Value::Array(values) => flattened.extend(values),
-            Value::Object(_) if include_single_objects => flattened.push(entry),
-            _ => {}
+    for (_, entry) in entries {
+        if let Some(values) = entry.array_items() {
+            flattened.extend(values.into_iter().flatten());
+        } else if include_single_objects && entry.truthy() && entry.type_of() == "object" {
+            flattened.push(entry);
         }
     }
-    flattened
+    Ok(Js::array(flattened))
 }
 
 // ts: LighterPrivateWebsocket.flattenOrdersByMarket
-pub fn flatten_orders_by_market(payload: Option<&serde_json::Value>) -> Vec<&serde_json::Value> {
-    flatten_by_market_payload(payload, true)
+pub fn flatten_orders_by_market(payload: Option<&Js>) -> Result<Js, Thrown> {
+    flatten_by_market_payload(
+        payload.filter(|value| value.truthy() && value.type_of() == "object"),
+        true,
+    )
 }

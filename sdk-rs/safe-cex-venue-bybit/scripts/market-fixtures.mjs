@@ -34,5 +34,12 @@ for(const variant of ['bybit','bybitinverse','bybitspot']) {
  add(base,[null]); add(base,[{symbol:base.symbol,takerFeeRate:'1',makerFeeRate:'2'},null]);
  // Competing failures pin source evaluation order: precision before expiry.
  add({...base,lotSizeFilter:null,deliveryTime:{toString:null}});
+ for(const field of ['baseCoin','quoteCoin']) for(const value of [undefined,null,false,17,{asset:'wrong'}]) {
+  const raw={...base}; if(value===undefined)delete raw[field];else raw[field]=value;
+  add(raw,[],variant==='bybitinverse'?'inverse':variant==='bybitspot'?'spot':'linear');
+  const row=cases[cases.length-1];row.assetRefusal=true;
+  row.ownAssets=['base','quote'].map(key=>Object.hasOwn(row.result,key));
+  row.assetIdentity=[row.result.base===raw.baseCoin,row.result.quote===raw.quoteCoin];
+ }
 }
 console.log(JSON.stringify(cases));

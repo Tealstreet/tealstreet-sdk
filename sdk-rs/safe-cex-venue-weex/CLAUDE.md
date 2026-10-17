@@ -39,6 +39,16 @@ raw arrays and the `data` array only. Extra `items`, `list` and `rows` wrappers
 are ignored. Constructed HTTP regressions cover all six direct/nested extra
 wrappers plus the two accepted forms, retaining fake zero positions when needed.
 
+Historical-fill pages apply the final strict-field policy per row. The concrete
+normalizer warns with the offending field/value and refuses only an Execution
+whose maker or commission asset cannot inhabit the shared model, retaining all
+valid rows. Missing maker stays absent, false stays false, and assets are never
+coerced. Source coercion/capture errors retain their order and propagation;
+warning subscriber failures also propagate. Both the public utility and the
+binding use one normalization pipeline; standalone utility error names/messages
+remain unchanged. This intentionally differs from TS retaining malformed rows.
+Mixed-page and all-refused-page regressions use the constructed exchange.
+
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
 request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
