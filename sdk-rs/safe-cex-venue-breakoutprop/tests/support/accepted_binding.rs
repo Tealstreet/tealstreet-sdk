@@ -119,10 +119,10 @@ pub fn accepted_report(
     let f = fixture();
     let logs = Rc::new(RefCell::new(Vec::new()));
     let sink = logs.clone();
-    f.exchange.base.on(
+    f.exchange.base.on_args(
         "error",
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut().push(json!(value));
             Ok(())
         }),
     );

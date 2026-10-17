@@ -78,9 +78,7 @@ fn feature_guard_matches_typescript() {
         base.on(
             "error",
             Rc::new(move |_, payload| {
-                listener_calls
-                    .borrow_mut()
-                    .push(json!(["emit", payload[0]]));
+                listener_calls.borrow_mut().push(json!(["emit", payload]));
                 Ok(())
             }),
         );

@@ -4077,8 +4077,10 @@ dependencies = [
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
+ "safe-cex-webworker",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

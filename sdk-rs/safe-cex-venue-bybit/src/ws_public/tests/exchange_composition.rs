@@ -830,8 +830,7 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
                     "error",
                     Rc::new(move |_, data| {
                         observed.borrow_mut().push(
-                            data[0]
-                                .as_str()
+                            data.as_str()
                                 .unwrap()
                                 .strip_prefix("Exchange Error: ")
                                 .unwrap()
