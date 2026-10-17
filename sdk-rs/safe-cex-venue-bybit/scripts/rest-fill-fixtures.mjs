@@ -1,34 +1,86 @@
 import ts from 'typescript';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import orderBy from 'lodash/orderBy.js';
+import omitBy from 'lodash/omitBy.js';
+import memoize from 'lodash/memoize.js';
 import camelCase from 'lodash/camelCase.js';
 import snakeCase from 'lodash/snakeCase.js';
-const root=new URL('../../../packages/safe-cex/src/',import.meta.url);
-const good={execId:'fill',orderId:'order',symbol:'BTCUSD',execType:'Trade',execQty:'2',execPrice:'3',execTime:'1700000000123',side:'Buy',execFee:'.1'};
+const root = new URL('../../../packages/safe-cex/src/', import.meta.url);
+const parse = file => ts.createSourceFile(file, readFileSync(new URL(file, root), 'utf8'), ts.ScriptTarget.Latest, true);
+const emit = code => ts.transpileModule(code, {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const declaration = (source, name) => {
+  const matches = source.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).filter(d=>d.name.getText(source)===name);
+  assert.equal(matches.length, 1, `source declaration ${name}`);
+  return matches[0].initializer.getText(source);
+};
+const good = {execId:'fill1', orderId:'order1',symbol:'BTCUSD',execType:'Trade',execQty:'2',execPrice:'100',execTime:'1700000000000',side:'Buy',execFee:'.1',feeCurrency:'USDT',isMaker:true};
+const recovered = {orderId:'recovered',orderStatus:'Filled',symbol:'BTCUSD',cumExecQty:'2',avgPrice:'100',side:'Sell',updatedTime:'1700000000000',cumExecFee:'-.2',feeCurrency:'USDT'};
+const page = (list, nextPageCursor) => ({retCode:0,retMsg:'OK',result:{list,nextPageCursor}});
 const cases=[];
-for(const variant of ['bybit','bybitinverse']){
- const source=ts.createSourceFile(variant,readFileSync(new URL(`exchanges/bybit/${variant}.exchange.ts`,root),'utf8'),ts.ScriptTarget.Latest,true);
- const cls=source.statements.find(n=>ts.isClassDeclaration(n)&&n.members.some(m=>m.name?.getText(source)==='fetchHistoricalFills'));
- const context=vm.createContext({OrderSide:{Buy:'buy',Sell:'sell'},LogSeverity:{Warning:'warning'},ENDPOINTS:{USER_TRADES:'/v5/execution/list',USER_ORDERS:'/v5/order/history'},camelCase,snakeCase,memoize:f=>f});
- const utility=ts.createSourceFile('v',readFileSync(new URL('utils/get-key.ts',root),'utf8'),ts.ScriptTarget.Latest,true);
- for(const n of ['s','c','v']){const d=utility.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).find(d=>d.name.getText(utility)===n);vm.runInContext(ts.transpileModule(`globalThis.${n}=${d.initializer.getText(utility)}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);}
- for(const name of ['fetchHistoricalFills','getExecutionQueryWindows']){const m=cls.members.find(m=>m.name?.getText(source)===name);vm.runInContext(ts.transpileModule(`globalThis.${name}=${name==='fetchHistoricalFills'?'async ':''}function(${m.initializer.parameters.map(p=>p.getText(source)).join(',')})${m.initializer.body.getText(source)}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);}
- const sourceConstant=name=>vm.runInContext(cls.members.find(m=>m.name?.getText(source)===name).initializer.getText(source),context);
- const add=async(opts={},responses=[],fallbacks=[[],[]],publicOnly=false)=>{
-  opts={symbol:'BTCUSD',...opts};const calls=[],diagnostics=[],fallbackCalls=[];let i=0,f=0,result,error;
-  context.console={warn:m=>diagnostics.push(['console',m])};
-  const owner={name:variant,DEFAULT_EXECUTIONS_LOOKBACK_MS:sourceConstant('DEFAULT_EXECUTIONS_LOOKBACK_MS'),EXECUTION_QUERY_MAX_RANGE_MS:sourceConstant('EXECUTION_QUERY_MAX_RANGE_MS'),isPublicDataOnly:publicOnly,getCategoryForSymbol:()=>variant==='bybitinverse'?'inverse':'linear',log:(m,s)=>diagnostics.push([s??'log',m]),xhr:{get:async(url,{params})=>{calls.push({url,params});const response=responses[i++]??{retMsg:'OK',result:{list:[]}};if(response.throw)throw Error(response.throw);return {data:response};}},fetchExecutionsFallbackFromOrderHistory:async(o,lookback)=>{fallbackCalls.push(lookback??null);const response=fallbacks[f++]??[];if(response.throw)throw Error(response.throw);return response;}};
-  owner.getExecutionQueryWindows=(from,to)=>context.getExecutionQueryWindows.call(owner,from,to);
-  try{result=await context.fetchHistoricalFills.call(owner,opts);}catch(e){error=e.message;}
-  cases.push({variant,opts,responses,fallbacks,publicOnly,calls,diagnostics,fallbackCalls,result,error});
- };
- const page=(list,cursor)=>({retMsg:'OK',result:{list,nextPageCursor:cursor}});
- for(const limit of [undefined,0,1,2,50,101,-1])for(const list of [[],[good],[good,good],[{...good,execType:'Funding'}],[good,{...good,side:{toString:null}}]])await add({limit},[page(list,'next'),page([good])]);
- for(const response of [{throw:'network refused'},{retMsg:'BAD'},{ret_msg:'OK',result:{list:[good]}},{retMsg:{toString:null}},true,12,'OK',page(null),page({})])await add({},[response]);
- for(const opts of [{from:1},{to:1700000000000},{orderId:'one'},{orderId:''},{symbol:''},{from:0,to:2*604800000},{from:30,to:12}])await add(opts,[page([])]);
- await add({},[page([], 'loop'),page([], 'loop'),page([], 'loop'),page([], 'loop'),page([], 'loop'),page([good])]);
- await add({},[],[{throw:'fallback refused'}]);await add({},[],[[],{throw:'extended refused'}]);
- await add({},[page([good])],[[],[]],true);
- await add({},[],[[{timestamp:1,symbol:'BTCUSD',price:3,qty:2,side:'buy'}]]);
+for (const name of ['bybit','bybitdemo','bybitinverse']) {
+  const file = name==='bybitinverse' ? name : 'bybit';
+  const source=parse(`exchanges/bybit/${file}.exchange.ts`);
+  const klass=source.statements.find(n=>ts.isClassDeclaration(n)&&n.members.some(m=>m.name?.getText(source)==='fetchHistoricalFills'));
+  const names=['EXECUTION_QUERY_MAX_RANGE_MS','DEFAULT_EXECUTIONS_LOOKBACK_MS','getExecutionQueryWindows','getCategoryForSymbol','mapOrderHistoryRowsToExecutions','fetchExecutionsFallbackFromOrderHistory','fetchHistoricalFills'];
+  const fields=names.map(name=>{
+    const found=klass.members.filter(m=>m.name?.getText(source)===name);
+    assert.equal(found.length,1,name);
+    return `${name}=${found[0].initializer.getText(source)};`;
+  }).join('\n');
+  async function add(opts, executionPages, historyPages=[], publicOnly=false) {
+    const calls=[], logs=[];
+    const context=vm.createContext({orderBy,omitBy,memoize,camelCase,snakeCase,
+      virtualClock:{getCurrentTimeMs:()=>1700000000000},
+      console:{warn:message=>logs.push(`warn: ${message}`)},
+    });
+    for (const [name,file] of [['OrderSide','types.ts'],['LogSeverity','../../logging/src/LogSeverity.ts']]) {
+      const types=parse(file);
+      const decl=types.statements.find(n=>ts.isEnumDeclaration(n)&&n.name.text===name);
+      assert.ok(decl,name);
+      vm.runInContext(emit(decl.getText(types).replace(/^export /,'')),context);
+    }
+    for (const [file,names] of [
+      ['utils/get-key.ts',['s','c','v']],['utils/omitUndefined.ts',['omitUndefined']],
+      ['exchanges/bybit/bybit.inverse.ts',['isBybitInverseSymbol']],
+      ['exchanges/bybit/bybit.options.ts',['isBybitOptionSymbol']],
+      ['exchanges/bybit/bybit.types.ts',['ENDPOINTS']],
+    ]) {
+      const fileSource=parse(file);
+      for (const name of names) vm.runInContext(emit(`globalThis.${name}=${declaration(fileSource,name)}`),context);
+    }
+    vm.runInContext(emit(`globalThis.Witness=class {${fields}}`),context);
+    const owner=new context.Witness();
+    owner.name=name; owner.store={markets:[]}; owner.isPublicDataOnly=publicOnly;
+    owner.log=(message,severity='info')=>logs.push(`${severity}: ${message}`);
+    const indexes=new Map();
+    owner.xhr={get:async(url,{params})=>{
+      calls.push({url,params});
+      const pages=url==='/v5/execution/list'?executionPages:historyPages;
+      assert.ok(['/v5/execution/list','/v5/order/history'].includes(url),url);
+      const index=indexes.get(url)||0; indexes.set(url,index+1);
+      return {data:pages.length?pages[Math.min(index,pages.length-1)]:page([])};
+    }};
+    const result=await owner.fetchHistoricalFills(opts);
+    assert.ok(logs.every(message=>!message.includes("is not defined")), logs.join("\n"));
+    cases.push({name,opts,executionPages,historyPages,publicOnly,calls,logs,result});
+  }
+  await add({symbol:'BTCUSD'},[page([good])]);
+  await add({symbol:'BTCUSD',limit:2},[page([good],'next'),page([{...good,execId:'fill2'}])]);
+  await add({symbol:'BTCUSD'},[page([good,null])]);
+  await add({symbol:'BTCUSD',from:1},[page([{...good,execType:'Funding'}])],[page([recovered])]);
+  await add({symbol:'BTCUSD',from:1},[page([],'loop')],[page([recovered])]);
+  await add({symbol:'BTCUSD'},[page([{...good,execPrice:'0',execValue:'200',side:' sell '}])]);
+  await add({symbol:'BTCUSD'},[page([])]);
+  await add({symbol:'BTCUSD',from:1},[page([])]);
+  await add({symbol:'BTCUSD',from:0,to:604800000},[page([])]);
+  await add({symbol:'BTCUSD',limit:0},[page([{...good,execFee:'junk'}])]);
+  await add({symbol:'BTCUSD',limit:-1},[page([good])]);
+  await add({symbol:''},[page([good])]);
+  await add({symbol:'BTCUSD'},[page([good])],[],true);
+  await add({symbol:'BTCUSD',from:1},[page([])],[page([recovered],'next'),page([null])]);
+  await add({symbol:'BTCUSD',from:1,limit:2},[page([])],[page([recovered,{...recovered,orderId:'newer',updatedTime:'1700000001000'}])]);
 }
-console.log(JSON.stringify(cases));
+assert.equal(cases.length,45,'real reader source-case floor');
+process.stdout.write(JSON.stringify(cases));

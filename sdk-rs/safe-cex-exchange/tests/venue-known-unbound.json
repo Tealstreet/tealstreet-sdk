@@ -61,10 +61,7 @@
   ],
   "safe-cex-venue-kraken": [],
   "safe-cex-venue-kucoin": [],
-  "safe-cex-venue-lighter": [
-    "global isLighterPartnerAttributionApprovalMissingRejection",
-    "global isLighterPartnerAttributionTierRejection"
-  ],
+  "safe-cex-venue-lighter": [],
   "safe-cex-venue-mexc": [
     "global bigIntAsStringJsonParse",
     "global isMexcControlChannel"

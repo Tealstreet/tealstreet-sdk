@@ -380,45 +380,67 @@ fn place_order_signs_an_attributed_create_order() {
     assert_eq!(ids, vec![info["ClientOrderIndex"].to_string()]);
 }
 
-/// A market whose 5-unit max splits 10.05 into lots with a 0.05 tail under the 0.1 minimum.
-fn lot_market(http: &Http) {
-    let mut row = perp_row();
-    row["supported_size_decimals"] = json!(2);
-    row["min_base_amount"] = json!("0.1");
-    row["order_quote_limit"] = json!("5");
-    http.ok(
-        "GET",
-        DETAILS,
-        json!({"code": 200, "order_book_details": [row]}),
-    );
-    lighter(http);
-}
-
-#[test]
-fn place_order_merges_a_sub_minimum_trailing_lot_into_the_previous_lot() {
-    let h = harness(ExchangeName::Lighter, options(), lot_market);
+fn assert_rejected_placement(code: i64, message: &str, expected: &str) {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
     loaded(&h);
-    let before = h.http.count();
-    let ids = h
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(method, path, _)| method != "POST" || path != SEND_TX);
+    h.http
+        .ok("POST", SEND_TX, json!({"code": code, "message": message}));
+    let error = h
         .drive(Box::pin(
             h.venue()
                 .base()
-                .place_order(h.venue(), limit_order(json!({"amount": 10.05}))),
+                .place_order(h.venue(), limit_order(json!({}))),
         ))
-        .expect("placeOrder");
-    let txs = sent_txs(&h, before);
-    let amounts: Vec<&Value> = txs.iter().map(|(_, info)| &info["BaseAmount"]).collect();
+        .expect_err("venue rejected the real signed transaction");
     assert_eq!(
-        amounts,
-        vec![&json!(333), &json!(333), &json!(338)],
-        "TS lots [3.33, 3.33, 3.33, 0.05] pop the tail into [3.33, 3.33, 3.38]"
+        h.http.calls(SEND_TX).len(),
+        1,
+        "one signed transaction reached the venue"
     );
-    assert!(txs.iter().all(|(tx_type, _)| tx_type == "14"));
-    let sent_ids: Vec<String> = txs
-        .iter()
-        .map(|(_, info)| info["ClientOrderIndex"].to_string())
-        .collect();
-    assert_eq!(ids, sent_ids);
+    assert_eq!(
+        error.message, expected,
+        "production order rejection retains source guidance"
+    );
+    assert!(
+        h.runtime
+            .reports
+            .borrow()
+            .iter()
+            .any(|report| report.contains(expected)),
+        "normalized venue rejection reaches the real error reporter: {:?}",
+        h.runtime.reports.borrow()
+    );
+}
+
+#[test]
+fn partner_tier_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21520,
+        "venue tier refused",
+        "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.",
+    );
+}
+
+#[test]
+fn partner_approval_rejection_keeps_source_guidance() {
+    assert_rejected_placement(
+        21149,
+        "venue approval refused",
+        "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.",
+    );
+}
+
+#[test]
+fn ordinary_order_rejection_keeps_source_message() {
+    assert_rejected_placement(
+        29999,
+        "venue rejected this order",
+        "venue rejected this order",
+    );
 }
 
 #[test]
@@ -954,4 +976,45 @@ fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
     );
     drop(completed);
     h.venue().dispose().unwrap();
+}
+
+/// A market whose 5-unit max splits 10.05 into lots with a 0.05 tail under the 0.1 minimum.
+fn lot_market(http: &Http) {
+    let mut row = perp_row();
+    row["supported_size_decimals"] = json!(2);
+    row["min_base_amount"] = json!("0.1");
+    row["order_quote_limit"] = json!("5");
+    http.ok(
+        "GET",
+        DETAILS,
+        json!({"code": 200, "order_book_details": [row]}),
+    );
+    lighter(http);
+}
+
+#[test]
+fn place_order_merges_a_sub_minimum_trailing_lot_into_the_previous_lot() {
+    let h = harness(ExchangeName::Lighter, options(), lot_market);
+    loaded(&h);
+    let before = h.http.count();
+    let ids = h
+        .drive(Box::pin(
+            h.venue()
+                .base()
+                .place_order(h.venue(), limit_order(json!({"amount": 10.05}))),
+        ))
+        .expect("placeOrder");
+    let txs = sent_txs(&h, before);
+    let amounts: Vec<&Value> = txs.iter().map(|(_, info)| &info["BaseAmount"]).collect();
+    assert_eq!(
+        amounts,
+        vec![&json!(333), &json!(333), &json!(338)],
+        "TS lots [3.33, 3.33, 3.33, 0.05] pop the tail into [3.33, 3.33, 3.38]"
+    );
+    assert!(txs.iter().all(|(tx_type, _)| tx_type == "14"));
+    let sent_ids: Vec<String> = txs
+        .iter()
+        .map(|(_, info)| info["ClientOrderIndex"].to_string())
+        .collect();
+    assert_eq!(ids, sent_ids);
 }
