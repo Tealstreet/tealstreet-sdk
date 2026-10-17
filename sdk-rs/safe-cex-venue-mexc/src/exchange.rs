@@ -764,14 +764,14 @@ impl MexcExchange {
     pub fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         Box::pin(async move {
             let interval = match options.interval {
-                safe_cex_types::Timeframe::M1 => "Min1",
-                safe_cex_types::Timeframe::M5 => "Min5",
-                safe_cex_types::Timeframe::M15 => "Min15",
-                safe_cex_types::Timeframe::M30 => "Min30",
-                safe_cex_types::Timeframe::H1 => "Min60",
-                safe_cex_types::Timeframe::H4 => "Hour4",
-                safe_cex_types::Timeframe::D1 => "Day1",
-                safe_cex_types::Timeframe::W1 => "Week1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1) => "Min1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M5) => "Min5",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M15) => "Min15",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M30) => "Min30",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H1) => "Min60",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H4) => "Hour4",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1) => "Day1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::W1) => "Week1",
                 unsupported => {
                     let literal = serde_json::to_value(unsupported)
                         .ok()
