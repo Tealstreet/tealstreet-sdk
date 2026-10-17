@@ -225,16 +225,33 @@ fn plain_string_member(s: Str, name: &str) -> Option<Js> {
             Ok(Js::utf16(&out))
         }),
         "split" => method(name, move |a| {
-            let sep = arg(&a, 0);
-            if sep.is_undefined() {
+            let separator = arg(&a, 0);
+            let limit = super::regexp::split_limit(&arg(&a, 1))?;
+            // Source coercion order is limit, then separator, even at limit 0.
+            let sep = separator.to_js_string()?;
+            if limit == 0 {
+                return Ok(Js::array(vec![]));
+            }
+            if separator.is_undefined() {
                 return Ok(Js::array(vec![Js::String(s.clone())]));
             }
-            let sep = text(&sep)?;
-            Ok(Js::array(if sep.is_empty() {
-                s.iter().map(|c| Js::utf16(&[*c])).collect()
-            } else {
-                st.split(&sep).map(Js::str).collect()
-            }))
+            if sep.is_empty() {
+                return Ok(Js::array(
+                    s.iter().take(limit).map(|c| Js::utf16(&[*c])).collect(),
+                ));
+            }
+            let mut out = vec![];
+            let mut start = 0;
+            while let Some(offset) = find_utf16(&s[start..], &sep) {
+                let end = start + offset;
+                out.push(Js::utf16(&s[start..end]));
+                if out.len() == limit {
+                    return Ok(Js::array(out));
+                }
+                start = end + sep.len();
+            }
+            out.push(Js::utf16(&s[start..]));
+            Ok(Js::array(out))
         }),
         "slice" | "substring" => {
             let sub = name == "substring";

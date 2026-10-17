@@ -1452,6 +1452,15 @@ installed NativeRuntime bindings, observing getter order, holes, duplicate amoun
 reads, inserted identity and reentrant row/length changes. Both regressions compile
 and fail on the prior implementation; their inputs do not replace utility code.
 
+String and RegExp split share the source ToUint32 limit conversion, including
+large finite values reduced modulo 2^32 before an integer cast. Plain splitting
+coerces limit before separator even when limit is zero, retains empty fields,
+and searches/slices UTF-16 units without replacement decoding. Existing RegExp
+symbol dispatch and dense own-undefined captures are preserved. The installed
+native `js_split_limit` target compares 1,440 Node cases across five strings,
+12 separators and 24 limits, including lone surrogates, regex captures, wrapping
+limits and throwing coercions. Regex literals use the actual production parser;
+this host does not install a global RegExp constructor.
 
 String.localeCompare uses the existing pinned JsRootCollator for the imported
 runtime's default English/root collation, including case, accents, canonical
