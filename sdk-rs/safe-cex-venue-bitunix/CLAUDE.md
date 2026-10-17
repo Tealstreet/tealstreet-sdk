@@ -125,7 +125,9 @@ and explicitly opt in to funding subtraction when realized PnL is net of funding
 The positionMode field selects hedge leg and liqQty selects liquidation; unknown
 directions refuse rather than default. Native settlement callbacks are infallible
 and row input is retained JSON/UTF-8, excluding executable/getter inputs. Use the
-focused --test position_adapter -- --include-ignored test; no fetch wiring is claimed.
+focused --test position_adapter test, enabled in ordinary Cargo runs.
+It needs Node and SAFE_CEX_TYPESCRIPT_PATH; no live account or network is used.
+No fetch wiring is claimed.
 
 **Response selection helpers:** `response_helpers` walks the seven source envelope edges in preorder through depth four without entering arrays. `row_extraction` selects the first qualifying array, preserves first-value precedence (including false/zero), and uses shared `TableHit` for inherited stock Object members. Inputs are retained JSON; account fallback is `None` for the source empty object.
 
