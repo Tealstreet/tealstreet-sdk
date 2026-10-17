@@ -1510,16 +1510,16 @@ fn actual_amendment_preflight_refuses_infinite_size_before_putting() {
 fn identity_order(id: &str) -> serde_json::Value {
     json!({"id":id,"market":"BTC-USD-PERP","side":"BUY","type":"LIMIT","status":"OPEN","price":"101.5","size":"0.006","remaining_size":"0.003","created_at":1784505600000i64,"reduce_only":false})
 }
-fn order_refusal_logs(
-    venue: &dyn Exchange,
-) -> std::rc::Rc<std::cell::RefCell<Vec<serde_json::Value>>> {
+fn order_refusal_logs(venue: &dyn Exchange) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
     let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let captured = logs.clone();
     venue.base().on_args(
         "log",
         std::rc::Rc::new(move |_, args| {
-            if args[1] == "warning" {
-                captured.borrow_mut().push(args[0].clone());
+            if args[1].strict_equals(&safe_cex_exchange::js_runtime::value::Js::str("warning")) {
+                captured
+                    .borrow_mut()
+                    .push(String::from_utf16(args[0].as_str().unwrap().as_ref()).unwrap());
             }
             Ok(())
         }),
@@ -1570,7 +1570,7 @@ fn order_identity_refusals_keep_good_rows_and_report_fields() {
             );
             let logs = logs.borrow();
             assert_eq!(logs.len(), 1);
-            let message = logs[0].as_str().unwrap();
+            let message = logs[0].as_str();
             let received = bad
                 .as_ref()
                 .map_or_else(|| "undefined".into(), serde_json::Value::to_string);
