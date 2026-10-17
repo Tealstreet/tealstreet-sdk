@@ -105,6 +105,13 @@ impl RestAdapter for Adapter {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let body = if request.url == "/api/v3/brokerage/portfolios" {
             portfolio()
+        } else if request.url == "/api/v3/brokerage/orders" {
+            json!({"success":true,"success_response":{"order_id":"wire-order","product_id":"BTC-USDC","side":"BUY","client_order_id":"wire-client"}})
+        } else if request
+            .url
+            .starts_with("/api/v3/brokerage/orders/historical/batch")
+        {
+            json!({"orders":[],"has_next":false})
         } else {
             json!({})
         };
@@ -360,4 +367,40 @@ fn maintained_source_executes_eight_transport_scenes() {
     );
     let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(rows.as_array().unwrap().len(), 8);
+}
+
+#[test]
+fn create_order_wire_places_leverage_before_configuration() {
+    use safe_cex_store::{Store, StoreUpdate};
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let adapter = Arc::new(Adapter::default());
+        let runtime = runtime(Some(adapter.clone()));
+        let http = Rc::new(harness::Http::default());
+        *http.runtime.borrow_mut() = Some(runtime.inner.clone());
+        let venue = construct(name, true, runtime.clone(), http).unwrap();
+        Store::update(venue.base().store.as_ref(), StoreUpdate {
+            markets: Some(vec![serde_json::from_value(json!({"id":"BTC-USDC","symbol":"BTC-USDC","base":"BTC","quote":"USDC","active":true,"precision":{"amount":0.001,"price":0.01},"limits":{"amount":{"min":0.001,"max":100},"leverage":{"min":1,"max":10}}})).unwrap()]),
+            ..Default::default()
+        }, false).unwrap();
+        let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":2.5,"price":123.45,"clientOrderId":"wire-client"})).unwrap();
+        assert_eq!(
+            drive(
+                &runtime,
+                Box::pin(venue.base().place_order(venue.as_ref(), opts))
+            )
+            .unwrap(),
+            ["wire-order"]
+        );
+        let requests = adapter.0.lock().unwrap();
+        let request = requests
+            .iter()
+            .find(|r| r.url == "/api/v3/brokerage/orders")
+            .expect("production order POST reaches the adapter");
+        assert_eq!(request.method.to_ascii_uppercase(), "POST");
+        assert_eq!(
+            String::from_utf8(request.body.as_ref().unwrap().wire_bytes().unwrap()).unwrap(),
+            r#"{"client_order_id":"wire-client","product_id":"BTC-USDC","side":"BUY","leverage":"10","order_configuration":{"limit_limit_gtc":{"base_size":"2.5","limit_price":"123.45","post_only":false}}}"#,
+            "real encoded body must retain source literal key order"
+        );
+    }
 }

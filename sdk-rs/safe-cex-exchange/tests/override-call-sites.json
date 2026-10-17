@@ -524,6 +524,18 @@
     ]
   },
   {
+    "file": "safe-cex-exchange/src/js_runtime/client/factory.rs",
+    "function": "create",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "name",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-exchange/src/js_runtime/store.rs",
     "function": "facade",
     "edges": [
@@ -5982,6 +5994,19 @@
     ]
   },
   {
+    "file": "safe-cex-venue-bybit/src/binding/members/ohlcv.rs",
+    "function": "fetch_ohlcv",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_ohlcv",
+        "callee": "crate :: spot_exchange_reads :: fetch_ohlcv",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs",
     "function": "install",
     "edges": [
@@ -6086,6 +6111,13 @@
         "kind": "reference",
         "hook": "fetch_markets",
         "callee": "members :: markets :: fetch_markets",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_ohlcv",
+        "callee": "members :: ohlcv :: fetch_ohlcv",
         "count": 1
       },
       {
@@ -7906,19 +7938,6 @@
   {
     "file": "safe-cex-venue-hyperliquid/src/spot_market_bootstrap.rs",
     "function": "fetch_spot_markets_and_tickers",
-    "edges": [
-      {
-        "receiver": "path",
-        "kind": "reference",
-        "hook": "start",
-        "callee": "helper_tasks :: start",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs",
-    "function": "spot_wait_for_token",
     "edges": [
       {
         "receiver": "path",
