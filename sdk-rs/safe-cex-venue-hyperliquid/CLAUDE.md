@@ -1,3 +1,7 @@
+The Realm iterator entrypoint uses its existing property/call/iterator-record
+operations for every value. It honors iterator overrides independently of function
+names and refuses primitive iterator results before reading next.
+
 # Hyperliquid Rust venue
 
 Behavioral authority: [Hyperliquid guidance](../../packages/safe-cex/src/exchanges/hyperliquid/CLAUDE.md).
