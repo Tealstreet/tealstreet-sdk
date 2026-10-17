@@ -835,3 +835,11 @@ Submission checks unknown outcome only for one payload carrying a caller client 
 The real HTTP regression sends a rejected first split lot with a non-coercible
 error code and verifies later lots still place; a single order without a caller
 ID also skips classification, while a caller-ID control still reaches it.
+
+The remaining generic callback dispatchers take closed per-module `Callback`
+selectors. Native routing converts only the original fixed factory tags; all
+matches are exhaustive. Their former unknown-callback intrinsic arms had no
+production route and are deleted. Hyro socket disposal uses the existing concrete
+PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
+generic dispose wrapper and its three synthetic-only cases are removed. Preserve
+the actual constructor/socket/Store witnesses and the remaining439 session cases.

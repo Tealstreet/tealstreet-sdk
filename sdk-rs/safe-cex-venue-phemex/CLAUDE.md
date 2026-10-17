@@ -226,3 +226,10 @@ snapshots replacing Store without fill notifications, terminal deltas emitting
 the execution price, supported-market position updates, and per-currency balance
 merging with current position PnL. These are coverage of existing source behavior,
 not additional venue fixes.
+
+The constructed ticker corpus in `tests/exchange_binding.rs` drives 72 packed
+three-row frames through the live public socket. Each of nine numeric inputs
+varies independently across eight malformed/coercion values, while every native
+Ticker number is compared by bits with the maintained constructed TS exchange
+and DefaultStore. The control runner swaps last/mark in the live packed mapper
+and requires a compiled native assertion failure followed by exact restoration.
