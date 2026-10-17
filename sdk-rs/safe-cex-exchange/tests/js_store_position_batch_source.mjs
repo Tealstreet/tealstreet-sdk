@@ -37,6 +37,7 @@ const selectors={
  noncoercible_id:()=>({id:{toString(){throw new RangeError('selector conversion')}}}),
 };
 
+selectors.object_symbol_id=()=>({id:{toString(){return Symbol.iterator}}});
 selectors.symbol_id=()=>({id:Symbol.iterator});
 selectors.surrogate_id=()=>({id:'\ud800'});
 const seed={id:'123',symbol:'BTC',side:'long',entryPrice:10,notional:20,leverage:2,unrealizedPnl:3,contracts:2,liquidationPrice:5};
@@ -49,5 +50,5 @@ for(const [mode,ids] of Object.entries(states))for(const count of [0,1,2])for(co
  let error=null;try{store.updatePositions(updates)}catch(e){error=e.name}
  cases.push({mode,count,tag,error,ids,delta:store.updateIds.positions-before,rows:store.positions.map(row=>({id:row.id,contracts:String(row.contracts)}))});
 }
-assert.equal(cases.length,156,'four position states,three update counts,thirteen selectors');
+assert.equal(cases.length,168,'four position states,three update counts,fourteen selectors');
 process.stdout.write(JSON.stringify({seed,cases}));

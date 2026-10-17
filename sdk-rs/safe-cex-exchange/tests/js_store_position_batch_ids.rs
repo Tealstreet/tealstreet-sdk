@@ -8,6 +8,13 @@ use serde_json::{Value, json};
 use std::rc::Rc;
 fn selector(tag: &str) -> Js {
     match tag {
+        "object_symbol_id" => Js::object(vec![(
+            "id",
+            Js::object(vec![(
+                "toString",
+                Js::function("toString", |_, _| Ok(Js::SymbolIterator)),
+            )]),
+        )]),
         "symbol_id" => Js::object(vec![("id", Js::SymbolIterator)]),
         "surrogate_id" => Js::object(vec![("id", Js::utf16(&[0xd800]))]),
         "string_id" => Js::object(vec![("id", Js::str("123"))]),
@@ -67,8 +74,8 @@ fn position_batch_ids_match_source_strict_and_indexed_lookup_modes() {
     let cases = source["cases"].as_array().unwrap();
     assert_eq!(
         cases.len(),
-        156,
-        "four states,three counts,thirteen selectors"
+        168,
+        "four states,three counts,fourteen selectors"
     );
     for row in cases {
         let native = Rc::new(DefaultStore::new());
