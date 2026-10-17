@@ -3,6 +3,18 @@
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/kucoin/CLAUDE.md).
 Core contract: [shared exchange](../safe-cex-exchange/CLAUDE.md).
 
+Spot production reads and cancellation use `spot_native_order_reads`, installed
+by `spot_exchange_class.rs`. The unused typed `spot_reads` and `spot_writes`
+modules and their exclusive tests/oracles/contracts have been removed. The
+constructed `spot_io_binding` target observes market precision, distinct ticker
+prices, current Store fallback, active-symbol/page requests, and all three
+cancellation routes. Three compiled mutations of the live native implementation
+leave the retired typed tests green and fail these constructed witnesses.
+Existing `spot_native_order_reads` component/source tests remain authoritative
+within their documented scope. Historical typed market/ticker/cancellation
+refusal and oracle measurements in older evidence are not production coverage.
+Shared output/identity limitations remain in the manifest; deletion widens no API.
+
 `types` and `spot_types` contain protocol tables and strict spot token records.
 `yarn venue-oracle:kucoin` compares every table against executing live source,
 and checks record acceptance against the live TypeScript compiler. CI uses
@@ -55,13 +67,6 @@ Historical typed-reader findings and control counts in evidence documents are
 not evidence about the production route. Shared typed projections remain bounded
 by the manifest's representation choices.
 
-`spot_reads::fetch_active_order_symbols` discovers active Spot symbols through
-RestAdapter, preserving every array entry rather than trusting the source's
-string[] annotation. Failures and non-array payloads return an empty vector.
-Value-first ingress retains overflow lexemes for shared JS coercion. Returned
-arrays are owned snapshots, with source aliasing and UTF-16 ingress differences
-witnessed explicitly. The future owns no latch or shared state across its await.
-
 `numeric_ingress` audits record decoders against live declarations and JSON.parse,
 comparing f64 bits before serialization. Each Spot token projection and the
 account-mode detection decoder captures `JsNumberInput` inside its public
@@ -92,13 +97,6 @@ Account-mode Serialize emits native fields directly, without an intermediate
 `json!` Value that would erase infinities before the ingress output guard.
 The wire serializer still gives JavaScript's null for non-finite JSON values;
 the ingress guard sees the native numeric events before that projection.
-
-`spot_reads::fetch_markets` maps Spot market rows using native f64 fields and
-retains raw info lexemes. Rejections and transport failures read the current
-store only after the await. The oracle executes the production Store constructor
-and getter, and witnesses gateway-info aliases and store-array aliases separately
-from Rust snapshots. Malformed open-string fields and non-string error payloads
-remain explicit findings; they are not covered by the closed-enum declaration.
 
 Response consumers use RestResponseBody::json_value for the current model view.
 Fixtures explicitly construct Encoded HTTP bytes; native HOW data is read without
@@ -150,25 +148,6 @@ and non-JSON bodies remain strings in source and cause a non-emitting fallback.
 Current shared byte responses instead produce a logged decode diagnostic;
 this separate response-staging FINDING awaits core's response provenance ABI.
 
-`spot_reads::fetch_tickers` maps native numeric fields and falls back to the
-current Store after a failed await. Its oracle executes the real Store update
-and installed Axios response transform. Shared TableHit retains inherited market
-truthiness; undefined ticker id/symbol cannot cross the typed output and cause
-an explicit diagnostic/fallback. Store prototype replacement is separately
-unrepaired: a market named __proto__ changes later dictionary reads in source.
-Info and Store fallback aliases remain owned snapshots. No notifying write is
-added to the production read path.
-
-Ticker numeric coercions run in source order before the inherited-output refusal.
-The error emitter receives JsCoercionError.message rather than its Display
-prefix, matching the source catch's err.message. A malformed numeric value must
-not be hidden by a later typed-output limitation.
-
-The typed ticker refusal is deferred across the entire response batch, not only
-within a row. A later null row or failed numeric coercion must win over an
-earlier inherited market's undefined id/symbol; a pending refusal flag records
-the output limitation without publishing or widening a malformed Ticker.
-
 `spot_fills_reference` holds the pending Spot historical-fill read on the shared
 request query boundary. The live method and its actual factory serializer execute
 with installed Axios, qs and omitUndefined. Native NaN and infinities are query
@@ -188,13 +167,6 @@ Empty/non-JSON account/order responses retain separate provenance findings: the
 source emits a fallback/transport message where Rust diagnoses JSON decoding.
 Discovery returns an empty array in both languages and adds no such finding.
 The numeric-ingress oracle's JSON.parse remains intentional source decoding.
-
-`spot_writes::cancel_all_orders` uses the supplied unlimited REST adapter and
-emits before returning an error. Venue rejection messages use shared JS string
-coercion; a transport failure is returned intact even when its response supplies
-a different emitted message. Boxed standard Error preserves the concrete shared
-failure without a venue error enum. Raw non-string emissions and response staging
-remain separate findings. No Store mutation, retry or lifecycle task is added.
 
 `FIELD_IDENTITY_AUDIT.md` inventories equal-valued fixture dimensions and the
 consumer boundary. Market id/symbol and independent numeric/boolean fields must
@@ -241,12 +213,6 @@ steps for both bracket directions and algo stops. Native payload fields are
 asserted before serialization; different step values alone do not prove identity
 when the chosen input rounds to the same result under both steps.
 
-`spot_writes::cancel_symbol_orders` resolves the market id before awaiting the
-unlimited DELETE, falling back for missing or empty ids. It shares the existing
-fallible cancel response path. An actual Store-constructor witness retains the
-prototype-replacement finding: an inherited info.id can redirect the source's
-cancellation target. Typed Store lookup does not reproduce that write effect.
-
 Oracle capture helpers compare source case counts against caller inputs before
 pairwise comparisons. The ticker cardinality supplement separately fixes native
 output count and comparison indices; neither oracle length nor a printed corpus
@@ -262,13 +228,6 @@ identity remains a separate assertion because equal JSON cannot prove aliasing.
 Table tests inspect native pair counts and unique keys before serialization.
 The supplemental table-pairs capture compares ordered entries alongside the
 original object projection, which alone would erase duplicate native keys.
-
-`spot_writes::cancel_orders` awaits each unlimited DELETE before looking up the
-next order's market. First request or reporting failure terminates the loop;
-catch reporting reuses the existing fallible path and retains transport metadata.
-The source's live input array may grow during an await; Rust accepts a stable
-borrowed slice. This boundary, Store prototype reads and raw-error/response
-findings remain separate from sequential request parity.
 
 `ws_ping` ports all four futures/Spot public/private ping entrypoints using
 BaseWebSocket disposal, mark_ping_sent and send/send_with_log. The Date.now
