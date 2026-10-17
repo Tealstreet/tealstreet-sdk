@@ -120,7 +120,12 @@ fn full_store_typescript_differential() {
                         .as_array()
                         .unwrap()
                         .iter()
-                        .map(|v| (v[0]["id"].as_str().unwrap().to_owned(), map(&v[1]).into()))
+                        .map(|v| {
+                            (
+                                Some(v[0]["id"].as_str().unwrap().to_owned()),
+                                map(&v[1]).into(),
+                            )
+                        })
                         .collect::<Vec<_>>(),
                 )
                 .unwrap(),

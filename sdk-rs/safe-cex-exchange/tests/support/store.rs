@@ -122,7 +122,7 @@ impl Store for TestStore {
     }
     fn update_positions(
         &self,
-        _updates: &[(String, ModelPatch)],
+        _updates: &[(Option<String>, ModelPatch)],
     ) -> Result<(), StoreMutationError> {
         panic!("TestStore::update_positions is not exercised by this fixture")
     }
