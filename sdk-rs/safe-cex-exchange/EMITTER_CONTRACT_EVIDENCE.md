@@ -49,6 +49,9 @@ observes a retained NaN payload. Fresh registry compiler inventory no longer
 selects `exchange_error` or `error_text`: both consume an already typed native
 value and return typed native data/text, with no raw schema decoder entrypoint.
 Their error-envelope behavior remains covered by these direct production tests.
+The selected registry run passes two explicit compiler/trait classifications;
+the separate two native unit tests supply the error-envelope and future runtime
+observations. These are separate receipts, not a full transitive gate.
 
 `scripts/emitter-error-controls.py` executes both registry error-envelope and
 future witnesses, replaces only the production native code capture with a JSON
