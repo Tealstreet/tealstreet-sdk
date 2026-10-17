@@ -1102,31 +1102,6 @@ fn public_feed_native_source_floor() {
         let expected = decode(&row["native"]);
         let method = row["input"]["method"].as_str().unwrap();
         let id = row["id"].as_str().unwrap();
-        if id == "depth_gap_reject" || id == "depth_gap_route_reject" {
-            let cause = if id == "depth_gap_reject" {
-                "fetch:reject"
-            } else {
-                "route"
-            };
-            assert_eq!(
-                raw(actual, "warnings"),
-                array(vec![text(&format!(
-                    "WEEX orderbook snapshot failed for BTC: fail:{cause}"
-                ))]),
-                "public_feed::depth_native_gap_warning {id}"
-            );
-            if id == "depth_gap_reject" {
-                assert_eq!(
-                    raw(actual, "reads"),
-                    array(vec![text("error:message")]),
-                    "public_feed::depth_native_rejection_read"
-                );
-            }
-            set(&expected, "warnings", raw(actual, "warnings"));
-            if id == "depth_gap_reject" {
-                set(&expected, "reads", array(vec![text("error:message")]));
-            }
-        }
         if id == "constructor_defaults" {
             let V::Object(a) = raw(actual, "constructorValue") else {
                 panic!("native constructor object");
@@ -1149,10 +1124,7 @@ fn public_feed_native_source_floor() {
         assert_eq!(*actual, expected, "public_feed::{method}_native {id}");
     }
     for (row, (_, events)) in rows.iter().zip(&native) {
-        let mut actual = events.clone();
-        if row["id"] == "depth_gap_reject" || row["id"] == "depth_gap_route_reject" {
-            actual.retain(|s| s != "warning");
-        }
+        let actual = events.clone();
         let expected: Vec<String> = serde_json::from_value(row["events"].clone()).unwrap();
         assert_eq!(actual, expected, "public_feed::event_trace {}", row["id"]);
     }
