@@ -98,7 +98,7 @@ fn script(http: &Http) {
                 "POST",
                 path,
                 if name == "BATCH_ORDERS" {
-                    json!([{"orderId":"placed-8","clientOrderId":"synthetic-client-1","success":true}])
+                    json!([{"orderId":"1008","clientOrderId":"synthetic-client-1","success":true}])
                 } else {
                     json!({"orderId":"placed-8"})
                 },
@@ -922,7 +922,7 @@ fn batch_placement_uses_native_registration_and_caller_id_guard() {
                 .place_orders(h.exchange.as_ref(), vec![place()]),
         ))
         .unwrap();
-    assert_eq!(ids, ["placed-8"]);
+    assert_eq!(ids, ["1008"]);
     let calls = h.http.calls(endpoint("BATCH_ORDERS"));
     assert_eq!(calls.len(), 1);
     assert_eq!(
@@ -1579,7 +1579,11 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
             let error = result.expect_err(&format!("source rejects malformed batch ID {id:?}"));
             assert_eq!(error.name, text(field(expected_error, "name")));
             assert_eq!(error.message, text(field(expected_error, "message")));
-            assert_eq!(*errors.borrow(), vec![json!(error.message)]);
+            assert_eq!(
+                *errors.borrow(),
+                vec![json!(format!("Exchange Error: {}", error.message))],
+                "production BaseExchange reports exactly one refusal"
+            );
             assert_eq!(
                 h.store.orders()[0].time_in_force,
                 ModelField::Value(OrderTimeInForce::GoodTillCancel),
