@@ -1684,7 +1684,9 @@ fn periodic_private_tick(name: safe_cex_types::ExchangeName) {
     h.advance(1500.0);
     assert!(
         h.wire.calls("/v5/position/list").len() > before,
-        "periodic tick must fetch real positions after startup: reports={:?}, logs={:?}", h.runtime.reports.borrow(), h.runtime.logs.borrow()
+        "periodic tick must fetch real positions after startup: reports={:?}, logs={:?}",
+        h.runtime.reports.borrow(),
+        h.runtime.logs.borrow()
     );
     assert!(
         !h.runtime
