@@ -6,8 +6,7 @@ use crate::{
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{JsCoercionError, TableHit, js_string, js_table_lookup, js_truthy, parse_float};
 use safe_cex_types::{
-    ModelField, Order, OrderExtra, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
-    OrderType,
+    Order, OrderExtra, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType,
 };
 use serde_json::Value;
 
@@ -53,24 +52,13 @@ fn finite(value: Option<&Value>) -> f64 {
         0.0,
     )
 }
-// A missed table lookup assigned in the source object literal is an own undefined.
-fn typed<T>(hit: TableHit<T>, field: &str) -> Result<ModelField<T>, ExchangeError> {
+fn typed<T>(hit: TableHit<T>, field: &str) -> Result<T, ExchangeError> {
     match hit {
-        TableHit::Mapped(value) => Ok(ModelField::Value(value)),
-        TableHit::Missing => Ok(ModelField::Undefined),
-        TableHit::Inherited(_) => Err(failure(
+        TableHit::Mapped(value) => Ok(value),
+        TableHit::Inherited(_) | TableHit::Missing => Err(failure(
             "RepresentationError",
             &format!("mapOrder cannot represent {field} in shared Order"),
         )),
-    }
-}
-
-fn raw_side_fallback(raw: Option<&Value>) -> (TableHit<OrderSide>, bool) {
-    match raw {
-        Some(Value::String(raw)) if raw == "buy" => (TableHit::Mapped(OrderSide::Buy), false),
-        Some(Value::String(raw)) if raw == "sell" => (TableHit::Mapped(OrderSide::Sell), false),
-        None => (TableHit::Missing, false),
-        Some(_) => (TableHit::Missing, true),
     }
 }
 
@@ -83,8 +71,6 @@ struct PendingOrder {
     symbol: String,
     kind: TableHit<OrderType>,
     side: TableHit<OrderSide>,
-    // `ORDER_SIDE[...] || o.side` keeps an unmapped raw side, which Order cannot carry.
-    unmapped_raw_side: bool,
     price: f64,
     amount: f64,
     filled: f64,
@@ -111,17 +97,10 @@ fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
             })?
             .into(),
         parent_id: (None).into(),
-        status: typed(order.status, "status")?,
+        status: (typed(order.status, "status")?).into(),
         symbol: order.symbol,
-        r#type: typed(order.kind, "type")?,
-        side: if order.side == TableHit::Missing && order.unmapped_raw_side {
-            return Err(failure(
-                "RepresentationError",
-                "mapOrder cannot represent side in shared Order",
-            ));
-        } else {
-            typed(order.side, "side")?
-        },
+        r#type: (typed(order.kind, "type")?).into(),
+        side: (typed(order.side, "side")?).into(),
         price: (order.price).into(),
         amount: order.amount,
         filled: order.filled,
@@ -129,7 +108,7 @@ fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
         reduce_only: order.reduce_only,
         close: (None).into(),
         info: (Some(info.clone())).into(),
-        time_in_force: typed(order.time_in_force, "timeInForce")?,
+        time_in_force: (Some(typed(order.time_in_force, "timeInForce")?)).into(),
         last_update: order.last_update,
         trigger_type: (None).into(),
         tp_trigger_type: (order.tp).into(),
@@ -197,10 +176,14 @@ pub fn map_order(
     )?;
     // ts-bug: inherited ORDER_SIDE hits suppress the raw-side fallback.
     let side = lookup(ORDER_SIDE, aliases(o, &["tradeSide", "tS", "side"]))?;
-    let (side, unmapped_raw_side) = if side.is_truthy_by(|_| true) {
-        (side, false)
+    let side = if side.is_truthy_by(|_| true) {
+        side
     } else {
-        raw_side_fallback(o.get("side"))
+        match o.get("side").and_then(Value::as_str) {
+            Some("buy") => TableHit::Mapped(OrderSide::Buy),
+            Some("sell") => TableHit::Mapped(OrderSide::Sell),
+            _ => TableHit::Missing,
+        }
     };
     let price = float(Some(
         aliases(o, &["price", "px"])
@@ -227,7 +210,6 @@ pub fn map_order(
         symbol,
         kind,
         side,
-        unmapped_raw_side,
         price,
         amount,
         filled,
@@ -417,10 +399,14 @@ pub fn map_inverse_order(
     // ts-bug: inherited table values suppress the raw-side fallback; retain the
     // hit until the later hedge branch, which may overwrite it, has executed.
     let side = lookup(ORDER_SIDE, aliases(o, &["tradeSide", "tS", "side"]))?;
-    let (side, unmapped_raw_side) = if side.is_truthy_by(|_| true) {
-        (side, false)
+    let side = if side.is_truthy_by(|_| true) {
+        side
     } else {
-        raw_side_fallback(o.get("side"))
+        match o.get("side").and_then(Value::as_str) {
+            Some("buy") => TableHit::Mapped(OrderSide::Buy),
+            Some("sell") => TableHit::Mapped(OrderSide::Sell),
+            _ => TableHit::Missing,
+        }
     };
     let amount = float(Some(raw_amount))?;
     let filled = float(Some(raw_filled))?;
@@ -448,7 +434,6 @@ pub fn map_inverse_order(
         symbol,
         kind,
         side,
-        unmapped_raw_side,
         price,
         amount,
         filled,
