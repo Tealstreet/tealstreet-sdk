@@ -844,3 +844,73 @@ fn production_private_position_loop_closes_only_after_a_body_throw() {
         );
     }
 }
+
+#[test]
+fn production_private_position_close_spread_accepts_iterator_values() {
+    let world = world();
+    // Use the actual Store mutator rather than this fixture's dispatch recorder.
+    let native_store = store::facade(world.store.clone());
+    world
+        .socket
+        .get("store")
+        .unwrap()
+        .define(
+            "updatePositions",
+            native_store.get("updatePositions").unwrap(),
+        )
+        .unwrap();
+    world
+        .store
+        .add_or_update_position(
+            serde_json::from_value(json!({
+                "id":"p", "symbol":"ETH", "side":"long", "entryPrice":10,
+                "notional":10, "leverage":2, "unrealizedPnl":0, "contracts":1,
+                "liquidationPrice":1, "marginSize":120
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let pair = Js::array(vec![
+        Js::object(vec![("id", Js::str("p"))]),
+        Js::object(vec![
+            ("contracts", Js::Number(0.0)),
+            ("marginSize", Js::Undefined),
+        ]),
+    ]);
+    let closes = Js::new_set();
+    closes.call_method("add", vec![pair]).unwrap();
+    let values = closes.call_method("values", vec![]).unwrap();
+    world
+        .socket
+        .define(
+            "resolveExplicitlyClosedPositionUpdates",
+            Js::function("resolveExplicitlyClosedPositionUpdates", move |_, _| {
+                Ok(values.clone())
+            }),
+        )
+        .unwrap();
+    world
+        .socket
+        .get("parent")
+        .unwrap()
+        .define(
+            "mapPosition",
+            Js::function("mapPosition", |_, _| Ok(Js::Undefined)),
+        )
+        .unwrap();
+    let revision = world.store.update_ids().positions;
+    world
+        .socket
+        .call_method(
+            "handlePositionTopic",
+            vec![Js::array(vec![Js::object(vec![("size", Js::str("0"))])])],
+        )
+        .unwrap();
+    let positions = world.store.positions();
+    assert_eq!(
+        positions[0].contracts, 0.0,
+        "spread must deliver its close pair to the actual Store"
+    );
+    assert!(positions[0].margin_size.is_undefined());
+    assert_eq!(world.store.update_ids().positions, revision + 1.0);
+}
