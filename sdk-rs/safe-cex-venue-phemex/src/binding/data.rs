@@ -173,7 +173,7 @@ impl DataHost for Host {
         Host::emit(self, m)
     }
     fn emit_candle_error(&mut self, m: Js) -> Result<(), Thrown> {
-        self.call("emit", vec![Js::str("error"), m])?;
+        Host::get(self, "emitter")?.call_method("emit", vec![Js::str("error"), m])?;
         Ok(())
     }
     fn now(&mut self) -> Result<Js, Thrown> {
@@ -196,8 +196,12 @@ impl DataHost for Host {
     fn end_time(&mut self, to: Js, daily: bool) -> Result<Js, Thrown> {
         let date = self.global("dayjs", if to.truthy() { vec![to] } else { vec![] })?;
         if daily {
-            date.call_method("startOf", vec![Js::str("day")])?
-                .call_method("subtract", vec![Js::Number(1.0), Js::str("day")])
+            let midnight = date
+                .call_method("utcOffset", vec![Js::Number(0.0)])?
+                .call_method("startOf", vec![Js::str("date")])?
+                .call_method("unix", vec![])?
+                .to_number()?;
+            self.global("dayjs", vec![Js::Number((midnight - 86400.0) * 1000.0)])
         } else {
             Ok(date)
         }

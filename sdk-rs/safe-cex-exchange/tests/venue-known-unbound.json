@@ -5,9 +5,7 @@
   "safe-cex-venue-binance": [],
   "safe-cex-venue-bingx": [],
   "safe-cex-venue-bitget": [],
-  "safe-cex-venue-bitrue": [
-    "global console.log"
-  ],
+  "safe-cex-venue-bitrue": [],
   "safe-cex-venue-bitunix": [],
   "safe-cex-venue-blofin": [],
   "safe-cex-venue-breakoutprop": [],
@@ -35,9 +33,7 @@
   "safe-cex-venue-mexc": [],
   "safe-cex-venue-okx": [],
   "safe-cex-venue-orderly": [],
-  "safe-cex-venue-paradex": [
-    "global Object.getOwnPropertyNames"
-  ],
+  "safe-cex-venue-paradex": [],
   "safe-cex-venue-phemex": [],
   "safe-cex-venue-polymarket": [],
   "safe-cex-venue-txflow": [],
