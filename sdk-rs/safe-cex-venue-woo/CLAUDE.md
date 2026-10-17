@@ -473,3 +473,9 @@ retains their own null keys in info. `scripts/legacy-order-null-control.py`
 compiles a live-mapper null-refusal control that must fail its named order-count
 assertion; decoder-only tests are not evidence
 for this production path.
+
+
+The constructed clientOrderIdRule retains its source Number(input) conversion and
+uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
+compares26 maintained-source identifiers, including safe-range and canonical-decimal
+boundaries, without replacing the rule or its operation table.

@@ -249,23 +249,27 @@ fn fetch_markets_native_source_outcomes() {
 }
 
 #[test]
-fn fetch_markets_typed_refusal_after_source_logging() {
+fn fetch_markets_reports_typed_row_refusal_after_source_logging() {
     let effects = RefCell::new(Vec::new());
     let result = run(fetch_markets(
         |_, _| std::future::ready(Ok(json!({"r":[{"i":"x","b":{},"q":"USD"}]}))),
-        |text, _| {
-            effects.borrow_mut().push(text.to_owned());
+        |text, severity| {
+            effects
+                .borrow_mut()
+                .push((text.to_owned(), severity.as_str().to_owned()));
             Ok(())
         },
     ));
-    assert_eq!(
-        result.unwrap_err().name,
-        "RepresentationError",
-        "MARKETS declared typed refusal"
+    assert!(
+        result.unwrap().is_empty(),
+        "MARKETS refuses the bad row only"
     );
     assert_eq!(
         *effects.borrow(),
-        ["Fetched 1 GRVT markets"],
+        [
+            ("Fetched 1 GRVT markets".into(), "debug".into()),
+            ("Refused GRVT market row 0 id=\"x\": base={} quote=\"USD\": GRVT market base and quote must be strings for the shared Market model".into(), "warning".into())
+        ],
         "MARKETS refusal outside source catch"
     );
 }
