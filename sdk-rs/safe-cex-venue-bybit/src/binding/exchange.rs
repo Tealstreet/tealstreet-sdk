@@ -838,7 +838,7 @@ impl Exchange for BybitExchange {
     ) -> ExchangeFuture<'_, Vec<OptionChainRow>> {
         if matches!(
             self.base.name,
-            ExchangeName::Bybit | ExchangeName::Bybitdemo
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
         ) {
             self.invoke("fetchOptionChain", args!(js(&query)))
         } else {
@@ -848,7 +848,7 @@ impl Exchange for BybitExchange {
     fn fetch_option_expiries(&self, underlying: String) -> ExchangeFuture<'_, Vec<f64>> {
         if matches!(
             self.base.name,
-            ExchangeName::Bybit | ExchangeName::Bybitdemo
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
         ) {
             self.invoke("fetchOptionExpiries", args!(js(&underlying)))
         } else {
@@ -858,7 +858,7 @@ impl Exchange for BybitExchange {
     fn fetch_account_greeks(&self) -> ExchangeFuture<'_, Vec<AccountGreeks>> {
         if matches!(
             self.base.name,
-            ExchangeName::Bybit | ExchangeName::Bybitdemo
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
         ) {
             self.invoke("fetchAccountGreeks", vec![])
         } else {

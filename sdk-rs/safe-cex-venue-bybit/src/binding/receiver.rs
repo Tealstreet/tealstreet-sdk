@@ -443,7 +443,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     });
     if matches!(
         venue(rt)?.base.name,
-        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
     ) {
         method(&this, rt, "assertOptionsEnabled", |rt, _| {
             members::options::assert_options_enabled(rt)
