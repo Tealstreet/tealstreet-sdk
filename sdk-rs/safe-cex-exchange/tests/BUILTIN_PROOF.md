@@ -22,3 +22,10 @@ body, with deterministic transport inputs; no helper-name stub supplies these
 builtins. Run an individual witness with `cargo test --manifest-path
 sdk-rs/Cargo.toml -p <crate> --test <target> <name>`. The native core witness
 requires `--all-features`. No workspace test run is needed.
+
+Two further Dayjs regressions use the same production NativeRuntime and host:
+32 offset-string/coercion cases and 576 start/end boundary cases. Both compiled
+and failed against the earlier #453 implementation (numeric-only refusal and
+ignored false flag), then passed after the repair. Opaque offset inputs keep
+their original reference; invalid offset strings return the original instance.
+The current-master library control also fails both tests before exact restoration.

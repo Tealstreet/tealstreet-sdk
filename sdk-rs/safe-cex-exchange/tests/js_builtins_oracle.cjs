@@ -81,4 +81,22 @@ const stringify = [
   ['missing-key', JSON.stringify({ a: 1 }, ['a', 'missing'])],
 ];
 
-process.stdout.write(JSON.stringify({ array, dates, names, nullish, stringify }));
+const encode = value => typeof value === 'number'
+  ? (Number.isNaN(value) ? 'NaN' : value === Infinity ? 'Infinity' : value === -Infinity ? '-Infinity' : Object.is(value, -0) ? '-0' : value)
+  : value;
+const inputs = ['+08:00', '-0530', '+08', '-00:00', 'prefix+09:30suffix', 'nonsense', '', null, false, true, [], [8], [20], {}, {type: 'number', value: 'NaN'}, {type: 'number', value: 'Infinity'}];
+const decode = input => input?.type === 'number' ? Number(input.value) : input;
+const coercions = inputs.flatMap(input => [false, true].map(keep => {
+  const argument = decode(input), before = dayjs(1710083045678), after = before.utcOffset(argument, keep);
+  return {input, keep, valueOf: encode(after.valueOf()), offset: encode(after.utcOffset()), unix: encode(after.unix()), sameInstance: before === after, sameInputOffset: after.utcOffset() === argument};
+}));
+const ends = [];
+for (const start of [1710083045678, -1, 'NaN']) for (const offset of [null, 480]) {
+  for (const unit of units) for (const flag of [false, true, null, []]) {
+    let d = dayjs(start === 'NaN' ? NaN : start);
+    if (offset !== null) d = d.utcOffset(offset);
+    d = d.startOf(unit, flag);
+    ends.push({start, offset, unit, flag, valueOf: encode(d.valueOf()), utcOffset: encode(d.utcOffset()), unix: encode(d.unix())});
+  }
+}
+process.stdout.write(JSON.stringify({ array, dates, names, nullish, stringify, coercions, ends }));

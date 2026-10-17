@@ -1227,8 +1227,11 @@ Shared builtins for source callers: `Array#pop`/`reverse` (holes mirror),
 `Object.getOwnPropertyNames` (own keys incl. non-enumerable; functions and
 intrinsics refuse) and `console.log` (runtime console, severity `log`). The Dayjs
 facade models dayjs 1.11 `plugin/utc` in the runtime's UTC zone: non-enumerable
-`$d`/`$offset`/`$u`/`$localOffset` fields drive `valueOf`, `utcOffset(n, keep)`
-(numeric offsets only) and `startOf`, and `dayjs(instance)` clones them.
+`$d`/`$offset`/`$u`/`$localOffset` fields drive `valueOf`, `utcOffset(input, keep)`
+and `startOf(unit, start)`, and `dayjs(instance)` clones them. Offset strings use
+the installed plugin parser; non-string arguments retain JS coercion and offset
+identity. Falsy start flags select the last millisecond of the unit. Native
+Date wall values use shared TimeClip.
 `tests/js_builtins.rs` compares 16 array, 420 dayjs-chain, 5 key-order and 7
 property-list cases against Node with installed dayjs (TZ=UTC), plus the
 Lighter, Orderly, Bitrue and Phemex production paths that call them.
