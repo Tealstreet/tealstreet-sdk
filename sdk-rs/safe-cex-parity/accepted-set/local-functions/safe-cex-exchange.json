@@ -11,8 +11,8 @@
   },
   "safe-cex-exchange/src/http.rs::LOCAL_FUNCTION:same": {
     "category": "non-decoder",
-    "reason": "Recursive receipt body identity comparison of already retained values, including bitwise native floats and ordered keys; selects whether to restore this codec projection without constructing or admitting a model.",
-    "sourceSha256": "0b0e07f18fcc280018e0eff539b295192af97b518d2f890c374933d089df9839"
+    "reason": "Recursive receipt body identity comparison of already retained values, including bitwise native floats and ordered keys; selects whether to restore this codec projection without constructing or admitting a model. Reviewed proxy diagnostic repair: physical response bytes use the shared Axios transform for classification/logging only, while native data and the original failure remain unchanged. The nested receipt identity comparator body is unchanged.",
+    "sourceSha256": "9ebadc098a88ab14c15dff8d3842fe0bc45a6a91d3a82ed2474baac0de4619d4"
   },
   "safe-cex-exchange/src/runtime.rs::LOCAL_FUNCTION:utf8_view": {
     "category": "non-decoder",

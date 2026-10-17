@@ -60,10 +60,12 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
     )
     .unwrap();
     let put = |path: &str, body: serde_json::Value| {
-        wire.bodies
-            .lock()
-            .unwrap()
-            .insert(path.into(), RestResponseBody::Untransformed(body));
+        wire.bodies.lock().unwrap().insert(
+            path.into(),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+            ),
+        );
     };
     put(
         "/api/v1/markets",

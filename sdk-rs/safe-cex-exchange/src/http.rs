@@ -670,7 +670,18 @@ impl HttpClient {
                 && let Some(status) = status
                 && let Some(response) = &error.response
             {
-                let body = response.body.clone().into_data();
+                // Physical bytes have not reached the native venue transform yet.
+                // Use the shared Axios view only for this diagnostic; native data
+                // keeps its existing value and the failure retains its raw body.
+                let body = match &response.body {
+                    safe_cex_transport::RestResponseBody::Encoded(_) => response
+                        .body
+                        .clone()
+                        .transform_axios_response()
+                        .expect("default response transform parses or preserves text")
+                        .into_data(),
+                    _ => response.body.clone().into_data(),
+                };
                 let source = if matches!(status, 401 | 403) {
                     Some(if native_proxy_auth_failure_body(&body) {
                         "Tealstreet proxy auth failed"
