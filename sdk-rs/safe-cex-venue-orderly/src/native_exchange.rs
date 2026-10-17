@@ -167,6 +167,9 @@ impl Exchange for OrderlyExchange {
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
+    fn set_all_leverage(&self, leverage: f64) -> ExchangeFuture<'_, ()> {
+        self.unit("setAllLeverage", args![leverage])
+    }
     fn set_leverage(
         &self,
         symbol: String,
