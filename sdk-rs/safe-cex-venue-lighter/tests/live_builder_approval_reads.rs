@@ -562,18 +562,18 @@ fn runtime() -> Rc<a::LighterApprovalReadRuntime<H, V, E>> {
         },
         l1_address: |_, v| Ok(utils::is_lighter_l1_address(Some(&json(v))).unwrap()),
         extract_tier: |_, v| {
-            Ok(
-                tier::extract_lighter_account_tier_from_payload(Some(&json(&v)))
-                    .unwrap()
-                    .map(|v| {
-                        text(match v {
-                            tier::LighterAccountTier::Standard => "standard",
-                            tier::LighterAccountTier::Premium => "premium",
-                            tier::LighterAccountTier::Plus => "plus",
-                        })
-                    })
-                    .unwrap_or(V::U),
-            )
+            Ok(tier::extract_lighter_account_tier_from_payload(Some(
+                &safe_cex_exchange::js_runtime::value::from_json(&json(&v)),
+            ))
+            .unwrap()
+            .map(|v| {
+                text(match v {
+                    tier::LighterAccountTier::Standard => "standard",
+                    tier::LighterAccountTier::Premium => "premium",
+                    tier::LighterAccountTier::Plus => "plus",
+                })
+            })
+            .unwrap_or(V::U))
         },
         eligible_tier: |_, v| {
             Ok(

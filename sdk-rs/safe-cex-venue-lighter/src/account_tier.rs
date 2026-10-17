@@ -1,4 +1,5 @@
-//! Pure account-tier helpers from lighter.account-tier.ts.
+//! Account-tier helpers from lighter.account-tier.ts over live JS values.
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_num::{JsCoercionError, js_string, js_trim};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,8 +20,8 @@ pub const LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_TIER_REQUIREMENT_MESSAGE: &str = 
 pub const LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
 
 // ts: asRecord
-pub fn as_record(value: Option<&Value>) -> Option<&Value> {
-    value.filter(|v| v.is_object() || v.is_array())
+pub fn as_record(value: Option<&Js>) -> Option<&Js> {
+    value.filter(|value| value.truthy() && value.type_of() == "object")
 }
 // ts: isLighterAccountTierEligibleForPartnerAttribution
 pub fn is_lighter_account_tier_eligible_for_partner_attribution(
@@ -69,10 +70,19 @@ fn nullish_string(value: Option<&Value>) -> Result<String, JsCoercionError> {
 
 // ts: normalizeLighterAccountTier
 pub fn normalize_lighter_account_tier(
-    value: Option<&Value>,
-) -> Result<Option<LighterAccountTier>, JsCoercionError> {
-    let input = nullish_string(value)?;
-    Ok(match js_trim(&input).to_lowercase().as_str() {
+    value: Option<&Js>,
+) -> Result<Option<LighterAccountTier>, Thrown> {
+    let value = value
+        .filter(|value| !value.is_nullish())
+        .cloned()
+        .unwrap_or_else(|| Js::str(""));
+    if matches!(value, Js::SymbolIterator) {
+        return Ok(None);
+    }
+    let normalized = Js::String(value.to_js_string()?)
+        .call_method("trim", vec![])?
+        .call_method("toLowerCase", vec![])?;
+    Ok(match normalized.to_display().as_str() {
         "std" | "standard" => Some(LighterAccountTier::Standard),
         "premium" => Some(LighterAccountTier::Premium),
         "plus" => Some(LighterAccountTier::Plus),
@@ -82,15 +92,22 @@ pub fn normalize_lighter_account_tier(
 
 // ts: extractLighterAccountTierFromPayload
 pub fn extract_lighter_account_tier_from_payload(
-    payload: Option<&Value>,
-) -> Result<Option<LighterAccountTier>, JsCoercionError> {
+    payload: Option<&Js>,
+) -> Result<Option<LighterAccountTier>, Thrown> {
     let Some(root) = as_record(payload) else {
         return Ok(None);
     };
-    let data = as_record(root.get("data"));
-    let account =
-        as_record(root.get("account")).or_else(|| as_record(data.and_then(|v| v.get("account"))));
-    for record in [Some(root), data, account].into_iter().flatten() {
+    let data_value = root.get("data")?;
+    let data = as_record(Some(&data_value));
+    let account_value = root.get("account")?;
+    let account = match as_record(Some(&account_value)) {
+        Some(account) => Some(account.clone()),
+        None => data
+            .map(|data| data.get("account"))
+            .transpose()?
+            .and_then(|account| as_record(Some(&account)).cloned()),
+    };
+    for record in [Some(root), data, account.as_ref()].into_iter().flatten() {
         for key in [
             "user_tier_name",
             "userTierName",
@@ -101,8 +118,9 @@ pub fn extract_lighter_account_tier_from_payload(
             "account_type",
             "accountType",
         ] {
-            if let Some(value) = record.get(key).filter(|v| !v.is_null()) {
-                return normalize_lighter_account_tier(Some(value));
+            let value = record.get(key)?;
+            if !value.is_nullish() {
+                return normalize_lighter_account_tier(Some(&value));
             }
         }
     }

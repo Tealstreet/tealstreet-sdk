@@ -1107,7 +1107,7 @@ process.stdout.write(JSON.stringify(['1e400','-1e400','null'].map(raw=>{
                 safe_cex_venue_lighter::account_tier::LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE);
             assert!(
                 h.http.calls(SEND_TX).is_empty(),
-                "known Standard tier blocks before signing/send"
+                "known Standard tier blocks transaction send"
             );
         }
     }

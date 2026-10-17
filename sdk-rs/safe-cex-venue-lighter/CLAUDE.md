@@ -405,3 +405,9 @@ win over close errors, while normal pair completion validates the return result.
 The constructed public class and its real operation table carry the regressions.
 The native exchange target also covers account_all orders, positions, fills and
 the source-throttled balance refresh through the real private socket.
+
+Account-tier extraction consumes live Js records, stopping at the first non-nullish
+alias even when its normalized tier is unknown. It preserves getter order, native
+number values, UTF-16 strings, unrelated cycles and original throws. The attributed
+placement regression drives overflow-number limits through the real client and
+signer, while live_tier retains the existing source corpus plus native-value cases.
