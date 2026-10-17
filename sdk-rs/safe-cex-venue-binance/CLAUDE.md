@@ -467,3 +467,16 @@ These native referents support the existing data/reference profile, not arbitrar
 intrinsic execution or full descriptors. Typed DTO conversion uses the shared
 native bridge. See [shared value evidence](SHARED_VALUES.md); the separately
 planned typed JS-string cutover remains outside this change.
+
+The native host's `uuid()` must use `safe_cex_crypto::uuid::uuid`, the maintained
+source `nanoid().replace(/-|_/g, '')` implementation. RFC UUID-v4 is36 characters
+before the10-character broker prefix and exceeds every family's ID limit.
+Stripping the default21-character nanoid yields at most21 alphanumerics; do not
+pad it to a fixed length. The production dependency/owner witnesses in
+`tests/private_classes.rs` cover actual host entropy, minting, regular/split and
+attached/standalone/trailing payloads, and preserve caller IDs. Run them with
+`--features native`; a default-feature filtered run cannot execute this host.
+The same native host fixtures deliver private orders/fills/positions/balance
+frames through the assembled private binding and assert real Store and emitted
+fill contents, including the source's ignored derivative balance rows and Spot's
+absence of a derivative-position topic.
