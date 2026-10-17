@@ -4162,3 +4162,162 @@ fn native_projection_unsigned_private_body_keeps_json_bigint_refusal() {
     assert_eq!(error.name, "TypeError");
     assert!(wire.0.lock().unwrap().is_empty());
 }
+
+#[cfg(feature = "native")]
+fn asset_market(symbol: &str, base: &str) -> Value {
+    json!({"symbol":symbol,"baseAsset":base,"quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","status":"TRADING","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"0.01","minQty":"0.01","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.01","minQty":"0.01","maxQty":"100"}]})
+}
+
+#[cfg(feature = "native")]
+fn market_asset_refusal_case(venue: Venue) {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
+    use std::sync::Arc;
+    struct Markets(Value);
+    impl RestAdapter for Markets {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            assert!(
+                request
+                    .url
+                    .split('?')
+                    .next()
+                    .unwrap()
+                    .ends_with("/exchangeInfo"),
+                "{}",
+                request.url
+            );
+            Box::pin(std::future::ready(Ok(RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: RestResponseBody::Encoded(serde_json::to_vec(&self.0).unwrap()),
+            })))
+        }
+    }
+    let source = std::process::Command::new("node")
+        .arg(format!(
+            "{}/scripts/public-rest.mjs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .args([
+            match venue {
+                Venue::Futures => "futures",
+                Venue::PM => "pm",
+                Venue::Spot => "spot",
+            },
+            "markets",
+            "asset-rows",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source.as_array().unwrap().len(),
+        10,
+        "source raw asset cases"
+    );
+    let mut witnesses = 0;
+    for (field, wire_field) in [("base", "baseAsset"), ("quote", "quoteAsset")] {
+        for value in [
+            Some(json!({"asset":"wrong"})),
+            Some(json!(false)),
+            Some(Value::Null),
+            Some(json!(17)),
+            None,
+        ] {
+            for refresh in [false, true] {
+                let runtime = Rc::new(Runtime::default());
+                let mut bad = asset_market("BADUSDT", "BAD");
+                if let Some(value) = &value {
+                    bad[wire_field] = value.clone();
+                } else {
+                    bad.as_object_mut().unwrap().remove(wire_field);
+                }
+                let deps = safe_cex_venue_binance::native_host::native_dependencies(
+                    runtime.clone(),
+                    Arc::new(Markets(
+                        json!({"symbols":[asset_market("BTCUSDT","BTC"),bad,asset_market("ETHUSDT","ETH")]}),
+                    )),
+                    Rc::new(|_, _| panic!("no external provider")),
+                    None,
+                    safe_cex_exchange::native::NativeHttpEvents::default(),
+                );
+                let owner = ExchangeOwner::new(
+                    venue,
+                    serde_json::from_value(json!(match venue {
+                        Venue::Futures => "binance",
+                        Venue::PM => "binancepm",
+                        Venue::Spot => "binancespot",
+                    }))
+                    .unwrap(),
+                    serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true}))
+                        .unwrap(),
+                    Rc::new(safe_cex_store::store::DefaultStore::new()),
+                    deps,
+                )
+                .unwrap();
+                let errors = Rc::new(RefCell::new(Vec::new()));
+                let capture = errors.clone();
+                owner.base.on(
+                    "error",
+                    Rc::new(move |_, error| {
+                        capture.borrow_mut().push(error.clone());
+                        Ok(())
+                    }),
+                );
+                let exchange = sdk_class(venue, owner.clone());
+                let markets = if refresh {
+                    run(&runtime, exchange.refresh_markets()).unwrap();
+                    owner.base.store.markets().to_vec()
+                } else {
+                    run(&runtime, exchange.fetch_markets()).unwrap()
+                };
+                assert_eq!(
+                    markets
+                        .iter()
+                        .map(|m| m.symbol.as_str())
+                        .collect::<Vec<_>>(),
+                    ["BTCUSDT", "ETHUSDT"],
+                    "{venue:?} bad{field} refresh={refresh}"
+                );
+                let errors = errors.borrow();
+                assert_eq!(errors.len(), 1, "one visible row refusal");
+                let message = errors[0].as_str().unwrap();
+                let expected = value
+                    .as_ref()
+                    .map_or_else(|| "undefined".into(), Value::to_string);
+                assert!(
+                    message.contains("BADUSDT") && message.contains(&format!("{field}={expected}")),
+                    "{message}"
+                );
+                assert_eq!(runtime.reported.borrow().len(), 1);
+                witnesses += 1;
+                owner.base.dispose().unwrap();
+            }
+        }
+    }
+    assert_eq!(witnesses, 20, "typed fetch and refresh per asset/domain");
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_futures_market_asset_refusals_keep_siblings() {
+    market_asset_refusal_case(Venue::Futures);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_pm_market_asset_refusals_keep_siblings() {
+    market_asset_refusal_case(Venue::PM);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_native_spot_market_asset_refusals_keep_siblings() {
+    market_asset_refusal_case(Venue::Spot);
+}
