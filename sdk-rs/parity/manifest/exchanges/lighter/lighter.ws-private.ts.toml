@@ -250,7 +250,6 @@ rs = "safe-cex-venue-lighter/src/ws_private.rs::flatten_by_market_payload"
 status = "ported"
 note = "Renamed to safe-cex-venue-lighter/src/ws_private.rs::flatten_by_market_payload. Native Js flattening retains row identity, holes versus own undefined, binary64 payloads, cycles and UTF-16. The maintained source corpus covers530 inputs and12 Unicode boundaries; real four-topic frames retain fills on both deployments with an unused lone-surrogate field."
 
-
 [[symbol]]
 ts = "LighterPrivateWebsocket#flattenOrdersByMarket"
 kind = "field-fn"
@@ -258,7 +257,6 @@ layer = "adapted"
 rs = "safe-cex-venue-lighter/src/ws_private.rs::flatten_orders_by_market"
 status = "ported"
 note = "Renamed to safe-cex-venue-lighter/src/ws_private.rs::flatten_orders_by_market. Native Js flattening retains row identity, holes versus own undefined, binary64 payloads, cycles and UTF-16. The maintained source corpus covers530 inputs and12 Unicode boundaries; real four-topic frames retain fills on both deployments with an unused lone-surrogate field."
-
 
 [[symbol]]
 ts = "LighterPrivateWebsocket#scheduleThrottledTask"

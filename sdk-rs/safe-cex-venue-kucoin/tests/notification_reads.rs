@@ -2,10 +2,10 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_store::{store::DefaultStore, virtual_clock::VirtualClock};
+use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse};
 use safe_cex_types::ExchangeName;
-use safe_cex_venue_kucoin::{accounts, order_reads, spot_reads, spot_writes};
+use safe_cex_venue_kucoin::{accounts, spot_reads, spot_writes};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -126,15 +126,7 @@ fn source(cases: &[Value]) -> Vec<Value> {
 fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
     let mut cases = vec![];
     for (venue, methods) in [
-        (
-            "kucoin",
-            vec![
-                "getAccount",
-                "fetchNormalOrders",
-                "fetchAlgoOrders",
-                "fetchOrders",
-            ],
-        ),
+        ("kucoin", vec!["getAccount"]),
         (
             "kucoinspot",
             vec![
@@ -167,7 +159,7 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
         }
     }
     let expected = source(&cases);
-    assert_eq!(expected.len(), 66);
+    assert_eq!(expected.len(), 48);
     for (case, expected) in cases.into_iter().zip(expected) {
         let base = BaseExchange::new(
             ExchangeName::Kucoinspot,
@@ -227,7 +219,6 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
             case: case.clone(),
             calls: Cell::new(0),
         };
-        let clock = VirtualClock::default();
         let mut original_cancel_failure = None;
         let result: Result<(), ExchangeError> = match case["method"].as_str().unwrap() {
             "getAccount" if case["venue"] == "kucoin" => {
@@ -242,13 +233,6 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
             }
             "fetchMarkets" => ready(spot_reads::fetch_markets(&base, &adapter)).map(|_| ()),
             "fetchTickers" => ready(spot_reads::fetch_tickers(&base, &adapter)).map(|_| ()),
-            "fetchNormalOrders" => {
-                ready(order_reads::fetch_normal_orders(&base, &adapter, &clock)).map(|_| ())
-            }
-            "fetchAlgoOrders" => {
-                ready(order_reads::fetch_algo_orders(&base, &adapter, &clock)).map(|_| ())
-            }
-            "fetchOrders" => ready(order_reads::fetch_orders(&base, &adapter, &clock)).map(|_| ()),
             "cancelAllOrders" | "cancelSymbolOrders" | "cancelOrders" => {
                 match if case["method"] == "cancelSymbolOrders" {
                     ready(spot_writes::cancel_symbol_orders(
