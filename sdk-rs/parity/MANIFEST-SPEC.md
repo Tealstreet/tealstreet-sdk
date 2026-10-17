@@ -1572,6 +1572,20 @@ not establish Axios runtime validation. Separate string and snapshot observation
 remain governed by [§19](#forced-surrogate-conflict) and
 [§16](#owned-snapshot-vs-live-alias).
 
+Final strict-field policy for the constructed WEEX market batch: a row whose
+required string field cannot inhabit `Market` is refused alone, with a visible
+field/value warning, retaining good rows and returning empty when all are refused.
+`normalize_market_row` completes source coercions before this projection; genuine
+source/capture failures retain the original outer catch and cached-market result.
+The public utility retains its standalone refusal. The maintained `fetchMarkets`
+and `normalizeMarket` source probe keeps the raw malformed fields in twelve mixed
+pages, so this row loss is explicitly CHOSEN. Keeping shared model fields strict
+avoids introducing malformed identities/assets into every downstream consumer;
+per-row refusal avoids discarding the valid snapshot. Constructed Exchange HTTP
+regressions independently pin native IDs/assets, warning values, empty-page
+semantics and source coercion precedence. No source-equivalent row claim is made.
+
+
 <a id="weex-class-assembly-choice"></a>
 
 ### WEEX explicit class assembly
