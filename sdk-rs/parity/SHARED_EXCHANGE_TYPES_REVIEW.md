@@ -4,7 +4,7 @@ Owner codex-4ri6pb. Baseline master `f759dc8be237207558a714994da86a4266806b6d`. 
 
 No new reachable TypeScript divergence was established in these helper/capability declarations during this review. Keep legitimate imported capabilities, inline carriers and ownership plumbing. This is a bounded exemption/debt review, not a claim that every mapped shared algorithm or arbitrary JavaScript value now has parity. Existing manifest FINDINGs, scalar/API decisions and cancellation choices remain authoritative.
 
-FFI, registry and transport implementation reviews remain with codex-0xekzz. Phase 2 is not on master at this baseline: request/response/body, signer-config and bridge migration is codex-dwfl8p checkpoint c41f1660e1. Those surfaces were read for ownership classification only and are explicitly marked below; no API or body edits were made.
+FFI, registry and transport implementation reviews remain with codex-0xekzz. Phase 2 is not on master at this baseline: request/response/body, signer-config and bridge migration is codex-dwfl8p PR #696 (latest supplied checkpoint e8cabc8b3f). Those surfaces were read for ownership classification only and are explicitly marked below; no API or body edits were made.
 
 Native witnesses already present include exchange core_contract/core_snapshots/core_health_http_token, cancellable_future_inventory, model_field_roundtrip, native_clock, transport_binding venue integration, and types strict_wire/retained_utf16/retained_native_f64/position_record. Referenced historical witnesses are scope references, not fresh-run claims. Fresh results are recorded at the end.
 
@@ -531,3 +531,27 @@ The canonical outstanding-defects.json is removal-only. These fingerprints were 
 - Phase 2 body/transport/signing API implementations remain untouched. Existing mapped FINDINGs and shared representation decisions remain open under their own owners.
 
 Scoped ratchet logs and exact native/WASM receipts are preserved as `/tmp/port-txflow-types-debt-ratchet.log`, `/tmp/port-txflow-types-native-results.json` and `/tmp/port-txflow-types-wasm-results.json` in this worktree session. The maintained accepted-set runner remains the executable authority; these historical receipts are not replacement fixtures.
+
+## Publication recheck (2026-10-18 SGT)
+
+Current master `aa3c9302a1615f948ebb03ce3211b28621df6676` was normally merged before publication. The exact
+123 exchange +108 types exemption rows remain unchanged from `f759dc8be2`.
+All26 Rust source files containing those declarations are byte-identical to the
+reviewed baseline, and the ledger has exactly one row for every current entry.
+Other mapped runtime implementations have changed independently; their source
+semantics are not closed by these exemption classifications.
+
+The complete safe-cex-types source tree, package manifest, locked dependencies,
+toolchain pin and maintained TS types declaration are also unchanged. The earlier
+native/WASM runtime measurements therefore observe the same production decoders.
+Rechecked every89 retired owner against an actual runtime receipt on both targets:
+212 runtime results +30 explicit classifications per target, zero failures. The
+unchanged production ratchet rejects the old89-owner/1004-fingerprint types debt
+and accepts its removal. Production history validation is removal-only, and the
+remaining9 owners/28 fingerprints are byte-for-byte unchanged from current master.
+
+Phase2 #696 remains open at this publication check (latest checkpoint supplied by
+its owner: e8cabc8b3f). Its marked body/transport consumers remain owned/deferred;
+this PR changes no body, model, API, exemption or scalar representation decision.
+All final shared-type decisions remain under their designated implementation
+owners; they are not implied implemented by this metadata cleanup.
