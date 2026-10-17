@@ -436,3 +436,10 @@ fill, position and wallet frames cover Store, fill notification and execution
 history behavior; wallet-only frames leave balance owned by REST, as in source.
 The socket oracle supplies no invented `log` method: unknown-market position rows
 compare the source TypeError and unchanged state.
+
+Missing order type/status/side table entries retain own undefined via ModelField.
+They cannot reject an entire REST snapshot or stop later rows in a private frame.
+Unknown private statuses still follow the source’s ignore branch after mapping;
+unknown type/side with an OPEN status reach Store. Inherited callable/object
+lookup results retain their separately documented closed-field refusal.
+The unmapped_order_enums target exercises both production entry paths.

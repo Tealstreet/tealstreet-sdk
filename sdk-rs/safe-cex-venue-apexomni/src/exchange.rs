@@ -10,7 +10,7 @@ use safe_cex_exchange::{
 use safe_cex_num::{JsJsonValue as J, math_round, subtract};
 use safe_cex_types::{
     Balance, ExchangeOptions, Execution, MarginType, Market, MarketLimits, MarketLimitsAmount,
-    MarketLimitsLeverage, MarketPrecision, Order, OrderSide, OrderStopTriggerType,
+    MarketLimitsLeverage, MarketPrecision, ModelField, Order, OrderSide, OrderStopTriggerType,
     OrderTimeInForce, OrderType, Position, PositionMode, PositionSide,
 };
 use std::{
@@ -439,20 +439,32 @@ impl ApexOmniExchange {
                 brackets.push((id, price, kind, updated, trigger_type(part)?));
             }
         }
-        let TableHit::Mapped(order_type) = order_type else {
-            return Err(failure(
-                "shared typed Order refuses unknown venue order type".into(),
-            ));
+        let order_type = match order_type {
+            TableHit::Mapped(value) => ModelField::Value(*value),
+            TableHit::Missing => ModelField::Undefined,
+            TableHit::Inherited(_) => {
+                return Err(failure(
+                    "shared typed Order refuses unknown venue order type".into(),
+                ));
+            }
         };
-        let TableHit::Mapped(status) = status else {
-            return Err(failure(
-                "shared typed Order refuses unknown venue order status".into(),
-            ));
+        let status = match status {
+            TableHit::Mapped(value) => ModelField::Value(*value),
+            TableHit::Missing => ModelField::Undefined,
+            TableHit::Inherited(_) => {
+                return Err(failure(
+                    "shared typed Order refuses unknown venue order status".into(),
+                ));
+            }
         };
-        let TableHit::Mapped(side) = side else {
-            return Err(failure(
-                "shared typed Order refuses unknown venue order side".into(),
-            ));
+        let side = match side {
+            TableHit::Mapped(value) => ModelField::Value(*value),
+            TableHit::Missing => ModelField::Undefined,
+            TableHit::Inherited(_) => {
+                return Err(failure(
+                    "shared typed Order refuses unknown venue order side".into(),
+                ));
+            }
         };
         let reduce_only = match raw_reduce_only {
             J::Bool(value) => *value,
@@ -466,10 +478,10 @@ impl ApexOmniExchange {
         let order = Order {
             client_order_id: (None).into(),
             id: field_string(raw_id)?,
-            status: (*status).into(),
+            status,
             symbol: market.symbol,
-            r#type: (*order_type).into(),
-            side: (*side).into(),
+            r#type: order_type,
+            side,
             price: price.into(),
             amount,
             filled,

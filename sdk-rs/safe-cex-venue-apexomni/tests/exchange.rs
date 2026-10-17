@@ -96,35 +96,25 @@ fn order(value: &Order) -> J {
         ("id", s(&value.id)),
         (
             "status",
-            s(
-                match value
-                    .status
-                    .value()
-                    .expect("present source enum in fixture")
-                {
-                    OrderStatus::Open => "open",
-                    OrderStatus::Closed => "closed",
-                    OrderStatus::Canceled => "canceled",
-                    _ => panic!(),
-                },
-            ),
+            match value.status {
+                ModelField::Value(OrderStatus::Open) => s("open"),
+                ModelField::Value(OrderStatus::Closed) => s("closed"),
+                ModelField::Value(OrderStatus::Canceled) => s("canceled"),
+                ModelField::Undefined => J::Undefined,
+                _ => panic!("source order status fixture"),
+            },
         ),
         ("symbol", s(&value.symbol)),
         (
             "type",
-            s(
-                match value
-                    .r#type
-                    .value()
-                    .expect("present source enum in fixture")
-                {
-                    OrderType::Limit => "limit",
-                    OrderType::Market => "market",
-                    OrderType::StopLoss => "stop_market",
-                    OrderType::TakeProfit => "take_profit_market",
-                    _ => panic!(),
-                },
-            ),
+            match value.r#type {
+                ModelField::Value(OrderType::Limit) => s("limit"),
+                ModelField::Value(OrderType::Market) => s("market"),
+                ModelField::Value(OrderType::StopLoss) => s("stop_market"),
+                ModelField::Value(OrderType::TakeProfit) => s("take_profit_market"),
+                ModelField::Undefined => J::Undefined,
+                _ => panic!("source order type fixture"),
+            },
         ),
         ("side", side(value.side)),
         ("price", n((value.price).to_number())),
