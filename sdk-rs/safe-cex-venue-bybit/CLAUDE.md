@@ -717,6 +717,11 @@ linear/inverse context order, source combined-category sort/limit rules, inclusi
 windows and repeated IDs. The mapper stays native until the typed public output;
 its ordinary lookup tables retain actual Object.prototype members.
 
+Spot's missing-market intrinsic constructs the source message before the caller
+wraps it in Error. Real placement witnesses cover ordinary limit and full-position
+SL/TP routes. The REST/private-frame unknown stopOrderType witness retains all
+three unlisted stop kinds as own Undefined through the ModelField Store bridge.
+
 Spot trailing-order placement retains the source `Ticker <symbol> not found`
 error when market or ticker data is missing. The SessionHost intrinsic builds
 the source template in UTF-16 before the existing Error construction. The real
