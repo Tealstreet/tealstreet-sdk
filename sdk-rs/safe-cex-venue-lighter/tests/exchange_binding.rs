@@ -657,7 +657,9 @@ fn real_trait_candles_refuse_unknown_market() {
 
 #[test]
 fn real_trait_fills_reach_signed_history_and_keep_both_rows() {
-    let h = harness(ExchangeName::Lighter, options(), |http| {
+    let mut opts = options();
+    opts.key = "0x1111111111111111111111111111111111111111".into();
+    let h = harness(ExchangeName::Lighter, opts, |http| {
         lighter(http);
         http.ok("GET","/api/v1/accountInactiveOrders",json!({"code":200,"fills":[
             {"market_id":1,"order_id":"open","side":"BUY","price":"100","size":"2","timestamp":1700000000,"fee":"0.1","feeAsset":"USDC"},
@@ -675,7 +677,14 @@ fn real_trait_fills_reach_signed_history_and_keep_both_rows() {
             ),
         )
         .unwrap();
-    assert_eq!(rows.len(), 2, "actual authenticated fill collection");
+    assert_eq!(
+        rows.len(),
+        2,
+        "actual authenticated fill collection; urls={:?}, logs={:?}, reports={:?}",
+        h.http.urls(),
+        h.runtime.logs.borrow(),
+        h.runtime.reports.borrow()
+    );
     assert_eq!(rows[0].order_id.as_deref(), Some("close"));
     assert_eq!(
         (rows[0].timestamp, rows[0].price, rows[0].qty),
@@ -759,11 +768,15 @@ fn real_trait_book_delivers_socket_changes_and_cleans_up() {
     );
     cleanup().unwrap();
     let count = seen.borrow().len();
+    let mut after_cleanup = frame.clone();
+    after_cleanup["order_book"]["bids"][0]["price"] = json!("108");
     socket
         .events
         .borrow_mut()
-        .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
-    h.runtime.pump();
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            after_cleanup.to_string(),
+        )));
+    h.runtime.advance(250.0);
     assert_eq!(seen.borrow().len(), count, "cleanup removes actual parser");
     assert!(
         socket
