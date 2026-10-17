@@ -1232,3 +1232,13 @@ ordinary digits coercion. Exact binary ties round away from zero; negative zero,
 nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
 `tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
 Polymarket's concrete binding witness checks the resulting signed order amounts.
+
+The shared `qs.stringify` binding consumes arrayFormat (indices/repeat/comma/
+brackets), callable sort, RFC3986/RFC1738 format and the encode boolean. It
+sorts keys at every object/array level before reading child values and keeps
+undefined omissions. Comparator failures propagate; native sorting does not
+claim V8's comparator call schedule. `tests/js_qs_options.rs` executes the actual
+installed qs package over 96 option/input combinations. The BingX registry
+regression additionally observes final signed GET query ordering through the
+production HTTP client and verifies the signature against the source preimage.
+Other qs options remain outside this imported runtime surface.
