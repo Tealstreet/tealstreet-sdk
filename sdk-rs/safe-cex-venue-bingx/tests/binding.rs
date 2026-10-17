@@ -472,12 +472,9 @@ fn retryable_read_gets_a_fresh_signature() {
     let calls = h.http.calls(BALANCE);
     assert_eq!(calls.len(), 2);
     assert_ne!(calls[0].params["timestamp"], calls[1].params["timestamp"]);
-    let timestamp = |index: usize| {
-        calls[index].params["timestamp"]
-            .as_str()
-            .unwrap()
-            .parse::<f64>()
-            .unwrap()
+    let timestamp = |index: usize| match &calls[index].params["timestamp"] {
+        Value::String(value) => value.parse::<f64>().unwrap(),
+        value => value.as_f64().unwrap(),
     };
     assert!(
         timestamp(1) - timestamp(0) >= 2_000.0,
