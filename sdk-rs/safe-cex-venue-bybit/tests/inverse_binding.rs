@@ -553,7 +553,7 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value[0].clone());
+            sink.borrow_mut().push(value.clone());
             Ok(())
         }),
     );
