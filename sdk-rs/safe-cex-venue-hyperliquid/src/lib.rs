@@ -95,3 +95,7 @@ pub mod spot_binding;
 #[cfg(test)]
 #[path = "../tests/support/accepted_projection_aliases.rs"]
 mod accepted_projection_aliases;
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_future_aliases.rs"]
+mod accepted_future_aliases;

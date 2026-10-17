@@ -1,3 +1,107 @@
+# Twenty parent and collection record reviews
+
+This cohort reviews twenty concrete maintained records against the actual TS
+members, native field types and private remote rename/presence attributes.
+`tests/fixtures/accepted_nested_record_schema.json` is the manually reviewed
+mapping table and body-pin ledger; it grants no scanner or policy permission.
+The production decoder bodies and all private schema attributes are unchanged.
+
+| Native owner | Reviewed structure |
+| --- | --- |
+| `UserFills` | Both maintained merged interface declarations; all 13 native fill members |
+| `WsFill` | Required fill strings, bool and exact numeric bits |
+| `Candle` | Required OHLCV strings, distinct `t`/`T` native members and counters |
+| `HyperliquidCandle` | Its own concrete candle members and decoder |
+| `WsUserFill` | Its own concrete user-fill members and decoder |
+| `LimitOrderType` | Required Tif string tag plus actual native enum variant identity |
+| `TriggerOrderType` | Trigger numeric bits, boolean and native Tpsl identity |
+| `CancelByCloidRequest` | Distinct native coin and Cloid string |
+| `ClearinghouseStateAssetPositionsItemPosition` | Every scalar and nested funding/leverage member |
+| `ClearinghouseStateAssetPositionsItem` | Native position object and type string |
+| `ClearinghouseState` | Ordered position collection, both margin records, time and raw strings |
+| `WsOrder` | Native order object, status, timestamp bits and user |
+| `WsUserFills` | Snapshot bool, ordered fill collection and user |
+| `WsUserFundings` | Snapshot bool, ordered funding collection and user |
+| `WsUserNonFundingLedgerUpdate` | Time bits, coin/usdc and all four native ledger variants |
+| `WsUserNonFundingLedgerUpdates` | Snapshot bool, ordered ledger collection and user |
+| `WsBook` | Coin/time and independently observed bid/ask collections |
+| `L2Book` | Actual distinct bid/ask tuple members with element order/cardinality |
+| `WsBbo` | Both independently nullable book slots, coin and time bits |
+| `SpotClearinghouseBalance` | Required strings and optional token/entryNtl presence; present null refused |
+
+All 1,519 expected cases were authored from the reviewed declarations and values,
+without candidate decoder outputs. Each actual maintained adapter reads typed
+native members recursively before owner serialization. It records binary64 bits,
+native enum variants, Option presence and every sequence element in order. Values
+vary individually at each primitive leaf as well as together; collection witnesses
+use distinct elements, multiple lengths, empty collections and reversed order.
+The corpus independently checks every object member's omission/null/wrong shape,
+string versus tagged enum shapes, valid complete declaration-order arrays at
+nested map boundaries, wrong tuple lengths, scalar roots, negative zero, positive
+overflow and negative underflow. Both nullable bid/ask slots vary independently;
+optional spot members admit omission and reject present null.
+
+The installed twenty literal contract adapters pass twenty actual native tests,
+1,519 cases through six public Serde/shared ingress routes: 9,114 observations.
+The single-field LimitOrderType projection reads the actual tag and Rust variant;
+L2Book reads the actual two tuple members. These are native values, not echoed
+inputs or success/cardinality placeholders.
+
+Each public map guard was removed independently while preserving JsNumberInput capture and all private wire attributes. All twenty compiled mutations failed the named complete-valid-array native assertion. Separate mutations removed only token or entryNtl present-value admission; both compiled and failed their named present-null assertion. The entire production source was restored byte-for-byte after every mutation. The final restored replay passes all twenty native tests / 1,519 cases / 9,114 observations.
+
+After inheriting current master and merged #382, strict native all-target clippy, formatting and parity pass. parity:check indexes 7459 rows and 17214 public Rust items. Static compiler checks authenticate all reviewed native field identities (including the twenty roots and nine reused child records), exact owner APIs, unchanged public decoder and private wire bodies, and every original census key.
+
+All 82 master contracts are preserved unchanged, with only these twenty new rows appended. The actual inventory remains 534 owners, 36 aliases and two construction obligations (572 total). This branch has 93 reviewed owners, nine aliases and two construction reviews: 104 reviewed, 468 remaining.
+
+The ordinary package gate retains `rate_limit.rs::LOCAL_FUNCTION:text: decoder helper requires its inventoried production decoder`. That existing policy points at non-indexed raw_number; its caller/native-evidence review is separate. This batch does not change local-helper policies or grant a preflight exception.
+
+This reviews only the twenty concrete native/default owners. Child owners,
+private companions, local helpers, aliases, dependencies, serializers and the
+remaining target/feature matrix retain their own obligations. No whole-package
+acceptance is claimed.
+
+# Three fixed future and callback alias reviews
+
+The ordinary package preflight previously stopped at
+`spot_account_reads::AccountFuture` with `fixed local future alias probe:
+lifetime then output parameter required`. These three reviewed declarations use
+two type parameters, so their exact identities belong in the existing finite
+`generic-aliases` registry. No scanner, alias helper or validator is widened.
+All six existing fixed Realm projection records remain unchanged.
+
+| Actual alias | Fixed reviewed instantiation | Independent expected container |
+| --- | --- | --- |
+| `spot_account_reads::AccountFuture<V,E>` | production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>>>>` |
+| `income::IncomeFuture<'a,V,E>` | `'static`, production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>> + 'static>>` |
+| `startup_timeout::TimeoutCallback<V,E>` | production `Value, Value` | `Rc<dyn Fn(Vec<Value>)->Result<Value,Value>>` |
+
+The registry fixes the actual source file, compiler generic bounds, raw and
+expanded targets, parameter order, canonical Pin/Rc roots, sizedness and expected
+native type. Fresh ordinary compiler discovery retains every 534 owner and 36
+alias before selecting the three. Artifact authentication and all ordinary Serde
+and conversion detectors run through the maintained `runProbes` implementation.
+
+`tests/support/accepted_future_aliases.rs` additionally runs three actual native
+witnesses. Compile-time Realm host bounds authenticate Value/Error bindings;
+invariant mutable references and TypeId pin the independently authored expected
+container. Both futures preserve Pending, a real waker call, Ready success/error,
+exact numeric bits, lone UTF-16 units, undefined and object/error identity. Poll,
+wake and drop counts include unpolled cancellation. The callback preserves shared
+Rc allocation/clone identity, ordered native arguments and returned/thrown object
+identity. These are distinct runtime witnesses, not classification-only receipts.
+They do not exercise the host bodies that supply those executable containers.
+
+The three actual alias contracts pass ordinary native and target-specific Wasm capability classifications (three classifications, zero failures on each target). Separate native ownership/result tests pass 3/3. Strict all-target native clippy, formatting and parity pass; parity indexes 7459 rows and 17214 public Rust items.
+
+Removing each of the three exact finite registry entries independently restores its original ordinary preflight refusal in a fresh process using actual compiler/artifact context. Each policy file is restored byte-for-byte in finally, and all three native capability probes pass after restoration. No validator guard is removed or widened.
+
+After integrating merged #378, all 79 master contracts and six master projection records remain unchanged. The branch has 73 reviewed owners, nine aliases and two construction obligations: 84 of 572 reviewed, 488 remaining. Ordinary preflight advances past the three aliases and retains `rate_limit.rs::LOCAL_FUNCTION:text: decoder helper requires its inventoried production decoder`; its existing policy points to non-indexed `rate_limit::raw_number`. The inventoried request-weight caller and its native observations require a separate review.
+
+Only these three fixed Value/Value monomorphizations are classified; other
+arguments, IncomeFuture lifetimes, host bodies, local helpers, dependencies and
+the remaining feature/target matrix retain their separate obligations. No whole
+package clearance is claimed.
+
 # Twenty-two required-field record reviews
 
 This cohort reviews 22 concrete records individually against their maintained TS
