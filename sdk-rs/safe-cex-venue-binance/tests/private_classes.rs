@@ -3867,3 +3867,212 @@ fn production_native_private_post_only_rejection_keeps_the_rejection_reason() {
     );
     assert!(fills.borrow().is_empty(), "cancel rejection emits no fill");
 }
+
+#[cfg(feature = "native")]
+#[derive(Default)]
+struct ProjectionWire(std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>);
+#[cfg(feature = "native")]
+impl safe_cex_transport::RestAdapter for ProjectionWire {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        self.0.lock().unwrap().push(request);
+        Box::pin(async {
+            Ok(safe_cex_transport::RestResponse {
+                status: 200,
+                reason: Some("OK".into()),
+                headers: Default::default(),
+                body: safe_cex_transport::RestResponseBody::Encoded(br#"{"ok":true}"#.to_vec()),
+            })
+        })
+    }
+}
+#[cfg(feature = "native")]
+fn projection_host() -> (
+    Rc<Runtime>,
+    Rc<dyn ExchangeImports>,
+    std::sync::Arc<ProjectionWire>,
+) {
+    let runtime = Rc::new(Runtime::default());
+    let wire = std::sync::Arc::new(ProjectionWire::default());
+    let deps = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        wire.clone(),
+        Rc::new(|_, _| panic!("no external provider")),
+        None,
+        Default::default(),
+    );
+    (runtime, deps.imports, wire)
+}
+#[cfg(feature = "native")]
+fn projection_client(imports: &dyn ExchangeImports, kind: Factory) -> EventValue {
+    let options = EventValue::from_json(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    let owner = record([("name", string("binance")), ("options", options.clone())]);
+    imports
+        .factory(Venue::Futures, kind, options, owner)
+        .unwrap()
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_query_bigint_is_rendered_instead_of_dropping_every_parameter() {
+    for method in [HttpMethod::Get, HttpMethod::Delete] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::PublicAPI);
+        let params = record([
+            ("symbol", string("BTCUSDT")),
+            (
+                "orderId",
+                EventValue::BigInt(Rc::new("10".parse().unwrap())),
+            ),
+        ]);
+        let result = run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(params))
+                .unwrap(),
+        )
+        .result;
+        result.expect("BigInt query must be admitted by the real production host");
+        let calls = wire.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].url, "/projection?symbol=BTCUSDT&orderId=10",
+            "real native query must keep all params and stringify BigInt"
+        );
+    }
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_body_bigint_rejects_before_any_transport_call() {
+    for method in [HttpMethod::Post, HttpMethod::Put] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::PublicAPI);
+        let data = record([(
+            "quantity",
+            EventValue::BigInt(Rc::new("10".parse().unwrap())),
+        )]);
+        let error = run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(data))
+                .unwrap(),
+        )
+        .result
+        .expect_err("real native JSON body must reject BigInt before transport");
+        assert_eq!(error.name, "TypeError");
+        assert!(
+            wire.0.lock().unwrap().is_empty(),
+            "serialization refusal must send no empty request"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_signing_observes_bigint_query_and_body_before_serialization() {
+    use std::io::Write;
+    let mut vectors = vec![];
+    let mut queries = vec![];
+    for method in [HttpMethod::Get, HttpMethod::Post] {
+        let (runtime, imports, wire) = projection_host();
+        let client = projection_client(imports.as_ref(), Factory::API);
+        let payload = record([
+            ("symbol", string("BTCUSDT")),
+            (
+                "orderId",
+                EventValue::BigInt(Rc::new("10".parse().unwrap())),
+            ),
+        ]);
+        run(
+            &runtime,
+            imports
+                .request(client, method, "/projection", Some(payload))
+                .unwrap(),
+        )
+        .result
+        .expect("source signs BigInt as its decimal query spelling");
+        let calls = wire.0.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert!(
+            calls[0]
+                .url
+                .starts_with("/projection?symbol=BTCUSDT&orderId=10&timestamp="),
+            "real native signer must retain request arguments: {}",
+            calls[0].url
+        );
+        assert!(calls[0].url.contains("&signature="));
+        assert!(
+            calls[0].body.is_none(),
+            "source signer moves data to the query"
+        );
+        let query = calls[0].url.split_once('?').unwrap().1.to_owned();
+        let fields: std::collections::HashMap<_, _> = query
+            .split('&')
+            .map(|pair| pair.split_once('=').unwrap())
+            .collect();
+        let is_get = matches!(method, HttpMethod::Get);
+        let mut config = json!({"method":if is_get {"get"}else{"post"},"url":"/projection"});
+        config[if is_get { "params" } else { "data" }] = json!({"symbol":"BTCUSDT","orderId":"10"});
+        vectors.push(json!({"mode":if is_get {"bigint-query"}else{"bigint-body"},"lossy":true,"config":config,"options":{"key":"fixture-key","secret":"fixture-secret"},"now":fields["timestamp"].parse::<f64>().unwrap(),"window":fields["recvWindow"].parse::<f64>().unwrap()}));
+        queries.push(query);
+    }
+    // One source capture for the complete signed corpus, using actual TS, qs and HMAC.
+    let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+    });
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/signing.mjs"))
+        .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&vectors).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 2, "independent signed BigInt source floor");
+    assert_eq!(queries.len(), 2);
+    for (native, source) in queries.iter().zip(source) {
+        assert_eq!(
+            source["query"].as_str(),
+            Some(native.as_str()),
+            "real signed wire must match actual TS BigInt query/HMAC"
+        );
+    }
+}
+#[test]
+#[cfg(feature = "native")]
+fn native_projection_unsigned_private_body_keeps_json_bigint_refusal() {
+    let (runtime, imports, wire) = projection_host();
+    let options = EventValue::from_json(json!({"key":"","secret":""}));
+    let owner = record([("name", string("binance")), ("options", options.clone())]);
+    let client = imports
+        .factory(Venue::Futures, Factory::API, options, owner)
+        .unwrap();
+    let payload = record([(
+        "quantity",
+        EventValue::BigInt(Rc::new("10".parse().unwrap())),
+    )]);
+    let error = run(
+        &runtime,
+        imports
+            .request(client, HttpMethod::Post, "/projection", Some(payload))
+            .unwrap(),
+    )
+    .result
+    .expect_err("skipped signing must leave original JSON BigInt refusal");
+    assert_eq!(error.name, "TypeError");
+    assert!(wire.0.lock().unwrap().is_empty());
+}
