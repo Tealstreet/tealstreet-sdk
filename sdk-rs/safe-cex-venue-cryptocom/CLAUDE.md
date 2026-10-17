@@ -33,6 +33,10 @@ must fail the non-2xx signature-resend E2E test until the shared ordering is fix
 the venue `private/cancel-all-orders`; the base store-only sweep would miss
 orders the Store has not mapped. Both rethrow a venue rejection.
 
+`fetchOHLCV`, `listenOHLCV` and `listenOrderBook` forward to the source bodies
+(GET `public/get-candlestick`, `candlestick.<interval>.<symbol>`, `book.<symbol>.50`);
+the base defaults returned `[]` and never subscribed.
+
 Source REST `fetchBalance` returns currency records with `available`/`locked`
 under an `as any` cast. The binding uses shared `CurrencyBalance::AvailableLocked`
 at both validation and Store boundaries, preserving those exact fields. It does

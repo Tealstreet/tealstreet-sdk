@@ -567,6 +567,168 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
     h.venue().dispose().expect("dispose");
 }
 
+fn started(script: impl FnOnce(&support::Http)) -> Harness {
+    let h = venue(|http| {
+        http.ok("POST", "/private/get-open-orders", open_orders());
+        http.ok(
+            "POST",
+            "/private/advanced/get-open-orders",
+            advanced_orders(),
+        );
+        http.ok("POST", "/private/get-positions", positions());
+        http.ok("POST", "/private/user-balance", balance());
+        script(http);
+    });
+    h.drive(h.venue().start()).expect("start");
+    h
+}
+
+fn market_socket(h: &Harness) -> std::rc::Rc<support::Socket> {
+    h.runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/market"))
+        .expect("public market socket")
+        .1
+        .clone()
+}
+
+fn public_frame(h: &Harness, result: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    market_socket(h)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"id": -1, "method": "subscribe", "code": 0, "result": result}).to_string(),
+        )));
+    for _ in 0..4 {
+        h.runtime.advance(50.0);
+    }
+}
+
+fn sent_channels(h: &Harness, method: &str) -> Vec<Value> {
+    market_socket(h)
+        .sent
+        .borrow()
+        .iter()
+        .filter_map(|m| serde_json::from_str::<Value>(m).ok())
+        .filter(|m| m["method"] == method)
+        .flat_map(|m| {
+            m["params"]["channels"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+// ts: cryptocom.exchange.ts fetchOHLCV posts public/get-candlestick and maps each row.
+#[test]
+fn fetch_ohlcv_reads_venue_candlesticks() {
+    let h = venue(|http| {
+        http.ok(
+            "GET",
+            "/public/get-candlestick",
+            ok(json!({"data": [
+                {"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}
+            ]})),
+        )
+    });
+    loaded(&h);
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let candles = h.drive(h.venue().fetch_ohlcv(opts)).expect("fetchOHLCV");
+    assert_eq!(candles.len(), 1, "venue candles are returned");
+    assert_eq!(candles[0].timestamp, 1_700_000_000_000.0);
+    assert_eq!(
+        (
+            candles[0].open,
+            candles[0].high,
+            candles[0].low,
+            candles[0].close,
+            candles[0].volume
+        ),
+        (1.0, 2.0, 0.5, 1.5, 10.0)
+    );
+    let call = &h.http.calls("/public/get-candlestick")[0];
+    assert_eq!(call.method, "GET", "public reads go out as GET");
+    assert_eq!(
+        call.params,
+        json!({"instrument_name": SYMBOL, "timeframe": "1h"})
+    );
+}
+
+// ts: cryptocom.ws-public.ts listenOrderBook subscribes book.<symbol>.50 and replaces both sides.
+#[test]
+fn listen_order_book_subscribes_and_delivers_snapshots() {
+    let h = started(|_| {});
+    let books = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = books.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            std::rc::Rc::new(move |b| sink.borrow_mut().push(b)),
+        )
+        .expect("listenOrderBook");
+    h.runtime.advance(50.0);
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "book subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "book", "subscription": format!("book.{SYMBOL}.50"),
+               "instrument_name": SYMBOL,
+               "data": [{"bids": [["30000", "1", "1"]], "asks": [["30001", "2", "1"]], "t": 1}]}),
+    );
+    let books = books.borrow();
+    assert!(!books.is_empty(), "order book callback fired");
+    let last = books.last().unwrap();
+    assert_eq!((last.bids[0].price, last.bids[0].amount), (30000.0, 1.0));
+    assert_eq!((last.asks[0].price, last.asks[0].amount), (30001.0, 2.0));
+    drop(books);
+    cleanup().expect("cleanup");
+    assert!(
+        sent_channels(&h, "unsubscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "last listener unsubscribes"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+// ts: cryptocom.ws-public.ts listenOHLCV subscribes candlestick.<interval>.<symbol>.
+#[test]
+fn listen_ohlcv_subscribes_and_delivers_candles() {
+    let h = started(|_| {});
+    let candles = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = candles.clone();
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let _cleanup = h
+        .venue()
+        .listen_ohlcv(opts, std::rc::Rc::new(move |c| sink.borrow_mut().push(c)))
+        .expect("listenOHLCV");
+    h.runtime.advance(50.0);
+    let channel = format!("candlestick.1h.{SYMBOL}");
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(channel)),
+        "candlestick subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "candlestick", "subscription": channel, "instrument_name": SYMBOL,
+               "interval": "1h",
+               "data": [{"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}]}),
+    );
+    let candles = candles.borrow();
+    assert_eq!(candles.len(), 1, "candle callback fired once");
+    assert_eq!(candles[0].close, 1.5);
+    drop(candles);
+    h.venue().dispose().expect("dispose");
+}
+
 #[test]
 fn constructing_another_venue_name_is_refused() {
     let runtime = std::rc::Rc::new(support::Runtime::default());
