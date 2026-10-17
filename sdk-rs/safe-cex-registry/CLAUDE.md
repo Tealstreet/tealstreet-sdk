@@ -235,3 +235,9 @@ with the selected family name bound before requests. Preserve the source local
 signing requirement on private HTTP even with hosted signing. Private WS stays
 local-only; empty-secret recovery follows the existing approved onOpen contract.
 `native_host_orderly_hosted` covers all six names with valid/empty local secrets.
+
+The native tunnel target also constructs global OKX, EU and EU demo with
+tealstreetProxy/tealstreetTunnel. Account validation uses the family's actual
+endpoint, through the shared provider-selected BigInt adapter. The loopback
+tradetunnel authenticates the account proxy token, verifies private request HMACs
+and raw response frames, and requires zero direct venue HTTP requests.

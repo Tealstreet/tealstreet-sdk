@@ -152,3 +152,11 @@ to the existing native operation rather than implementing another terminal map.
 `tests/terminal_store_controls.py` faults the bridge registration, terminal-memory
 delegation, empty-Store handling, subscriber-error propagation and typed ID
 admission, requiring named compiled failures and exact restoration.
+
+The concrete API global now delegates safeCexAxiosCreate to the shared routed
+factory and installs the source's BigInt adapter through the actual provider.
+Tunneled construction works across global, EU and EU demo without a venue-local
+adapter replacement. `safe-cex-registry/tests/native_host_tunnel.rs` validates
+private account reads through authenticated local HOW, server-verifies HMACs,
+requires raw response frames and forbids direct HTTP traffic. The existing
+response-domain limitations remain recorded in their owning rows.

@@ -333,10 +333,14 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     def(
         "safeCexAxiosCreate",
         Js::function("safeCexAxiosCreate", move |_, a| {
-            Ok(client::create(
-                scope_of(&w)?.shared.http.clone(),
+            let scope = scope_of(&w)?;
+            client::factory::create(
+                scope.shared.http.clone(),
+                scope.shared.runtime.transport().as_ref(),
                 arg(&a, 0),
-            ))
+                &arg(&a, 1),
+                scope.base(),
+            )
         }),
     );
     def(
@@ -381,11 +385,23 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     );
     def(
         "installTransportAdapter",
-        Js::function("installTransportAdapter", |_, _| {
-            Err(Thrown::error(
-                "Error",
-                "Tealstreet tunnel transport is not available in the Rust OKX binding",
-            ))
+        Js::function("installTransportAdapter", {
+            let weak = weak.clone();
+            move |_, a| {
+                let scope = scope_of(&weak)?;
+                if text(&arg(&a, 3))? != "bigInt" {
+                    return Err(Thrown::type_error("Unexpected OKX transport parser"));
+                }
+                client::factory::install_transport_adapter(
+                    scope.shared.http.clone(),
+                    scope.shared.runtime.transport().as_ref(),
+                    &arg(&a, 0),
+                    &arg(&a, 1),
+                    to_typed(&arg(&a, 2))?,
+                    safe_cex_transport::RestAdapterVariant::BigInt,
+                )?;
+                Ok(Js::Undefined)
+            }
         }),
     );
     def(
