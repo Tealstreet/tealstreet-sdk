@@ -52,7 +52,7 @@ async fn requests(secondary: Option<&str>) -> Vec<Seen> {
     let account = open_native_account(NativeAccountSpec {
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange: "mexc".into(),
-        options: options.into(),
+        options,
         account_name: None,
         sign: None,
         proxy_token: None,

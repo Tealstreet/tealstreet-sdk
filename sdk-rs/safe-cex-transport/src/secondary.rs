@@ -86,6 +86,19 @@ impl SecondaryKeyClients {
         request.method = "get".into();
         self.secondary.execute(request)
     }
+    pub fn get_with_receipt(
+        &self,
+        mut request: RestRequest,
+    ) -> crate::RestFuture<'_, crate::RestExecution> {
+        request.method = "get".into();
+        self.secondary.execute_with_receipt(request)
+    }
+    pub fn request_with_receipt(
+        &self,
+        request: RestRequest,
+    ) -> crate::RestFuture<'_, crate::RestExecution> {
+        self.primary.execute_with_receipt(request)
+    }
     // Generic request calls, HEAD, and writes remain primary, matching the TS get-only Proxy.
     pub fn request(&self, request: RestRequest) -> crate::RestFuture<'_, RestResponse> {
         self.primary.execute(request)
