@@ -317,3 +317,11 @@ registry also exposes that capability to typed canSign. Private WebSocket auth
 uses the local Ed25519 secret exactly as the source: a missing secret logs the
 original RangeError and sends no subscription, even when HTTP is hosted. See
 [the hosted signer evidence](HOSTED_SIGNER_EVIDENCE.md); no hosted WS path is added.
+
+Private reconnects use the inherited orders-only snapshot refresh. They must not
+call `tick`, which schedules another recurring account/position/balance poll.
+`tests/private_reopen.rs` drives the real socket lifecycle and authentication,
+checks that reconnect refreshes orders, and advances the runtime clock to verify
+that the original polling chain remains the only one.
+The same socket-event fixture covers private order and position Store commits,
+fill emission, and the real REST balance refresh triggered by an order-fill frame.

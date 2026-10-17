@@ -181,3 +181,9 @@ for constructed trait coverage, actual SDK signatures and compiled controls.
 Preserve source fetchPositions balance writes and exchange disposal without base
 cleanup. Only constructed private onOpen uses the approved shared authentication
 recovery contract; direct authenticate keeps the original catch and log behavior.
+
+Native `cancel_all_orders` and `cancel_symbol_orders` call the venue receiver
+methods, whose DELETE /orders behavior also covers orders absent from Store.
+Keep the symbol in the original params.market config so the shared HTTP adapter
+owns query serialization. Both methods preserve the existing catch/log/rethrow
+path; an empty Store must not turn a rejected venue cancellation into success.

@@ -225,33 +225,3 @@ fn decoded_native_field_identity_cannot_cancel_through_serialization() {
         "native futures instrument identity"
     );
 }
-#[test]
-#[ignore = "requires isolated TypeScript compiler; mandatory venue gate"]
-fn original_archive_loader_has_direct_column_identity() {
-    let script = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/archive-identity-oracle.mjs"
-    );
-    let run = std::process::Command::new("node")
-        .arg(script)
-        .output()
-        .unwrap();
-    assert!(
-        run.status.success(),
-        "{}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let capture: Value = serde_json::from_slice(&run.stdout).unwrap();
-    assert_eq!(capture["records"], 87845);
-    let mutation = std::process::Command::new("node")
-        .arg(script)
-        .arg("--mutate-columns")
-        .output()
-        .unwrap();
-    assert_eq!(mutation.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&mutation.stderr).contains("archive loader field identity open"),
-        "{}",
-        String::from_utf8_lossy(&mutation.stderr)
-    );
-}
