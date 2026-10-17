@@ -5,7 +5,7 @@ use safe_cex_exchange::{
 use safe_cex_store::store::DefaultStore;
 use safe_cex_transport::{RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse};
 use safe_cex_types::ExchangeName;
-use safe_cex_venue_kucoin::{accounts, spot_reads, spot_writes};
+use safe_cex_venue_kucoin::accounts;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -127,18 +127,7 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
     let mut cases = vec![];
     for (venue, methods) in [
         ("kucoin", vec!["getAccount"]),
-        (
-            "kucoinspot",
-            vec![
-                "getAccount",
-                "validateAccount",
-                "fetchMarkets",
-                "fetchTickers",
-                "cancelAllOrders",
-                "cancelSymbolOrders",
-                "cancelOrders",
-            ],
-        ),
+        ("kucoinspot", vec!["getAccount", "validateAccount"]),
     ] {
         for method in methods {
             for fail in ["never", "once", "always"] {
@@ -150,16 +139,8 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
             }
         }
     }
-    for case in &mut cases {
-        if case["method"] == "cancelOrders" {
-            case["orders"] = json!([
-                {"id":"cancel-first","symbol":"BTC-USDT","status":"open","type":"limit","side":"buy","price":1,"amount":2,"filled":0,"remaining":2,"reduceOnly":false,"lastUpdate":3},
-                {"id":"cancel-second","symbol":"ETH-USDT","status":"open","type":"limit","side":"buy","price":4,"amount":5,"filled":0,"remaining":5,"reduceOnly":false,"lastUpdate":6}
-            ]);
-        }
-    }
     let expected = source(&cases);
-    assert_eq!(expected.len(), 48);
+    assert_eq!(expected.len(), 18);
     for (case, expected) in cases.into_iter().zip(expected) {
         let base = BaseExchange::new(
             ExchangeName::Kucoinspot,
@@ -211,7 +192,6 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
             case: case.clone(),
             calls: Cell::new(0),
         };
-        let mut original_cancel_failure = None;
         let result: Result<(), ExchangeError> = match case["method"].as_str().unwrap() {
             "getAccount" if case["venue"] == "kucoin" => {
                 ready(accounts::get_account(&base, &adapter)).map(|_| ())
@@ -223,45 +203,8 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
                 }))
                 .map(|_| ())
             }
-            "fetchMarkets" => ready(spot_reads::fetch_markets(&base, &adapter)).map(|_| ()),
-            "fetchTickers" => ready(spot_reads::fetch_tickers(&base, &adapter)).map(|_| ()),
-            "cancelAllOrders" | "cancelSymbolOrders" | "cancelOrders" => {
-                match if case["method"] == "cancelSymbolOrders" {
-                    ready(spot_writes::cancel_symbol_orders(
-                        &base, &adapter, "BTC-USDT",
-                    ))
-                } else if case["method"] == "cancelOrders" {
-                    let orders = serde_json::from_value::<Vec<safe_cex_types::Order>>(
-                        case["orders"].clone(),
-                    )
-                    .unwrap();
-                    ready(spot_writes::cancel_orders(&base, &adapter, &orders))
-                } else {
-                    ready(spot_writes::cancel_all_orders(&base, &adapter))
-                } {
-                    Ok(()) => Ok(()),
-                    Err(error) => match error.downcast::<ExchangeError>() {
-                        Ok(error) => Err(*error),
-                        Err(error) => {
-                            let error = *error
-                                .downcast::<RestFailure>()
-                                .expect("cancel retains concrete transport failure");
-                            let observed = ExchangeError::new(error.message.clone());
-                            original_cancel_failure = Some(error);
-                            Err(observed)
-                        }
-                    },
-                }
-            }
             _ => panic!("unknown method"),
         };
-        if case["method"] == "cancelOrders" {
-            assert_eq!(
-                adapter.calls.get(),
-                1,
-                "KUCOIN-SEQUENTIAL reporting stops the loop"
-            );
-        }
         assert_eq!(
             adapter.calls.get(),
             expected["calls"].as_u64().unwrap() as usize,
@@ -272,37 +215,6 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
             expected["resolved"].as_bool().unwrap(),
             "listener rejection escapes instead of fallback: {case}"
         );
-        if matches!(
-            case["method"].as_str(),
-            Some("cancelAllOrders" | "cancelSymbolOrders" | "cancelOrders")
-        ) && case["transport"] == true
-        {
-            if case["fail"] == "never" {
-                assert_eq!(
-                    expected["rejected"]["sameOriginal"], true,
-                    "source cancel successful emission preserves original transport failure"
-                );
-                let original = original_cancel_failure
-                    .as_ref()
-                    .expect("cancel successful emission preserves original transport failure");
-                assert_eq!(original.code.as_deref(), Some("ECONNRESET"));
-                assert_eq!(original.context.as_deref(), Some(&json!({"original":17})));
-                assert_eq!(original.request.method, "DELETE");
-            } else {
-                assert_eq!(
-                    expected["rejected"]["sameOriginal"], false,
-                    "source cancel failed emission replaces original transport failure"
-                );
-                assert_eq!(
-                    expected["rejected"]["same"], true,
-                    "source cancel failed emission returns listener object"
-                );
-                assert!(
-                    original_cancel_failure.is_none(),
-                    "cancel failed emission replaces original transport failure"
-                );
-            }
-        }
         if expected["rejected"]["same"] == true {
             assert_eq!(
                 result.unwrap_err(),

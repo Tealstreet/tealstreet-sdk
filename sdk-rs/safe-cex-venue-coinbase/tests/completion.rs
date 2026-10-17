@@ -248,7 +248,7 @@ impl OrderEditHost for EditHost {
             Some(a) => num(a, &v["amount"], "native replacement size"),
             None => assert_eq!(v["amount"], json!({"$undefined":true})),
         };
-        assert_eq!(Some(o.reduce_only), v["reduceOnly"].as_bool());
+        assert_eq!(o.reduce_only.into_value(), v["reduceOnly"].as_bool());
         Ok(ready(
             &self.q,
             self.place_error

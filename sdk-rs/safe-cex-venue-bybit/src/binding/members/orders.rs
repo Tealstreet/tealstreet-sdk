@@ -116,10 +116,11 @@ pub(crate) async fn submit_create_orders_body(
                     .unwrap_or(Js::Undefined);
                 let message = error.value.get("message").unwrap_or(Js::Undefined);
                 emit(rt, &format_venue_error(rt, &data, &message)?)?;
-                let unknown =
-                    safe_cex_store::remaining_utils::is_unknown_outcome(&to_json(&error.value)?)
-                        .map_err(|m| Thrown::error("TypeError", &m))?;
-                if single && opts.get("clientOrderId")?.truthy() && unknown {
+                if single
+                    && opts.get("clientOrderId")?.truthy()
+                    && safe_cex_store::remaining_utils::is_unknown_outcome(&to_json(&error.value)?)
+                        .map_err(|m| Thrown::error("TypeError", &m))?
+                {
                     return Err(error);
                 }
             }
