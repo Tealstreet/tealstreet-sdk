@@ -1974,3 +1974,23 @@ fn zero_delay_retry_invokes_scheduler_for_each_retried_attempt() {
         "retry native zero-delay scheduler calls"
     );
 }
+
+#[test]
+fn signing_rate_slots_release_cancelled_waiters_without_spending_capacity() {
+    let clock = Arc::new(HeldClock(Mutex::new(0)));
+    let limiter = RateLimiter::new(clock.clone(), 1, 1000);
+    drop(limiter.acquire()); // An unpolled reservation has no queue side effects.
+    run(limiter.acquire()).unwrap();
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut cancelled = Box::pin(limiter.acquire());
+    let mut next = Box::pin(limiter.acquire());
+    assert!(cancelled.as_mut().poll(&mut cx).is_pending());
+    assert!(next.as_mut().poll(&mut cx).is_pending());
+    drop(cancelled);
+    *clock.0.lock().unwrap() = 1000;
+    assert!(matches!(next.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+    let mut later = Box::pin(limiter.acquire());
+    assert!(later.as_mut().poll(&mut cx).is_pending());
+    *clock.0.lock().unwrap() = 2000;
+    assert!(matches!(later.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+}

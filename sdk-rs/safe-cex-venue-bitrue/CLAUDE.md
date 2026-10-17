@@ -211,9 +211,12 @@ fills, positions and balance. Account/balance notifications exercise the source
 The production collection host consumes `ReadHost::items` with the shared iterator
 protocol. The background order loop reads the actual `prioritySymbols` Set before
 issuing requests; requiring an array there aborts every symbol refresh. The
-constructed-binding `background_orders` regression uses known LIMIT rows and
-asserts both the signed REST read and asynchronous Store commit, independently
-of the coordinated unmapped Order.type representation change.
+constructed-binding `background_orders` target checks known LIMIT rows alongside
+IOC/FOK/POST_ONLY/STOP_LIMIT rows, real HMACs and asynchronous Store commits.
+Those REST type lookups preserve own undefined through shared ModelField rather
+than dropping the symbol’s snapshot. The private parser separately maps these
+native types to Limit; `exchange_binding` checks that source behavior on actual
+private frames. REST and WebSocket lookup rules must remain distinct.
 
 REST signing uses `PrivateHost::virtual_now`, bound to the shared synced clock,
 matching the API's `virtualClock.getCurrentTimeMs()`. `PrivateHost::now` remains

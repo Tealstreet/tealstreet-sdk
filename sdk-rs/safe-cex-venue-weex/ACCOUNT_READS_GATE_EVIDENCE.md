@@ -66,3 +66,43 @@ The merge changed global exemption entries, other venue manifests and the manife
 | Tomllib integration-relative census and new-target declaration audit | 0 | Exactly **8 pending→ported, 1 pending→divergent**, 11 real public Rust declarations for those nine rows. |
 
 The census compares against the actual merge parent `15925fadedb9338798d13cdf6168286aaeff6f15`, not the stale authoring parent. Integration remained 80 ported / 29 divergent / 47 pending for WEEX; this branch is 88 / 30 / 38. Enumeration of this venue census stops at all 156 rows in its six manifests; it is a census, not proof of complete runtime equivalence. A subsequent commit updates only this evidence sheet.
+
+## Silent rejected order legs (wave-1 correction)
+
+This supersedes the historical choice above to report rejected `fetchOrders`
+legs. The maintained source silently drops rejected Promise.allSettled results.
+The real constructed exchange regression in commit `d1d79a149d` compiles on its
+master parent and fails after an algo HTTP rejection: the ordinary order survives,
+but the error emitter incorrectly receives `Exchange Error: algo endpoint unavailable`.
+Removing the reporting capability makes that same regression pass with zero events.
+
+Measured fixed worktree content (before its implementation commit):
+
+- `src/account_reads.rs`: `ce2ef50c1bf94df2a1b3c459b436050041bfede23fc383735b2c32ce3e261eda`
+- `src/binding/reads.rs`: `78e5f1289d6f0ae214a896d23ebed5bc73abedd6e34b5c2f8038992c37384ac4`
+- `tests/account_reads.rs`: `302e26b80c5953c086d7d0cf1b8dc6424cd5bbd462954a28acd3d1c264990ae6`
+- `tests/exchange_binding.rs`: `49e5d4cfa215a55ccdb37b89de9b357f2eefcc53bc508192ca1b9a9201f76165`
+
+The actual-source account-read corpus retains all 54 fixtures and passes. The
+full constructed binding target passes all 35 tests. Strict native and wasm32
+all-target Clippy pass; cancellation inventory passes 6 tests with its intentional
+exporter ignored. Scoped canonical full-resolution parity passes (7459 rows,
+244 public Rust items, zero venue exemptions).
+
+All eight account-read mutation controls compiled, failed their named assertions
+with exit 101, and passed after exact restoration. After the equivalent Clippy
+flatten rewrite, the changed `order-source-order` control was measured again:
+reversing normal/algo source order fails `native_result::orders_unique` (101),
+then restores and passes (0). This replaces the obsolete native-only reporting
+control; it does not claim exhaustive mutation coverage. The default runner still
+executes all eight controls, with an optional named-control selection for review.
+
+Remaining continuation ownership and private/public refresh reporting choices
+remain declared in MANIFEST-SPEC; this correction only fixes fetchOrders reporting.
+
+Post-master merge `c83d2d5151` (master parent `4d4c5ffaba`): all 38 binding
+tests, the 54-fixture source corpus and cancellation inventory (6/1) pass. The
+direct node extractor check reports zero manifest updates. Full-resolution parity
+now fails on the unchanged shared BaseWebSocket.recoverAfterOffline declaration
+pointing to absent JsProtocol::recovers_after_offline; this is a master baseline
+failure outside the WEEX changes, reported to the overseer.

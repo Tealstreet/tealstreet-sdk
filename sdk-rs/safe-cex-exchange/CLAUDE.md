@@ -1226,6 +1226,14 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+`__configureRateLimit` registers a request interceptor at the source registration point. Axios LIFO ordering therefore waits before the earlier signing interceptor, while later request hooks still run before the wait. Each registration owns its window. The queued nonce regression and installed Axios oracle are `tests/js_runtime.rs::rate_limit_dequeues_before_signing_and_keeps_interceptor_registration_order` and `tests/rate-limit-signing-source.cjs`.
+
+JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
+It rejects signs inside radix digits (for example `0x+1`) and preserves the shared
+full-string, whitespace and arbitrary-length binary64 rounding rules. The native
+host `js_string_number` target compares 93 Node results through installed Number,
+including signed radix refusals, large values, overflow and signed zero.
+
 Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
 JavaScript callbacks need not define a Rust total order: NaN comparison results
 mean equality, and inconsistent callbacks must not panic. The first source throw
@@ -1342,3 +1350,20 @@ builtin parser, raw-unit replacement, and HTTP parser independently; each fault
 must compile, fail its named real-boundary assertion, and pass after exact
 restoration. This does not widen HOW response data or typed Store/model strings;
 JSON reviver behavior and exact engine diagnostic text remain outside this fix.
+
+
+Plain JS socket dispatch follows the DOM listener snapshot and per-registration
+removed flag: removal before a callback's turn skips it, and readding the same
+function cannot revive its old registration. ReconnectingWebSocket retains its
+vendored captured-array removal behavior. The native TCP
+`js_socket_listener_removal` witness compares 16 open/message cases with Node
+EventTarget and the actual vendored class, using only shared Node/DOM outcomes.
+The browser rule is https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke;
+Node's additions-during-dispatch quirk is outside this removal comparison.
+
+For array inputs, JS Store `removeOrders` reads each element's `id` and applies
+source object-key coercion; it never treats a bare element as the ID itself.
+Property access and string-hint conversion failures propagate after the source's
+empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
+24 maintained Store cases through the production facade, including numeric keys,
+primitive elements, nullish elements and throwing getters/conversions.

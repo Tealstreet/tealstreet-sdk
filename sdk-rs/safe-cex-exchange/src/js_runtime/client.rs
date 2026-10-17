@@ -42,8 +42,7 @@ struct ClientState {
     requests: Vec<Interceptor>,
     responses: Vec<Interceptor>,
     retry_options: Option<Js>,
-    /// axios-rate-limit windows `(maxRequests, perMilliseconds, sent)`; a chained
-    /// limiter adds a window and a request waits until every window has room.
+    /// Each rate-limit registration owns one window and one request interceptor.
     windows: Vec<(f64, f64, Vec<f64>)>,
 }
 
@@ -140,6 +139,7 @@ pub fn create(host: Host, defaults: Js) -> Js {
         }),
     );
     let limit_state = state;
+    let limit_host = host.clone();
     let _ = client.define(
         "__configureRateLimit",
         Js::function("__configureRateLimit", move |_, a| {
@@ -153,10 +153,31 @@ pub fn create(host: Host, defaults: Js) -> Js {
             } else {
                 (rps.to_number()?, 1000.0)
             };
+            let index = limit_state.borrow().windows.len();
             limit_state
                 .borrow_mut()
                 .windows
                 .push((window.0, window.1, vec![]));
+            let weak = Rc::downgrade(&limit_state);
+            let host = limit_host.clone();
+            let interceptor = Js::function("axiosRateLimit", move |_, a| {
+                let config = arg(&a, 0);
+                let state = weak.upgrade().expect("active client rate-limit state");
+                let host = host.clone();
+                let runtime = host.runtime();
+                Ok(Js::Promise(Promise::spawn(
+                    &runtime,
+                    Box::pin(async move {
+                        throttle(&host, &state, index).await?;
+                        Ok(config)
+                    }),
+                )))
+            });
+            // Axios executes request interceptors in reverse registration order.
+            limit_state
+                .borrow_mut()
+                .requests
+                .push((interceptor, Js::Undefined));
             Ok(Js::Undefined)
         }),
     );
@@ -465,7 +486,7 @@ async fn send_once(
         current = chain_step(interceptor, current).await;
     }
     current = match current {
-        Ok(config) => dispatch_request(host, state, config).await,
+        Ok(config) => dispatch_request(host, config).await,
         Err(error) => Err(error),
     };
     let responses: Vec<Interceptor> = state.borrow().responses.clone();
@@ -475,12 +496,7 @@ async fn send_once(
     current
 }
 
-async fn dispatch_request(
-    host: &Host,
-    state: &Rc<RefCell<ClientState>>,
-    config: Js,
-) -> Result<Js, Thrown> {
-    throttle(host, state).await?;
+async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
     let adapter = config.get("adapter")?;
     let custom_adapter = adapter.is_callable();
     let response = if custom_adapter {
@@ -521,29 +537,28 @@ fn transform_response(response: &Js, config: &Js) -> Result<(), Thrown> {
     response.set("data", data)
 }
 
-async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) -> Result<(), Thrown> {
+async fn throttle(
+    host: &Host,
+    state: &Rc<RefCell<ClientState>>,
+    index: usize,
+) -> Result<(), Thrown> {
     loop {
         let runtime = host.runtime();
         let now = runtime.monotonic_now_ms();
         let wait = {
-            let mut s = state.borrow_mut();
-            let mut wait: Option<f64> = None;
-            for (max, per, sent) in s.windows.iter_mut() {
-                if *max <= 0.0 {
-                    continue;
-                }
-                sent.retain(|t| now - t < *per);
+            let mut state = state.borrow_mut();
+            let (max, per, sent) = &mut state.windows[index];
+            if *max <= 0.0 {
+                None
+            } else {
+                sent.retain(|time| now - time < *per);
                 if sent.len() as f64 >= *max {
-                    let ms = *per - (now - sent[0]);
-                    wait = Some(wait.map_or(ms, |w| w.max(ms)));
-                }
-            }
-            if wait.is_none() {
-                for (_, _, sent) in s.windows.iter_mut() {
+                    Some(*per - (now - sent[0]))
+                } else {
                     sent.push(now);
+                    None
                 }
             }
-            wait
         };
         match wait {
             None => return Ok(()),

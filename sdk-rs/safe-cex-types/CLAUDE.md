@@ -172,6 +172,8 @@ canonical field/serde metadata; optional null and duplicate-field rejection rema
 explicit. Direct raw JSON, private-companion and bounded map-seed witnesses cover
 this seam; plain serde numeric decoding still has its ordinary overflow policy.
 
+OHLCVOptions.interval uses the existing AnyTimeframe union for worker runtime requests. Its 27 literals match maintained AnyTimeframe exactly; the source request annotation remains narrower. The private wire uses the same field type, with its object and optional-field guards unchanged.
+
 Order and Position use `ModelField<T>` for output enums, Order.price, and their
 optional fields. `Absent`, own `Undefined`, and `Value` stay distinct through the
 native model codec; JSON serialization omits the first two. Explicit JSON null

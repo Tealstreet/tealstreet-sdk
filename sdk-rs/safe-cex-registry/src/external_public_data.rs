@@ -10,7 +10,7 @@ use crate::{
 };
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_types::{
-    Candle, OHLCVOptions, OrderBook, Timeframe,
+    AnyTimeframe, Candle, OHLCVOptions, OrderBook,
     gateway::{GatewayChannel, GatewayMessage, GatewayMessageType},
 };
 use serde_json::Value;
@@ -85,7 +85,7 @@ fn remove(map: &ListenerMap, key: &str) {
 fn has_listener(map: &ListenerMap, key: &str) -> bool {
     lookup(map, key).is_some_and(|set| set.borrow().iter().any(Option::is_some))
 }
-fn timeframe(interval: &Timeframe) -> String {
+fn timeframe(interval: &AnyTimeframe) -> String {
     serde_json::to_value(interval)
         .unwrap()
         .as_str()
@@ -97,7 +97,7 @@ fn message(
     exchange: &str,
     channel: Option<GatewayChannel>,
     symbol: Option<String>,
-    interval: Option<Timeframe>,
+    interval: Option<AnyTimeframe>,
 ) -> GatewayMessage {
     GatewayMessage {
         message_type: kind,
@@ -520,7 +520,7 @@ impl ExternalPublicDataProvider {
                     &self.exchange_id,
                     Some(GatewayChannel::Candle),
                     Some(opts.symbol.clone()),
-                    Some(opts.interval),
+                    Some(opts.interval.clone()),
                 )
             };
             self.send(request)?;
@@ -557,7 +557,7 @@ impl ExternalPublicDataProvider {
                             &provider.exchange_id,
                             Some(GatewayChannel::Candle),
                             Some(opts.symbol.clone()),
-                            Some(opts.interval),
+                            Some(opts.interval.clone()),
                         )
                     };
                     provider.send(request)?;
