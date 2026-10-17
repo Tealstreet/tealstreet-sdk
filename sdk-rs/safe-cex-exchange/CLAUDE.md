@@ -1353,6 +1353,11 @@ and side effects. Core host listeners share that snapshot, and an in-flight emit
 keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
 production native runtime and BaseExchange facade against installed tiny-emitter.
 
+Array `slice` applies ToIntegerOrInfinity's NaN-to-zero rule to both bounds,
+including malformed numeric strings. `tests/js_array_slice.rs` compares422 Node
+cases through the installed native builtins, observing each output slot's value
+and presence so copied holes stay distinct from own undefined elements.
+
 The runtime JSON builtin and default encoded-HTTP response parser decode directly
 into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
 including lone surrogates; object members use own data-property definition, and
