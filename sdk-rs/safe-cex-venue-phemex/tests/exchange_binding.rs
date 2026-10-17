@@ -875,7 +875,9 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
             h.runtime.advance(30_000.);
         }
         public_frame(&h, frame.clone());
-        h.runtime.pump();
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
         assert_eq!(
             h.http.calls("/md/v2/fullbook").len(),
             attempt + 1,
@@ -892,7 +894,8 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
         assert_eq!(
             logs.len(),
             if attempt == 2 { 2 } else { 1 },
-            "snapshot warning latch must throttle and reopen"
+            "PHEMEX-SNAPSHOT-WARNING must reach parent.log and throttle/reopen; reports: {:?}",
+            h.runtime.reports.borrow()
         );
         for (severity, message) in logs {
             assert_eq!(severity, "warning");
@@ -905,7 +908,9 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
     }
     h.http.ok("GET", "/md/v2/fullbook", json!({"result":{"sequence":100,"orderbook_p":{"bids":[["100","2"]],"asks":[["102","3"]]}}}));
     public_frame(&h, frame);
-    h.runtime.pump();
+    for _ in 0..8 {
+        h.runtime.pump();
+    }
     assert_eq!(
         received.borrow().len(),
         1,
