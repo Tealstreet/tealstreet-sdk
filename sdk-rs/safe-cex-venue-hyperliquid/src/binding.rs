@@ -20,6 +20,7 @@ use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
     },
+    client_order_id::ClientOrderLookup,
     exchange::{
         AccountIdentityPatch, BaseExchange, Exchange, ExchangeSettings, IdentityFieldPatch,
         ValidatedBatch, ValidatedOrder,
@@ -290,6 +291,85 @@ impl Exchange for HyperliquidExchange {
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("start", |_| Ok(vec![])))
+    }
+    fn fetch_ohlcv(
+        &self,
+        options: safe_cex_types::OHLCVOptions,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::Candle>> {
+        Box::pin(self.typed("fetchOHLCV", move |r| Ok(vec![r.from_typed(&options)?])))
+    }
+    fn fetch_historical_fills(
+        &self,
+        options: safe_cex_types::ExecutionsOptions,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::Execution>> {
+        Box::pin(self.typed("fetchHistoricalFills", move |r| {
+            Ok(vec![r.from_typed(&options)?])
+        }))
+    }
+    fn fetch_historical_orders(
+        &self,
+        options: Option<safe_cex_types::OrderHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::HistoricalOrder>> {
+        Box::pin(self.typed("fetchHistoricalOrders", move |r| {
+            Ok(vec![opt(r, &options)?])
+        }))
+    }
+    fn fetch_income_history(
+        &self,
+        options: Option<safe_cex_types::IncomeHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::IncomeRecord>> {
+        Box::pin(self.typed("fetchIncomeHistory", move |r| Ok(vec![opt(r, &options)?])))
+    }
+    fn fetch_income_history_range(
+        &self,
+        start: f64,
+        end: f64,
+        kind: Option<String>,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::IncomeRecord>> {
+        Box::pin(self.typed("fetchIncomeHistoryRange", move |r| {
+            Ok(vec![
+                Value::Number(start),
+                Value::Number(end),
+                opt(r, &kind)?,
+            ])
+        }))
+    }
+    fn fetch_and_set_private_snapshot(&self, tries: u32) -> ExchangeFuture<'_, ()> {
+        Box::pin(self.unit("fetchAndSetPrivateSnapshot", move |_| {
+            Ok(vec![Value::Number(tries as f64)])
+        }))
+    }
+    fn find_order_by_client_order_id(
+        &self,
+        symbol: String,
+        id: String,
+    ) -> ExchangeFuture<'_, ClientOrderLookup> {
+        Box::pin(async move {
+            let (mut realm, result) = self
+                .bound()?
+                .invoke("findOrderByClientOrderId", move |_| {
+                    Ok(vec![Value::str(&symbol), Value::str(&id)])
+                })
+                .await?;
+            let found = realm
+                .get_str(&result, "found")
+                .map_err(|error| realm.exchange_error(&error))?;
+            if found.truthy() {
+                let order = realm
+                    .get_str(&result, "order")
+                    .map_err(|error| realm.exchange_error(&error))?;
+                let order = realm
+                    .to_typed(&order)
+                    .map_err(|error| realm.exchange_error(&error))?;
+                Ok(ClientOrderLookup::Found(Box::new(order)))
+            } else {
+                let definitive = realm
+                    .get_str(&result, "definitive")
+                    .map_err(|error| realm.exchange_error(&error))?
+                    .truthy();
+                Ok(ClientOrderLookup::NotFound { definitive })
+            }
+        })
     }
     fn fetch_historical_positions(
         &self,

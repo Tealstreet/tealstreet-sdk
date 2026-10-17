@@ -742,3 +742,322 @@ fn fractional_host_clock_still_produces_integer_date_now_signing_nonces() {
     assert_eq!(body["nonce"].as_f64(), Some(1_700_000_000_000.0));
     assert!(body["signature"]["r"].is_string());
 }
+
+fn seam_started() -> Fixture {
+    let f = started();
+    // Join the startup's actual coalesced order read before seeding assertions.
+    f.host.block_on(f.exchange.fetch_orders(None)).unwrap();
+    f.host.settle();
+    f
+}
+fn seam_order() -> safe_cex_types::Order {
+    serde_json::from_value(json!({"id":"777","status":"open","symbol":"BTC-PERP","type":"stop_market","side":"sell","price":59000,"amount":0.01,"filled":0,"remaining":0.01,"reduceOnly":true,"lastUpdate":1700000000000u64})).unwrap()
+}
+fn seam_route(f: &Fixture, route: &str, response: Value) {
+    let mut routes = f.routes.routes.borrow_mut();
+    if let Some((_, value)) = routes.iter_mut().find(|(name, _)| name == route) {
+        *value = response;
+    } else {
+        routes.push((route.into(), response));
+    }
+}
+fn seam_fill() -> Value {
+    json!({"coin":"BTC","tid":901,"oid":777,"time":1699999999000u64,"side":"A","px":"62000","sz":"0.25","fee":"2","feeToken":"USDC","closedPnl":"125","dir":"Close Long","startPosition":"0.25","crossed":true,"hash":"authored-history-fill"})
+}
+fn seam_core_state() -> Value {
+    json!({"marginSummary":{"accountValue":"2400","totalNtlPos":"15000","totalRawUsd":"2400","totalMarginUsed":"60"},"crossMarginSummary":{"accountValue":"2400","totalNtlPos":"15000","totalRawUsd":"2400","totalMarginUsed":"60"},"withdrawable":"2340","crossMaintenanceMarginUsed":"30","time":1700000000100u64,"assetPositions":[{"type":"oneWay","position":{"coin":"BTC","szi":"0.25","entryPx":"60000","positionValue":"15000","unrealizedPnl":"125","returnOnEquity":"0.1","marginUsed":"60","liquidationPx":null,"maxLeverage":40,"leverage":{"type":"cross","value":5},"cumFunding":{"allTime":"0","sinceOpen":"0","sinceChange":"0"}}}]})
+}
+
+#[test]
+fn production_seam_terminal_cancel_removes_the_local_order_after_the_venue_miss() {
+    let f = seam_started();
+    let order = seam_order();
+    f.exchange
+        .base()
+        .store
+        .add_or_update_orders(vec![order.clone()])
+        .unwrap();
+    seam_route(
+        &f,
+        "exchange:cancel",
+        json!({"status":"ok","response":{"type":"cancel","data":{"statuses":[{"error":"Order was never placed, already canceled, or filled. asset=0"}]}}}),
+    );
+    let result = f.host.block_on(f.exchange.cancel_orders(vec![order]));
+    assert_eq!(f.routes.count("exchange:cancel"), 1);
+    result.expect("a terminal venue miss must resolve through the real production import");
+    assert!(
+        f.exchange
+            .base()
+            .store
+            .orders()
+            .iter()
+            .all(|o| o.id != "777"),
+        "successful terminal cancellation clears the actual Store"
+    );
+}
+
+#[test]
+fn production_seam_nonterminal_cancel_retains_the_original_error_and_order() {
+    let f = seam_started();
+    let order = seam_order();
+    f.exchange
+        .base()
+        .store
+        .add_or_update_orders(vec![order.clone()])
+        .unwrap();
+    seam_route(
+        &f,
+        "exchange:cancel",
+        json!({"status":"ok","response":{"type":"cancel","data":{"statuses":[{"error":"authored cancel rejection"}]}}}),
+    );
+    let error = f
+        .host
+        .block_on(f.exchange.cancel_orders(vec![order]))
+        .unwrap_err();
+    assert!(
+        error.message.contains("authored cancel rejection"),
+        "original error must survive classification: {error:?}"
+    );
+    assert!(
+        f.exchange
+            .base()
+            .store
+            .orders()
+            .iter()
+            .any(|o| o.id == "777")
+    );
+}
+
+#[test]
+fn production_seam_fetch_candles_reaches_the_venue_and_returns_native_values() {
+    let f = seam_started();
+    seam_route(
+        &f,
+        "info:candleSnapshot",
+        json!([{"t":1699999940000u64,"T":1700000000000u64,"o":"60000","h":"61000","l":"59000","c":"60500","v":"12.5"}]),
+    );
+    let options = serde_json::from_value(
+        json!({"symbol":"BTC-PERP","interval":"1m","limit":2,"to":1700000000000u64}),
+    )
+    .unwrap();
+    let candles = f.host.block_on(f.exchange.fetch_ohlcv(options)).unwrap();
+    assert_eq!(
+        candles.len(),
+        1,
+        "the shared empty default must not handle candles"
+    );
+    let candle = &candles[0];
+    assert_eq!(
+        (
+            candle.timestamp,
+            candle.open,
+            candle.high,
+            candle.low,
+            candle.close,
+            candle.volume
+        ),
+        (1699999940.0, 60000.0, 61000.0, 59000.0, 60500.0, 12.5)
+    );
+    let request = last_body(&f, "info:candleSnapshot");
+    assert_eq!(
+        request["req"],
+        json!({"coin":"BTC","interval":"1m","startTime":1699999880000u64,"endTime":1700000000000u64})
+    );
+}
+
+#[test]
+fn production_seam_lookup_uses_order_status_by_cloid_without_mutating_orders() {
+    use safe_cex_exchange::client_order_id::ClientOrderLookup;
+    let f = seam_started();
+    let id = "0x11111111111111111111111111111111";
+    seam_route(
+        &f,
+        "info:orderStatus",
+        json!({"status":"order","order":{"status":"filled","order":{"coin":"BTC","oid":777,"side":"B","limitPx":"60000","sz":"0","origSz":"0.25","timestamp":1699999999000u64,"orderType":"Limit","reduceOnly":false,"cloid":id}}}),
+    );
+    let before = f.routes.count("info:frontendOpenOrders");
+    let result = f
+        .host
+        .block_on(
+            f.exchange
+                .find_order_by_client_order_id("BTC-PERP".into(), id.into()),
+        )
+        .unwrap();
+    let ClientOrderLookup::Found(order) = result else {
+        panic!("production lookup must find the filled order via orderStatus")
+    };
+    assert_eq!(order.id, "777");
+    assert_eq!(order.status, safe_cex_types::OrderStatus::Closed);
+    assert_eq!(order.client_order_id.as_deref(), Some(id));
+    assert_eq!(
+        last_body(&f, "info:orderStatus"),
+        json!({"type":"orderStatus","user":MASTER,"oid":id})
+    );
+    assert_eq!(
+        f.routes.count("info:frontendOpenOrders"),
+        before,
+        "lookup must not refresh/mutate the open-order snapshot"
+    );
+    assert!(f.exchange.base().store.orders().is_empty());
+}
+
+#[test]
+fn production_seam_reconnect_snapshot_refreshes_core_positions_and_balance() {
+    let f = seam_started();
+    seam_route(&f, "info:clearinghouseState", seam_core_state());
+    let before = f.routes.count("info:clearinghouseState");
+    f.host
+        .block_on(f.exchange.fetch_and_set_private_snapshot(3))
+        .unwrap();
+    assert_eq!(
+        f.routes.count("info:clearinghouseState"),
+        before + 1,
+        "the real reconnect override fetches core state alongside orders"
+    );
+    let positions = f.exchange.base().store.positions();
+    let btc = positions
+        .iter()
+        .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
+        .expect("core position");
+    assert_eq!(btc.contracts, 0.25);
+    assert_eq!(f.exchange.base().store.balance().total, 2275.0);
+    assert!(f.exchange.base().store.loaded().orders);
+}
+
+#[test]
+fn production_seam_historical_fills_reaches_the_native_execution_mapper() {
+    let f = seam_started();
+    seam_route(&f, "info:userFillsByTime", json!([seam_fill()]));
+    let options = serde_json::from_value(
+        json!({"symbol":"BTC-PERP","from":1699999900000u64,"to":1700000000000u64,"limit":10}),
+    )
+    .unwrap();
+    let fills = f
+        .host
+        .block_on(f.exchange.fetch_historical_fills(options))
+        .unwrap();
+    assert_eq!(
+        fills.len(),
+        1,
+        "actual execution rows must replace the empty default"
+    );
+    let fill = &fills[0];
+    assert_eq!(fill.id.as_deref(), Some("901"));
+    assert_eq!(fill.order_id.as_deref(), Some("777"));
+    assert_eq!(
+        (fill.price, fill.qty, fill.timestamp),
+        (62000.0, 0.25, 1699999999.0)
+    );
+    assert_eq!(fill.symbol, "BTC-PERP");
+    assert_eq!(fill.commission, Some(2.0));
+    assert_eq!(fill.side, safe_cex_types::OrderSide::Sell);
+    assert!(fill.position_side.is_none());
+    assert_eq!(last_body(&f, "info:userFillsByTime")["user"], MASTER);
+}
+
+#[test]
+fn production_seam_historical_orders_collapses_and_maps_real_venue_rows() {
+    let f = seam_started();
+    let row = |status: &str, remaining: &str, time: u64| json!({"order":{"coin":"BTC","oid":777,"timestamp":1699999998000u64,"side":"B","origSz":"0.25","sz":remaining,"orderType":"Limit","limitPx":"60000","reduceOnly":false,"cloid":"0x11111111111111111111111111111111"},"status":status,"statusTimestamp":time});
+    seam_route(
+        &f,
+        "info:historicalOrders",
+        json!([
+            row("open", "0.25", 1699999998000),
+            row("filled", "0", 1699999999000)
+        ]),
+    );
+    let options = serde_json::from_value(
+        json!({"symbol":"BTC-PERP","from":1699999990000u64,"to":1700000000000u64}),
+    )
+    .unwrap();
+    let orders = f
+        .host
+        .block_on(f.exchange.fetch_historical_orders(Some(options)))
+        .unwrap();
+    assert_eq!(
+        orders.len(),
+        1,
+        "collapse and mapping imports must both execute"
+    );
+    let order = &orders[0];
+    assert_eq!(order.id, "777");
+    assert_eq!(order.symbol, "BTC-PERP");
+    assert_eq!(order.status, safe_cex_types::OrderStatus::Closed);
+    assert_eq!(
+        (order.amount, order.filled, order.created_time),
+        (0.25, 0.25, 1699999998000.0)
+    );
+    assert_eq!(
+        last_body(&f, "info:historicalOrders"),
+        json!({"type":"historicalOrders","user":MASTER})
+    );
+}
+
+fn seam_income(f: &Fixture) {
+    seam_route(f, "info:userFillsByTime", json!([seam_fill()]));
+    seam_route(f, "info:userFunding", json!([]));
+}
+fn assert_seam_income(records: &[safe_cex_types::IncomeRecord]) {
+    assert_eq!(
+        records.len(),
+        2,
+        "the real fill produces both realized PnL and fee rows"
+    );
+    for (kind, income) in [("REALIZED_PNL", 125.0), ("COMMISSION", -2.0)] {
+        let row = records
+            .iter()
+            .find(|r| r.income_type == kind)
+            .expect("typed income row");
+        assert_eq!(row.symbol, "BTC-PERP");
+        assert_eq!(row.income, income);
+        assert_eq!(row.asset, "USDC");
+        assert_eq!(row.timestamp, 1699999999000.0);
+    }
+}
+#[test]
+fn production_seam_income_history_reaches_both_fill_income_rows() {
+    let f = seam_started();
+    seam_income(&f);
+    let options =
+        serde_json::from_value(json!({"startTime":1699999900000u64,"endTime":1700000000000u64}))
+            .unwrap();
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_income_history(Some(options)))
+        .unwrap();
+    assert_seam_income(&records);
+    assert_eq!(
+        f.routes
+            .requests
+            .borrow()
+            .iter()
+            .find(|(route, _)| route == "info:userFillsByTime")
+            .unwrap()
+            .1["startTime"],
+        json!(1699999900000u64)
+    );
+}
+#[test]
+fn production_seam_income_range_reaches_the_same_actual_ledger() {
+    let f = seam_started();
+    seam_income(&f);
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_income_history_range(
+            1699999900000.0,
+            1700000000000.0,
+            Some("REALIZED_PNL".into()),
+        ))
+        .unwrap();
+    // Maintained TS selects fills for every non-funding type, retaining both rows.
+    assert_seam_income(&records);
+    let requests = f.routes.requests.borrow();
+    let body = &requests
+        .iter()
+        .find(|(route, _)| route == "info:userFillsByTime")
+        .unwrap()
+        .1;
+    assert_eq!(body["startTime"], json!(1699999900000u64));
+    assert_eq!(body["endTime"], json!(1700000000000u64));
+}
