@@ -40,18 +40,6 @@ impl ZkLinkHost for Services {
         self.host().record("sdk:init", vec![]);
         Box::pin(async { Ok(()) })
     }
-    fn now_ms(&self) -> f64 {
-        1700001234567.
-    }
-    fn pack_amount(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
-    fn pack_fee(&self, _: &J) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
-    fn pubkey_hash(&self) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
     fn builder(&self, kind: TransactionKind, args: Vec<J>) -> Result<ZkLinkHandle, ExchangeError> {
         assert_eq!(kind, TransactionKind::Contract);
         self.host().record("contract:builder", args);
@@ -74,18 +62,6 @@ impl ZkLinkHost for Services {
             "signature",
             obj(vec![("signature", s("contract-signature"))]),
         )]))
-    }
-    fn create_signed_order(&self, _: ZkLinkHandle) -> Result<J, ExchangeError> {
-        panic!("not used by contracts")
-    }
-    fn sign_transfer(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by contracts")
-    }
-    fn sign_withdraw(&self, _: ZkLinkHandle, _: J) -> ExchangeFuture<'_, J> {
-        panic!("not used by contracts")
-    }
-    fn sign_change_pubkey(&self, _: ZkLinkHandle, _: bool) -> ExchangeFuture<'_, J> {
-        panic!("not used by contracts")
     }
 }
 fn place(p: &safe_cex_types::PreparedOrderOpts) -> J {
