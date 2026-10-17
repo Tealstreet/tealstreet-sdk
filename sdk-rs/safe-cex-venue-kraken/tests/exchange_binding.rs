@@ -104,6 +104,83 @@ fn fetch_tickers_reads_the_rest_snapshot_for_known_markets() {
 }
 
 #[test]
+fn futures_candles_refuse_only_nan_timestamp_rows() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/reads-cardinality-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let case = &source["futuresCandleBoundaries"][0];
+    assert_eq!(case["label"], "mixed-NaN-timestamps");
+    assert_eq!(case["result"].as_array().unwrap().len(), 4);
+    let original: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+    let mut multiple = original.clone();
+    multiple["candles"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"time":"bad","open":"99"}));
+    for (body, expected_rows, expected_reports) in [
+        (original, 3, 1),
+        (multiple, 3, 2),
+        (json!({"candles":[{"time":"NaN"},{"time":"bad"}]}), 0, 2),
+    ] {
+        let url = format!("https://futures.kraken.com/api/charts/v1/trade/{SYMBOL}/1m");
+        let h = futures(|http| http.ok("GET", &url, body));
+        let candles = h
+            .drive(
+                h.venue().fetch_ohlcv(
+                    serde_json::from_value(json!({
+                        "symbol":SYMBOL,"interval":"1m","limit":4,"to":1700000000000.0
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            candles.len(),
+            expected_rows,
+            "valid candles survive bad timestamp rows"
+        );
+        for (index, candle) in candles.iter().enumerate() {
+            let expected = &case["result"][index];
+            for (field, actual) in [
+                ("timestamp", candle.timestamp),
+                ("open", candle.open),
+                ("high", candle.high),
+                ("low", candle.low),
+                ("close", candle.close),
+                ("volume", candle.volume),
+            ] {
+                assert_eq!(
+                    format!("{:016x}", actual.to_bits()),
+                    expected[field]["number"].as_str().unwrap(),
+                    "native {field}"
+                );
+            }
+        }
+        let console = h.runtime.console.borrow();
+        let refusals = console
+            .iter()
+            .filter(|(level, message)| level == "error" && message.contains("timestamp=NaN"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refusals.len(),
+            expected_reports,
+            "each refused timestamp is visible"
+        );
+        assert_eq!(h.http.calls(&url).len(), 1);
+    }
+}
+
+#[test]
 fn private_reads_sign_and_map_orders_positions_and_balance() {
     let h = futures(|http| {
         http.ok("GET", "/v3/openorders", open_orders());
