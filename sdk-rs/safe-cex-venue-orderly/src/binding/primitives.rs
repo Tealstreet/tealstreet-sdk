@@ -156,11 +156,14 @@ impl crate::api::ApiHost for Host {
     }
     fn axios_create(&self, config: V, options: V, _: V) -> R<V> {
         let rt = self.rt()?;
-        let options = safe_cex_exchange::js_runtime::base_exchange::exchange_options(&options)?;
-        Ok(v(safe_cex_exchange::js_runtime::client::create(
-            (rt.shared.extra.deps.http)(&options).map_err(Thrown::from)?,
+        let typed = safe_cex_exchange::js_runtime::base_exchange::exchange_options(&options)?;
+        Ok(v(safe_cex_exchange::js_runtime::client::factory::create(
+            (rt.shared.extra.deps.http)(&typed).map_err(Thrown::from)?,
+            &*rt.shared.runtime.transport(),
             (*config).clone(),
-        )))
+            &options,
+            rt.base(),
+        )?))
     }
     fn network_retry_condition(&self) -> R<V> {
         Ok(v(Js::function("networkErrorOnRead", |_, args| {
@@ -214,9 +217,17 @@ impl crate::api::ApiHost for Host {
         client.call_method("__configureRetry", vec![(*options).clone()])?;
         Ok(())
     }
-    fn transport(&self, _: V, _: V, _: V) -> R<()> {
-        Ok(())
-    } // Factory receives the exact transport options.
+    fn transport(&self, client: V, options: V, name: V) -> R<()> {
+        let rt = self.rt()?;
+        safe_cex_exchange::js_runtime::client::factory::install_transport_adapter(
+            rt.shared.http.clone(),
+            &*rt.shared.runtime.transport(),
+            &client,
+            &options,
+            safe_cex_exchange::js_runtime::value::to_typed(&name)?,
+            safe_cex_transport::RestAdapterVariant::Default,
+        )
+    }
 }
 impl crate::runtime_actions::RuntimeHost for Host {
     fn strict_eq(&self, a: &Js, b: &Js) -> bool {

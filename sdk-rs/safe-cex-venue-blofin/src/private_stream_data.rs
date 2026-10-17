@@ -44,11 +44,13 @@ impl<E> From<JsCoercionError> for PrivateDataError<E> {
         Self::Coercion(e)
     }
 }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrivateFill {
     pub id: String,
     pub order_id: String,
-    pub side: OrderSide,
+    #[serde(skip_serializing_if = "safe_cex_types::ModelField::is_none")]
+    pub side: safe_cex_types::ModelField<OrderSide>,
     pub symbol: String,
     pub price: f64,
     pub amount: f64,

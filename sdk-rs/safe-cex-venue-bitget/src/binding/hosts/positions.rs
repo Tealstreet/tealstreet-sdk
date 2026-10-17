@@ -149,12 +149,12 @@ fn position_object(p: &Position, info: Js, invalid_payload: bool) -> Result<Js, 
         ("notional", Js::Number(p.notional)),
         ("leverage", Js::Number(p.leverage)),
         ("unrealizedPnl", Js::Number(p.unrealized_pnl)),
-        ("realizedPnl", opt_num(p.realized_pnl)),
+        ("realizedPnl", opt_num((p.realized_pnl).into_value())),
         ("contracts", Js::Number(p.contracts)),
         ("liquidationPrice", Js::Number(p.liquidation_price)),
     ];
     if !invalid_payload {
-        fields.push(("marginSize", opt_num(p.margin_size)));
+        fields.push(("marginSize", opt_num((p.margin_size).into_value())));
     }
     fields.push((
         "positionMode",
@@ -169,7 +169,7 @@ fn position_object(p: &Position, info: Js, invalid_payload: bool) -> Result<Js, 
             .map_or(Ok(Js::Undefined), from_typed)?,
     ));
     fields.push(("info", info));
-    fields.push(("lastUpdate", opt_num(p.last_update)));
+    fields.push(("lastUpdate", opt_num((p.last_update).into_value())));
     Ok(Js::object(fields))
 }
 
@@ -627,25 +627,25 @@ pub(crate) fn bind(
             let probe = Position {
                 id: String::new(),
                 symbol: String::new(),
-                side: safe_cex_types::PositionSide::Long,
+                side: (safe_cex_types::PositionSide::Long).into(),
                 entry_price: 0.0,
                 notional: 0.0,
                 leverage: 0.0,
-                margin_type: None,
-                position_mode: None,
+                margin_type: (None).into(),
+                position_mode: (None).into(),
                 unrealized_pnl: 0.0,
-                realized_pnl: None,
+                realized_pnl: (None).into(),
                 contracts: 0.0,
                 liquidation_price: 0.0,
-                margin_size: None,
+                margin_size: (None).into(),
                 info: if info.is_nullish() {
-                    None
+                    (None).into()
                 } else {
-                    Some(to_json(&info)?)
+                    (Some(to_json(&info)?)).into()
                 },
-                extra: None,
-                last_update: None,
-                option: None,
+                extra: (None).into(),
+                last_update: (None).into(),
+                option: (None).into(),
             };
             Ok(
                 crate::stream_positions::get_position_payload_update_time(&probe)

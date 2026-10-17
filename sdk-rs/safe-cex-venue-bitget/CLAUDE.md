@@ -14,7 +14,10 @@ The concrete binding connects both signature-rejection retry imports to the
 shared client replay path and shared request-stamp key. Non-2xx refusals stamp
 the live config; resolved refusals copy and stamp it before re-entering request
 interceptors. Tests cover all three families, writes, fresh signing timestamps,
-the single-resend limit and unrelated failures. The signature predicate uses
+the single-resend limit and unrelated failures. The write-retry witness advances the
+shared VirtualClock between actual transport attempts, separately from the runtime
+timeout clock, and verifies each observed timestamp and its exact HMAC preimage.
+It must not depend on two wall-clock milliseconds happening to differ. The signature predicate uses
 shared string-hint coercion; its source witness compares all 22 outcomes, including
 custom hooks and getter throws. Older pending notes below describe standalone
 extraction stages.
@@ -114,6 +117,12 @@ Do not refuse those intermediate values early. The [refusal-timing audit](REFUSA
 whole mapping result, not just a field; source callable omission and prototype
 object serialization remain separate witnesses. `info` is an owned snapshot,
 with both directions of source alias mutation pinned independently of NaN loss.
+
+Missing Order status/type/side table entries project to own `ModelField::Undefined`;
+JSON omits those fields while the native Store retains their presence. Inherited
+values, unsupported raw side values and missing required IDs still refuse at the
+final projection. `algo_frame_binding` covers real private frames and REST pages
+across linear, USDC and inverse bindings, including later-row evaluation order.
 
 **Inverse order mapper:** `orders::map_inverse_order` is a distinct source body,
 not the linear mapper with a product flag. Keep its narrower aliases, absent
@@ -325,3 +334,23 @@ Classic and USDC retain both the inner cancellation emission and the outer symbo
 catch emission before propagating the original refusal; inverse retains its inner
 swallowing behavior. The cancellation binding tests assert that distinction and
 the selected symbol/order IDs through the actual signed client.
+
+The shared ModelField cutover (#465) preserves missed mapOrder table lookups as
+own Undefined when the source assigns them. Missing raw side is Undefined;
+a present unsupported raw side and unreplaced inherited table members retain
+the explicit closed-model refusal. Algo frames still evaluate the mapper before
+branching on status. Do not skip mapping merely because status is unmapped.
+
+The order oracle checks native own-Undefined fields before JSON projection. It
+walks every output and checks native row counts before pairing with source rows:
+1,327 linear cases (1,263 source successes, 78 accepted own-Undefined cases) and
+1,166 inverse cases (1,095 source successes, 100 accepted own-Undefined cases).
+Representability checks visit every source row without short-circuiting.
+The actual socket/Store and authenticated REST witnesses additionally distinguish
+missing-side Undefined from absence across all three families, while unsupported
+raw side still refuses. `scripts/map-order-undefined-controls.py` compiles the old
+throw, absent-property and unsupported-side faults against both the real binding
+and frozen oracle, then requires exact restored passes. Run it exclusively.
+All three representation controls compile and fail named tests in both the
+constructed binding and frozen oracle; each exact restoration passes both.
+The actual TypeScript order oracle also passes without changing its fixture.

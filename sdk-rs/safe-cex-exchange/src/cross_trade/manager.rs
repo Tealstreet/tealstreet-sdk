@@ -267,9 +267,9 @@ impl CrossTradeManager {
                     .find(|p| {
                         p.symbol == symbol
                             && if hedged {
-                                p.side != position.side
+                                p.side.value() != position.side.value()
                             } else {
-                                p.side == position.side
+                                p.side.value() == position.side.value()
                             }
                     })
                     .copied()
@@ -448,9 +448,9 @@ impl CrossTradeManager {
             let found = copier_positions.iter().find(|p| {
                 p.symbol == symbol
                     && if hedged {
-                        p.side != position.side
+                        p.side.value() != position.side.value()
                     } else {
-                        p.side == position.side
+                        p.side.value() == position.side.value()
                     }
             });
             if found.is_some() {
