@@ -1,18 +1,18 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::store_delivery::StoreFrame;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_types::ExchangeName;
-use safe_cex_webworker::{
-    chaser::ChaserOrderInstance,
-    chaser_manager::{ChaserOrderManager, ChaserSupervisor},
-    exchange_worker::*,
-    payload::StoreWorkerOp,
-    worker_ports::WorkerPortTimers,
-};
+use safe_cex_webworker::chaser::ChaserOrderInstance;
+use safe_cex_webworker::chaser_manager::ChaserOrderManager;
+use safe_cex_webworker::chaser_manager::ChaserSupervisor;
+use safe_cex_webworker::exchange_worker::*;
+use safe_cex_webworker::payload::StoreWorkerOp;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -89,6 +89,11 @@ impl WorkerPortTimers for Host {
         *id != 0
     }
 }
+impl safe_cex_exchange::store_delivery::StoreUpdateThrottleHost for Host {
+    fn report_store_timer_error(&self, e: &ExchangeError) {
+        self.events.borrow_mut().push(e.message.clone());
+    }
+}
 impl ExchangeWorkerHost for Host {
     fn post_store(&self, m: WorkerStoreMessage) -> Result<(), ExchangeError> {
         if self.assert_timer_before_post.replace(false) {
@@ -110,9 +115,6 @@ impl ExchangeWorkerHost for Host {
     }
     fn chaser_supervisor(&self) -> Rc<dyn ChaserSupervisor> {
         Rc::new(UnusedSupervisor)
-    }
-    fn report_timer_error(&self, e: &ExchangeError) {
-        self.events.borrow_mut().push(e.message.clone());
     }
 }
 fn fixture(mult: Option<f64>) -> (Rc<Host>, Rc<ExchangeWorker<Host>>) {
