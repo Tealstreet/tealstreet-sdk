@@ -36,7 +36,12 @@ pub(super) fn from_input(value: Input) -> Js {
     }
 }
 
-pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thrown> {
+pub(super) fn capture(
+    value: &Js,
+    depth: usize,
+    present_fields: bool,
+    data_only: bool,
+) -> Result<Input, Thrown> {
     if depth >= 128 {
         return Err(Thrown::type_error("typed value recursion limit exceeded"));
     }
@@ -49,6 +54,9 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
         Js::Null | Js::Function(_) | Js::Promise(_) => Input::Null,
         Js::Bool(value) => Input::Bool(*value),
         Js::Number(value) => Input::Float(*value),
+        Js::BigInt(_) if data_only => {
+            return Err(Thrown::type_error("Do not know how to serialize a BigInt"));
+        }
         Js::BigInt(value) => Input::Text(value.to_string().encode_utf16().collect()),
         Js::String(value) => Input::Text(value.to_vec()),
         Js::Array(values) => Input::Array(
@@ -57,7 +65,7 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
                 .iter()
                 .map(|value| {
                     value.as_ref().map_or(Ok(Input::Null), |value| {
-                        capture(value, depth + 1, present_fields)
+                        capture(value, depth + 1, present_fields, data_only)
                     })
                 })
                 .collect::<Result<_, _>>()?,
@@ -69,7 +77,10 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
                 if !present_fields && (matches!(value, Js::Function(_)) || value.is_callable()) {
                     continue;
                 }
-                fields.push((key.to_vec(), capture(&value, depth + 1, present_fields)?));
+                fields.push((
+                    key.to_vec(),
+                    capture(&value, depth + 1, present_fields, data_only)?,
+                ));
             }
             Input::Object(fields)
         }
@@ -86,7 +97,7 @@ pub(super) fn decode<T: de::DeserializeOwned>(
     } else {
         NativeMode::Normal
     };
-    T::deserialize(NativeInput(capture(value, 0, present_fields)?, mode)).map_err(fault)
+    T::deserialize(NativeInput(capture(value, 0, present_fields, false)?, mode)).map_err(fault)
 }
 
 #[derive(Clone, Copy, PartialEq)]

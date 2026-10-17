@@ -219,7 +219,17 @@ pub fn response_json_view(body: &safe_cex_transport::RestResponseBody) -> serde_
             other => other,
         }
     }
-    let value = utf8_view(body.clone().into_data());
+    let data = match body {
+        safe_cex_transport::RestResponseBody::Encoded(bytes) => {
+            let text: Vec<u16> = String::from_utf8_lossy(bytes).encode_utf16().collect();
+            // Only physical bytes receive this JSON view. Native strings keep
+            // their existing value, and the original encoded body stays owned
+            // by the RestFailure even when parsing this secondary view fails.
+            Input::parse_json(&text).unwrap_or(Input::Text(text))
+        }
+        _ => body.clone().into_data(),
+    };
+    let value = utf8_view(data);
     let json = safe_cex_num::js_retained_json_stringify(&value).expect("retained tree JSON view");
     json.map_or(serde_json::Value::Null, |text| {
         serde_json::from_str(&text).expect("UTF-8 JSON error view")
