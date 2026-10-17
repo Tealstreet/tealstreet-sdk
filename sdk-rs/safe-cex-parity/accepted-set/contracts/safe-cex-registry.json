@@ -1230,7 +1230,7 @@
     ],
     "entrypoints": [],
     "observation": {
-      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"base\": row.base, \"quote\": row.quote, \"active\": row.active, \"amountPrecision\": row.precision.amount, \"pricePrecision\": row.precision.price, \"minAmount\": row.limits.amount.min, \"maxAmount\": row.limits.amount.max, \"minLeverage\": row.limits.leverage.min, \"maxLeverage\": row.limits.leverage.max})).collect()) }",
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"base\": row.base, \"quote\": row.quote, \"active\": row.active, \"amountPrecisionBits\": row.precision.amount.to_bits().to_string(), \"pricePrecisionBits\": row.precision.price.to_bits().to_string(), \"minAmountBits\": row.limits.amount.min.to_bits().to_string(), \"maxAmountBits\": row.limits.amount.max.to_bits().to_string(), \"minLeverageBits\": row.limits.leverage.min.to_bits().to_string(), \"maxLeverageBits\": row.limits.leverage.max.to_bits().to_string()})).collect()) }",
       "cases": [
         {
           "input": [],
@@ -1267,12 +1267,12 @@
               "base": "BTC",
               "quote": "USDT",
               "active": true,
-              "amountPrecision": 0.01,
-              "pricePrecision": 0.1,
-              "minAmount": 1,
-              "maxAmount": 2,
-              "minLeverage": 3,
-              "maxLeverage": 4
+              "pricePrecisionBits": "4591870180066957722",
+              "maxAmountBits": "4611686018427387904",
+              "minAmountBits": "4607182418800017408",
+              "minLeverageBits": "4613937818241073152",
+              "maxLeverageBits": "4616189618054758400",
+              "amountPrecisionBits": "4576918229304087675"
             }
           ]
         },
@@ -1328,12 +1328,12 @@
               "base": "BTC",
               "quote": "USDT",
               "active": true,
-              "amountPrecision": 0.01,
-              "pricePrecision": 0.1,
-              "minAmount": 1,
-              "maxAmount": 2,
-              "minLeverage": 3,
-              "maxLeverage": 4
+              "pricePrecisionBits": "4591870180066957722",
+              "maxAmountBits": "4611686018427387904",
+              "minAmountBits": "4607182418800017408",
+              "minLeverageBits": "4613937818241073152",
+              "maxLeverageBits": "4616189618054758400",
+              "amountPrecisionBits": "4576918229304087675"
             },
             {
               "id": "m12",
@@ -1341,12 +1341,12 @@
               "base": "BTC",
               "quote": "USDT",
               "active": true,
-              "amountPrecision": 0.01,
-              "pricePrecision": 0.1,
-              "minAmount": 1,
-              "maxAmount": 2,
-              "minLeverage": 3,
-              "maxLeverage": 4
+              "pricePrecisionBits": "4591870180066957722",
+              "maxAmountBits": "4611686018427387904",
+              "minAmountBits": "4607182418800017408",
+              "minLeverageBits": "4613937818241073152",
+              "maxLeverageBits": "4616189618054758400",
+              "amountPrecisionBits": "4576918229304087675"
             }
           ]
         }
@@ -1582,7 +1582,7 @@
     ],
     "entrypoints": [],
     "observation": {
-      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"bid\": row.bid, \"ask\": row.ask, \"last\": row.last, \"mark\": row.mark, \"index\": row.index, \"percentage\": row.percentage, \"openInterest\": row.open_interest, \"fundingRate\": row.funding_rate, \"fundingTime\": row.funding_time, \"volume\": row.volume, \"quoteVolume\": row.quote_volume})).collect()) }",
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"bidBits\": row.bid.to_bits().to_string(), \"askBits\": row.ask.to_bits().to_string(), \"lastBits\": row.last.to_bits().to_string(), \"markBits\": row.mark.to_bits().to_string(), \"indexBits\": row.index.to_bits().to_string(), \"percentageBits\": row.percentage.to_bits().to_string(), \"openInterestBits\": row.open_interest.to_bits().to_string(), \"fundingRateBits\": row.funding_rate.to_bits().to_string(), \"fundingTimeBits\": row.funding_time.to_bits().to_string(), \"volumeBits\": row.volume.to_bits().to_string(), \"quoteVolumeBits\": row.quote_volume.to_bits().to_string()})).collect()) }",
       "cases": [
         {
           "input": [],
@@ -1610,17 +1610,17 @@
             {
               "id": "t1",
               "symbol": "BTC/USDT",
-              "bid": 1,
-              "ask": 2,
-              "last": 3,
-              "mark": 4,
-              "index": 5,
-              "percentage": 6,
-              "openInterest": 7,
-              "fundingRate": 8,
-              "fundingTime": 9,
-              "volume": 10,
-              "quoteVolume": 11
+              "volumeBits": "4621819117588971520",
+              "indexBits": "4617315517961601024",
+              "fundingTimeBits": "4621256167635550208",
+              "askBits": "4611686018427387904",
+              "markBits": "4616189618054758400",
+              "percentageBits": "4618441417868443648",
+              "fundingRateBits": "4620693217682128896",
+              "quoteVolumeBits": "4622382067542392832",
+              "openInterestBits": "4619567317775286272",
+              "lastBits": "4613937818241073152",
+              "bidBits": "4607182418800017408"
             }
           ]
         },
@@ -1661,32 +1661,32 @@
             {
               "id": "t1",
               "symbol": "BTC/USDT",
-              "bid": 1,
-              "ask": 2,
-              "last": 3,
-              "mark": 4,
-              "index": 5,
-              "percentage": 6,
-              "openInterest": 7,
-              "fundingRate": 8,
-              "fundingTime": 9,
-              "volume": 10,
-              "quoteVolume": 11
+              "volumeBits": "4621819117588971520",
+              "indexBits": "4617315517961601024",
+              "fundingTimeBits": "4621256167635550208",
+              "askBits": "4611686018427387904",
+              "markBits": "4616189618054758400",
+              "percentageBits": "4618441417868443648",
+              "fundingRateBits": "4620693217682128896",
+              "quoteVolumeBits": "4622382067542392832",
+              "openInterestBits": "4619567317775286272",
+              "lastBits": "4613937818241073152",
+              "bidBits": "4607182418800017408"
             },
             {
               "id": "t12",
               "symbol": "ETH/USDT",
-              "bid": 1,
-              "ask": 2,
-              "last": 3,
-              "mark": 4,
-              "index": 5,
-              "percentage": 6,
-              "openInterest": 7,
-              "fundingRate": 8,
-              "fundingTime": 9,
-              "volume": 10,
-              "quoteVolume": 11
+              "volumeBits": "4621819117588971520",
+              "indexBits": "4617315517961601024",
+              "fundingTimeBits": "4621256167635550208",
+              "askBits": "4611686018427387904",
+              "markBits": "4616189618054758400",
+              "percentageBits": "4618441417868443648",
+              "fundingRateBits": "4620693217682128896",
+              "quoteVolumeBits": "4622382067542392832",
+              "openInterestBits": "4619567317775286272",
+              "lastBits": "4613937818241073152",
+              "bidBits": "4607182418800017408"
             }
           ]
         }
