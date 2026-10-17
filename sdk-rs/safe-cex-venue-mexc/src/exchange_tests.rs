@@ -947,7 +947,7 @@ fn mexc_fetch_ohlcv_matches_live_source() {
             native_case_comparisons += 1;
             continue;
         }
-        let interval: safe_cex_types::Timeframe =
+        let interval: safe_cex_types::AnyTimeframe =
             serde_json::from_value(options["interval"].clone()).unwrap();
         let number = |key: &str| options[key].as_f64();
         let options = OHLCVOptions {
@@ -4559,7 +4559,7 @@ fn mexc_ohlcv_retains_rejected_transport_origin() {
     });
     let options = OHLCVOptions {
         symbol: "BTCUSDT".into(),
-        interval: safe_cex_types::Timeframe::M1,
+        interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),
         from: None,
         to: None,
         limit: None,
