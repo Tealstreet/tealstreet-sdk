@@ -733,3 +733,9 @@ valid prefix on mapping errors, but discard a failed recovery accumulator. Sourc
 primary short/extended recovery differs from dedicated inverse single recovery;
 Spot inherits empty history. The full reader source corpus covers requests, results
 and diagnostics; mapper source corpora retain their separate scalar contracts.
+
+Dynamic history capabilities delegate to the same live Exchange methods: fills,
+income/range and closed PnL for primary/demo/inverse, historical orders for
+primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
+order history. `history_capability_binding` exercises the actual capability calls
+and signed HTTP; direct trait coverage alone does not witness this dispatch path.
