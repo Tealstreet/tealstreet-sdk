@@ -24,19 +24,19 @@ satisfy this corpus.
 | ApexOmni | apexomni/apexomni.ws-public.ts | Truthy-gated parseFloat; missing mark falls back to index | Native proven: safe-cex-venue-apexomni/tests/binding.rs::production_ticker_coercion_matches_constructed_typescript; 64 three-row frames |
 | AsterDEX | asterdex/asterdex.ws-public.ts | Coercion except copied truthy fundingTime; decision-3 row refusal | Pending complete coercion corpus; row policy #807 |
 | Backpack | backpack/backpack.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Binance futures | binance/binance.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Binance PM | binance/binancepm.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Binance Spot | binance/binancespot.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
+| Binance futures | binance/binance.ws-public.ts | parseFloat; distinct market/public socket routes | Native proven: safe-cex-venue-binance/tests/private_classes.rs::production_ticker_coercion_futures_matches_constructed_typescript (--features native); 80 three-row frames |
+| Binance PM | binance/binancepm.ws-public.ts | parseFloat; distinct market/public socket routes | Native proven: safe-cex-venue-binance/tests/private_classes.rs::production_ticker_coercion_pm_matches_constructed_typescript (--features native); 80 three-row frames |
+| Binance Spot | binance/binancespot.ws-public.ts | parseFloat; distinct market/public socket routes; last also populates mark/index | Native proven: safe-cex-venue-binance/tests/private_classes.rs::production_ticker_coercion_spot_matches_constructed_typescript (--features native); 48 three-row frames |
 | BingX | bingx/bingx.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Bitget | bitget/bitget.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Bitrue | bitrue/bitrue.ws-public.ts | Unary Number conversion; rose multiplied by 100 | Native proven: safe-cex-venue-bitrue/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 32 cases / 96 actual frames |
 | Bitunix | bitunix/bitunix.ws-public.ts | parseFloat; depth fallback with `|| 0` | Native proven: safe-cex-venue-bitunix/tests/native_identity.rs::production_ticker_coercion_matches_constructed_typescript; 80 cases / 240 primary and secondary frames |
-| BloFin | blofin/blofin.ws-public.ts | Numeric coercion | Pending; prioritize missing ticker binding corpus |
-| Bybit primary/demo | bybit/bybit.ws-public.ts | parseFloat/arithmetic; category-dependent volumes | Pending complete coercion corpus |
-| Bybit inverse | bybit/bybitinverse.ws-public.ts | parseFloat/arithmetic; dedicated inverse volumes | Pending complete coercion corpus |
-| Bybit Spot | bybit/bybitspot.ws-public.ts | parseFloat/arithmetic | Pending complete coercion corpus |
-| Coinbase | coinbase/coinbase.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Crypto.com | cryptocom/cryptocom.ws-public.ts | parseFloat | Pending; prioritize missing ticker binding corpus |
+| BloFin | blofin/blofin.ws-public.ts | parseFloat and rounded percentage; first row of each channel frame | Native proven: safe-cex-venue-blofin/tests/native_ping_latency.rs::production_ticker_coercion_matches_constructed_typescript; 64 cases / 192 ticker and funding frames |
+| Bybit primary/demo | bybit/bybit.ws-public.ts | Truthy parseFloat/arithmetic; category-dependent volumes | Native proven: safe-cex-venue-bybit/tests/public_stream_binding.rs::production_ticker_coercion_primary_matches_constructed_typescript and demo; 176 cases / 528 frames per constructor across linear and inverse sockets |
+| Bybit inverse | bybit/bybitinverse.ws-public.ts | Truthy parseFloat/arithmetic; dedicated inverse volumes | Native proven: safe-cex-venue-bybit/tests/public_stream_binding.rs::production_ticker_coercion_inverse_matches_constructed_typescript; 88 cases / 264 dedicated inverse frames |
+| Bybit Spot | bybit/bybitspot.ws-public.ts | Truthy parseFloat/arithmetic; truthy funding rate becomes zero and funding time is ignored | Native proven: safe-cex-venue-bybit/tests/public_stream_binding.rs::production_ticker_coercion_spot_matches_constructed_typescript; 88 cases / 264 frames |
+| Coinbase | coinbase/coinbase.ws-public.ts | No active ticker handler: TS ticker_batch mapper and registration are commented out; reports unknown channel and leaves tickers unchanged | Native proven: safe-cex-venue-coinbase/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 56 malformed three-row batches through each Coinbase constructor, unchanged numeric fields and 56 visible unsupported-channel reports each |
+| Crypto.com | cryptocom/cryptocom.ws-public.ts | parseFloat ticker/book; nonempty string and finite Number guards for valuations | Native proven: safe-cex-venue-cryptocom/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 96 cases / 288 ticker, book, mark, index and funding frames; numeric mapping scope, not throttle timing |
 | GRVT | grvt/grvt.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Hyperliquid futures | hyperliquid/hyperliquid.ws-public.ts | parseFloat mids; positive finite Number fast contexts | Native proven: safe-cex-venue-hyperliquid/tests/binding.rs::production_ticker_coercion_matches_constructed_typescript; 24 three-row frames, including raw-DEFLATE fast contexts and midPrice |
 | Hyperliquid Spot | hyperliquid/hyperliquidspot.ws-public.ts | parseFloat mids | Native proven: safe-cex-venue-hyperliquid/tests/spot_binding.rs::production_ticker_coercion_matches_constructed_typescript; 8 three-row frames including midPrice |
@@ -53,3 +53,7 @@ satisfy this corpus.
 | Polymarket | polymarket/polymarket.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | WEEX | weex/weex.ws-public.ts | toNumber finite fallback; bounded fractional percentage scaling | Native proven: safe-cex-venue-weex/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 96 cases / 288 frames, object and one-element array payloads |
 | WOO | woo/woo.ws-public.ts | Copied ticker/BBO/mark values stay strict; decision-3 row refusal | Pending complete coercion corpus; row policy #789/#814 |
+
+HyroTrader inherits the Bybit public ticker class. Its configured constructor is
+also natively proven by `safe-cex-venue-bybit/tests/hyro_binding.rs::production_ticker_coercion_hyro_matches_constructed_typescript`
+across 88 cases / 264 linear frames using the actual simulator URL configuration.
