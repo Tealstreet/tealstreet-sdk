@@ -11,6 +11,13 @@ time from `ExchangeRuntime::now_ms`. The native registry regression
 `native_host_mexc_clock` applies a 90-second sync offset and checks both signed
 wire timestamps and HMACs over real loopback HTTP/WebSocket transports.
 
+Leverage refresh uses stored symbol settings before deriving from positions,
+matching the source short-circuit. Derivation reads positions/account mode only
+when settings are absent. A constructed public-trait regression uses real
+setLeverage to cache 50, seeds stale position leverage 20 and checks empty or
+untyped leverage rows and missing markets against the actual TypeScript method.
+Cached margin/position mode and both leverage sides survive the refresh.
+
 Regular-order `externalOid` generation uses the shared crypto `uuid_with_entropy`
 helper with runtime entropy: generate 21 nanoid characters, then strip `-` and
 `_`, as `utils/uuid.ts` does. The runtime's generic `unique_id` contract does not

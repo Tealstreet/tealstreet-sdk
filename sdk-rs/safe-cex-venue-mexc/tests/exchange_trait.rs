@@ -662,13 +662,19 @@ fn leverage_refresh_prefers_stored_settings_over_stale_positions() {
         assert_eq!(fetched.margin_type, Some(MarginType::Cross), "{name}");
         assert_eq!(fetched.position_mode, Some(PositionMode::Hedged), "{name}");
         assert_eq!(
-            serde_json::to_value(&fetched).unwrap(),
-            expected["storedConfig"][name]["fetched"],
+            fetched,
+            serde_json::from_value::<safe_cex_types::FetchedLeverage>(
+                expected["storedConfig"][name]["fetched"].clone()
+            )
+            .unwrap(),
             "{name}: actual source result"
         );
         assert_eq!(
-            serde_json::to_value(&store.fetched_leverage()["BTCUSDT"]).unwrap(),
-            expected["storedConfig"][name]["stored"],
+            store.fetched_leverage()["BTCUSDT"],
+            serde_json::from_value::<safe_cex_types::FetchedLeverage>(
+                expected["storedConfig"][name]["stored"].clone()
+            )
+            .unwrap(),
             "{name}: source Store result"
         );
         let log = calls(&wire);
