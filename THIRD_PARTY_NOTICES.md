@@ -71,3 +71,13 @@ which keep their upstream licences. `scripts/check-licenses.mjs` fails CI when a
 - Modified by Tealstreet Ltd: extracted deterministic signing and contract
   serialization primitives, with explicit errors for unsafe packing/price
   inputs and a seed-only native signer capability.
+
+## Rust Number radix conversion
+
+- `sdk-rs/safe-cex-exchange/src/js_runtime/number_radix.rs` adapts V8's
+  `DoubleToRadixStringView` from Node v24.20.0:
+  https://github.com/nodejs/node/blob/v24.20.0/deps/v8/src/numbers/conversions.cc
+- Licence: BSD-3-Clause; the full notice is retained in the Rust file header.
+- Copyright 2011 the V8 project authors. All rights reserved.
+- Modified by Tealstreet Ltd: Rust vectors replace the split character buffer;
+  decimal and special values use the SDK's existing number formatter.

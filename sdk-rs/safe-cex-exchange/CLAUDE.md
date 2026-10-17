@@ -1378,3 +1378,12 @@ output in a child process and compares its payloads with Node, including exact
 info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
+
+Number.toString applies radix coercion and range validation before formatting,
+including for NaN, infinities and zero. Radix 10 uses the existing number formatter;
+other radices use the private V8-derived precision/rounding algorithm documented
+in THIRD_PARTY_NOTICES.md. The installed-native `js_number_radix` witness compares
+5,320 Node outputs across all radices 2..36, fixed boundaries and deterministic
+binary64 samples, plus 60 coercion/error cases. Its test-only commit compiles and
+fails on the original binding at `(255).toString(2)`. This does not change the separate
+BigInt formatter or the existing Number method receiver profile.
