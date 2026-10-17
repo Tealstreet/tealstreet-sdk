@@ -42,3 +42,6 @@ mod wire_record;
 
 #[cfg(test)]
 mod accepted_test_support;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_cryptocom;
