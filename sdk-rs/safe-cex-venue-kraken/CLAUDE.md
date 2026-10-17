@@ -268,11 +268,15 @@ Measured code SHA, exits and non-claims are committed in `GATE_EVIDENCE.md`.
 
 `futures_candles.rs::fetch_ohlcv` implements the Futures charts read at the
 [Futures candle host boundary](../parity/MANIFEST-SPEC.md#kraken-futures-candle-host).
-The existing one-process read oracle adds 47 cases, 74 records and 444 direct
-native numeric comparisons. It observes inherited interval lookup, clock use,
+The existing one-process read oracle has 47 cases and 74 source records. It
+observes inherited interval lookup, clock use,
 request range, sorting, missing-data reporting, catch reporting and emission.
 Both error callbacks remain fallible and preserve original metadata on failure.
-The paired mixed-NaN witness records the explicit sortable-timestamp refusal.
+NaN timestamps are refused per row with a visible row/field/value diagnostic;
+good rows survive and sort normally, without claiming NaN comparator ordering.
+The corpus observes 73 admitted native rows and 438 numeric fields plus the
+refused row. The constructed `exchange_binding` regression covers mixed,
+multiple-bad and all-bad batches against unchanged maintained-source capture.
 `scripts/rest-read-controls.py` proves one production mutation per new read
 with a named native assertion failure and a restored pass.
 No Store write, timer, or two-axis precision adjustment is introduced.

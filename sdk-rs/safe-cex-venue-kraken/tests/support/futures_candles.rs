@@ -109,6 +109,24 @@ fn futures_candles_live_source() {
             *case["calls"].as_array().unwrap(),
             "FCANDLE native request"
         );
+        if i == 33 {
+            assert_eq!(case["label"], "shape-33");
+            assert_eq!(counts[i], 1);
+            assert_eq!(case["result"][0]["timestamp"], number(f64::NAN));
+            assert!(result.unwrap().is_empty(), "NaN timestamp row is refused");
+            assert_eq!(
+                *reports.borrow(),
+                vec![json!({
+                    "label":"[Kraken] fetchOHLCV row refusal:",
+                    "message":"Kraken Futures candle 0: refused timestamp=NaN",
+                    "name":"TypeError","identity":"mapped"
+                })]
+            );
+            assert!(emits.borrow().is_empty());
+            assert_eq!(json!(clocks.get()), case["clocks"]);
+            comparisons += 1;
+            continue;
+        }
         assert_eq!(
             *reports.borrow(),
             *case["reports"].as_array().unwrap(),
@@ -187,25 +205,25 @@ fn futures_candles_live_source() {
         comparisons += 1;
     }
     assert_eq!(comparisons, 47, "FCANDLE completed cases");
-    assert_eq!(records, 74, "FCANDLE completed native records");
-    assert_eq!(fields, 444, "FCANDLE completed native fields");
+    assert_eq!(records, 73, "FCANDLE admitted native records");
+    assert_eq!(fields, 438, "FCANDLE admitted native fields");
 }
 
 #[test]
-fn mixed_nan_timestamps_chosen_boundary() {
+fn mixed_nan_timestamps_refuse_only_the_bad_row() {
     let source = oracle();
     let cases = source["futuresCandleBoundaries"].as_array().unwrap();
     assert_eq!(cases.len(), 1, "FCANDLE mixed NaN boundary cases");
     let case = &cases[0];
     let source_rows = case["result"].as_array().unwrap();
     assert_eq!(source_rows.len(), 4, "FCANDLE mixed NaN source acceptance");
-    for (i, timestamp) in [1.0, 2.0, 3.0, f64::NAN].into_iter().enumerate() {
-        assert_eq!(
-            source_rows[i]["timestamp"],
-            number(timestamp),
-            "FCANDLE mixed NaN source ordering"
-        );
-    }
+    assert_eq!(
+        source_rows
+            .iter()
+            .filter(|row| row["timestamp"] == number(f64::NAN))
+            .count(),
+        1
+    );
     let reports = RefCell::new(Vec::new());
     let emits = RefCell::new(Vec::new());
     let result = complete(futures_candles::fetch_ohlcv(
@@ -227,15 +245,18 @@ fn mixed_nan_timestamps_chosen_boundary() {
         },
     ))
     .unwrap();
-    assert!(result.is_empty(), "FCANDLE CHOSEN mixed NaN native refusal");
+    assert_eq!(result.len(), 3, "good rows survive timestamp refusal");
+    for (candle, timestamp) in result.iter().zip([1.0_f64, 2.0, 3.0]) {
+        assert_eq!(candle.timestamp.to_bits(), timestamp.to_bits());
+    }
     assert_eq!(
         *reports.borrow(),
         vec!["TypeError"],
-        "FCANDLE CHOSEN refusal diagnostic"
+        "FCANDLE per-row refusal diagnostic"
     );
     assert_eq!(
         *emits.borrow(),
-        vec!["Kraken Futures mixed NaN timestamps are outside sortable timestamp profile"],
-        "FCANDLE CHOSEN refusal emission"
+        Vec::<String>::new(),
+        "row refusal does not invoke the batch catch emission"
     );
 }
