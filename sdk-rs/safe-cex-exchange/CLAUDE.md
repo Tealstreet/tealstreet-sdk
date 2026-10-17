@@ -1351,3 +1351,7 @@ Property access and string-hint conversion failures propagate after the source's
 empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
 24 maintained Store cases through the production facade, including numeric keys,
 primitive elements, nullish elements and throwing getters/conversions.
+
+The numeric patch witnesses pass entity selectors (`{id}`), matching the source
+Store signatures, while retaining all numeric-bit, null and omission assertions.
+Bare primitive selectors remain negative cases in the source ID corpus.
