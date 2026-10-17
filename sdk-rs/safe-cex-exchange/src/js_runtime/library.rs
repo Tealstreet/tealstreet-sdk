@@ -560,6 +560,8 @@ fn big_number(value: BigNumberValue) -> Js {
             func(name, move |_| Ok(Js::str(&shown.value_string()))),
         );
     }
+    let finite = matches!(&value, BigNumberValue::Finite(_));
+    let _ = object.define("isFinite", func("isFinite", move |_| Ok(Js::Bool(finite))));
     let _ = object.define(
         "isNaN",
         func("isNaN", move |_| {
