@@ -13,14 +13,15 @@ use safe_cex_exchange::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
     },
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch, ValidatedOrder},
-    runtime::{ExchangeError, ExchangeFuture},
+    journal::HistoricalPositionOptions,
+    runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
 use safe_cex_types::{
-    ExchangeAccount, ExchangeName, ExchangeOptions, Execution, ExecutionsOptions, Market, Order,
-    PlaceOrderOpts, Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts,
-    ValidateAccountResult,
+    Candle, ExchangeAccount, ExchangeName, ExchangeOptions, Execution, ExecutionsOptions,
+    IncomeHistoryOptions, IncomeRecord, Market, OHLCVOptions, Order, OrderBook, PlaceOrderOpts,
+    Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts, ValidateAccountResult,
 };
 use std::rc::Rc;
 
@@ -139,6 +140,27 @@ impl BitgetExchange {
             to_typed(&value).map_err(err)
         })
     }
+    // ts: BitgetExchange.listenOHLCV / listenOrderBook return the socket's cleanup.
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        member: &'static str,
+        first: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let listener = Js::function("callback", move |_, args| {
+            callback(to_typed(&super::value::arg(&args, 0))?);
+            Ok(Js::Undefined)
+        });
+        let cleanup = self
+            .rt
+            .this
+            .call_method(member, vec![first, listener])
+            .map_err(err)?;
+        Ok(Box::new(move || {
+            cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            Ok(())
+        }))
+    }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
@@ -165,6 +187,12 @@ fn capabilities() -> ExchangeCapabilities {
         place_orders: PlaceOrdersBinding::implemented::<BitgetExchange>(Exchange::place_orders),
         fetch_historical_fills: CapabilityBinding::implemented(|venue, opts| {
             venue.fetch_historical_fills(opts)
+        }),
+        fetch_income_history: CapabilityBinding::implemented(|venue, opts| {
+            venue.fetch_income_history(opts)
+        }),
+        fetch_income_history_range: CapabilityBinding::implemented(|venue, (start, end, kind)| {
+            venue.fetch_income_history_range(start, end, kind)
         }),
         ..Default::default()
     }
@@ -279,6 +307,52 @@ impl Exchange for BitgetExchange {
     ) -> ExchangeFuture<'_, Vec<Execution>> {
         let a = args!(js(&options));
         self.invoke("fetchHistoricalFills", a)
+    }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        let a = args!(js(&options));
+        self.invoke("fetchOHLCV", a)
+    }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", js(&options)?, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", Js::str(&symbol), callback)
+    }
+    fn fetch_income_history(
+        &self,
+        options: Option<IncomeHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        let a = args!(opt_js(options));
+        self.invoke("fetchIncomeHistory", a)
+    }
+    fn fetch_income_history_range(
+        &self,
+        start: f64,
+        end: f64,
+        kind: Option<String>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        let a = args!(js(&start), js(&end), opt_js(kind));
+        self.invoke("fetchIncomeHistoryRange", a)
+    }
+    // ts: BitgetExchange.fetchHistoricalPositions folds closed round trips from fills.
+    fn fetch_historical_positions(
+        &self,
+        options: HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        let opts = Js::object(vec![
+            ("account", Js::str(&options.account)),
+            ("from", options.from.map_or(Js::Undefined, Js::Number)),
+            ("to", options.to.map_or(Js::Undefined, Js::Number)),
+        ]);
+        self.invoke("fetchHistoricalPositions", vec![opts])
     }
     // ts: BitgetExchange.cancelAllOrders / BitgetInverseExchange.cancelAllOrders
     fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
