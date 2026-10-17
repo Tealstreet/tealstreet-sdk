@@ -468,3 +468,395 @@ fn source_identity_flags_survive_demo_facade_construction() {
         h.venue().dispose().unwrap();
     }
 }
+
+fn private_frame(h: &Harness, channel: &str, rows: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/v5/private"))
+        .expect("production private socket")
+        .1
+        .clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"arg":{"channel":channel,"instType":"SWAP"},"data":rows}).to_string(),
+        )));
+    h.runtime.pump();
+}
+
+fn record_private_fills(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value>>> {
+    let fills = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, payload| {
+            sink.borrow_mut().push(payload.clone());
+            Ok(())
+        }),
+    );
+    fills
+}
+
+#[test]
+fn private_orders_commit_terminal_states_before_final_fill_and_reject_stale_snapshots() {
+    let mut checked = 0;
+    for (state, status) in [
+        ("filled", OrderStatus::Closed),
+        ("canceled", OrderStatus::Canceled),
+        ("mmp_canceled", OrderStatus::Canceled),
+    ] {
+        let h = harness(ExchangeName::Okx, options(), okx);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.advance(50.);
+        let stale = h.store.orders().to_vec();
+        assert_eq!(stale.len(), 1, "OKX private initial order floor");
+        assert_eq!(stale[0].status, OrderStatus::Open);
+        let fills = record_private_fills(&h);
+        let errors = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+        let failures = errors.clone();
+        h.venue().base().on(
+            "error",
+            std::rc::Rc::new(move |_, error| {
+                failures.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        let statuses = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+        let observed = statuses.clone();
+        let store = h.store.clone();
+        h.venue().base().on(
+            "fill",
+            std::rc::Rc::new(move |_, _| {
+                observed.borrow_mut().push(store.orders()[0].status);
+                Ok(())
+            }),
+        );
+        let mut row = order();
+        row["state"] = json!(state);
+        row["accFillSz"] = json!("10");
+        row["fillSz"] = json!("2");
+        row["fillPx"] = json!("50100");
+        row["tradeId"] = json!("execution-1");
+        row["fillTime"] = json!("1700000000001");
+        private_frame(&h, "orders", json!([row.clone()]));
+        assert_eq!(
+            h.store.orders().len(),
+            1,
+            "OKX private terminal order retained"
+        );
+        assert_eq!(h.store.orders()[0].id, "o1");
+        assert_eq!(
+            h.store.orders()[0].status,
+            status,
+            "OKX private terminal frame commits native status {state}; errors={:?}",
+            errors.borrow()
+        );
+        let expected_fills = usize::from(state == "filled");
+        assert_eq!(
+            fills.borrow().len(),
+            expected_fills,
+            "OKX private final fill count {state}"
+        );
+        if state == "filled" {
+            assert_eq!(
+                *statuses.borrow(),
+                [OrderStatus::Closed],
+                "OKX private terminal commit precedes final fill"
+            );
+            assert_eq!(
+                fills.borrow()[0],
+                json!({"id":"o1","side":"buy","symbol":"BTCUSDT","price":50100.0,"amount":0.02}),
+                "OKX private native fill object and converted amount"
+            );
+            private_frame(&h, "orders", json!([row]));
+            assert_eq!(
+                fills.borrow().len(),
+                1,
+                "OKX private duplicate execution does not emit twice"
+            );
+        }
+        Store::update(
+            &*h.store,
+            StoreUpdate {
+                orders: Some(stale),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            h.store.orders()[0].status,
+            status,
+            "OKX private terminal memory refuses stale open REST snapshot {state}"
+        );
+        assert!(
+            errors.borrow().is_empty(),
+            "OKX private terminal frame emits no error"
+        );
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "OKX private frame has no uncaught runtime error"
+        );
+        h.venue().dispose().unwrap();
+        checked += 1;
+    }
+    assert_eq!(checked, 3, "OKX private terminal state execution floor");
+}
+
+#[test]
+fn private_positions_frame_updates_native_position_and_balance_without_a_fill() {
+    let h = harness(ExchangeName::Okx, options(), okx);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.advance(50.);
+    let fills = record_private_fills(&h);
+    let mut row = position();
+    row["pos"] = json!("15");
+    row["avgPx"] = json!("47000");
+    row["markPx"] = json!("48000");
+    row["liqPx"] = json!("39000");
+    row["upl"] = json!("1.75");
+    row["mmr"] = json!("7.25");
+    row["imr"] = json!("75");
+    private_frame(&h, "positions", json!([row]));
+    let positions = h.store.positions();
+    assert_eq!(positions.len(), 1, "OKX private position floor");
+    let p = &positions[0];
+    assert_eq!(p.symbol, "BTCUSDT");
+    assert_eq!(p.side, PositionSide::Long);
+    assert_eq!(p.contracts, 0.15, "OKX private position converts contracts");
+    assert_eq!(
+        p.entry_price, 47000.,
+        "OKX private position native entry price"
+    );
+    assert_eq!(
+        p.liquidation_price, 39000.,
+        "OKX private position native liquidation price"
+    );
+    assert_eq!(
+        p.unrealized_pnl, 1.8,
+        "OKX private position native PnL rounded to price tick"
+    );
+    assert_eq!(
+        h.store.balance().used,
+        7.25,
+        "OKX private position updates used margin"
+    );
+    assert_eq!(
+        h.store.balance().upnl,
+        1.8,
+        "OKX private position updates balance PnL"
+    );
+    assert!(
+        fills.borrow().is_empty(),
+        "OKX position topic emits no fill"
+    );
+    assert!(h.runtime.reports.borrow().is_empty());
+    drop(positions);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_account_frame_updates_balance_and_emits_no_fill() {
+    let h = harness(ExchangeName::Okx, options(), okx);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.advance(50.);
+    let fills = record_private_fills(&h);
+    let mut seed = h.store.balance().clone();
+    seed.used = 7.25;
+    seed.upnl = 1.75;
+    Store::update(
+        &*h.store,
+        StoreUpdate {
+            balance: Some(seed),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    private_frame(
+        &h,
+        "account",
+        json!([{"totalEq":"1200.25"},{"totalEq":"9.75"}]),
+    );
+    let balance = h.store.balance();
+    assert_eq!(
+        balance.free, 1202.75,
+        "OKX private account free after used margin"
+    );
+    assert_eq!(
+        balance.total, 1208.25,
+        "OKX private account total after PnL"
+    );
+    assert_eq!(balance.used, 7.25);
+    assert_eq!(balance.upnl, 1.75);
+    assert!(fills.borrow().is_empty(), "OKX account topic emits no fill");
+    assert!(h.runtime.reports.borrow().is_empty());
+    drop(balance);
+    h.venue().dispose().unwrap();
+}
+
+fn record_errors(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, data| {
+            sink.borrow_mut().push(data.to_string());
+            Ok(())
+        }),
+    );
+    errors
+}
+
+// ts: okx.api.ts formatOkxApiErrorMessage through the createAPI response interceptor,
+// observed by setLeverage's `err?.response?.data?.msg || err?.message`.
+fn rejected_set_leverage(body: Value) -> (String, Vec<String>) {
+    let h = harness(ExchangeName::Okx, options(), |http| {
+        http.route("POST", SET_LEVERAGE, 200.0, body.clone());
+        okx(http);
+    });
+    loaded(&h);
+    let positions = h.drive(h.venue().fetch_positions(None)).expect("positions");
+    Store::add_or_update_positions(&*h.store, positions).expect("store positions");
+    let errors = record_errors(&h);
+    let error = h
+        .drive(h.venue().set_leverage("BTCUSDT".into(), 5.0, None))
+        .expect_err("setLeverage rejects");
+    let emitted = errors.borrow().clone();
+    (error.message, emitted)
+}
+
+#[test]
+fn okx_api_error_without_msg_names_the_full_code() {
+    let (message, emitted) = rejected_set_leverage(json!({"code": "50011", "msg": "", "data": []}));
+    assert_eq!(message, "OKX API error (code 50011)");
+    assert!(
+        emitted
+            .iter()
+            .any(|e| e.contains("OKX API error (code 50011)")),
+        "{emitted:?}"
+    );
+}
+
+#[test]
+fn okx_api_error_row_message_carries_its_code() {
+    let (message, _) = rejected_set_leverage(json!({
+        "code": "1", "msg": "",
+        "data": [{"sCode": "0", "sMsg": ""}, {"sCode": "51008", "sMsg": " Insufficient margin "}]
+    }));
+    assert_eq!(message, "Insufficient margin (code 51008)");
+}
+
+// setLeverage reads the attached response's raw msg before the trimmed error message.
+#[test]
+fn okx_api_error_top_level_msg_reaches_the_caller_through_response() {
+    let (message, _) = rejected_set_leverage(
+        json!({"code": "51603", "msg": " Order does not exist ", "data": []}),
+    );
+    assert_eq!(message, " Order does not exist ");
+}
+
+#[test]
+fn okx_place_rejection_reads_the_attached_response() {
+    let h = harness(ExchangeName::Okx, options(), |http| {
+        http.route(
+            "POST",
+            PLACE,
+            200.0,
+            json!({"code": "1", "msg": "All operations failed",
+                   "data": [{"sCode": "51008", "sMsg": "Insufficient margin"}]}),
+        );
+        okx(http);
+    });
+    loaded(&h);
+    let errors = record_errors(&h);
+    let error = h
+        .drive(Box::pin(
+            h.venue().base().place_order(h.venue(), limit_order(10.0)),
+        ))
+        .expect_err("placeOrder rejects");
+    assert_eq!(error.message, "Insufficient margin (code 51008)");
+    assert!(
+        errors
+            .borrow()
+            .iter()
+            .any(|e| e.contains("Insufficient margin (code 51008)")),
+        "{:?}",
+        errors.borrow()
+    );
+}
+
+// ts: okx.exchange.ts fetchIncomeHistory `rowsSeen += rows.length`.
+#[test]
+fn fetch_income_history_maps_a_nonempty_bills_page() {
+    let h = harness(ExchangeName::Okx, options(), |http| {
+        okx(http);
+        http.ok(
+            "GET",
+            "/api/v5/account/bills",
+            json!([{"billId": "1", "ts": "1700000000000", "balChg": "-0.1", "fee": "-0.1",
+                    "pnl": "0", "type": "2", "instId": "BTC-USDT-SWAP", "ccy": "USDT"}]),
+        );
+    });
+    loaded(&h);
+    let errors = record_errors(&h);
+    let records = h
+        .drive(h.venue().fetch_income_history(None))
+        .expect("fetchIncomeHistory");
+    assert!(errors.borrow().is_empty(), "{:?}", errors.borrow());
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].income_type, "COMMISSION");
+    assert_eq!(records[0].income, -0.1);
+    assert_eq!(records[0].symbol, "BTCUSDT");
+}
+
+// ts: okx.ws-business.ts resyncsPrivateStateOnReopen -> base.ws.ts trackConnected runs
+// fetchAndSetPrivateSnapshot when only the business (algo orders) socket re-opens.
+#[test]
+fn business_socket_reopen_alone_resyncs_the_private_snapshot() {
+    use safe_cex_exchange::websocket::WsEvent;
+    let h = harness(ExchangeName::Okx, options(), okx);
+    h.drive(h.venue().start()).expect("start");
+    for _ in 0..100 {
+        h.runtime.advance(50.0);
+    }
+    let business = |h: &Harness| {
+        h.runtime
+            .sockets
+            .borrow()
+            .iter()
+            .filter(|(url, _)| url.ends_with("/ws/v5/business"))
+            .count()
+    };
+    assert_eq!(business(&h), 1, "one business socket after start");
+    let before = h.http.calls(ALGO_ORDERS).len();
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/v5/business"))
+        .expect("business socket")
+        .1
+        .clone();
+    socket.closed.set(true);
+    socket.events.borrow_mut().push_back(WsEvent::Close {
+        code: Some(1006),
+        reason: "abnormal".into(),
+    });
+    for _ in 0..200 {
+        h.runtime.advance(50.0);
+    }
+    assert_eq!(business(&h), 2, "business socket re-dialled");
+    assert!(
+        h.http.calls(ALGO_ORDERS).len() > before,
+        "business re-open fetched the private snapshot ({before} algo reads before)"
+    );
+    h.venue().dispose().expect("dispose");
+}

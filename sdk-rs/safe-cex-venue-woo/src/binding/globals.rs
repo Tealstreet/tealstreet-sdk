@@ -29,12 +29,20 @@ fn table(entries: &[(&str, &str)]) -> Js {
 }
 
 fn enum_table<T: serde::Serialize>(entries: &[(&str, T)]) -> Js {
-    Js::object(
+    let table = Js::object(
         entries
             .iter()
             .map(|(k, v)| (*k, Js::str(&serde_text(v))))
             .collect(),
-    )
+    );
+    // The source exports ordinary objects: unknown keys can inherit the actual
+    // realm's Object.prototype members. Preserve those referents as values.
+    if let Js::Object(object) = &table {
+        *object.proto.borrow_mut() = Some(Js::Builtin(
+            safe_cex_num::PrototypeRealm::current().reference(safe_cex_num::ProtoMember::Prototype),
+        ));
+    }
+    table
 }
 
 fn strings(values: &[&str]) -> Js {

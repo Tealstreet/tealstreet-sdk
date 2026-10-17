@@ -30,7 +30,7 @@ use safe_cex_exchange::{
         safe_cex_axios_create_no_proxy,
     },
     income_paging::{IncomePageParams, IncomeRangeOptions, paginate_income_range},
-    native::{NativeHttpHost, nanoid},
+    native::{NativeHttpEvents, NativeHttpHost, nanoid},
     runtime::{
         ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners, ExchangeTask, RemoteSigner,
     },
@@ -73,11 +73,13 @@ fn to_json(value: &EventValue) -> Result<Value, Failure> {
 /// `external` builds the externalPublicData provider for an exchange's base; the
 /// registry supplies it, since the providers live above the venue layer.
 /// `remote` is the account's hosted signer and its `accountName`, when it has one.
+/// `events` is the account's exchange emitter slot for HTTP proxy failures.
 pub fn native_dependencies(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
     external: ExternalFactory,
     remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+    events: NativeHttpEvents,
 ) -> ExchangeDependencies {
     let token = remote.as_ref().map(|(_, account)| match account {
         Some(account) => record([("accountName", string(account.clone()))]),
@@ -89,7 +91,7 @@ pub fn native_dependencies(
             remote_signer: remote.as_ref().map(|(signer, _)| signer.clone()),
             payload_signer: None,
         },
-        imports: native_imports(runtime, adapter, external, remote),
+        imports: native_imports(runtime, adapter, external, remote, events),
         remote_signer_token: token,
         payload_signer_token: None,
     }
@@ -147,6 +149,7 @@ fn native_imports(
     adapter: Arc<dyn RestAdapter>,
     external: ExternalFactory,
     remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+    events: NativeHttpEvents,
 ) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
         external,
@@ -156,7 +159,7 @@ fn native_imports(
         owner: Rc::new(RefCell::new(Weak::new())),
         public_client: RefCell::new(None),
         adapter,
-        host: Rc::new(NativeHttpHost),
+        host: Rc::new(NativeHttpHost { events }),
         registry: TransportRegistry::default(),
         clients: RefCell::new(vec![]),
         this: this.clone(),
@@ -999,7 +1002,7 @@ impl ExchangeImports for NativeImports {
         VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn uuid(&self) -> String {
-        safe_cex_exchange::native::uuid_v4()
+        safe_cex_crypto::uuid::uuid().expect("operating system entropy is available")
     }
     fn dayjs(&self, value: Option<f64>) -> Result<f64, Failure> {
         Ok(value.unwrap_or_else(|| VIRTUAL_CLOCK.get_current_time_ms()))

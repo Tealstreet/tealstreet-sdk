@@ -28,6 +28,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 #[derive(Default)]
 pub struct Runtime {
     pub now: Rc<Cell<f64>>,
+    pub clock_reads: Cell<usize>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
@@ -75,6 +76,7 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn now_ms(&self) -> f64 {
+        self.clock_reads.set(self.clock_reads.get() + 1);
         self.now.get()
     }
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {

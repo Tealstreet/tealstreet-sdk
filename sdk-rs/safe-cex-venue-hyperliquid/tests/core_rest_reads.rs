@@ -1005,11 +1005,14 @@ impl RestReadHost for Host {
             return Err(Native::decode(error));
         }
         assert_eq!(f["result"].as_array().unwrap().len(), mask.len());
+        // Production Realm::array_pattern returns bound slots only; holes are consumed, not returned.
         Ok(f["result"]
             .as_array()
             .unwrap()
             .iter()
-            .map(Native::decode)
+            .zip(mask)
+            .filter(|(_, bound)| **bound)
+            .map(|(value, _)| Native::decode(value))
             .collect())
     }
     fn rest_argument_spread(

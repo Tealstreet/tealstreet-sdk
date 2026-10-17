@@ -1536,7 +1536,7 @@ impl Socket {
             let venue = socket.venue()?;
             let options = venue.base.options();
             let runtime = venue.runtime.clone();
-            let (clock, nonce, id) = (runtime.clone(), runtime.clone(), runtime.clone());
+            let (nonce, id) = (runtime.clone(), runtime.clone());
             let signer = venue.base.signers.remote_signer.clone();
             let account_name = venue.remote_account_name.clone();
             let request_account = account_name.clone();
@@ -1544,11 +1544,15 @@ impl Socket {
             let report = venue.clone();
             let sender = socket.clone();
             crate::websocket_private::send_login(
-                || Ok(clock.now_ms()),
-                || Ok(nonce.unique_id()),
+                || Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time()),
+                || Ok(nonce.unique_id().replace(['-', '_'], "")),
                 || Ok(options.key.clone()),
-                // virtualClock.syncBybitClientServerTime: the shared runtime clock is already authoritative.
-                || std::future::ready(Ok(())),
+                || async {
+                    safe_cex_store::virtual_clock::VIRTUAL_CLOCK
+                        .sync_bybit_client_server_time(None)
+                        .await;
+                    Ok(())
+                },
                 |ms| {
                     let f = runtime.sleep(ms as u64);
                     async move { f.await.map_err(|e| e.message) }
@@ -1904,8 +1908,11 @@ struct LoginRetry {
 }
 impl crate::event_models::LoginRetryHost for LoginRetry {
     type Error = ExchangeError;
-    fn sync(&mut self) -> impl Future<Output = Result<(), ExchangeError>> {
-        std::future::ready(Ok(()))
+    async fn sync(&mut self) -> Result<(), ExchangeError> {
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK
+            .sync_bybit_client_server_time(None)
+            .await;
+        Ok(())
     }
     fn sleep(&mut self, ms: f64) -> impl Future<Output = Result<(), ExchangeError>> {
         self.socket.runtime().sleep(ms as u64)

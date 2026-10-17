@@ -68,7 +68,7 @@
         6
       ],
       "file": "safe-cex-venue-bitget/src/binding/exchange.rs",
-      "sha256": "e4708e66371d3fa04226fc2dc4a7bab060b7dcd1c5f4f663fbcadcd89da40e93"
+      "sha256": "06a68964499366526863365c961fbe154ce8006d1858399edfa128c547ff9d2d"
     },
     "typescript": {
       "base": {
@@ -239,7 +239,7 @@
         6
       ],
       "file": "safe-cex-venue-bitget/src/binding/exchange.rs",
-      "sha256": "e4708e66371d3fa04226fc2dc4a7bab060b7dcd1c5f4f663fbcadcd89da40e93"
+      "sha256": "06a68964499366526863365c961fbe154ce8006d1858399edfa128c547ff9d2d"
     },
     "typescript": {
       "base": {
