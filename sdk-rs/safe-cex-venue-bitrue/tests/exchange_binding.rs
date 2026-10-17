@@ -1002,7 +1002,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         .base()
         .emit(
             "markets:changed",
-            json!({"added":[{"symbol":"E-ETH-USDT"},{"symbol":"E-ADA-USDT"}]}),
+            from_json(&json!({"added":[{"symbol":"E-ETH-USDT"},{"symbol":"E-ADA-USDT"}]})),
         )
         .unwrap();
     f.runtime.pump();
