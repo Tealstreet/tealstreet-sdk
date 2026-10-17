@@ -357,6 +357,23 @@ impl WsProtocol for JsProtocol {
     fn watchdog_ping_threshold_ms(&self) -> Option<f64> {
         self.receiver_threshold("getWatchdogPingThresholdMs")
     }
+    /// ts: a subclass `resyncsPrivateStateOnReopen` getter replaces base.ws.ts's
+    /// private-socket default; an undefined receiver member keeps that default.
+    fn resyncs_private_state_on_reopen(&self) -> Option<bool> {
+        let core = self.0.upgrade()?;
+        let this = core.this.borrow().clone();
+        match this.get("resyncsPrivateStateOnReopen") {
+            Ok(value) if value.is_undefined() => None,
+            Ok(value) => Some(value.truthy()),
+            Err(thrown) => {
+                core.context.runtime.report_exception(
+                    &core_error(thrown),
+                    &serde_json::json!({ "operation": "resyncsPrivateStateOnReopen" }),
+                );
+                None
+            }
+        }
+    }
     fn on_error(&self, _socket: &BaseWebSocket, message: &str) -> Result<(), ExchangeError> {
         self.emit(
             "error",

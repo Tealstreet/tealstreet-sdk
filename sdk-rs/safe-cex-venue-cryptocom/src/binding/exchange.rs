@@ -315,6 +315,13 @@ impl Exchange for CryptocomExchange {
         let a = args!(js(&orders));
         self.invoke_unit("cancelOrders", a)
     }
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        let a = args!(js(&symbol));
+        self.invoke_unit("cancelSymbolOrders", a)
+    }
+    fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
+        self.invoke_unit("cancelAllOrders", vec![])
+    }
     // ts: base.ts:989 — inherited scheduleCancel rejects.
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         not_implemented()

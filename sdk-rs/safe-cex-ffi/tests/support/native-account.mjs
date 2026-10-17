@@ -22,6 +22,7 @@ function textFrame(value) {
 export async function openStartedAccount(t) {
   const seen = [];
   const sockets = new Set();
+  const received = [];
   const server = createServer(async (request, response) => {
     const url = new URL(request.url.replace(/^\/https?:\/\/[^/]+/, ''), 'http://local');
     let body = '';
@@ -44,12 +45,33 @@ export async function openStartedAccount(t) {
     socket.on('close', () => sockets.delete(socket));
     const accept = createHash('sha1').update(request.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-    // Once the provider writes subscriptions, supply both startup snapshots.
-    // Resending is harmless: the provider replaces its market/ticker batches.
-    socket.on('data', () => {
-      if (socket.destroyed) return;
-      for (const [channel, data] of [['market', market], ['tickers', ticker]]) {
-        socket.write(textFrame({ type: 'data', exchangeId: 'binance', channel, data: [data] }));
+    let buffered = Buffer.alloc(0);
+    socket.on('data', chunk => {
+      buffered = Buffer.concat([buffered, chunk]);
+      while (buffered.length >= 2) {
+        const opcode = buffered[0] & 15;
+        let length = buffered[1] & 127;
+        let offset = 2;
+        if (length === 126) {
+          if (buffered.length < 4) return;
+          length = buffered.readUInt16BE(2); offset = 4;
+        }
+        if (length === 127) throw new Error('unexpected oversized fixture frame');
+        const masked = (buffered[1] & 128) !== 0;
+        const maskBytes = masked ? 4 : 0;
+        if (buffered.length < offset + maskBytes + length) return;
+        const mask = buffered.subarray(offset, offset + maskBytes);
+        const payload = Buffer.from(buffered.subarray(offset + maskBytes, offset + maskBytes + length));
+        if (masked) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+        buffered = buffered.subarray(offset + maskBytes + length);
+        if (opcode === 8) { socket.end(Buffer.from([0x88, 0])); return; }
+        if (opcode !== 1) continue;
+        const frame = JSON.parse(payload.toString());
+        received.push(frame);
+        if (frame.type === 'subscribe' && ['market', 'tickers'].includes(frame.channel)) {
+          socket.write(textFrame({ type: 'data', exchangeId: 'binance', channel: frame.channel,
+            data: [frame.channel === 'market' ? market : ticker] }));
+        }
       }
     });
   });
@@ -72,5 +94,7 @@ export async function openStartedAccount(t) {
   }) }, event => events.push(JSON.parse(event)), store => stores.push(JSON.parse(store)));
   const call = async (method, ...args) => JSON.parse(await native.nativeAccountCallMethod(id, method, JSON.stringify(args)));
   await call('start');
-  return { call, seen, events, stores };
+  return { call, seen, events, stores, received, sendGateway: frame => {
+    for (const socket of sockets) if (!socket.destroyed) socket.write(textFrame(frame));
+  } };
 }

@@ -403,6 +403,47 @@ fn cancel_orders_routes_triggers_to_the_advanced_endpoint() {
     );
 }
 
+// ts: cryptocom.exchange.ts cancelSymbolOrders / cancelAllOrders post the venue cancel-all,
+// so orders the store has not mapped yet are cancelled too.
+#[test]
+fn cancel_symbol_and_all_orders_post_the_venue_cancel_all() {
+    let h = venue(|http| http.ok("POST", "/private/cancel-all-orders", ok(json!({}))));
+    loaded(&h);
+    h.drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect("cancelSymbolOrders");
+    assert_eq!(
+        only(&h, "/private/cancel-all-orders"),
+        json!({"instrument_name": SYMBOL})
+    );
+    h.drive(h.venue().cancel_all_orders())
+        .expect("cancelAllOrders");
+    let calls = h.http.calls("/private/cancel-all-orders");
+    assert_eq!(calls.len(), 2, "cancelAllOrders posts once");
+    assert_eq!(envelope(&calls[1])["params"], json!({}));
+    assert!(h.http.calls("/private/cancel-order").is_empty());
+}
+
+#[test]
+fn cancel_all_orders_rethrows_a_venue_rejection() {
+    let h = venue(|http| {
+        http.route(
+            "POST",
+            "/private/cancel-all-orders",
+            400.0,
+            json!({"code": 40003, "message": "BAD_REQUEST"}),
+        )
+    });
+    loaded(&h);
+    let symbol = h
+        .drive(h.venue().cancel_symbol_orders(SYMBOL.into()))
+        .expect_err("cancelSymbolOrders rethrows");
+    let all = h
+        .drive(h.venue().cancel_all_orders())
+        .expect_err("cancelAllOrders rethrows");
+    assert_eq!(symbol.message, all.message);
+    assert!(symbol.message.contains("BAD_REQUEST"), "{}", symbol.message);
+}
+
 #[test]
 fn set_leverage_posts_the_account_leverage() {
     let h = venue(|http| http.ok("POST", "/private/change-account-leverage", ok(json!({}))));
@@ -878,4 +919,156 @@ fn dispose_sets_source_flag_without_removing_inherited_listeners() {
         1,
         "source override does not invoke base listener cleanup"
     );
+}
+
+// ts: cryptocom.api.ts createAPI through safeCexAxiosCreate (provider baseURL and proxy
+// authorization) and, under tealstreetTunnel, installTransportAdapter.
+#[test]
+#[expect(clippy::arc_with_non_send_sync)]
+fn create_api_routes_through_the_provider_and_tunnel_adapter() {
+    use safe_cex_transport::{
+        DirectTransport, PrivateProxy, ResolvedRouting, RestAdapter, RestAdapterContext,
+        RestAdapterVariant, RestAuthorizer, RestFuture, RestRequest, RestResponse,
+        RestResponseBody, RestTransport, RestTransportContext, RoutingOptions, TransportError,
+        TransportFuture, TransportProvider, WsConnection,
+    };
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
+    const PROXIED: &str = "https://private-proxy/https://api.crypto.com/exchange/v1";
+    struct Authorize;
+    impl RestAuthorizer for Authorize {
+        fn authorize<'a>(&'a self, request: &'a mut RestRequest) -> TransportFuture<'a, ()> {
+            Box::pin(async move {
+                let Some(safe_cex_transport::RestBody::Encoded(body)) = &request.body else {
+                    panic!("ROUTING encoded body: {:?}", request.body)
+                };
+                let body: Value = serde_json::from_slice(body).unwrap();
+                assert!(
+                    body["sig"].as_str().is_some_and(|s| s.len() == 64),
+                    "ROUTING venue signs before proxy authorization"
+                );
+                request
+                    .headers
+                    .insert("Authorization".into(), "Bearer proxy-token".into());
+                Ok(())
+            })
+        }
+    }
+    struct Terminal(Rc<RefCell<Vec<RestRequest>>>);
+    impl RestAdapter for Terminal {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.borrow_mut().push(request);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Untransformed(balance()),
+                })
+            })
+        }
+    }
+    struct Provider {
+        variants: Rc<RefCell<Vec<RestAdapterVariant>>>,
+        sent: Rc<RefCell<Vec<RestRequest>>>,
+    }
+    impl TransportProvider for Provider {
+        fn name(&self) -> &str {
+            "cryptocom-routing"
+        }
+        fn rest(&self, c: RestTransportContext<'_>) -> Result<RestTransport, TransportError> {
+            assert_eq!(c.exchange, &ExchangeName::Cryptocom, "ROUTING exchange");
+            assert_eq!(
+                c.config.base_url.as_deref(),
+                Some("https://api.crypto.com/exchange/v1"),
+                "ROUTING original base"
+            );
+            Ok(RestTransport {
+                base_url: Some(PROXIED.into()),
+                proxied: true,
+                authorize: Some(Arc::new(Authorize)),
+            })
+        }
+        fn rest_adapter(&self, c: RestAdapterContext<'_>) -> Option<Arc<dyn RestAdapter>> {
+            self.variants.borrow_mut().push(c.variant);
+            Some(Arc::new(Terminal(self.sent.clone())))
+        }
+        fn proxy_prefix(&self, _: RestTransportContext<'_>) -> String {
+            String::new()
+        }
+        fn public_cors_proxy(&self) -> Option<String> {
+            None
+        }
+        fn private_proxy(&self, _: &ExchangeName) -> Option<Arc<dyn PrivateProxy>> {
+            None
+        }
+        fn require_proxy(&self, options: ExchangeOptions) -> ExchangeOptions {
+            options
+        }
+        fn server_proxy_url(&self, _: &ExchangeName) -> Option<String> {
+            None
+        }
+        fn ws_routing(&self, name: &ExchangeName, options: &RoutingOptions) -> ResolvedRouting {
+            DirectTransport.ws_routing(name, options)
+        }
+        fn ws_connection(&self, _: &str) -> Option<WsConnection> {
+            None
+        }
+    }
+    for tunnel in [false, true] {
+        let runtime = Rc::new(support::Runtime::default());
+        let variants = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        *runtime.provider.borrow_mut() = Some(Arc::new(Provider {
+            variants: variants.clone(),
+            sent: sent.clone(),
+        }));
+        let options = serde_json::from_value(json!({
+            "key": "fixture-key", "secret": "fixture-secret",
+            "tealstreetProxy": true, "tealstreetTunnel": tunnel
+        }))
+        .unwrap();
+        let h = support::harness_on(runtime, options, |http| {
+            http.ok("POST", "/private/user-balance", balance())
+        });
+        let result = h
+            .drive(h.venue().validate_account())
+            .expect("validateAccount");
+        assert_eq!(serde_json::to_value(&result.error).unwrap(), json!(""));
+        if tunnel {
+            assert_eq!(
+                *variants.borrow(),
+                [RestAdapterVariant::Default],
+                "ROUTING tunnel installs the default adapter once"
+            );
+            assert!(
+                h.http.requests.borrow().is_empty(),
+                "ROUTING adapter replaces host"
+            );
+            let requests = sent.borrow();
+            assert_eq!(
+                requests.len(),
+                2,
+                "ROUTING source validation then fetchBalance"
+            );
+            assert_eq!(requests[0].base_url.as_deref(), Some(PROXIED));
+            assert_eq!(
+                requests[0].headers.get("Authorization").map(String::as_str),
+                Some("Bearer proxy-token")
+            );
+        } else {
+            assert!(
+                variants.borrow().is_empty(),
+                "ROUTING no adapter without tunnel"
+            );
+            let calls = h.http.calls("/private/user-balance");
+            assert_eq!(
+                calls.len(),
+                2,
+                "ROUTING source validation then fetchBalance"
+            );
+            let call = &calls[0];
+            assert_eq!(call.base_url, PROXIED, "ROUTING provider base");
+            assert_eq!(call.headers["Authorization"], "Bearer proxy-token");
+        }
+    }
 }
