@@ -141,47 +141,19 @@ fn dispatch_callback(
     captures: Vec<Js>,
     args: Vec<Js>,
 ) -> Result<Js, Thrown> {
-    if matches!(
-        code,
-        "wallet-has"
-            | "wallet-field"
-            | "wallet-coin"
-            | "position-numeric"
-            | "position-required"
-            | "nonfinite"
-            | "order-number"
-            | "orders-invalid"
-            | "orders-map"
-            | "positions-map"
-    ) {
+    if let Some(code) = crate::hyro_private_reads::Callback::from_name(code) {
         return crate::hyro_private_reads::dispatch(h.as_ref(), &owner, code, &captures, args);
     }
-    if matches!(
-        code,
-        "snapshot-current" | "snapshot-pnl" | "market-usdt" | "market-entry"
-    ) {
+    if let Some(code) = crate::hyro_snapshot::Callback::from_name(code) {
         return crate::hyro_snapshot::dispatch(h.as_ref(), code, args);
     }
-    if matches!(
-        code,
-        "recovery-link"
-            | "reconciliation-link"
-            | "existing-order"
-            | "cancel-child"
-            | "accepted-order"
-    ) {
+    if let Some(code) = crate::hyro_order_publication::Callback::from_name(code) {
         return crate::hyro_order_publication::dispatch(h.as_ref(), &owner, code, &captures, args);
     }
-    if matches!(code, "inverse-pnl" | "inverse-coin" | "inverse-null-market") {
+    if let Some(code) = crate::inverse_read_surface::Callback::from_name(code) {
         return crate::inverse_read_surface::dispatch(h.as_ref(), code, args);
     }
-    if matches!(
-        code,
-        "account-orders"
-            | "inverse-account-positions"
-            | "spot-account-positions"
-            | "account-tick-again"
-    ) {
+    if let Some(code) = crate::variant_account_refresh::Callback::from_name(code) {
         return crate::variant_account_refresh::dispatch(h.as_ref(), &owner, code, args);
     }
     if code.starts_with("start_") {

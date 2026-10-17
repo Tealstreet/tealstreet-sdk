@@ -1592,3 +1592,210 @@ fn batch_order_ids_match_source_decimal_admission_before_store_updates() {
         }
     }
 }
+
+fn named_market(symbol: &str, base: &str) -> Value {
+    let mut row = raw_market();
+    row["symbol"] = json!(symbol);
+    row["baseAsset"] = json!(base);
+    row
+}
+#[test]
+fn market_closed_rows_keep_good_markets_and_report_field_values() {
+    let bad_values = [
+        None,
+        Some(Value::Null),
+        Some(json!(17)),
+        Some(json!(false)),
+        Some(json!({})),
+        Some(json!([])),
+    ];
+    for field in ["baseAsset", "symbol"] {
+        for bad in &bad_values {
+            let mut refused = named_market("BADUSDT", "BAD");
+            match bad {
+                Some(value) => {
+                    refused[field] = value.clone();
+                }
+                None => {
+                    refused.as_object_mut().unwrap().remove(field);
+                }
+            }
+            let h = harness(options(), |http| {
+                http.ok("GET", endpoint("EXCHANGE_INFO"), json!({"symbols":[named_market("ETHUSDT", "ETH"), refused, named_market("SOLUSDT", "SOL")]}));
+                script(http);
+            });
+            seed(&h);
+            let logs = historical_fill_logs(&h);
+            let markets = h.drive(h.venue().fetch_markets()).unwrap();
+            let identities: Vec<_> = markets
+                .iter()
+                .map(|m| {
+                    (
+                        m.id.as_str(),
+                        m.symbol.as_str(),
+                        m.base.as_str(),
+                        m.quote.as_str(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                identities,
+                [
+                    ("ETHUSDT", "ETHUSDT", "ETH", "USDT"),
+                    ("SOLUSDT", "SOLUSDT", "SOL", "USDT")
+                ],
+                "bad {field}={bad:?} must not discard good markets or return the cached BTC snapshot"
+            );
+            assert_eq!(
+                h.store.markets()[0].symbol,
+                "BTCUSDT",
+                "fetch returns the snapshot; caller commits it"
+            );
+            let logs = logs.borrow();
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0]["severity"], "warning");
+            let message = logs[0]["message"].as_str().unwrap();
+            let rendered = bad
+                .as_ref()
+                .map_or_else(|| "undefined".to_owned(), Value::to_string);
+            assert!(message.contains(&format!("Market.{field}")), "{message}");
+            assert!(
+                message.contains(&format!("received: {rendered}")),
+                "{message}"
+            );
+            assert_eq!(h.http.calls(endpoint("EXCHANGE_INFO")).len(), 1);
+        }
+    }
+}
+#[test]
+fn market_closed_all_refused_rows_return_empty_with_each_report() {
+    let mut bad = named_market("BADUSDT", "BAD");
+    bad["baseAsset"] = json!(17);
+    let mut absent = named_market("MISSINGUSDT", "BAD");
+    absent.as_object_mut().unwrap().remove("baseAsset");
+    let h = harness(options(), |http| {
+        http.ok(
+            "GET",
+            endpoint("EXCHANGE_INFO"),
+            json!({"symbols":[bad, absent]}),
+        );
+        script(http);
+    });
+    seed(&h);
+    let logs = historical_fill_logs(&h);
+    assert!(
+        h.drive(h.venue().fetch_markets()).unwrap().is_empty(),
+        "all refused rows must not return the stale cached market"
+    );
+    assert_eq!(logs.borrow().len(), 2);
+}
+#[test]
+fn market_closed_refusal_does_not_replace_source_coercion_failure() {
+    let mut bad = named_market("BADUSDT", "BAD");
+    bad["baseAsset"] = json!(17);
+    bad["makerFeeRate"] = json!({"toString":null});
+    let h = harness(options(), |http| {
+        http.ok(
+            "GET",
+            endpoint("EXCHANGE_INFO"),
+            json!({"symbols":[named_market("ETHUSDT", "ETH"), bad]}),
+        );
+        script(http);
+    });
+    seed(&h);
+    let logs = historical_fill_logs(&h);
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, value| {
+            sink.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert_eq!(markets.len(), 1);
+    assert_eq!(
+        markets[0].symbol, "BTCUSDT",
+        "source failure retains cached snapshot"
+    );
+    assert!(
+        !logs.borrow().iter().any(|log| log["severity"] == "warning"),
+        "a source coercion failure must not become a typed refusal"
+    );
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .as_str()
+            .unwrap()
+            .contains("Cannot convert object to primitive value")
+    );
+}
+
+#[test]
+fn market_closed_source_keeps_raw_fields_and_catches_coercion_errors() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/market-row-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "13");
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::StoreUpdate;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("weex");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 96);
+    let h = setup();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("public"))
+        .unwrap()
+        .1
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("weex")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}

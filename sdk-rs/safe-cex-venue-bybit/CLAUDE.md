@@ -844,3 +844,11 @@ refusal, not a network failure. The native factory observer records canonical
 retained input, and its compiled control fails if the original response is lost.
 Numeric fixture comparisons check exact binary64 bits and source JSON spelling,
 rather than serde number lexemes.
+
+The remaining generic callback dispatchers take closed per-module `Callback`
+selectors. Native routing converts only the original fixed factory tags; all
+matches are exhaustive. Their former unknown-callback intrinsic arms had no
+production route and are deleted. Hyro socket disposal uses the existing concrete
+PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
+generic dispose wrapper and its three synthetic-only cases are removed. Preserve
+the actual constructor/socket/Store witnesses and the remaining439 session cases.
