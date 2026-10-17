@@ -9,16 +9,24 @@ cases = {
     "bitrue": ("public_bodies.rs", "exchange_binding", "let last = h.unary_plus(close)?;", "let _original = h.unary_plus(close)?; let last = h.number(0.0);"),
     "apexomni": ("ws_public.rs", "binding", '("p", "last"),', '("mp", "last"),'),
     "weex": ("public_feed.rs", "exchange_binding", 'let last = get("c", "last")?;', 'let last = get("m", "mark")?;'),
+    "phemex": ("websocket_data.rs", "exchange_binding", 'let last = parse_field(h, &input, "lastRp")?;', 'let last = parse_field(h, &input, "markRp")?;'),
+    "kucoin": ("public_streams.rs", "exchange_trait", 'fallback(h, (h.get)(&data, "bestBidPrice")?, || {', 'fallback(h, (h.get)(&data, "bestAskPrice")?, || {'),
+    "kucoinspot": ("public_streams.rs", "exchange_trait", 'vec!["bestBid", "bestBidPrice", "buy"],', 'vec!["bestAsk", "bestAskPrice", "sell"],'),
 }
 selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    source = root / "sdk-rs" / ("safe-cex-venue-" + venue) / "src" / filename
+    crate = "kucoin" if venue == "kucoinspot" else venue
+    test = {
+        "kucoin": "production_ticker_coercion_futures_matches_constructed_typescript",
+        "kucoinspot": "production_ticker_coercion_spot_matches_constructed_typescript",
+    }.get(venue, "production_ticker_coercion_matches_constructed_typescript")
+    source = root / "sdk-rs" / ("safe-cex-venue-" + crate) / "src" / filename
     original = source.read_bytes()
     assert original.count(before.encode()) == 1, venue
-    command = ["cargo", "test", "--jobs", "1", "-p", "safe-cex-venue-" + venue,
-               "--test", target, "production_ticker_coercion_matches_constructed_typescript"]
+    command = ["cargo", "test", "--jobs", "1", "-p", "safe-cex-venue-" + crate,
+               "--test", target, test]
     try:
         source.write_bytes(original.replace(before.encode(), after.encode(), 1))
         red = subprocess.run(command, cwd=root / "sdk-rs", capture_output=True, text=True)
