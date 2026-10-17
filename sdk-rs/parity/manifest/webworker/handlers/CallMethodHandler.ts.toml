@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/webworker/handlers/CallMethodHandler.ts"
-rust_files = [ "safe-cex-webworker/src/call_method.rs" , "safe-cex-webworker/src/data_post.rs", "safe-cex-webworker/src/data_post/browser.rs" ]
+rust_files = [ "safe-cex-webworker/src/call_method.rs", "safe-cex-webworker/src/data_post.rs", "safe-cex-webworker/src/data_post/browser.rs" ]
 
 [[symbol]]
 ts = "CallMethodHandler"
