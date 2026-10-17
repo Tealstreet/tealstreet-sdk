@@ -497,19 +497,7 @@ fn dayjs_add(ms: f64, amount: f64, unit: &str) -> f64 {
     if !ms.is_finite() {
         return f64::NAN;
     }
-    let unit = match unit {
-        "M" => "month",
-        "y" => "year",
-        "w" => "week",
-        "d" => "day",
-        "D" => "date",
-        "h" => "hour",
-        "m" => "minute",
-        "s" => "second",
-        "ms" => "millisecond",
-        other => other.trim_end_matches('s'),
-    }
-    .to_lowercase();
+    let unit = pretty_unit(unit);
     let days = ms.div_euclid(DAY_MS) as i64;
     let in_day = ms.rem_euclid(DAY_MS);
     let (y, m, d) = civil_from_days(days);
@@ -563,6 +551,14 @@ fn dayjs_ms(v: &Js, now: f64) -> Result<f64, Thrown> {
     })
 }
 
+/// `dayjs(input)`: a facade input is cloned with its utc-plugin state, as `clone()` does.
+fn dayjs_from(v: &Js, now: f64) -> Result<Js, Thrown> {
+    if let Some(state) = DayjsState::of(v)? {
+        return Ok(dayjs_with(state));
+    }
+    Ok(dayjs(dayjs_ms(v, now)?))
+}
+
 /// `YYYY-MM-DD[THH:mm[:ss[.sss]]][Z]`, read as UTC.
 fn parse_iso(s: &str) -> Option<f64> {
     let s = s.trim_end_matches('Z');
@@ -584,8 +580,118 @@ fn parse_iso(s: &str) -> Option<f64> {
     Some(ms)
 }
 
+/// dayjs + utc plugin instance fields in a UTC host zone: `$d` is the wall clock,
+/// `$offset`/`$u`/`$x.$localOffset` follow dayjs 1.11 `plugin/utc` exactly.
+#[derive(Clone, Copy)]
+struct DayjsState {
+    wall: f64,
+    offset: Option<f64>,
+    utc: bool,
+    local_offset: Option<f64>,
+}
+
+impl DayjsState {
+    const FIELDS: [&'static str; 4] = ["$d", "$offset", "$u", "$localOffset"];
+
+    fn plain(ms: f64) -> Self {
+        DayjsState {
+            wall: ms,
+            offset: None,
+            utc: false,
+            local_offset: None,
+        }
+    }
+    /// utc plugin `valueOf`: `$offset + ($localOffset || getTimezoneOffset())` minutes.
+    fn value_of(self) -> f64 {
+        let Some(offset) = self.offset else {
+            return self.wall;
+        };
+        let local = self.local_offset.filter(|v| *v != 0.0 && !v.is_nan());
+        self.wall - (offset + local.unwrap_or(0.0)) * 60_000.0
+    }
+    fn utc_offset(self) -> f64 {
+        match (self.utc, self.offset) {
+            (true, _) => 0.0,
+            (false, Some(offset)) => offset,
+            // -Math.round(getTimezoneOffset() / 15) * 15 in a UTC zone.
+            (false, None) if self.wall.is_nan() => f64::NAN,
+            (false, None) => -0.0,
+        }
+    }
+    fn timezone_offset(self) -> f64 {
+        if self.value_of().is_nan() {
+            f64::NAN
+        } else {
+            0.0
+        }
+    }
+    fn with_wall(self, wall: f64) -> Self {
+        DayjsState { wall, ..self }
+    }
+    fn of(v: &Js) -> Result<Option<Self>, Thrown> {
+        if !matches!(v, Js::Object(o) if o.class == "Dayjs") {
+            return Ok(None);
+        }
+        let [wall, offset, utc, local_offset] = Self::FIELDS.map(|key| v.get(key));
+        let optional = |v: Js| (!v.is_undefined()).then(|| v.to_number()).transpose();
+        Ok(Some(DayjsState {
+            wall: wall?.to_number()?,
+            offset: optional(offset?)?,
+            utc: utc?.truthy(),
+            local_offset: optional(local_offset?)?,
+        }))
+    }
+}
+
+/// dayjs `prettyUnit`: shorthand table, else lowercase with one trailing `s` removed.
+fn pretty_unit(unit: &str) -> String {
+    match unit {
+        "M" => "month".into(),
+        "y" => "year".into(),
+        "w" => "week".into(),
+        "d" => "day".into(),
+        "D" => "date".into(),
+        "h" => "hour".into(),
+        "m" => "minute".into(),
+        "s" => "second".into(),
+        "ms" => "millisecond".into(),
+        "Q" => "quarter".into(),
+        other => {
+            let lower = other.to_lowercase();
+            lower.strip_suffix('s').map_or(lower.clone(), str::to_owned)
+        }
+    }
+}
+
+/// dayjs `startOf(unit)` on the wall clock; en locale weeks start on Sunday and
+/// units without a core case (quarter, isoWeek, unknown) return a clone.
+fn dayjs_start_of(wall: f64, unit: &str) -> f64 {
+    if !wall.is_finite() {
+        return f64::NAN;
+    }
+    let days = wall.div_euclid(DAY_MS) as i64;
+    let in_day = wall.rem_euclid(DAY_MS);
+    let (y, m, _) = civil_from_days(days);
+    let day = |d: i64| d as f64 * DAY_MS;
+    match unit {
+        "year" => day(days_from_civil(y, 1, 1)),
+        "month" => day(days_from_civil(y, m, 1)),
+        // 1970-01-01 was a Thursday (weekday 4).
+        "week" => day(days - (days + 4).rem_euclid(7)),
+        "day" | "date" => day(days),
+        "hour" => day(days) + in_day - in_day % 3_600_000.0,
+        "minute" => day(days) + in_day - in_day % 60_000.0,
+        "second" => day(days) + in_day - in_day % 1_000.0,
+        _ => wall,
+    }
+}
+
 fn dayjs(ms: f64) -> Js {
-    let at = |f: fn(f64) -> f64| func("", move |_| Ok(Js::Number(f(ms))));
+    dayjs_with(DayjsState::plain(ms))
+}
+
+fn dayjs_with(state: DayjsState) -> Js {
+    let at = move |f: fn(f64) -> f64| func("", move |_| Ok(Js::Number(f(state.value_of()))));
     let shift = |sign: f64| {
         func("", move |a| {
             let amount = arg(&a, 0).to_number()?;
@@ -595,16 +701,80 @@ fn dayjs(ms: f64) -> Js {
             } else {
                 text(&unit)?
             };
-            Ok(dayjs(dayjs_add(ms, sign * amount, &unit)))
+            Ok(dayjs_with(state.with_wall(dayjs_add(
+                state.wall,
+                sign * amount,
+                &unit,
+            ))))
         })
     };
     let order = |want: Ordering| {
         func("", move |a| {
             let other = dayjs_ms(&arg(&a, 0), f64::NAN)?;
-            Ok(Js::Bool(ms.partial_cmp(&other) == Some(want)))
+            Ok(Js::Bool(state.value_of().partial_cmp(&other) == Some(want)))
         })
     };
-    Js::object_with_class(
+    let utc_offset = func("utcOffset", move |a| {
+        let input = match arg(&a, 0) {
+            Js::Undefined => return Ok(Js::Number(state.utc_offset())),
+            Js::Number(n) => n,
+            _ => {
+                return Err(Thrown::type_error(
+                    "dayjs utcOffset accepts only numeric offsets in this runtime",
+                ));
+            }
+        };
+        let offset = if input.abs() <= 16.0 {
+            input * 60.0
+        } else {
+            input
+        };
+        let keep_local_time = arg(&a, 1).truthy();
+        if offset == 0.0 {
+            // proto.utc(keepLocalTime)
+            let utc = DayjsState {
+                utc: true,
+                ..DayjsState::plain(state.value_of())
+            };
+            return Ok(dayjs_with(if keep_local_time {
+                utc.with_wall(dayjs_add(utc.wall, state.utc_offset(), "minute"))
+            } else {
+                utc
+            }));
+        }
+        if keep_local_time {
+            return Ok(dayjs_with(DayjsState {
+                offset: Some(offset),
+                utc: false,
+                ..state
+            }));
+        }
+        let local_timezone_offset = if state.utc {
+            state.timezone_offset()
+        } else {
+            -state.utc_offset()
+        };
+        let local = DayjsState::plain(state.value_of());
+        Ok(dayjs_with(DayjsState {
+            wall: dayjs_add(local.wall, offset + local_timezone_offset, "minute"),
+            offset: Some(offset),
+            utc: false,
+            local_offset: Some(local_timezone_offset),
+        }))
+    });
+    let start_of = func("startOf", move |a| {
+        let unit = arg(&a, 0);
+        let unit = if unit.is_undefined() {
+            String::new()
+        } else {
+            text(&unit)?
+        };
+        Ok(dayjs_with(state.with_wall(dayjs_start_of(
+            state.wall,
+            &pretty_unit(&unit),
+        ))))
+    });
+    let object = Js::object_with_class(
         "Dayjs",
         vec![
             ("_isDayjs", Js::Bool(true)),
@@ -614,16 +784,40 @@ fn dayjs(ms: f64) -> Js {
             ("subtract", shift(-1.0)),
             ("isBefore", order(Ordering::Less)),
             ("isAfter", order(Ordering::Greater)),
+            ("utcOffset", utc_offset),
+            ("startOf", start_of),
             (
                 "toISOString",
                 func("toISOString", move |_| {
-                    iso_string(ms)
+                    iso_string(state.value_of())
                         .map(|s| Js::str(&s))
                         .ok_or_else(|| Thrown::error("RangeError", "Invalid time value"))
                 }),
             ),
         ],
-    )
+    );
+    let optional = |v: Option<f64>| v.map_or(Js::Undefined, Js::Number);
+    let fields = [
+        Js::Number(state.wall),
+        optional(state.offset),
+        Js::Bool(state.utc),
+        optional(state.local_offset),
+    ];
+    if let Js::Object(data) = &object {
+        let mut props = data.props.borrow_mut();
+        for (key, value) in DayjsState::FIELDS.into_iter().zip(fields) {
+            props.insert(
+                key.encode_utf16().collect::<Vec<u16>>().into(),
+                super::value::Prop::DataDescriptor {
+                    value,
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+    }
+    object
 }
 
 /// qs default encoder (RFC 3986 unreserved set kept, UTF-8 percent-encoded).
@@ -1209,7 +1403,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             } else {
                 f64::NAN
             };
-            Ok(dayjs(dayjs_ms(&input, now)?))
+            dayjs_from(&input, now)
         })
     });
     if let Ok(clock) = g.get("virtualClock") {
