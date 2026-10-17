@@ -1193,8 +1193,7 @@ The unused typed accounts module and its exclusive response_default parser are
 retired, with their three account/validation/notification test targets and
 source-only oracles. Earlier measurements of those copies are historical. The
 constructed Futures and Spot exchanges already use the retained native account
-modules; their existing component/source cases remain. The venue oracle command
-now includes exchange_trait. Changing only the production futures userId read
+modules; their existing component/source cases remain. The upstream wiring request adds exchange_trait to the venue oracle command. Changing only the production futures userId read
 to referrerUserId compiles and leaves all eight old typed account tests passing,
 but fails futures_binds_all_sixteen_defaults at empty ID versus user-1. Exact
 restoration passes. The actual constructed test and its runtime fixture are

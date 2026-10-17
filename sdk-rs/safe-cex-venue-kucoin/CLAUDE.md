@@ -272,7 +272,7 @@ Production account/validation operations use `futures_native_accounts` and
 `accounts` module and its private `response_default` parser are removed, with
 exclusive account/validation/notification tests and oracles. Shared transport
 parsing stays canonical and untouched. Existing native/source account cases
-remain, and the venue oracle command now runs `exchange_trait` for real
+remain, and the upstream wiring request adds `exchange_trait` to the venue oracle command for real
 constructed HTTP/account field observations. A compiled native user-ID mutation
 leaves all eight retired copy tests green and fails that actual binding test;
 exact restoration passes. Historical typed-account parser/refusal measurements
