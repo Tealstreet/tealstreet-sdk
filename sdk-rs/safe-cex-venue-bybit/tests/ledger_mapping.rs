@@ -72,23 +72,35 @@ fn ledger_native_source_parity() {
         let e = &c["result"];
         match c["name"].as_str().unwrap() {
             "toNumber" => {
-                if c["family"] == "closed" {
-                    let native = value
-                        .as_ref()
-                        .map(safe_cex_exchange::js_runtime::value::from_json)
-                        .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined);
-                    if let Some(v) = outcome(
-                        closed_number(&native).map_err(|e| e.to_exchange_error().message),
-                        e,
-                    ) {
-                        number(v, &e["ok"], "toNumber");
-                    }
-                } else if let Some(v) = outcome(to_number(value.as_ref()), e) {
+                let native = value
+                    .as_ref()
+                    .map(safe_cex_exchange::js_runtime::value::from_json)
+                    .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined);
+                if let Some(v) = outcome(
+                    to_number(&native).map_err(|e| e.to_exchange_error().message),
+                    e,
+                ) {
                     number(v, &e["ok"], "toNumber");
                 }
             }
             "toOptionalNumber" => {
-                if let Some(v) = outcome(to_optional_number(value.as_ref()), e) {
+                if let Some(v) = outcome(
+                    to_optional_number(
+                        &value
+                            .as_ref()
+                            .map(safe_cex_exchange::js_runtime::value::from_json)
+                            .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined),
+                    )
+                    .map(|v| {
+                        if v.is_undefined() {
+                            None
+                        } else {
+                            Some(v.to_number().unwrap())
+                        }
+                    })
+                    .map_err(|e| e.to_exchange_error().message),
+                    e,
+                ) {
                     optional(v, &e["ok"], "toOptionalNumber");
                 }
             }
@@ -143,8 +155,32 @@ fn ledger_native_source_parity() {
     );
     for c in f["orders"].as_array().unwrap() {
         let e = &c["result"];
-        let Some(actual) = outcome(map_bybit_historical_order(c["row"].as_object().unwrap()), e)
-        else {
+        let native =
+            map_bybit_historical_order(&safe_cex_exchange::js_runtime::value::from_json(&c["row"]));
+        if e["ok"]["positionSide"]["inherited"] == true {
+            assert!(
+                native
+                    .as_ref()
+                    .unwrap()
+                    .get("positionSide")
+                    .unwrap()
+                    .is_callable(),
+                "native mapper must retain the inherited optional function before projection"
+            );
+        }
+        let Some(actual) = outcome(
+            native
+                .and_then(|v| {
+                    if v.is_nullish() {
+                        Ok(None)
+                    } else {
+                        safe_cex_exchange::js_runtime::value::to_typed::<HistoricalOrder>(&v)
+                            .map(Some)
+                    }
+                })
+                .map_err(|e| e.to_exchange_error().message),
+            e,
+        ) else {
             continue;
         };
         let e = &e["ok"];
@@ -183,7 +219,9 @@ fn ledger_native_source_parity() {
             Some(e["reduceOnly"].as_bool().unwrap()),
             "LEDGER native order reduceOnly"
         );
-        let position = if e["positionSide"]["undefined"] == true {
+        let position = if e["positionSide"]["undefined"] == true
+            || e["positionSide"]["inherited"] == true
+        {
             None
         } else {
             Some(

@@ -6,7 +6,7 @@ use safe_cex_exchange::{
     js_runtime::{
         client::JsHttpHost,
         promise::JsFuture,
-        value::{Js, from_json, to_json},
+        value::{Js, from_json, from_typed, to_json},
     },
     runtime::ExchangeRuntime,
 };
@@ -38,6 +38,18 @@ impl JsHttpHost for Http {
         assert_eq!(
             to_json(&config.get("params").unwrap().get("contractName").unwrap()).unwrap(),
             "E-BTC-USDT"
+        );
+        let headers = to_json(&config.get("headers").unwrap()).unwrap();
+        assert_eq!(headers["X-CH-APIKEY"], "fixture-key");
+        let timestamp = headers["X-CH-TS"].as_f64().unwrap();
+        let payload = format!("{timestamp}GET/fapi/v2/openOrders?contractName=E-BTC-USDT");
+        assert_eq!(
+            headers["X-CH-SIGN"],
+            safe_cex_crypto::hmac_sha256(
+                b"fixture-secret",
+                payload.as_bytes(),
+                safe_cex_crypto::Encoding::Hex
+            )
         );
         self.order_reads.set(self.order_reads.get() + 1);
         let row = |id: &str, kind: &str| json!({"orderId":id,"side":"BUY","type":kind,"status":"NEW","action":"OPEN","origQty":0.4,"executedQty":0.1,"price":27234.5,"transactTime":1700000000000.0});
@@ -137,4 +149,76 @@ fn background_refresh_reads_symbols_from_the_real_priority_set() {
     assert_eq!(orders.len(), 2);
     assert!(orders.iter().any(|order| order.id == "known-order"));
     assert!(orders.iter().any(|order| order.id == "native-order"));
+}
+
+fn assert_native_type(order: &safe_cex_types::Order, kind: &str) {
+    assert!(
+        order.r#type.is_undefined(),
+        "unmapped native type must remain own undefined"
+    );
+    let native = from_typed(order).unwrap();
+    assert!(native.has_own("type"));
+    assert!(matches!(native.get("type").unwrap(), Js::Undefined));
+    assert_eq!(order.info.value().unwrap()["type"], kind);
+}
+fn typed_case(kind: &'static str) {
+    let f = Fixture::new(kind);
+    let orders = complete(
+        &f.runtime,
+        f.venue.fetch_orders(Some(vec!["E-BTC-USDT".into()])),
+    )
+    .expect("source retains both known and unmapped native order types");
+    assert_eq!(
+        orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        ["known-order", "native-order"]
+    );
+    assert_eq!(
+        orders[0].r#type.value(),
+        Some(&safe_cex_types::OrderType::Limit)
+    );
+    assert_native_type(&orders[1], kind);
+    assert_eq!(f.http.order_reads.get(), 1);
+}
+#[test]
+fn real_binding_retains_ioc_order() {
+    typed_case("IOC");
+}
+#[test]
+fn real_binding_retains_fok_order() {
+    typed_case("FOK");
+}
+#[test]
+fn real_binding_retains_post_only_order() {
+    typed_case("POST_ONLY");
+}
+#[test]
+fn real_binding_retains_stop_limit_order() {
+    typed_case("STOP_LIMIT");
+}
+#[test]
+fn background_refresh_commits_unmapped_native_order_types() {
+    for kind in ["IOC", "FOK", "POST_ONLY", "STOP_LIMIT"] {
+        let f = Fixture::new(kind);
+        assert!(
+            complete(&f.runtime, f.venue.fetch_orders(None))
+                .unwrap()
+                .is_empty()
+        );
+        for _ in 0..5 {
+            f.runtime.pump();
+            f.runtime.advance(100.0);
+        }
+        assert_eq!(f.http.order_reads.get(), 1);
+        let orders = f.venue.base().store.orders();
+        assert_eq!(
+            orders.len(),
+            2,
+            "{kind} must not stop the symbol's Store reconciliation"
+        );
+        assert_native_type(
+            orders.iter().find(|o| o.id == "native-order").unwrap(),
+            kind,
+        );
+        assert!(f.runtime.reports.borrow().is_empty());
+    }
 }

@@ -1125,3 +1125,49 @@ fn listener_setup_failure_propagates_but_cleanup_failure_keeps_source_catch_orde
         );
     }
 }
+
+#[test]
+fn ohlcv_worker_subscribes_every_source_timeframe_and_delivers_candles() {
+    let (venue, _) = leaf_venue();
+    venue.base.store.update(serde_json::from_value(json!({"markets":[{"id":"BTC","symbol":"BTC","base":"BTC","quote":"USD","active":true,"precision":{"amount":1,"price":0.1},"limits":{"amount":{"min":1,"max":100},"leverage":{"min":1,"max":20}}}]})).unwrap(), false).unwrap();
+    let posts = Rc::new(RefCell::new(Vec::new()));
+    let capture = posts.clone();
+    let handler = OHLCVSubscriptionsHandler::new(
+        venue.clone(),
+        data_trace::post(Rc::new(move |post| capture.borrow_mut().push(post))),
+        error_post_support::unexpected(),
+    );
+    let intervals = [
+        "1M", "1s", "5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h",
+        "12h", "1d", "1w", "3h", "5h", "7h", "8h", "9h", "10h", "11h", "24h", "2d", "3d",
+    ];
+    for (i, interval) in intervals.iter().enumerate() {
+        handler
+            .handle(StoreWorkerPayload {
+                op: StoreWorkerOp::SubscribeOHLCV,
+                instance_id: None,
+                data: Some(json!({"symbol":"BTC","interval":interval,"subId":format!("s{i}")})),
+            })
+            .unwrap();
+        let callback = venue
+            .candles
+            .borrow()
+            .get(&format!("BTC:{interval}"))
+            .cloned()
+            .unwrap_or_else(|| panic!("OHLCV-WORKER subscription for {interval} must reach venue"));
+        callback(
+            serde_json::from_value(
+                json!({"timestamp":123,"open":1,"high":3,"low":0.5,"close":2,"volume":4}),
+            )
+            .unwrap(),
+        );
+        let posts = posts.borrow();
+        let post = posts.last().unwrap();
+        assert_eq!(post.op, StoreWorkerOp::ListenOHLCV);
+        assert_eq!(post.data.as_ref().unwrap()["interval"], *interval);
+        assert_eq!(post.data.as_ref().unwrap()["subId"], format!("s{i}"));
+        assert_eq!(post.data.as_ref().unwrap()["candle"]["volume"], 4.0);
+    }
+    assert_eq!(venue.candles.borrow().len(), 27);
+    assert_eq!(posts.borrow().len(), 27);
+}
