@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 safe-cex-exchange.workspace = true
+safe-cex-candle-cache.workspace = true
 safe-cex-types.workspace = true
 safe-cex-num.workspace = true
 safe-cex-transport.workspace = true

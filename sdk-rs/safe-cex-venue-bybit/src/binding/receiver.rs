@@ -336,6 +336,47 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         members::controls::change_margin_type(rt, arg(&a, 0), arg(&a, 1))
     });
 
+    this.define(
+        "DEFAULT_EXECUTIONS_LOOKBACK_MS",
+        Js::Number(typed.default_executions_lookback_ms),
+    )?;
+    method(
+        &this,
+        rt,
+        "getExecutionQueryWindows",
+        members::history::query_windows,
+    );
+    method(
+        &this,
+        rt,
+        "refuseOptionSymbol",
+        members::history::refuse_option_symbol,
+    );
+    let contexts_rt = rt.clone();
+    this.define_accessor(
+        "incomeContexts",
+        Some(Rc::new(move |_| {
+            crate::ledger_history::income_contexts(&contexts_rt, &contexts_rt.this)
+        })),
+        None,
+    );
+    let context_rt = rt.clone();
+    this.define_accessor(
+        "incomeContext",
+        Some(Rc::new(move |_| {
+            crate::inverse_read_surface::income_context(&context_rt, &context_rt.this)
+        })),
+        None,
+    );
+    method(&this, rt, "fetchIncomeHistory", |rt, a| {
+        members::history::fetch_income_history(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchIncomeHistoryRange", |rt, a| {
+        members::history::fetch_income_history_range(rt, arg(&a, 0), arg(&a, 1), arg(&a, 2))
+    });
+    method(&this, rt, "fetchClosedPnl", |rt, a| {
+        members::history::fetch_closed_pnl(rt, arg(&a, 0))
+    });
     method(&this, rt, "fetchOHLCV", |rt, a| {
         members::ohlcv::fetch_ohlcv(rt, arg(&a, 0))
     });

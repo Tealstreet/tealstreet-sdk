@@ -143,9 +143,10 @@ impl OrderExecution {
             ..Default::default()
         };
         if suppress {
-            request
-                .config_extensions
-                .insert("__suppressAsterUnknownOrderError".into(), Value::Bool(true));
+            request.config_extensions.insert(
+                "__suppressAsterUnknownOrderError".into(),
+                safe_cex_types::retained_json::RetainedJsonInput::Bool(true),
+            );
         }
         let response = adapter.execute(request).await.map_err(|failure| {
             let mut e = ExchangeError::new(failure.message);
