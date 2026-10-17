@@ -110,6 +110,7 @@ fn null_batch_rows_match_actual_source_errors_prefix_and_next_chunk() {
         venue.base().on(
             "error",
             Rc::new(move |_, v| {
+                let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
                 sink.borrow_mut().push(v.as_str().unwrap().to_owned());
                 Ok(())
             }),
@@ -199,7 +200,7 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
             let captured = errors.clone();
             venue.base().on(
                 "error",
-                Rc::new(move |_, value: &Value| {
+                Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
                     captured.borrow_mut().push(value.clone());
                     Ok(())
                 }),
@@ -231,7 +232,11 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
                 1,
                 "one visible field refusal per call"
             );
-            assert!(errors.borrow()[0].as_str().unwrap().contains(&message));
+            assert!(
+                String::from_utf16(errors.borrow()[0].as_str().unwrap().as_ref())
+                    .unwrap()
+                    .contains(&message)
+            );
             assert!(
                 wire.requests.lock().unwrap().is_empty(),
                 "batch preflight must refuse before any hydration or order HTTP"
@@ -302,7 +307,8 @@ fn attached_amendment_recreates_only_after_matching_refusal_and_successful_cance
         venue.base().on(
             "error",
             Rc::new(move |_, v| {
-                sink.borrow_mut().push(v.as_str().unwrap().to_owned());
+                sink.borrow_mut()
+                    .push(String::from_utf16(v.as_str().unwrap().as_ref()).unwrap());
                 Ok(())
             }),
         );

@@ -51,7 +51,10 @@ pub(crate) fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
         r.define_hidden(&e, PropKey::str("name"), Value::str(&error.name));
     }
     if let Some(code) = &error.code {
-        let code = r.from_serde(code);
+        let code = match r.restore_typed_value(code) {
+            Ok(code) => code,
+            Err(cause) => return cause,
+        };
         r.define_hidden(&e, PropKey::str("code"), code);
     }
     if let Some(response) = &error.response {
