@@ -655,7 +655,7 @@
   },
   "safe_cex_ffi::native_exchange::NativeAccountInit": {
     "shape": "observed",
-    "evidence": "Real Node addon Env executes the production FromNapiValue adapter; projection inspects retained native variants, binary64 bits, UTF-16 units and own fields directly. Additional real-registry cases live in safe-cex-ffi/tests/native-account-values.test.mjs and native-account-signer-rejections.test.mjs.",
+    "evidence": "Real Node addon Env executes the production FromNapiValue adapter; projection inspects retained native variants, binary64 bits, UTF-16 units and own fields directly. Additional real-registry cases live in safe-cex-ffi/tests/native-account-values.test.mjs and native-account-signer-rejections.test.mjs. The required options property refuses a top-level undefined; an own undefined child remains retained.",
     "entrypoints": [
       {
         "api": {
@@ -746,13 +746,28 @@
         }
       },
       {
-        "input": "({exchange: \"mexc\", options: undefined, accountName: \"host\"})",
+        "input": "({exchange: \"mexc\", options: {nested: undefined}, accountName: \"host\"})",
         "output": {
           "ok": true,
           "exchange": "mexc",
           "accountName": "host",
           "options": [
-            "undefined"
+            "object",
+            [
+              [
+                [
+                  110,
+                  101,
+                  115,
+                  116,
+                  101,
+                  100
+                ],
+                [
+                  "undefined"
+                ]
+              ]
+            ]
           ]
         }
       },
@@ -764,6 +779,12 @@
       },
       {
         "input": "({})",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "({exchange: \"mexc\", options: undefined, accountName: \"host\"})",
         "output": {
           "ok": false
         }

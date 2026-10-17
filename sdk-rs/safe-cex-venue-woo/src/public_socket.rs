@@ -4,6 +4,7 @@ use safe_cex_exchange::{runtime::ExchangeError, websocket::BaseWebSocket};
 use safe_cex_num::{TableHit, js_table_lookup, js_truthy};
 #[cfg(test)]
 use safe_cex_transport::how::json_parse;
+use safe_cex_types::retained_json::RetainedJsonInput;
 #[cfg(test)]
 use serde_json::Value;
 use std::rc::Rc;
@@ -11,7 +12,7 @@ use std::rc::Rc;
 // ts: handleTickersStreamEvents
 pub fn handle_tickers_stream_events(
     store: &dyn safe_cex_store::Store,
-    data: &serde_json::Value,
+    data: &RetainedJsonInput,
 ) -> Result<(), ExchangeError> {
     update_public_tickers(
         store,
@@ -27,7 +28,7 @@ pub fn handle_tickers_stream_events(
 // ts: handleBBOStreamEvents
 pub fn handle_bbo_stream_events(
     store: &dyn safe_cex_store::Store,
-    data: &serde_json::Value,
+    data: &RetainedJsonInput,
 ) -> Result<(), ExchangeError> {
     update_public_tickers(store, data, &[("bid", "bid"), ("ask", "ask")])
 }
@@ -35,49 +36,63 @@ pub fn handle_bbo_stream_events(
 // ts: handleMarkPricesStreamEvents
 pub fn handle_mark_prices_stream_events(
     store: &dyn safe_cex_store::Store,
-    data: &serde_json::Value,
+    data: &RetainedJsonInput,
 ) -> Result<(), ExchangeError> {
     update_public_tickers(store, data, &[("mark", "price")])
 }
 
 fn update_public_tickers(
     store: &dyn safe_cex_store::Store,
-    data: &serde_json::Value,
+    data: &RetainedJsonInput,
     fields: &[(&str, &str)],
 ) -> Result<(), ExchangeError> {
     use safe_cex_store::{StoreMutationError, model_patch::ModelPatch};
-    let rows = data.as_array().ok_or_else(|| {
-        type_error(if data.is_null() {
-            "Cannot read properties of null (reading 'forEach')"
-        } else {
-            "data.forEach is not a function"
-        })
-    })?;
+    let RetainedJsonInput::Array(rows) = data else {
+        return Err(type_error(match data {
+            RetainedJsonInput::Null => "Cannot read properties of null (reading 'forEach')",
+            RetainedJsonInput::Undefined => {
+                "Cannot read properties of undefined (reading 'forEach')"
+            }
+            _ => "data.forEach is not a function",
+        }));
+    };
     let mut refusals = Vec::new();
     'rows: for row in rows {
-        if row.is_null() {
-            return Err(type_error(
-                "Cannot read properties of null (reading 'symbol')",
-            ));
+        if matches!(row, RetainedJsonInput::Null | RetainedJsonInput::Undefined) {
+            return Err(type_error(if matches!(row, RetainedJsonInput::Null) {
+                "Cannot read properties of null (reading 'symbol')"
+            } else {
+                "Cannot read properties of undefined (reading 'symbol')"
+            }));
         }
-        let symbol = match row.get("symbol") {
-            Some(serde_json::Value::String(symbol)) => symbol,
-            Some(serde_json::Value::Null) => {
+        let symbol = match ticker_field(row, "symbol") {
+            Some(RetainedJsonInput::Text(symbol)) => symbol,
+            Some(RetainedJsonInput::Null) => {
                 return Err(type_error(
                     "Cannot read properties of null (reading 'startsWith')",
                 ));
             }
-            None => {
+            None | Some(RetainedJsonInput::Undefined) => {
                 return Err(type_error(
                     "Cannot read properties of undefined (reading 'startsWith')",
                 ));
             }
             _ => return Err(type_error("row.symbol.startsWith is not a function")),
         };
-        if !symbol.starts_with("PERP_") {
+        if !symbol.starts_with(&"PERP_".encode_utf16().collect::<Vec<_>>()) {
             continue;
         }
-        let symbol = crate::utils::normalize_symbol(symbol);
+        let normalized = crate::utils::normalize_symbol_utf16(symbol);
+        let Ok(symbol) = String::from_utf16(&normalized) else {
+            let value =
+                safe_cex_num::js_retained_json_stringify(&RetainedJsonInput::Text(normalized))
+                    .expect("a string always has a JSON projection")
+                    .expect("a string is defined");
+            refusals.push(format!(
+                "Refused WOO ticker row symbol={value}: symbol={value}: exceeds native UTF-8 identifier boundary"
+            ));
+            continue;
+        };
         // Source uppercasing prevents inherited-member spellings. Drop the
         // read borrow before the mutation or a synchronous callback can fail.
         let id = store
@@ -90,17 +105,24 @@ fn update_public_tickers(
         let mut patch = ModelPatch::default();
         for (target, source) in fields {
             // Preserve later source/store errors ahead of typed row reports.
-            let Some(value) = row.get(*source).filter(|v| v.is_number()) else {
-                let value = row
-                    .get(*source)
-                    .map_or_else(|| "undefined".into(), serde_json::Value::to_string);
-                refusals.push(format!(
-                    "Refused WOO ticker row symbol={symbol:?}: {target}={value}: expected number"
-                ));
-                continue 'rows;
+            let value = ticker_field(row, source).unwrap_or(&RetainedJsonInput::Undefined);
+            let number = match value {
+                RetainedJsonInput::Float(number) => *number,
+                RetainedJsonInput::Lexeme(number) => safe_cex_num::number_from_string(number),
+                _ => {
+                    let value = safe_cex_num::js_retained_json_stringify(value)
+                        .map_err(|error| {
+                            let mut native = ExchangeError::new(error.message);
+                            native.name = error.name.into();
+                            native
+                        })?
+                        .unwrap_or_else(|| "undefined".into());
+                    refusals.push(format!(
+                        "Refused WOO ticker row symbol={symbol:?}: {target}={value}: expected number"
+                    ));
+                    continue 'rows;
+                }
             };
-            let number = safe_cex_num::numeric_ingress::js_value_as_f64(value)
-                .ok_or_else(|| ExchangeError::new("numeric ticker value unavailable"))?;
             patch.set_number(*target, number);
         }
         // Preserve the typed mutation failure until core recovers its cause.
@@ -112,6 +134,17 @@ fn update_public_tickers(
     } else {
         Err(ExchangeError::new(refusals.join("; ")))
     }
+}
+
+fn ticker_field<'a>(row: &'a RetainedJsonInput, key: &str) -> Option<&'a RetainedJsonInput> {
+    let RetainedJsonInput::Object(fields) = row else {
+        return None;
+    };
+    fields
+        .iter()
+        .rev()
+        .find(|(name, _)| name.iter().copied().eq(key.encode_utf16()))
+        .map(|(_, value)| value)
 }
 
 fn type_error(message: &str) -> ExchangeError {
