@@ -56,7 +56,11 @@ field Get, invocation and numeric-result extraction. A separate seven-case
 executed-count assertion protects its full walk. The shared SocketOps fixture is
 extracted unchanged into a test-only helper;
 unused supplied capabilities panic. Nine existing socket helper tests verify
-that extraction without changing production operations.
+that extraction without changing production operations. Review additionally
+identified silent truncation holes in the optional nullish/falsey and imported
+abrupt-stage walks. Fixed counts of two, three and two now protect their original
+inputs and expectations, with three named truncated-walk failures and restored
+passes.
 
 These roles grant no downstream admission permission. In particular, parsed
 dispatches a supplied parser; its grammar/coercion remains separate. finish
@@ -76,8 +80,9 @@ python3 safe-cex-venue-cryptocom/scripts/control-flow-controls.py
 node safe-cex-venue-cryptocom/scripts/control-flow-contracts.mjs
 ```
 
-The control runner requires twenty distinct body corruptions and two truncated
-fixture walks (comparison and parser dispatch) to compile, fail their named
+The control runner requires twenty distinct body corruptions and five truncated
+fixture walks (comparison, parser dispatch, optional nullish/falsey inputs and
+imported abrupt stages) to compile, fail their named
 native assertion with exit
 101, restore exact bytes and pass again. The result-array mutation fully reads
 the original ID before constructing an empty array. Compiler errors do not count,
@@ -86,7 +91,7 @@ and expected native values are not revised from mutation output.
 Selected validation passed: all four new direct witnesses, nine unchanged socket
 helper witnesses after the test-only fixture extraction, the three actual-source
 composition targets (252 admitted scenarios), all twenty body controls and the
-two fixture-walk controls. The fresh closed selector produced twenty explicit
+five fixture-walk controls. The fresh closed selector produced twenty explicit
 classifications and zero failures. Integrated readiness is recorded in the
 [PR validation record](https://github.com/Tealstreet/tealstreet-sdk/pull/394).
 

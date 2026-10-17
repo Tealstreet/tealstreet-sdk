@@ -1,5 +1,6 @@
 """Individual native body controls for twenty reviewed control-flow/adapter owners."""
 import os
+import sys
 from pathlib import Path
 import subprocess
 SDK=Path(__file__).resolve().parents[2]
@@ -36,7 +37,13 @@ body('account_envelopes','equal(','value.iter().copied().eq(text.encode_utf16())
 assert len(CONTROLS)==20
 CONTROLS.append(('comparison fixture walk',CRATE/'src/account_envelopes.rs',b'fn equal_native_contract()',b'\n    }\n',b'for case in cases {',b'for case in cases.into_iter().take(21) {',['--lib'],'account_envelopes::accepted_control_flow::equal_native_contract',['envelope equal executed cases']))
 CONTROLS.append(('parsed fixture walk',CRATE/'src/rest_reads.rs',b'fn parsed_native_contract()',b'\n    }\n',b'for (failure, output) in cases {',b'for (failure, output) in cases.into_iter().take(6) {',['--lib'],'rest_reads::accepted_control_flow::parsed_native_contract',['parsed native executed cases']))
-assert len(CONTROLS)==22
+REVIEW_WALKS = [
+    ('optional nullish fixture walk',CRATE/'src/class_admin.rs',b'fn optional_native_contract()',b'\n    }\n',b'for value in [Js::Undefined, Js::Null] {',b'for value in [Js::Undefined, Js::Null].into_iter().take(1) {',['--lib'],'class_admin::accepted_control_flow::optional_native_contract',['class optional nullish executed cases']),
+    ('optional falsey fixture walk',CRATE/'src/class_admin.rs',b'fn optional_native_contract()',b'\n    }\n',b'for value in [Js::Bool(false), Js::Number(-0.), Js::str("")] {',b'for value in [Js::Bool(false), Js::Number(-0.), Js::str("")].into_iter().take(2) {',['--lib'],'class_admin::accepted_control_flow::optional_native_contract',['class optional falsey executed cases']),
+    ('imported abrupt fixture walk',CRATE/'src/class_mappings.rs',b'fn imported_native_contract()',b'\n    }\n',b'for stage in 0..2 {',b'for stage in 0..1 {',['--lib'],'class_mappings::accepted_control_flow::imported_native_contract',['imported native abrupt executed cases']),
+]
+CONTROLS.extend(REVIEW_WALKS)
+assert len(CONTROLS)==25
 
 def run(target,test):
     result=subprocess.run(['cargo','test','--locked','--jobs','1','-q','-p','safe-cex-venue-cryptocom',*target,test,'--','--exact'],cwd=SDK,capture_output=True,text=True)
@@ -53,7 +60,9 @@ for name,file,marker,ending,before,after,target,test,assertions in CONTROLS:
 
 if __name__=='__main__':
     assert os.environ.get('SAFE_CEX_TYPESCRIPT_PATH'),'compiler_path_required'
-    for name,file,marker,ending,before,after,target,test,assertions in CONTROLS:
+    assert sys.argv[1:] in ([], ['--review-walks-only']), 'unknown control scope'
+    selected = REVIEW_WALKS if sys.argv[1:] else CONTROLS
+    for name,file,marker,ending,before,after,target,test,assertions in selected:
         passing(target,test)
         original=file.read_bytes();start=original.index(marker);end=original.index(ending,start)+len(ending);region=original[start:end]
         try:
@@ -69,4 +78,4 @@ if __name__=='__main__':
         assert file.read_bytes()==original
         passing(target,test)
         print(f'{name}: compiled named runtime failure (exit 101); assertion={matched[0]}; exact restoration PASS',flush=True)
-    print('All 22 control-flow body/counter controls passed.',flush=True)
+    print(f'All {len(selected)} selected control-flow body/counter controls passed.',flush=True)

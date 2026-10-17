@@ -367,7 +367,7 @@ discovery/feature/target matrix remain independent obligations.
 Twenty control-flow/property/adapter owners have individual accepted-contract
 role reviews backed by four direct native witnesses and sixteen helpers reached
 through unchanged actual-source native caller tests. All twenty body corruptions
-and both counted fixture walks require compiled named failures and restored
+and all five counted fixture walks require compiled named failures and restored
 passes. See CONTROL_FLOW_CONTRACT_REVIEW.md and scripts/control-flow-contracts.mjs.
 The twenty compiler classification receipts remain separate from behavioral
 proof; downstream admission, parser grammar, generic hosts, aliases, construction

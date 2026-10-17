@@ -234,6 +234,7 @@ mod accepted_control_flow {
             t.borrow_mut().push("get");
             v.get(k)
         });
+        let mut nullish_executed = 0;
         for value in [Js::Undefined, Js::Null] {
             events.borrow_mut().clear();
             assert!(
@@ -244,7 +245,9 @@ mod accepted_control_flow {
                 events.borrow().is_empty(),
                 "class optional nullish skips getter"
             );
+            nullish_executed += 1;
         }
+        assert_eq!(nullish_executed, 2, "class optional nullish executed cases");
         let parent = Js::object(vec![]);
         let child = Js::object(vec![]);
         parent
@@ -257,6 +260,7 @@ mod accepted_control_flow {
             "class optional native child identity"
         );
         assert_eq!(*events.borrow(), ["get"], "class optional native getter");
+        let mut falsey_executed = 0;
         for value in [Js::Bool(false), Js::Number(-0.), Js::str("")] {
             events.borrow_mut().clear();
             assert!(matches!(
@@ -268,7 +272,9 @@ mod accepted_control_flow {
                 ["get"],
                 "class optional falsey is not nullish"
             );
+            falsey_executed += 1;
         }
+        assert_eq!(falsey_executed, 3, "class optional falsey executed cases");
         let error = Js::object(vec![]);
         let e = error.clone();
         let parent = Js::object(vec![]);

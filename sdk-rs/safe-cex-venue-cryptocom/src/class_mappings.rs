@@ -153,6 +153,7 @@ mod accepted_control_flow {
             matches!(imported(&h, "Enum", "missing").unwrap(), Js::Undefined),
             "imported missing property forwarded"
         );
+        let mut abrupt_executed = 0;
         for stage in 0..2 {
             let globals = token();
             let enumeration = token();
@@ -207,6 +208,8 @@ mod accepted_control_flow {
                 },
                 "imported native abrupt order"
             );
+            abrupt_executed += 1;
         }
+        assert_eq!(abrupt_executed, 2, "imported native abrupt executed cases");
     }
 }
