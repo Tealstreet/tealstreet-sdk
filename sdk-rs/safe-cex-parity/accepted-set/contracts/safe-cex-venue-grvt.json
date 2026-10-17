@@ -15678,5 +15678,5394 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_grvt::data_reads::text": {
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Individually reviewed actual scalar-coercion body and its GRVT response consumers (grvt.exchange.ts parseFloat/Number sites). Independently authored 38-case JSON-data/absent carrier covers native text, binary64 bits and original coercion errors before any wire projection. Raw finite JSON carriers preserve -0.0/underflow and Number rounding beyond2^53; String inputs cover overflow. NaN outputs are canonicalized only. The chosen JSON input excludes native nonfinite input values, own undefined slots and executable coercion hooks per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; Rust strings use #shared-utf8-string-boundary. This is not an arbitrary JS-object or protocol-record claim.",
+    "call": "{ let payload:Option<serde_json::Value>=if $value[\"absent\"].as_bool()==Some(true){None}else if let Some(raw)=$value[\"raw\"].as_str(){Some(serde_json::from_str(raw).expect(\"fixed finite JSON carrier\"))}else{Some($value[\"value\"].clone())}; match $type(payload.as_ref()) { Ok(text)=>serde_json::json!({\"ok\":true,\"text\":text}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"response\":error.response,\"code\":error.code,\"origin\":error.origin.is_some()}) } }",
+    "cases": [
+      {
+        "input": {
+          "absent": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "undefined"
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "null"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "false"
+        }
+      },
+      {
+        "input": {
+          "value": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "true"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "0"
+        }
+      },
+      {
+        "input": {
+          "raw": "-0.0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "0"
+        }
+      },
+      {
+        "input": {
+          "value": 1.25,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "1.25"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      },
+      {
+        "input": {
+          "value": " \t\n",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": " \t\n"
+        }
+      },
+      {
+        "input": {
+          "value": "-0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "-0"
+        }
+      },
+      {
+        "input": {
+          "value": "12px",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "12px"
+        }
+      },
+      {
+        "input": {
+          "value": "1e2tail",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "1e2tail"
+        }
+      },
+      {
+        "input": {
+          "value": "0x10",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "0x10"
+        }
+      },
+      {
+        "input": {
+          "value": "0b11",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "0b11"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "Infinity"
+        }
+      },
+      {
+        "input": {
+          "value": "-Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "-Infinity"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinityx",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "Infinityx"
+        }
+      },
+      {
+        "input": {
+          "value": "1e309",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "1e309"
+        }
+      },
+      {
+        "input": {
+          "value": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "-1e-4000"
+        }
+      },
+      {
+        "input": {
+          "value": "NaN",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "[object Object]"
+        }
+      },
+      {
+        "input": {
+          "value": [],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      },
+      {
+        "input": {
+          "value": [
+            7
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "7"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1,
+            2
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "1,2"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null,
+            8
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": ",8"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "valueOf": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "[object Object]"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 4,
+            "valueOf": 2
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "raw": "9007199254740993",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "9007199254740992"
+        }
+      },
+      {
+        "input": {
+          "raw": "18446744073709551615",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "18446744073709552000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "0"
+        }
+      },
+      {
+        "input": {
+          "value": "﻿ -0rest",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "﻿ -0rest"
+        }
+      },
+      {
+        "input": {
+          "value": "​1",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "​1"
+        }
+      },
+      {
+        "input": {
+          "absent": true,
+          "fallback": "-0tail"
+        },
+        "output": {
+          "ok": true,
+          "text": "undefined"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "no"
+        },
+        "output": {
+          "ok": true,
+          "text": "0"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "Infinity!"
+        },
+        "output": {
+          "ok": true,
+          "text": "false"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "-2.5suffix"
+        },
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::number": {
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Individually reviewed actual scalar-coercion body and its GRVT response consumers (grvt.exchange.ts parseFloat/Number sites). Independently authored 38-case JSON-data/absent carrier covers native text, binary64 bits and original coercion errors before any wire projection. Raw finite JSON carriers preserve -0.0/underflow and Number rounding beyond2^53; String inputs cover overflow. NaN outputs are canonicalized only. The chosen JSON input excludes native nonfinite input values, own undefined slots and executable coercion hooks per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; Rust strings use #shared-utf8-string-boundary. This is not an arbitrary JS-object or protocol-record claim.",
+    "call": "{ let payload:Option<serde_json::Value>=if $value[\"absent\"].as_bool()==Some(true){None}else if let Some(raw)=$value[\"raw\"].as_str(){Some(serde_json::from_str(raw).expect(\"fixed finite JSON carrier\"))}else{Some($value[\"value\"].clone())}; match $type(payload.as_ref()) { Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":if number.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",number.to_bits())}}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"response\":error.response,\"code\":error.code,\"origin\":error.origin.is_some()}) } }",
+    "cases": [
+      {
+        "input": {
+          "absent": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-0.0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 1.25,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": " \t\n",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "12px",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "1e2tail",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "0x10",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4030000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0b11",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4008000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "fff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinityx",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "1e309",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "NaN",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            7
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1,
+            2
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null,
+            8
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "valueOf": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 4,
+            "valueOf": 2
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "raw": "9007199254740993",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4340000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "18446744073709551615",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "43f0000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "﻿ -0rest",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "​1",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "absent": true,
+          "fallback": "-0tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "no"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "Infinity!"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "-2.5suffix"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::parsed": {
+    "api": {
+      "kind": "function",
+      "name": "parsed",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Individually reviewed actual scalar-coercion body and its GRVT response consumers (grvt.exchange.ts parseFloat/Number sites). Independently authored 38-case JSON-data/absent carrier covers native text, binary64 bits and original coercion errors before any wire projection. Raw finite JSON carriers preserve -0.0/underflow and Number rounding beyond2^53; String inputs cover overflow. NaN outputs are canonicalized only. The chosen JSON input excludes native nonfinite input values, own undefined slots and executable coercion hooks per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; Rust strings use #shared-utf8-string-boundary. This is not an arbitrary JS-object or protocol-record claim.",
+    "call": "{ let payload:Option<serde_json::Value>=if $value[\"absent\"].as_bool()==Some(true){None}else if let Some(raw)=$value[\"raw\"].as_str(){Some(serde_json::from_str(raw).expect(\"fixed finite JSON carrier\"))}else{Some($value[\"value\"].clone())}; match $type(payload.as_ref()) { Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":if number.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",number.to_bits())}}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"response\":error.response,\"code\":error.code,\"origin\":error.origin.is_some()}) } }",
+    "cases": [
+      {
+        "input": {
+          "absent": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-0.0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 1.25,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": " \t\n",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "-0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "12px",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4028000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "1e2tail",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4059000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0x10",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0b11",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "fff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinityx",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "1e309",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "NaN",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            7
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1,
+            2
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null,
+            8
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "valueOf": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 4,
+            "valueOf": 2
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "raw": "9007199254740993",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4340000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "18446744073709551615",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "43f0000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "﻿ -0rest",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "​1",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "absent": true,
+          "fallback": "-0tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "no"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "Infinity!"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "-2.5suffix"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::default_parse": {
+    "api": {
+      "kind": "function",
+      "name": "default_parse",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fallback",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Individually reviewed actual scalar-coercion body and its GRVT response consumers (grvt.exchange.ts parseFloat/Number sites). Independently authored 38-case JSON-data/absent carrier covers native text, binary64 bits and original coercion errors before any wire projection. Raw finite JSON carriers preserve -0.0/underflow and Number rounding beyond2^53; String inputs cover overflow. NaN outputs are canonicalized only. The chosen JSON input excludes native nonfinite input values, own undefined slots and executable coercion hooks per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; Rust strings use #shared-utf8-string-boundary. This is not an arbitrary JS-object or protocol-record claim.",
+    "call": "{ let payload:Option<serde_json::Value>=if $value[\"absent\"].as_bool()==Some(true){None}else if let Some(raw)=$value[\"raw\"].as_str(){Some(serde_json::from_str(raw).expect(\"fixed finite JSON carrier\"))}else{Some($value[\"value\"].clone())}; match $type(payload.as_ref(), $value[\"fallback\"].as_str().unwrap()) { Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":if number.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",number.to_bits())}}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"response\":error.response,\"code\":error.code,\"origin\":error.origin.is_some()}) } }",
+    "cases": [
+      {
+        "input": {
+          "absent": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-0.0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 1.25,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": " \t\n",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "-0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "12px",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4028000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "1e2tail",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4059000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0x10",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0b11",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "fff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinityx",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "1e309",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "NaN",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            7
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1,
+            2
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null,
+            8
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "valueOf": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 4,
+            "valueOf": 2
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "raw": "9007199254740993",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4340000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "18446744073709551615",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "43f0000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "﻿ -0rest",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "​1",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "absent": true,
+          "fallback": "-0tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "no"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "Infinity!"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "-2.5suffix"
+        },
+        "output": {
+          "ok": true,
+          "bits": "c004000000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::markets::parsed": {
+    "api": {
+      "kind": "function",
+      "name": "parsed",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fallback",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Individually reviewed actual scalar-coercion body and its GRVT response consumers (grvt.exchange.ts parseFloat/Number sites). Independently authored 38-case JSON-data/absent carrier covers native text, binary64 bits and original coercion errors before any wire projection. Raw finite JSON carriers preserve -0.0/underflow and Number rounding beyond2^53; String inputs cover overflow. NaN outputs are canonicalized only. The chosen JSON input excludes native nonfinite input values, own undefined slots and executable coercion hooks per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias; Rust strings use #shared-utf8-string-boundary. This is not an arbitrary JS-object or protocol-record claim.",
+    "call": "{ let payload:Option<serde_json::Value>=if $value[\"absent\"].as_bool()==Some(true){None}else if let Some(raw)=$value[\"raw\"].as_str(){Some(serde_json::from_str(raw).expect(\"fixed finite JSON carrier\"))}else{Some($value[\"value\"].clone())}; match $type(payload.as_ref(), $value[\"fallback\"].as_str().unwrap()) { Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":if number.is_nan(){\"NaN\".to_owned()}else{format!(\"{:016x}\",number.to_bits())}}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"response\":error.response,\"code\":error.code,\"origin\":error.origin.is_some()}) } }",
+    "cases": [
+      {
+        "input": {
+          "absent": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": true,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-0.0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 1.25,
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": " \t\n",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": "-0",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "12px",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4028000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "1e2tail",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4059000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0x10",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0b11",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-Infinity",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "fff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "Infinityx",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "1e309",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "NaN",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            7
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "401c000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            1,
+            2
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            null,
+            8
+          ],
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "valueOf": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": null
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "toString": 4,
+            "valueOf": 2
+          },
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "response": null,
+          "code": null,
+          "origin": false
+        }
+      },
+      {
+        "input": {
+          "raw": "9007199254740993",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4340000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "18446744073709551615",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "43f0000000000000"
+        }
+      },
+      {
+        "input": {
+          "raw": "-1e-4000",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "﻿ -0rest",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "​1",
+          "fallback": "17.25tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "absent": true,
+          "fallback": "-0tail"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 0,
+          "fallback": "no"
+        },
+        "output": {
+          "ok": true,
+          "bits": "NaN"
+        }
+      },
+      {
+        "input": {
+          "value": false,
+          "fallback": "Infinity!"
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "",
+          "fallback": "-2.5suffix"
+        },
+        "output": {
+          "ok": true,
+          "bits": "c004000000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::snapshots::record_nonce": {
+    "api": {
+      "kind": "function",
+      "name": "record_nonce",
+      "signature": {
+        "inputs": [
+          [
+            "creation_times",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "indexmap::map::IndexMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "primitive": "f64"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "real_ids",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "indexmap::map::IndexMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "nonce",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "real_order_id",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "creation_time_ms",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed raw nonce/cache state admission against grvt.exchange.ts::recordNonce:204-226. Four independently authored native map-state cases keep ordered keys, real-ID sentinels, unknown/earliest finite positive time bits and paired200entry eviction observable; later120/30 must retain70/10. These are direct calls to the actual producer, separate from composition delegation. Raw Rust strings/native f64/optional inputs are the existing typed domain, not a Deserialize record exemption.",
+    "call": "{ use std::{cell::RefCell,rc::Rc};\nlet times_alias=Rc::new(RefCell::new(indexmap::IndexMap::<String,Option<f64>>::new()));let ids_alias=Rc::new(RefCell::new(indexmap::IndexMap::<String,String>::new()));\nfor operation in $value[\"operations\"].as_array().unwrap(){let time=operation[\"time\"].as_str().map(|text|text.parse::<f64>().unwrap());$type(&mut times_alias.borrow_mut(),&mut ids_alias.borrow_mut(),operation[\"nonce\"].as_str().unwrap(),operation[\"real\"].as_str(),time);}\nfor index in 0..$value[\"fill\"].as_u64().unwrap_or(0){$type(&mut times_alias.borrow_mut(),&mut ids_alias.borrow_mut(),&format!(\"n{index}\"),Some(&format!(\"id{index}\")),Some(1000.0+index as f64));}\nlet times=times_alias.borrow();let ids=ids_alias.borrow();serde_json::json!({\"times\":times.iter().take(3).map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})).collect::<Vec<_>>(),\"ids\":ids.iter().take(3).map(|(k,v)|[k.clone(),v.clone()]).collect::<Vec<_>>(),\"time_count\":times.len(),\"id_count\":ids.len(),\"last_time\":times.last().map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})),\"last_id\":ids.last().map(|(k,v)|[k.clone(),v.clone()]),\"retained_first_two\":[times.contains_key(\"n0\"),times.contains_key(\"n1\"),ids.contains_key(\"n0\"),ids.contains_key(\"n1\")]}) }",
+    "cases": [
+      {
+        "input": {
+          "operations": [
+            {
+              "nonce": "same",
+              "real": "real-old",
+              "time": "90"
+            },
+            {
+              "nonce": "same",
+              "real": "0x0",
+              "time": "100"
+            },
+            {
+              "nonce": "later",
+              "real": null,
+              "time": "0"
+            },
+            {
+              "nonce": "same",
+              "real": "real-next",
+              "time": "70"
+            },
+            {
+              "nonce": "same",
+              "real": null,
+              "time": "120"
+            }
+          ]
+        },
+        "output": {
+          "times": [
+            {
+              "key": "same",
+              "bits": "4634626229029306368"
+            },
+            {
+              "key": "later",
+              "bits": null
+            }
+          ],
+          "ids": [
+            [
+              "same",
+              "real-next"
+            ]
+          ],
+          "time_count": 2,
+          "id_count": 1,
+          "last_time": {
+            "key": "later",
+            "bits": null
+          },
+          "last_id": [
+            "same",
+            "real-next"
+          ],
+          "retained_first_two": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      },
+      {
+        "input": {
+          "operations": [
+            {
+              "nonce": "unknown",
+              "real": "0x00",
+              "time": "NaN"
+            },
+            {
+              "nonce": "unknown",
+              "real": "actual",
+              "time": "20"
+            },
+            {
+              "nonce": "unknown",
+              "real": null,
+              "time": "40"
+            },
+            {
+              "nonce": "unknown",
+              "real": "",
+              "time": "10"
+            },
+            {
+              "nonce": "unknown",
+              "real": null,
+              "time": "30"
+            }
+          ]
+        },
+        "output": {
+          "times": [
+            {
+              "key": "unknown",
+              "bits": "4621819117588971520"
+            }
+          ],
+          "ids": [
+            [
+              "unknown",
+              "actual"
+            ]
+          ],
+          "time_count": 1,
+          "id_count": 1,
+          "last_time": {
+            "key": "unknown",
+            "bits": "4621819117588971520"
+          },
+          "last_id": [
+            "unknown",
+            "actual"
+          ],
+          "retained_first_two": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      },
+      {
+        "input": {
+          "operations": [
+            {
+              "nonce": "empty",
+              "real": "0x0",
+              "time": "-0"
+            },
+            {
+              "nonce": "empty",
+              "real": "0x00",
+              "time": "inf"
+            },
+            {
+              "nonce": "empty",
+              "real": "",
+              "time": "-1"
+            }
+          ]
+        },
+        "output": {
+          "times": [
+            {
+              "key": "empty",
+              "bits": null
+            }
+          ],
+          "ids": [],
+          "time_count": 1,
+          "id_count": 0,
+          "last_time": {
+            "key": "empty",
+            "bits": null
+          },
+          "last_id": null,
+          "retained_first_two": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      },
+      {
+        "input": {
+          "operations": [],
+          "fill": 202
+        },
+        "output": {
+          "times": [
+            {
+              "key": "n2",
+              "bits": "4652024901027233792"
+            },
+            {
+              "key": "n3",
+              "bits": "4652033697120256000"
+            },
+            {
+              "key": "n4",
+              "bits": "4652042493213278208"
+            }
+          ],
+          "ids": [
+            [
+              "n2",
+              "id2"
+            ],
+            [
+              "n3",
+              "id3"
+            ],
+            [
+              "n4",
+              "id4"
+            ]
+          ],
+          "time_count": 200,
+          "id_count": 200,
+          "last_time": {
+            "key": "n201",
+            "bits": "4652996869306187776"
+          },
+          "last_id": [
+            "n201",
+            "id201"
+          ],
+          "retained_first_two": [
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_controls::cancellation_error": {
+    "api": {
+      "kind": "function",
+      "name": "cancellation_error",
+      "signature": {
+        "inputs": [
+          [
+            "result",
+            {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "T"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "emit_error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Result<(), ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed actual raw response-data error projection against the maintained cancelOrder/cancelAllOrders catches. Thirteen independent cases fix T=i64 and observe native success values, message/m and code/c truthy precedence, String coercion errors before emit, exact emit order, fresh Error metadata and original callback-error Rc origin/response/code/stack retention. JSON response inputs retain their existing chosen data-only boundary; no arbitrary executable getter or host-object claim.",
+    "call": "{ use safe_cex_exchange::runtime::{ExchangeError,ExchangeErrorOrigin};\nlet mut events=Vec::new();let mut emit=ExchangeError::new(\"emit failed\");emit.name=\"EmitError\".into();emit.origin=Some(ExchangeErrorOrigin::new(std::io::Error::other(\"emit origin\")));emit.response=Some(serde_json::json!({\"emit\":1}));emit.code=Some(serde_json::json!(44));emit.stack=Some(\"emit stack\".into());let emit_origin=emit.origin.clone();\nlet result:Result<i64,ExchangeError>=if let Some(value)=$value[\"ok\"].as_i64(){Ok(value)}else{let mut cause=ExchangeError::new(\"original\");cause.name=\"OriginalError\".into();cause.code=Some(serde_json::json!(99));cause.origin=Some(ExchangeErrorOrigin::new(std::io::Error::other(\"original origin\")));if let Some(data)=$value.get(\"data\"){cause.response=Some(serde_json::json!({\"data\":data}));}Err(cause)};\nlet result=$type(result,$value[\"prefix\"].as_str().unwrap_or(\"Cancel failed: \"),&mut |message:&str|{events.push(message.to_owned());if $value[\"emit_fail\"].as_bool()==Some(true){Err(emit.clone())}else{Ok(())}});\nmatch result{Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value,\"events\":events}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"events\":events,\"origin_retained\":error.origin.is_some()&&error.origin==emit_origin,\"response\":error.response,\"code\":error.code,\"stack\":error.stack})} }",
+    "cases": [
+      {
+        "input": {
+          "ok": 0
+        },
+        "output": {
+          "ok": true,
+          "value": 0,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "ok": -7
+        },
+        "output": {
+          "ok": true,
+          "value": -7,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": "direct",
+            "m": "lite",
+            "code": 7,
+            "c": 8
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "direct (code: 7)",
+          "events": [
+            "Cancel failed: direct (code: 7)"
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": "",
+            "m": "lite",
+            "code": 0,
+            "c": 9
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "lite (code: 9)",
+          "events": [
+            "Cancel failed: lite (code: 9)"
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": false,
+            "m": 0,
+            "code": false,
+            "c": 0
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "original",
+          "events": [
+            "Cancel failed: original"
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": [
+              1,
+              2
+            ],
+            "code": "0"
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "1,2 (code: 0)",
+          "events": [
+            "Cancel failed: 1,2 (code: 0)"
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": []
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "",
+          "events": [
+            "Cancel failed: "
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": "why",
+            "code": {}
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "why (code: [object Object])",
+          "events": [
+            "Cancel failed: why (code: [object Object])"
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "original",
+          "events": [
+            "Cancel failed: original"
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "original",
+          "events": [
+            "Cancel failed: original"
+          ],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": {
+              "toString": null
+            }
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "events": [],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": "why",
+            "code": {
+              "toString": null
+            }
+          },
+          "prefix": "Cancel failed: "
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value",
+          "events": [],
+          "origin_retained": false,
+          "response": null,
+          "code": null,
+          "stack": null
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "message": "why",
+            "c": 4
+          },
+          "prefix": "Cancel all failed: ",
+          "emit_fail": true
+        },
+        "output": {
+          "ok": false,
+          "name": "EmitError",
+          "message": "emit failed",
+          "events": [
+            "Cancel all failed: why (code: 4)"
+          ],
+          "origin_retained": true,
+          "response": {
+            "emit": 1
+          },
+          "code": 44,
+          "stack": "emit stack"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::markets::error": {
+    "api": {
+      "kind": "function",
+      "name": "error",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Constructs a native Error from already-valid name/text and fresh default metadata; it performs no protocol-data admission.",
+    "evidence": "Individually reviewed actual production factory body. Three independently authored direct native witnesses in markets::accepted_contract_tests::accepted_market_error_factory observe unprojected name/message/default metadata or UTF16 fields/fresh object identity; an individual compiling production drift control must fail that named test and restore green. String domain retains parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. This exact function classification grants no permission to neighboring parsers or error-response projection."
+  },
+  "safe_cex_venue_grvt::data_reads::type_error": {
+    "api": {
+      "kind": "function",
+      "name": "type_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Constructs TypeError metadata around already-valid diagnostic text; it performs no input coercion or protocol decoding.",
+    "evidence": "Individually reviewed actual production factory body. Three independently authored direct native witnesses in data_reads::accepted_contract_tests::accepted_data_read_error_factory observe unprojected name/message/default metadata or UTF16 fields/fresh object identity; an individual compiling production drift control must fail that named test and restore green. String domain retains parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. This exact function classification grants no permission to neighboring parsers or error-response projection."
+  },
+  "safe_cex_venue_grvt::binding::account::failure": {
+    "api": {
+      "kind": "function",
+      "name": "failure",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::AsRef",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "primitive": "str"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl AsRef<str>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::AsRef",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Constructs a fresh native JS Error value from already-valid Rust diagnostic text, without JSON admission or validation.",
+    "evidence": "Individually reviewed actual production factory body. Three independently authored direct native witnesses in binding::account::accepted_contract_tests::accepted_account_error_factory observe unprojected name/message/default metadata or UTF16 fields/fresh object identity; an individual compiling production drift control must fail that named test and restore green. String domain retains parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. This exact function classification grants no permission to neighboring parsers or error-response projection."
+  },
+  "safe_cex_venue_grvt::data_reads::or": {
+    "api": {
+      "kind": "function",
+      "name": "or",
+      "signature": {
+        "inputs": [
+          [
+            "first",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "second",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed response.results||response.r and instrument||i selectors in maintained grvt.exchange.ts:874-883; truthy first operand wins, otherwise retain exact second presence/value. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{let actual=$type($value.get(\"a\"),$value.get(\"b\"));serde_json::json!({\"present\":actual.is_some(),\"value\":actual})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "a": null
+        },
+        "output": {
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "a": false,
+          "b": null
+        },
+        "output": {
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "a": 0,
+          "b": false
+        },
+        "output": {
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "a": "",
+          "b": 0
+        },
+        "output": {
+          "present": true,
+          "value": 0
+        }
+      },
+      {
+        "input": {
+          "a": 1,
+          "b": 2
+        },
+        "output": {
+          "present": true,
+          "value": 1
+        }
+      },
+      {
+        "input": {
+          "a": [],
+          "b": 7
+        },
+        "output": {
+          "present": true,
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "a": {},
+          "b": 7
+        },
+        "output": {
+          "present": true,
+          "value": {}
+        }
+      },
+      {
+        "input": {
+          "a": "x",
+          "b": "y"
+        },
+        "output": {
+          "present": true,
+          "value": "x"
+        }
+      },
+      {
+        "input": {
+          "b": []
+        },
+        "output": {
+          "present": true,
+          "value": []
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::results": {
+    "api": {
+      "kind": "function",
+      "name": "results",
+      "signature": {
+        "inputs": [
+          [
+            "response",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed null property-access refusal and exact results/r source alias precedence, grvt.exchange.ts:874-883/2070-2093. Observes Option presence independently from returned null. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{match $type(&$value){Ok(actual)=>serde_json::json!({\"ok\":true,\"present\":actual.is_some(),\"value\":actual}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'results')"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "results": null
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "results": false,
+          "r": null
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "results": 0,
+          "r": false
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "results": "",
+          "r": 0
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": 0
+        }
+      },
+      {
+        "input": {
+          "results": 1,
+          "r": 2
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": 1
+        }
+      },
+      {
+        "input": {
+          "results": [],
+          "r": 7
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "results": {},
+          "r": 7
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {}
+        }
+      },
+      {
+        "input": {
+          "results": "x",
+          "r": "y"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": "x"
+        }
+      },
+      {
+        "input": {
+          "r": []
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": []
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": 42,
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": "text",
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::instrument": {
+    "api": {
+      "kind": "function",
+      "name": "instrument",
+      "signature": {
+        "inputs": [
+          [
+            "item",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed null property-access refusal and exact instrument/i source alias precedence, grvt.exchange.ts:874-883/2070-2093. Observes Option presence independently from returned null. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{match $type(&$value){Ok(actual)=>serde_json::json!({\"ok\":true,\"present\":actual.is_some(),\"value\":actual}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot read properties of null (reading 'instrument')"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "instrument": null
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "instrument": false,
+          "i": null
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "instrument": 0,
+          "i": false
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "instrument": "",
+          "i": 0
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": 0
+        }
+      },
+      {
+        "input": {
+          "instrument": 1,
+          "i": 2
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": 1
+        }
+      },
+      {
+        "input": {
+          "instrument": [],
+          "i": 7
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": []
+        }
+      },
+      {
+        "input": {
+          "instrument": {},
+          "i": 7
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": {}
+        }
+      },
+      {
+        "input": {
+          "instrument": "x",
+          "i": "y"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": "x"
+        }
+      },
+      {
+        "input": {
+          "i": []
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": []
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": 42,
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": "text",
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::no_results": {
+    "api": {
+      "kind": "function",
+      "name": "no_results",
+      "signature": {
+        "inputs": [
+          [
+            "results",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed source !results || results.length === 0 in grvt.exchange.ts:875/2071. Strict numeric-zero length differs from string or boolean length; empty arrays remain truthy in the first operand. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "serde_json::json!($type($value.get(\"v\")))",
+    "cases": [
+      {
+        "input": {},
+        "output": true
+      },
+      {
+        "input": {
+          "v": null
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "v": false
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "v": 0
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "v": ""
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "v": []
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "v": [
+            null
+          ]
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "v": {}
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "v": {
+            "length": 0
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "v": {
+            "length": -0.0
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "v": {
+            "length": "0"
+          }
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "v": {
+            "length": false
+          }
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "v": {
+            "length": 1
+          }
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "v": true
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "v": "a"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "v": -1
+        },
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::uppercase": {
+    "api": {
+      "kind": "function",
+      "name": "uppercase",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed optional toUpperCase call in grvt.exchange.ts:883/2093. Absent/null short circuit; valid strings preserve native Unicode scalar uppercase and embedded NUL, and present nonstrings fail with caller-supplied diagnostic. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{match $type($value.get(\"v\"),$value[\"message\"].as_str().unwrap_or(\"unused\")){Ok(actual)=>serde_json::json!({\"ok\":true,\"value\":actual}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "v": null
+        },
+        "output": {
+          "ok": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "v": ""
+        },
+        "output": {
+          "ok": true,
+          "value": ""
+        }
+      },
+      {
+        "input": {
+          "v": "btc_usdt_Perp"
+        },
+        "output": {
+          "ok": true,
+          "value": "BTC_USDT_PERP"
+        }
+      },
+      {
+        "input": {
+          "v": "caféß"
+        },
+        "output": {
+          "ok": true,
+          "value": "CAFÉSS"
+        }
+      },
+      {
+        "input": {
+          "v": "a\u0000z"
+        },
+        "output": {
+          "ok": true,
+          "value": "A\u0000Z"
+        }
+      },
+      {
+        "input": {
+          "v": 0,
+          "message": "instrument.toUpperCase is not a function"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "instrument.toUpperCase is not a function"
+        }
+      },
+      {
+        "input": {
+          "v": false,
+          "message": "instrument.toUpperCase is not a function"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "instrument.toUpperCase is not a function"
+        }
+      },
+      {
+        "input": {
+          "v": [],
+          "message": "instrument.toUpperCase is not a function"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "instrument.toUpperCase is not a function"
+        }
+      },
+      {
+        "input": {
+          "v": {},
+          "message": "instrument.toUpperCase is not a function"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "instrument.toUpperCase is not a function"
+        }
+      },
+      {
+        "input": {
+          "v": 42,
+          "message": "instrument.toUpperCase is not a function"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "instrument.toUpperCase is not a function"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::binding::signing::fields": {
+    "api": {
+      "kind": "function",
+      "name": "fields",
+      "signature": {
+        "inputs": [
+          [
+            "entries",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed output-field constructor against ordered EIP712 declarations in thirdparty/grvt-ts-sdk/src/signing/types.ts and legacy grvt.signing.ts ORDER_TYPES. Exact typed string-pair domain; keeps order, duplicate names and empty text. This grants no EIP712 validation permission. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{let pairs:Vec<(&str,&str)>=$value.as_array().unwrap().iter().map(|pair|(pair[0].as_str().unwrap(),pair[1].as_str().unwrap())).collect();$type(&pairs)}",
+    "cases": [
+      {
+        "input": [],
+        "output": []
+      },
+      {
+        "input": [
+          [
+            "name",
+            "string"
+          ],
+          [
+            "chainId",
+            "uint256"
+          ]
+        ],
+        "output": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256"
+          }
+        ]
+      },
+      {
+        "input": [
+          [
+            "x",
+            "bool"
+          ],
+          [
+            "x",
+            "uint8"
+          ],
+          [
+            "",
+            ""
+          ],
+          [
+            "café",
+            "💠"
+          ]
+        ],
+        "output": [
+          {
+            "name": "x",
+            "type": "bool"
+          },
+          {
+            "name": "x",
+            "type": "uint8"
+          },
+          {
+            "name": "",
+            "type": ""
+          },
+          {
+            "name": "café",
+            "type": "💠"
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::binding::signing::typed_numbers": {
+    "api": {
+      "kind": "function",
+      "name": "typed_numbers",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed Alloy integer-carrier adapter body, separately from source SDK schema/signature witnesses. Numeric integers use exact binary64 integer decimal text rather than shortest JS Number text, including representable integers beyond2^53; fractional, boolean, null and existing string slots are unchanged. Recursion visits nested array/object slots. Finite raw JSON input only; not generic integer validation. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{let mut actual=if let Some(raw)=$value[\"raw\"].as_str(){serde_json::from_str::<serde_json::Value>(raw).unwrap()}else{$value[\"value\"].clone()};$type(&mut actual);actual}",
+    "cases": [
+      {
+        "input": {
+          "value": null
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "value": "001"
+        },
+        "output": "001"
+      },
+      {
+        "input": {
+          "value": 1
+        },
+        "output": "1"
+      },
+      {
+        "input": {
+          "raw": "-0.0"
+        },
+        "output": "0"
+      },
+      {
+        "input": {
+          "value": 1.25
+        },
+        "output": 1.25
+      },
+      {
+        "input": {
+          "value": []
+        },
+        "output": []
+      },
+      {
+        "input": {
+          "raw": "9007199254740993"
+        },
+        "output": "9007199254740992"
+      },
+      {
+        "input": {
+          "raw": "1000000000000000100"
+        },
+        "output": "1000000000000000128"
+      },
+      {
+        "input": {
+          "raw": "18446744073709551615"
+        },
+        "output": "18446744073709551616"
+      },
+      {
+        "input": {
+          "value": {
+            "a": [
+              0,
+              -2,
+              1.5,
+              false,
+              null,
+              "7"
+            ],
+            "b": {
+              "c": 325
+            }
+          }
+        },
+        "output": {
+          "a": [
+            "0",
+            "-2",
+            1.5,
+            false,
+            null,
+            "7"
+          ],
+          "b": {
+            "c": "325"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::public_subscriptions::interval_string": {
+    "api": {
+      "kind": "function",
+      "name": "interval_string",
+      "signature": {
+        "inputs": [
+          [
+            "interval",
+            {
+              "resolved_path": {
+                "path": "safe_cex_num::table_lookup::TableHit",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed final interval wire-string projection. Native domain is exactly Mapped(String) or12 stock inherited member identities. The only caller convert_interval always supplies mapped fallback on misses; TableHit::Missing is unreachable and not a protocol input permission. Every inherited identity and representative mapped texts are observed independently, including empty text. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{let input=if let Some(text)=$value[\"mapped\"].as_str(){safe_cex_num::TableHit::Mapped(text.to_owned())}else{safe_cex_num::TableHit::Inherited(match $value[\"inherited\"].as_str().unwrap(){\"Constructor\"=>safe_cex_num::ProtoMember::Constructor,\"DefineGetter\"=>safe_cex_num::ProtoMember::DefineGetter,\"DefineSetter\"=>safe_cex_num::ProtoMember::DefineSetter,\"HasOwnProperty\"=>safe_cex_num::ProtoMember::HasOwnProperty,\"LookupGetter\"=>safe_cex_num::ProtoMember::LookupGetter,\"LookupSetter\"=>safe_cex_num::ProtoMember::LookupSetter,\"IsPrototypeOf\"=>safe_cex_num::ProtoMember::IsPrototypeOf,\"PropertyIsEnumerable\"=>safe_cex_num::ProtoMember::PropertyIsEnumerable,\"ToString\"=>safe_cex_num::ProtoMember::ToString,\"ValueOf\"=>safe_cex_num::ProtoMember::ValueOf,\"Prototype\"=>safe_cex_num::ProtoMember::Prototype,\"ToLocaleString\"=>safe_cex_num::ProtoMember::ToLocaleString,_=>unreachable!(\"fixed reviewed identity\")})};serde_json::json!($type(input))}",
+    "cases": [
+      {
+        "input": {
+          "mapped": ""
+        },
+        "output": ""
+      },
+      {
+        "input": {
+          "mapped": "CI_1_M"
+        },
+        "output": "CI_1_M"
+      },
+      {
+        "input": {
+          "mapped": "💠"
+        },
+        "output": "💠"
+      },
+      {
+        "input": {
+          "inherited": "Constructor"
+        },
+        "output": "function Object() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "DefineGetter"
+        },
+        "output": "function __defineGetter__() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "DefineSetter"
+        },
+        "output": "function __defineSetter__() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "HasOwnProperty"
+        },
+        "output": "function hasOwnProperty() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "LookupGetter"
+        },
+        "output": "function __lookupGetter__() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "LookupSetter"
+        },
+        "output": "function __lookupSetter__() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "IsPrototypeOf"
+        },
+        "output": "function isPrototypeOf() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "PropertyIsEnumerable"
+        },
+        "output": "function propertyIsEnumerable() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "ToString"
+        },
+        "output": "function toString() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "ValueOf"
+        },
+        "output": "function valueOf() { [native code] }"
+      },
+      {
+        "input": {
+          "inherited": "Prototype"
+        },
+        "output": "[object Object]"
+      },
+      {
+        "input": {
+          "inherited": "ToLocaleString"
+        },
+        "output": "function toLocaleString() { [native code] }"
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::data_reads::catch": {
+    "api": {
+      "kind": "function",
+      "name": "catch",
+      "signature": {
+        "inputs": [
+          [
+            "result",
+            {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "T"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "severity",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::LogSeverity",
+                "args": null
+              }
+            }
+          ],
+          [
+            "log",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::runtime::LogSeverity",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str, LogSeverity) -> Result<(), ExchangeError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::runtime::LogSeverity",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed pure catch/log adapter against source data-read catches: logger runs once with Error string and exact severity before retaining original cause; logger failure replaces cause. Fixed i64 success domain and actual Rc error-origin identity, response/code and event order remain visible. Independently fixed native expectations, before any wire roundtrip. JSON-data and canonical UTF8 boundaries remain per parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary; no arbitrary host/getter claim.",
+    "call": "{use safe_cex_exchange::runtime::{ExchangeError,ExchangeErrorOrigin,LogSeverity};let mut cause=ExchangeError::new($value[\"message\"].as_str().unwrap_or(\"unused\"));cause.name=$value[\"name\"].as_str().unwrap_or(\"Error\").into();cause.origin=Some(ExchangeErrorOrigin::new(std::io::Error::other(\"cause\")));cause.code=Some(serde_json::json!(99));cause.response=Some(serde_json::json!({\"data\":1}));let cause_origin=cause.origin.clone();let mut logger=ExchangeError::new(\"logger failed\");logger.name=\"LoggerError\".into();logger.origin=Some(ExchangeErrorOrigin::new(std::io::Error::other(\"logger\")));logger.code=Some(serde_json::json!(44));logger.response=Some(serde_json::json!({\"log\":1}));let logger_origin=logger.origin.clone();let severity=match $value[\"severity\"].as_str().unwrap_or(\"error\"){\"debug\"=>LogSeverity::Debug,\"info\"=>LogSeverity::Info,\"warning\"=>LogSeverity::Warning,_=>LogSeverity::Error};let mut events=Vec::new();let result:Result<i64,ExchangeError>=if let Some(v)=$value[\"ok\"].as_i64(){Ok(v)}else{Err(cause)};match $type(result,\"prefix:\",severity,&mut |text:&str,severity:LogSeverity|{events.push((text.to_owned(),severity.as_str().to_owned()));if $value[\"fail\"].as_bool()==Some(true){Err(logger.clone())}else{Ok(())}}){Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value,\"events\":events}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message,\"origin\":if error.origin==cause_origin{\"cause\"}else if error.origin==logger_origin{\"logger\"}else{\"lost\"},\"code\":error.code,\"response\":error.response,\"events\":events})}}",
+    "cases": [
+      {
+        "input": {
+          "ok": 0
+        },
+        "output": {
+          "ok": true,
+          "value": 0,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "ok": -7
+        },
+        "output": {
+          "ok": true,
+          "value": -7,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "name": "Error",
+          "message": "why",
+          "severity": "error"
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "message": "why",
+          "origin": "cause",
+          "code": 99,
+          "response": {
+            "data": 1
+          },
+          "events": [
+            [
+              "prefix:Error: why",
+              "error"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "name": "",
+          "message": "why",
+          "severity": "warning"
+        },
+        "output": {
+          "ok": false,
+          "name": "",
+          "message": "why",
+          "origin": "cause",
+          "code": 99,
+          "response": {
+            "data": 1
+          },
+          "events": [
+            [
+              "prefix:why",
+              "warning"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "name": "Custom",
+          "message": "",
+          "severity": "info"
+        },
+        "output": {
+          "ok": false,
+          "name": "Custom",
+          "message": "",
+          "origin": "cause",
+          "code": 99,
+          "response": {
+            "data": 1
+          },
+          "events": [
+            [
+              "prefix:Custom",
+              "info"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "name": "",
+          "message": "",
+          "severity": "debug"
+        },
+        "output": {
+          "ok": false,
+          "name": "",
+          "message": "",
+          "origin": "cause",
+          "code": 99,
+          "response": {
+            "data": 1
+          },
+          "events": [
+            [
+              "prefix:",
+              "debug"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "name": "Error",
+          "message": "why",
+          "severity": "warning",
+          "fail": true
+        },
+        "output": {
+          "ok": false,
+          "name": "LoggerError",
+          "message": "logger failed",
+          "origin": "logger",
+          "code": 44,
+          "response": {
+            "log": 1
+          },
+          "events": [
+            [
+              "prefix:Error: why",
+              "warning"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_controls::trigger_info_error": {
+    "api": {
+      "kind": "function",
+      "name": "trigger_info_error",
+      "signature": {
+        "inputs": [
+          [
+            "kind",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Creates a native TypeError diagnostic around an already-valid Rust kind string. It admits no protocol value and performs no validation.",
+    "evidence": "Individually reviewed actual body and the null/undefined trigger-info callers. Three independent native witnesses in order_controls::accepted_contract_tests::accepted_trigger_info_error_factory inspect exact name/message/fresh default metadata; compiling name drift fails that test before exact restoration. This exact output-factory classification grants no permission to update_order or raw trigger decoding."
   }
 }
