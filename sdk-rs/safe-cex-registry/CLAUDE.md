@@ -235,3 +235,9 @@ with the selected family name bound before requests. Preserve the source local
 signing requirement on private HTTP even with hosted signing. Private WS stays
 local-only; empty-secret recovery follows the existing approved onOpen contract.
 `native_host_orderly_hosted` covers all six names with valid/empty local secrets.
+
+The native JSON removeOrders/history argument records are module-scope concrete
+decoders with ordinary accepted-set map and raw member observations. Positional
+Serde struct arrays are refused at this typed JSON boundary; surplus object fields
+remain ignored. History from/to retain their existing omitted/null None semantics.
+This does not establish runtime validation in TypeScript's unchecked worker casts.
