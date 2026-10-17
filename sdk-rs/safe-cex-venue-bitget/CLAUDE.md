@@ -14,7 +14,10 @@ The concrete binding connects both signature-rejection retry imports to the
 shared client replay path and shared request-stamp key. Non-2xx refusals stamp
 the live config; resolved refusals copy and stamp it before re-entering request
 interceptors. Tests cover all three families, writes, fresh signing timestamps,
-the single-resend limit and unrelated failures. The signature predicate uses
+the single-resend limit and unrelated failures. The write-retry witness advances the
+shared VirtualClock between actual transport attempts, separately from the runtime
+timeout clock, and verifies each observed timestamp and its exact HMAC preimage.
+It must not depend on two wall-clock milliseconds happening to differ. The signature predicate uses
 shared string-hint coercion; its source witness compares all 22 outcomes, including
 custom hooks and getter throws. Older pending notes below describe standalone
 extraction stages.
@@ -114,6 +117,12 @@ Do not refuse those intermediate values early. The [refusal-timing audit](REFUSA
 whole mapping result, not just a field; source callable omission and prototype
 object serialization remain separate witnesses. `info` is an owned snapshot,
 with both directions of source alias mutation pinned independently of NaN loss.
+
+Missing Order status/type/side table entries project to own `ModelField::Undefined`;
+JSON omits those fields while the native Store retains their presence. Inherited
+values, unsupported raw side values and missing required IDs still refuse at the
+final projection. `algo_frame_binding` covers real private frames and REST pages
+across linear, USDC and inverse bindings, including later-row evaluation order.
 
 **Inverse order mapper:** `orders::map_inverse_order` is a distinct source body,
 not the linear mapper with a product flag. Keep its narrower aliases, absent
@@ -319,3 +328,9 @@ does. It allows the unreached part rather than pruning its half: keeping the two
 copies textually identical is the point of copying, and `V::Hole`/`V::U`/`V::Null`
 are the missing/undefined/null trichotomy the wire decoders turn on, so a harness
 that cannot spell null is weaker than its sibling in a way nothing would flag.
+
+The public `cancel_symbol_orders` trait hook invokes the assembled family member.
+Classic and USDC retain both the inner cancellation emission and the outer symbol
+catch emission before propagating the original refusal; inverse retains its inner
+swallowing behavior. The cancellation binding tests assert that distinction and
+the selected symbol/order IDs through the actual signed client.

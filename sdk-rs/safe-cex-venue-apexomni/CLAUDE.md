@@ -326,6 +326,16 @@ request account/metadata, delayed login, relay failure and pending-auth disposal
 callback ownership; each must compile and fail its named native test, then restore.
 
 
+Placement follows lodash `times` for out-of-range lot counts, including an empty
+submission when the market maximum is zero. It still schedules order refresh.
+Trigger-price fallback preserves an adjusted zero in the final `price` operand.
+All split payloads are submitted before response IDs are read and projected;
+a numeric ID cannot interrupt the remaining submissions or reconciliation.
+Exact non-string placement results remain a coordinated shared `Vec<String>`
+representation issue; they are never stringified or replaced by fabricated IDs.
+`tests/support/placement_parity.rs` drives all three cases through the real
+constructed binding and L2 signer, observing the signed HTTP requests.
+
 ## Accepted-set map records
 
 `public_records`, `private_records` and `config_records` use 26 private Serde
@@ -407,3 +417,22 @@ passes all23 native tests each time; restored decoder runs repeat all16 outputs
 and7 classifications. Literal whole-function uniqueness is checked before any
 mutation; new source drift must refuse. Other functions, aliases, receivers,
 construction, feature and wasm accepted behavior remain separate obligations.
+
+Private position frames preserve the source mapper's socket receiver: unlike the
+exchange receiver, the socket has no `log` method. An unknown market therefore
+raises TypeError after the mapper's earlier reads, before any position updates,
+refresh timestamp/timer or later same-frame pong. The shared mapping body accepts
+its receiver's logging capability so REST mappings retain exchange warning logs.
+The production binding tests cover mixed valid/unknown rows, unchanged Store and
+skipped pong, plus a known-market socket-frame control that updates Store.
+
+
+The binding dispatches private snapshot refresh through the Apex lifecycle override,
+so reopen commits positions and orders before balance, retaining the WebSocket
+grace merge. Private keepalive schedules into the core Ping slot shared with pong,
+close and disposal; there is no separate shadow timeout. Real binding regressions
+stagger pong deadlines and hold replacement dialing after close. Private order,
+fill, position and wallet frames cover Store, fill notification and execution
+history behavior; wallet-only frames leave balance owned by REST, as in source.
+The socket oracle supplies no invented `log` method: unknown-market position rows
+compare the source TypeError and unchanged state.

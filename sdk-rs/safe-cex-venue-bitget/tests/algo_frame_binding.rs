@@ -136,6 +136,10 @@ fn real_algo_frame_keeps_open_order_with_unmapped_plan_type() {
         ["algo-unknown-plan", "algo-known-plan"],
         "unmapped plan type must remain in Store and not abort later rows"
     );
+    assert!(
+        orders[0].r#type.is_undefined(),
+        "real mapper retains own undefined type"
+    );
     let unknown = serde_json::to_value(&orders[0]).unwrap();
     assert!(
         unknown.get("type").is_none(),
@@ -167,6 +171,14 @@ fn rest_orders_keep_unmapped(name: ExchangeName) {
     assert_eq!(
         orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
         ["rest-unmapped", "rest-known"]
+    );
+    assert!(
+        orders[0].status.is_undefined(),
+        "real REST mapper retains own undefined status"
+    );
+    assert!(
+        orders[0].r#type.is_undefined(),
+        "real REST mapper retains own undefined type"
     );
     let unknown = serde_json::to_value(&orders[0]).unwrap();
     assert!(

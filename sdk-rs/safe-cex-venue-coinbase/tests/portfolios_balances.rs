@@ -1,7 +1,6 @@
 use safe_cex_venue_coinbase::{
     portfolios_balances::*,
     starbase_auth::{CoinbaseStarbasePromise as Promise, CoinbaseStarbasePromiseResolver},
-    types::ListPortfoliosResponsePortfoliosItem,
 };
 #[path = "support/microtasks.rs"]
 mod microtasks;
@@ -65,7 +64,7 @@ impl PortfolioHost for Host {
 }
 fn portfolio(v: &Value) -> Portfolio {
     Rc::new(RefCell::new(
-        serde_json::from_value::<ListPortfoliosResponsePortfoliosItem>(v.clone()).unwrap(),
+        serde_json::from_value::<PortfolioState>(v.clone()).unwrap(),
     ))
 }
 fn thrown(v: Value) -> PortfolioFailure {
@@ -209,10 +208,10 @@ fn assert_json(actual: Option<&Value>, expected: &Value, label: &str) {
 }
 fn assert_portfolio(actual: &Portfolio, expected: &Value, label: &str) {
     let p = actual.borrow();
-    assert_eq!(p.name, expected["name"], "{label}");
+    assert_eq!(p.metadata["name"], expected["name"], "{label}");
     assert_eq!(p.uuid, expected["uuid"], "{label}");
     assert_eq!(p.r#type, expected["type"], "{label}: native portfolio type");
-    assert_eq!(p.deleted, expected["deleted"], "{label}");
+    assert_eq!(p.metadata["deleted"], expected["deleted"], "{label}");
 }
 fn assert_balance(actual: &Balance, e: &Value, label: &str) {
     let b = actual.borrow();

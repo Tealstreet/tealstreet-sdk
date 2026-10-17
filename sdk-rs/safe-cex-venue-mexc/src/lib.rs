@@ -9,12 +9,10 @@ pub mod exchange_helpers;
 
 pub mod exchange;
 
-pub mod private_session;
-pub mod public_subscriptions;
+pub mod method_tasks;
 pub mod submit_validation;
 pub mod symbol_config;
 pub mod ws;
-pub mod ws_lifecycle;
 pub mod ws_private;
 pub mod ws_public;
 

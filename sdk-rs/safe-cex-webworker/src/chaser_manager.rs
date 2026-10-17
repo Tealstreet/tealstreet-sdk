@@ -186,14 +186,16 @@ pub fn check_and_mark_if_complete(
         let ids = orders
             .iter()
             .map(|order| {
+                use safe_cex_types::ModelField::{Absent, Undefined, Value};
                 use safe_cex_types::OrderStatus;
                 let status = match order.status {
-                    OrderStatus::Open => "open",
-                    OrderStatus::Closed => "closed",
-                    OrderStatus::Canceled => "canceled",
-                    OrderStatus::Creating => "creating",
-                    OrderStatus::Updating => "updating",
-                    OrderStatus::Canceling => "canceling",
+                    Value(OrderStatus::Open) => "open",
+                    Value(OrderStatus::Closed) => "closed",
+                    Value(OrderStatus::Canceled) => "canceled",
+                    Value(OrderStatus::Creating) => "creating",
+                    Value(OrderStatus::Updating) => "updating",
+                    Value(OrderStatus::Canceling) => "canceling",
+                    Absent | Undefined => "undefined",
                 };
                 format!("{}:{status}", order.id)
             })

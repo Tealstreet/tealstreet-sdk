@@ -208,7 +208,8 @@ impl SocketHost {
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info = Some(to_json(&to_js(&order.info)).expect("parsed private frame"));
+                fields.info =
+                    (Some(to_json(&to_js(&order.info)).expect("parsed private frame"))).into();
                 fields
             })
             .collect()
@@ -632,7 +633,10 @@ impl PrivateStreamHost for SocketHost {
                     let _ = self.host.base().log(message, severity);
                 },
                 |message| {
-                    let _ = self.host.base().emit("warning", json!(message));
+                    let _ = self
+                        .host
+                        .base()
+                        .emit_args("warning", &[json!(message), json!({"forceToast": true})]);
                 },
             )
             .map_err(|error| Rc::new(error.into()))

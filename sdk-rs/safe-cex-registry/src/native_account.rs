@@ -14,6 +14,7 @@ use safe_cex_store::Store;
 use safe_cex_transport::{
     RestAdapter, TransportError, TransportFuture,
     native::reqwest_adapter,
+    query_signing::{HttpSigningRequest, HttpSigningResponse},
     signing::{RemoteSignerRequest, RemoteSignerResponse},
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts};
@@ -95,6 +96,22 @@ impl safe_cex_transport::signing::RemoteSigner for HostSigner {
                 .await
                 .map_err(|error| TransportError::Host(error_text(&error)))?;
             request.decode_response(&response.to_string())
+        })
+    }
+    // ts: createRemoteSigningAdapter signs every config, query params included.
+    fn sign_query(&self, request: HttpSigningRequest) -> TransportFuture<'_, HttpSigningResponse> {
+        let sign = self.sign.clone();
+        Box::pin(async move {
+            let mut wire = serde_json::Map::from_iter([("type".into(), json!("http"))]);
+            match serde_json::to_value(&request).map_err(|e| TransportError::Host(e.to_string()))? {
+                Value::Object(fields) => wire.extend(fields),
+                other => return Err(TransportError::Host(format!("signing request: {other}"))),
+            }
+            let response = sign(Value::Object(wire))
+                .await
+                .map_err(|error| TransportError::Host(error_text(&error)))?;
+            serde_json::from_str(&response.to_string())
+                .map_err(|error| TransportError::Host(error.to_string()))
         })
     }
 }
@@ -213,6 +230,7 @@ const NATIVE_ACCOUNT_EVENTS: &[&str] = &[
     "grafana-http-request",
     "grafana-http-response",
     "grafana-info",
+    "deactivate",
     "listenOHLCV",
     "listenOHLCVs",
     "listenOrderBook",
@@ -224,13 +242,48 @@ pub fn native_account_watch(
     on_store: Rc<dyn Fn(Value)>,
 ) -> Box<dyn Fn()> {
     let base = account.exchange.base();
+    let active = Rc::new(Cell::new(true));
+    let store_active = active.clone();
+    let unsubscribe: Rc<dyn Fn()> = account
+        .store
+        .subscribe(Box::new(move |data, _| {
+            if store_active.get() {
+                on_store(json!({
+                    "latency": data.latency,
+                    "balance": data.balance,
+                    "orders": data.orders,
+                    "positions": data.positions,
+                    "loaded": data.loaded,
+                    "updateIds": data.update_ids,
+                }));
+            }
+            Ok(())
+        }))
+        .into();
     let ids: Vec<(&str, String)> = NATIVE_ACCOUNT_EVENTS
         .iter()
         .map(|event| {
             let forward = on_event.clone();
+            let active = active.clone();
+            let unsubscribe = unsubscribe.clone();
+            let exchange = Rc::downgrade(&account.exchange);
             let id = base.on(
                 event,
                 Rc::new(move |name: &str, data: &Value| {
+                    if !active.get() {
+                        return Ok(());
+                    }
+                    if name == "deactivate" {
+                        // ExchangeWorker clears its delivery pipeline before disposal,
+                        // including the Store reset that disposal performs.
+                        active.set(false);
+                        unsubscribe();
+                        if let Some(exchange) = exchange.upgrade() {
+                            exchange.dispose()?;
+                        }
+                        forward("deactivate-status", &Value::Bool(true));
+                        return Ok(());
+                    }
                     forward(name, data);
                     Ok(())
                 }),
@@ -238,19 +291,9 @@ pub fn native_account_watch(
             (*event, id)
         })
         .collect();
-    let unsubscribe = account.store.subscribe(Box::new(move |data, _| {
-        on_store(json!({
-            "latency": data.latency,
-            "balance": data.balance,
-            "orders": data.orders,
-            "positions": data.positions,
-            "loaded": data.loaded,
-            "updateIds": data.update_ids,
-        }));
-        Ok(())
-    }));
     let exchange = account.exchange.clone();
     Box::new(move || {
+        active.set(false);
         unsubscribe();
         for (event, id) in &ids {
             exchange.base().off(event, Some(id));
@@ -409,7 +452,9 @@ pub fn native_account_call(
                 done(venue.cancel_symbol_orders(arg(&args, 0)?).await).map(|_| Value::Null)
             }
             "cancelAllOrders" => done(venue.cancel_all_orders().await).map(|_| Value::Null),
-            "mintClientOrderId" => encode(base.mint_client_order_id(&arg(&args, 0)?)),
+            "mintClientOrderId" => {
+                encode(base.mint_client_order_id(&arg::<safe_cex_types::PlaceOrderOpts>(&args, 0)?))
+            }
             "placeOrderWithClientOrderId" => {
                 let order: PlaceOrderOpts = arg(&args, 0)?;
                 done(base.place_order_with_client_order_id(venue, order).await).map(|placed| {
@@ -512,4 +557,79 @@ pub fn native_account_call(
             other => Err(host_error(format!("Unknown method {other}"))),
         }
     })
+}
+
+#[cfg(test)]
+mod model_codec_tests {
+    use super::encode;
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
+    use safe_cex_types::{Order, Position};
+    use serde_json::Value;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn account_encoder_round_trips_model_presence_through_the_napi_json_surface() {
+        let output = Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../safe-cex-types/tests/support/model-field-corpus.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(cases.len(), 126);
+        let mut wire = Vec::new();
+        for case in &cases {
+            let input: Value = serde_json::from_str(case["input"].as_str().unwrap()).unwrap();
+            let native = from_json(&input);
+            for (field, state) in case["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["states"].as_array().unwrap())
+            {
+                if state == 1 {
+                    native
+                        .define(field.as_str().unwrap(), Js::Undefined)
+                        .unwrap();
+                }
+            }
+            let encoded = if case["model"] == "order" {
+                encode(to_typed::<Order>(&native).unwrap()).unwrap()
+            } else {
+                encode(to_typed::<Position>(&native).unwrap()).unwrap()
+            };
+            // napi native_exchange forwards this exact Value.to_string(). The
+            // JS consumer parses that text before exposing SDK model objects.
+            wire.push(encoded.to_string());
+        }
+        let mut node = Command::new("node").args(["-e", "let text='';process.stdin.on('data',x=>text+=x).on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(text).map(x=>JSON.stringify(JSON.parse(x))))));"])
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        node.stdin
+            .take()
+            .unwrap()
+            .write_all(serde_json::to_string(&wire).unwrap().as_bytes())
+            .unwrap();
+        let output = node.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let actual: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(actual.len(), 126);
+        for (actual, case) in actual.iter().zip(&cases) {
+            assert_eq!(
+                actual,
+                case["wire"].as_str().unwrap(),
+                "account/napi field-presence bytes {case}"
+            );
+        }
+    }
 }

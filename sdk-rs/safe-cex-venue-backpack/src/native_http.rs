@@ -54,8 +54,6 @@ impl Client {
             let mut req = RestRequest {
                 method: config.method.clone().unwrap_or_else(|| "GET".into()),
                 url: config.url.clone().unwrap_or_default(),
-                base_url: Some(client.config.base_url.into()),
-                timeout_ms: Some(client.config.timeout as i64),
                 skip_remote_signing: config.skip_remote_signing,
                 ..Default::default()
             };
@@ -267,7 +265,7 @@ impl api::Host for Factory {
         secret: String,
         window: f64,
     ) -> Result<api::Task<Vec<(String, JsJsonValue)>, ExchangeError>, ExchangeError> {
-        let now = self.base.runtime.now_ms();
+        let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let future = crate::signing::generate_auth_headers(
             instruction,
             &params,

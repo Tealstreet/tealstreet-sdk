@@ -22,15 +22,7 @@ pub struct EditUpdate {
     pub has_price: bool,
 }
 pub type EditUpdateRoot = Rc<RefCell<EditUpdate>>;
-#[derive(Clone, Debug)]
-pub struct EditReplacement {
-    pub symbol: String,
-    pub kind: OrderType,
-    pub side: OrderSide,
-    pub price: Option<f64>,
-    pub amount: Option<f64>,
-    pub reduce_only: bool,
-}
+pub type EditReplacement = safe_cex_types::PreparedOrderOpts<String, Option<f64>, bool>;
 pub trait OrderEditHost {
     fn selected_portfolio_type(&self) -> Result<Option<String>, PortfolioFailure>;
     fn orders(&self) -> Result<SyncedOrders, PortfolioFailure>;
@@ -123,11 +115,12 @@ pub fn update_order<H: OrderEditHost + 'static>(
                     let o = order.borrow();
                     EditReplacement {
                         symbol: o.fields.symbol.clone(),
-                        kind: o.fields.r#type,
-                        side: o.fields.side,
-                        price: Some(o.fields.price),
+                        r#type: o.fields.r#type.into_property(),
+                        side: o.fields.side.into_property(),
+                        price: o.fields.price.into_value(),
                         amount: Some(o.fields.amount),
                         reduce_only: o.fields.reduce_only,
+                        ..Default::default()
                     }
                 };
                 {
@@ -272,7 +265,7 @@ pub fn update_order<H: OrderEditHost + 'static>(
                     market.borrow().precision.amount,
                 );
                 let current_price = adjust(
-                    canonical.borrow().fields.price,
+                    (canonical.borrow().fields.price).to_number(),
                     market.borrow().precision.price,
                 );
                 let reconciled = is_coinbase_zero_decimal(filled)

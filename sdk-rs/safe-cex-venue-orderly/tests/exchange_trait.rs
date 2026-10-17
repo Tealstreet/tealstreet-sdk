@@ -397,14 +397,24 @@ fn caller_id_preflight_matches_the_source_regex_before_http() {
 #[test]
 fn signed_requests_verify_over_exact_wire_method_url_and_body() {
     use base64::Engine;
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
     let (venue, rt, _, wire) = support::fixture(
         json!({"key":"key","secret":"11111111111111111111111111111111","applicationId":"account"}),
     );
     script(&wire);
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
     drive(&rt, venue.get_account()).unwrap();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
     let requests = wire.requests.borrow();
     let request = &requests[0];
-    let preimage = format!("{}GET/v1/client/info", rt.now.get() as u64);
+    // orderly.api.ts signs the synced timestamp, method, URL and optional body.
+    let timestamp = &request.headers["orderly-timestamp"];
+    let native_timestamp: f64 = timestamp.parse().unwrap();
+    assert!(
+        native_timestamp >= before && native_timestamp <= after,
+        "signed timestamp comes from the synced virtual clock"
+    );
+    let preimage = format!("{timestamp}GET/v1/client/info");
     assert_eq!(request.headers["orderly-textsign"], preimage);
     assert_eq!(request.headers["orderly-account-id"], "account");
     let signature = base64::engine::general_purpose::URL_SAFE
@@ -504,4 +514,180 @@ fn disposal_updates_the_shared_flag_and_preserves_source_listeners() {
         .emit("fill", json!({"source":"disposal witness"}))
         .unwrap();
     assert_eq!(calls.get(), 1, "source disposal retains emitter listeners");
+}
+
+#[test]
+fn trait_cancel_all_reaches_both_endpoints_with_an_empty_store() {
+    let (venue, rt, store, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    assert!(store.orders().is_empty());
+    drive(&rt, venue.cancel_all_orders()).unwrap();
+    assert!(
+        sent(&wire, "DELETE", "/v1/orders"),
+        "cancel-all reaches venue orders absent from Store"
+    );
+    assert!(sent(&wire, "DELETE", "/v1/algo/orders"));
+    let calls = wire.requests.borrow();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].url, "/v1/orders");
+    assert_eq!(calls[1].url, "/v1/algo/orders");
+}
+
+#[test]
+fn trait_cancel_symbol_attempts_algo_after_a_normal_cancel_failure() {
+    use std::{cell::RefCell, rc::Rc};
+    let (venue, rt, _, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    wire.statuses.borrow_mut().insert("/v1/orders".into(), 400);
+    wire.responses.borrow_mut().insert(
+        "/v1/orders".into(),
+        json!({"message":"normal cancellation denied"}),
+    );
+    let errors = Rc::new(RefCell::new(vec![]));
+    let seen = errors.clone();
+    venue.base().on(
+        "error",
+        Rc::new(move |_, e| {
+            seen.borrow_mut().push(e.clone());
+            Ok(())
+        }),
+    );
+    drive(&rt, venue.cancel_symbol_orders("BTCUSDC".into())).unwrap();
+    assert!(
+        sent(&wire, "DELETE", "/v1/orders"),
+        "symbol cancellation is venue-wide"
+    );
+    assert!(
+        sent(&wire, "DELETE", "/v1/algo/orders"),
+        "algo cancel continues after the ordinary cancel fails"
+    );
+    let calls = wire.requests.borrow();
+    assert_eq!(calls.len(), 2);
+    for call in calls.iter() {
+        assert!(call.url.ends_with("?symbol=PERP_BTC_USDC"));
+        assert!(
+            call.params.is_none(),
+            "signer consumes the query before transport"
+        );
+    }
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("normal cancellation denied")
+    );
+}
+
+fn private_frame(
+    venue: &safe_cex_venue_orderly::native_exchange::OrderlyExchange,
+    frame: serde_json::Value,
+) {
+    venue.base().get_private_sockets()[0]
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            frame.to_string(),
+        ))
+        .unwrap();
+}
+
+#[test]
+fn private_execution_report_updates_orders_in_the_real_store() {
+    let (venue, rt, store, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    private_frame(
+        &venue,
+        json!({"topic":"executionreport","data":{"orderId":777,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":97.5,"quantity":2,"totalExecutedQuantity":0,"reduceOnly":false}}),
+    );
+    let orders = store.orders();
+    let actual = orders.iter().find(|o| o.id == "777").unwrap();
+    assert_eq!(actual.symbol, "BTCUSDC");
+    assert_eq!(actual.price, 97.5);
+    assert_eq!(actual.remaining, 2.0);
+    drop(orders);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn private_partial_execution_updates_store_and_emits_fill() {
+    use std::{cell::RefCell, rc::Rc};
+    let (venue, rt, store, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    let fills = Rc::new(RefCell::new(vec![]));
+    let seen = fills.clone();
+    venue.base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            seen.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    private_frame(
+        &venue,
+        json!({"topic":"executionreport","data":{"orderId":778,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":101.5,"quantity":2,"totalExecutedQuantity":0.5,"executedPrice":101.5,"executedQuantity":0.5,"reduceOnly":false}}),
+    );
+    let orders = store.orders();
+    let actual = orders.iter().find(|o| o.id == "778").unwrap();
+    assert_eq!(actual.filled, 0.5);
+    assert_eq!(actual.remaining, 1.5);
+    assert_eq!(fills.borrow().len(), 1);
+    assert_eq!(fills.borrow()[0]["id"].as_f64(), Some(778.0));
+    assert_eq!(fills.borrow()[0]["symbol"], "BTCUSDC");
+    assert_eq!(fills.borrow()[0]["price"].as_f64(), Some(101.5));
+    assert_eq!(fills.borrow()[0]["amount"].as_f64(), Some(0.5));
+    drop(orders);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn private_position_report_updates_store_and_keeps_rest_account_balance() {
+    let (venue, rt, store, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    assert_eq!(store.balance().total, 100.0);
+    private_frame(
+        &venue,
+        json!({"topic":"position","data":{"positions":[{"symbol":"PERP_BTC_USDC","position_qty":"3","average_open_price":"100","mark_price":"102","margin_mode":"CROSS","leverage":"20","est_liq_price":"50"}]}}),
+    );
+    let positions = store.positions();
+    let actual = positions.iter().find(|p| p.contracts == 3.0).unwrap();
+    assert_eq!(actual.symbol, "BTCUSDC");
+    assert_eq!(actual.entry_price, 100.0);
+    assert_eq!(actual.unrealized_pnl, 6.0);
+    // Orderly has no private balance topic: fetchPositions owns its REST balance write.
+    assert_eq!(store.balance().total, 100.0);
+    assert_eq!(store.balance().free, 70.0);
+    drop(positions);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn private_algo_execution_report_updates_the_real_store() {
+    let (venue, rt, store, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    private_frame(
+        &venue,
+        json!({"topic":"algoexecutionreportv2","data":{"algoOrderId":779,"rootAlgoOrderId":779,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","quantity":2,"triggerPrice":108.5,"totalExecutedQuantity":0,"reduceOnly":true}}),
+    );
+    let orders = store.orders();
+    let actual = orders.iter().find(|o| o.id == "779").unwrap();
+    assert_eq!(actual.symbol, "BTCUSDC");
+    assert_eq!(actual.price, 108.5);
+    assert_eq!(actual.amount, 2.0);
+    assert_eq!(actual.parent_id.as_deref(), Some("779"));
+    drop(orders);
+    venue.dispose().unwrap();
 }

@@ -34,14 +34,12 @@ Deserialize implementation. Ordinary private Wire decoders keep their own
 obligations. Existing shared string, number and owned-JSON boundaries apply;
 these tests do not establish arbitrary live JavaScript object identity.
 
-Eight existing carrier enum APIs are reviewed as actual decoders: five websocket
+Five existing carrier enum APIs are reviewed as actual decoders: the websocket
 unions (valuation channel, side, reference-price type, position type and isolation
-type), and account request type, time-in-force and subscribe-method unions. Their
-24 tags have independently authored direct native variant/ordinal observations.
+type). Their 18 tags have independently authored direct native variant/ordinal observations.
 PayloadValue APIs also reject non-string primitive kinds and valid-tag object
-maps; slice APIs execute their real UTF16 input domain, including lone-surrogate
-refusal. They receive observed decoder contracts instead of typed-construction
-waivers. No JSON or property-binding admission is invented for the slice APIs.
+maps. They receive observed decoder contracts instead of typed-construction
+waivers.
 Each owner has a compiling literal identity/refusal mutation control.
 
 From sdk-rs, run:
@@ -54,7 +52,7 @@ python3 safe-cex-venue-cryptocom/scripts/carrier-enum-controls.py
 node safe-cex-venue-cryptocom/scripts/record-carrier-contracts.mjs
 ```
 
-The maintained selector fixes these fourteen compiler identities, performs fresh
+The maintained selector fixes these eleven compiler identities, performs fresh
 rustdoc, loads the per-crate contract shard and executes canonical native
 production probes. It separately matches the six selected compiler Clone
 capabilities with loadPolicy('construction') and their specific Crypto.com
@@ -71,3 +69,8 @@ of the original 133 native/default owners and six of fifteen construction review
 aliases, construction entries, newer discovery, locals, features and WASM
 contract execution remain separate obligations. No full-package completion is
 claimed.
+
+The test-only `account_envelopes.rs` module had no production caller and was
+removed with its three carrier owners (wave2-vacuous-tests). The validation
+paragraphs above record the larger batch as it passed before that removal; the
+selector, control runner and contract shard now hold the eleven owners.

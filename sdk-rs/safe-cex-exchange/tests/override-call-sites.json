@@ -524,6 +524,18 @@
     ]
   },
   {
+    "file": "safe-cex-exchange/src/js_runtime/client/factory.rs",
+    "function": "create",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "name",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-exchange/src/js_runtime/store.rs",
     "function": "facade",
     "edges": [
@@ -1028,6 +1040,18 @@
     ]
   },
   {
+    "file": "safe-cex-registry/src/native_account.rs",
+    "function": "native_account_watch",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-registry/src/native_host.rs",
     "function": "dispose",
     "edges": [
@@ -1143,6 +1167,18 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs",
+    "function": "fetch_and_set_private_snapshot",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_and_set_private_snapshot",
         "count": 1
       }
     ]
@@ -3443,6 +3479,18 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "fetch_historical_fills",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history_range",
         "count": 1
       },
       {
@@ -5958,6 +6006,19 @@
     ]
   },
   {
+    "file": "safe-cex-venue-bybit/src/binding/members/ohlcv.rs",
+    "function": "fetch_ohlcv",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_ohlcv",
+        "callee": "crate :: spot_exchange_reads :: fetch_ohlcv",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs",
     "function": "install",
     "edges": [
@@ -6062,6 +6123,13 @@
         "kind": "reference",
         "hook": "fetch_markets",
         "callee": "members :: markets :: fetch_markets",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_ohlcv",
+        "callee": "members :: ohlcv :: fetch_ohlcv",
         "count": 1
       },
       {
@@ -7882,19 +7950,6 @@
   {
     "file": "safe-cex-venue-hyperliquid/src/spot_market_bootstrap.rs",
     "function": "fetch_spot_markets_and_tickers",
-    "edges": [
-      {
-        "receiver": "path",
-        "kind": "reference",
-        "hook": "start",
-        "callee": "helper_tasks :: start",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs",
-    "function": "spot_wait_for_token",
     "edges": [
       {
         "receiver": "path",
@@ -9738,6 +9793,12 @@
     "function": "dispatch",
     "edges": [
       {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_historical_positions",
+        "count": 1
+      },
+      {
         "receiver": "path",
         "kind": "reference",
         "hook": "cancel_all_orders",
@@ -9756,6 +9817,34 @@
         "kind": "reference",
         "hook": "cancel_symbol_orders",
         "callee": "crate :: order_commands :: cancel_symbol_orders",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_historical_fills",
+        "callee": "crate :: account_rest :: fetch_historical_fills",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_historical_orders",
+        "callee": "crate :: account_rest :: fetch_historical_orders",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history",
+        "callee": "crate :: account_rest :: fetch_income_history",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history_range",
+        "callee": "crate :: history_reads :: fetch_income_history_range",
         "count": 1
       },
       {
@@ -9846,6 +9935,20 @@
         "hook": "dispose",
         "callee": "crate :: lifecycle :: dispose",
         "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "listen_ohlcv",
+        "callee": "crate :: subscription_delegates :: listen_ohlcv",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "listen_order_book",
+        "callee": "crate :: subscription_delegates :: listen_order_book",
+        "count": 1
       }
     ]
   },
@@ -9866,6 +9969,31 @@
         "hook": "dispose",
         "callee": "crate :: ws_public_lifecycle :: dispose",
         "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "listen_ohlcv",
+        "callee": "crate :: runtime_assembly :: listen_ohlcv",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-paradex/src/native_exchange.rs",
+    "function": "build_folded_position_records",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_historical_fills",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history_range",
+        "count": 1
       }
     ]
   },
@@ -9883,8 +10011,45 @@
   },
   {
     "file": "safe-cex-venue-paradex/src/native_exchange.rs",
+    "function": "fetch_historical_positions",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_historical_positions",
+        "callee": "crate :: state_operations :: fetch_historical_positions",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-paradex/src/native_exchange.rs",
     "function": "new",
     "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_historical_fills",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_historical_orders",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history_range",
+        "count": 1
+      },
       {
         "receiver": "dynamic",
         "kind": "call",

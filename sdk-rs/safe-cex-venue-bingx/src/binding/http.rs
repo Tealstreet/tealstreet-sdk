@@ -143,13 +143,7 @@ impl ReadTransport for Transport {
                         );
                         if let Some(response) = response {
                             let raw = response.get("data").map_err(error)?;
-                            let data = if raw.is_string() {
-                                safe_cex_transport::how::big_int_as_string_json_parse(
-                                    &raw.to_display(),
-                                )
-                            } else {
-                                to_json(&raw).map_err(error)?
-                            };
+                            let data = to_json(&raw).map_err(error)?;
                             failure.response = Some(Box::new(safe_cex_transport::RestResponse {
                                 status: response
                                     .get("status")
@@ -176,11 +170,7 @@ impl ReadTransport for Transport {
                 }
             };
             let data = response.get("data").map_err(error)?;
-            let value = if data.is_string() {
-                safe_cex_transport::how::big_int_as_string_json_parse(&data.to_display())
-            } else {
-                to_json(&data).map_err(error)?
-            };
+            let value = to_json(&data).map_err(error)?;
             serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))
         })
     }
@@ -259,7 +249,20 @@ impl ApiHost for Host {
             Js::object(vec![
                 ("baseURL", Js::str(&defaults.base_url)),
                 ("timeout", Js::Number(defaults.timeout)),
-                ("responseType", Js::str("text")),
+                (
+                    "transformResponse",
+                    Js::function("bigIntAsStringJsonParse", |_, args| {
+                        let value = arg(&args, 0);
+                        if !value.is_string() {
+                            return Ok(value);
+                        }
+                        Ok(from_json(
+                            &safe_cex_transport::how::big_int_as_string_json_parse(
+                                &value.to_display(),
+                            ),
+                        ))
+                    }),
+                ),
                 (
                     "headers",
                     Js::object(
@@ -281,7 +284,7 @@ impl ApiHost for Host {
                 ),
             ]),
             &from_typed(options).map_err(error)?,
-            ExchangeName::Bingx,
+            base,
         )
         .map_err(error)?;
         client
@@ -401,7 +404,38 @@ impl ApiHost for Host {
         self.scope
             .globals
             .get("qs")
-            .and_then(|q| q.call_method("stringify", vec![from_json(params)]))
+            .and_then(|q| {
+                let collator = safe_cex_num::JsRootCollator::try_new()
+                    .map_err(|e| Thrown::error(e.name, e.message))?;
+                let sort = Js::function("localeCompare", move |_, args| {
+                    let left =
+                        String::from_utf16(&arg(&args, 0).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    let right =
+                        String::from_utf16(&arg(&args, 1).to_js_string()?).map_err(|_| {
+                            Thrown::error(
+                                "RepresentationError",
+                                "query key is outside the shared string boundary",
+                            )
+                        })?;
+                    Ok(Js::Number(match collator.compare(&left, &right) {
+                        std::cmp::Ordering::Less => -1.0,
+                        std::cmp::Ordering::Equal => 0.0,
+                        std::cmp::Ordering::Greater => 1.0,
+                    }))
+                });
+                q.call_method(
+                    "stringify",
+                    vec![
+                        from_json(params),
+                        Js::object(vec![("arrayFormat", Js::str("repeat")), ("sort", sort)]),
+                    ],
+                )
+            })
             .map(|s| s.to_display())
             .map_err(error)
     }
@@ -413,6 +447,6 @@ impl ApiHost for Host {
             .map_err(error)
     }
     fn now_ms(&self) -> f64 {
-        self.scope.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
 }

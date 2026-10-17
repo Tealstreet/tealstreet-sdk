@@ -62,8 +62,10 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
                     Ok(Js::str(&safe_cex_num::js_number_string(n)))
                 })),
                 "toFixed" => Some(method("toFixed", move |a| {
-                    let digits = arg(&a, 0).to_number()?.max(0.0) as usize;
-                    Ok(Js::str(&format!("{n:.digits$}")))
+                    let digits = arg(&a, 0).to_number()?;
+                    safe_cex_num::js_to_fixed(n, digits)
+                        .map(|text| Js::str(&text))
+                        .map_err(|message| Thrown::error("RangeError", message))
                 })),
                 _ => None,
             }

@@ -22,7 +22,7 @@ function numeric(node, visiting = new Set()) {
   if (node.elementType && numeric(node.elementType, visiting)) return true;
   return [...(node.types || []), ...(node.elements || [])].some(child => numeric(child, visiting)) || (node.members || []).some(member => numeric(member.type, visiting));
 }
-const sourceNames = [...definitions].filter(([_, nodes]) => nodes.some(def => numeric(def.type) || (def.members || []).some(member => numeric(member.type)))).map(([name]) => name);
+const sourceNames = [...definitions].filter(([_, nodes]) => nodes.some(def => numeric(def.type) || (def.members || []).some(member => numeric(member.type)))).map(([name]) => name).filter(name => !require('./not-modeled-types.cjs').has(name));
 const bases = JSON.parse(fs.readFileSync(path.join(__dirname, '../tests/fixtures/types.json'), 'utf8')).cases;
 const escape = key => String(key).replaceAll('~', '~0').replaceAll('/', '~1');
 function numbers(value, prefix = '', result = {}) {

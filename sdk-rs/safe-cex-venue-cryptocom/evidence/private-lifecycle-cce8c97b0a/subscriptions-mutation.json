@@ -1,6 +1,0 @@
-{
-  "base_sha": "cce8c97b0a0c965a25c360d8928827888eaf03a1",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/private_lifecycle.rs\n@@ -186,7 +186,7 @@\n     state: &PrivateSocketState<W, H>,\n     transport: &T,\n ) -> Result<(), T::Error> {\n-    let channels = [\"user.order\", \"user.advance.order\"]\n+    let channels = [\"user.wrong.order\", \"user.advance.order\"]\n         .map(|channel| ChannelValue::String(channel.encode_utf16().collect()));\n     let new_channels: Vec<_> = channels\n         .into_iter()\n",
-  "expected_named_assertion": "CRYPTOCOM-LIFECYCLE-NATIVE-STATE order-queued immediate"
-}

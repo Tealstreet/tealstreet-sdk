@@ -750,15 +750,7 @@ fn settle(ret: Return<Host>) -> Result<V, E> {
     }
 }
 fn construct(h: &Host, kind: Kind, ctor: bool) -> Result<V, E> {
-    if ctor {
-        return classes::constructor(
-            h,
-            get(&h.cfg, "name"),
-            get(&h.cfg, "options"),
-            get(&h.cfg, "store"),
-        );
-    }
-    let args = if flag(&h.cfg, "noArgs") {
+    let args = if !ctor && flag(&h.cfg, "noArgs") {
         vec![]
     } else {
         vec![
@@ -768,15 +760,7 @@ fn construct(h: &Host, kind: Kind, ctor: bool) -> Result<V, E> {
             object(vec![("ignored", boolean(true))]),
         ]
     };
-    match kind {
-        Kind::Orderly => classes::orderly(h, args),
-        Kind::KodiakFI => classes::kodiakfi(h, args),
-        Kind::Mode => classes::mode(h, args),
-        Kind::SalsaDEX => classes::salsadex(h, args),
-        Kind::TealstreetDEX => classes::tealstreet_dex(h, args),
-        Kind::What => classes::what(h, args),
-        Kind::Woofi => classes::woofi(h, args),
-    }
+    classes::construct(h, kind, args)
 }
 fn shape(h: &Host, r: &V, e: &Value) {
     let entries = ordered(r);

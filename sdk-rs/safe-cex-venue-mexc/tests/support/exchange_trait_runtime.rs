@@ -266,6 +266,10 @@ pub fn fixture_with_settings(
         wire.clone(),
         Rc::new(|v| v),
         MexcSocketDependencies {
+            current_time_ms: {
+                let runtime = runtime.clone();
+                Rc::new(move || runtime.now_ms())
+            },
             runtime: runtime.clone(),
             remote_account_name: None,
             emit_fill: Rc::new(|_| Ok(())),

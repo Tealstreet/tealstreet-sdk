@@ -226,7 +226,7 @@ fn tag_number(n: f64) -> Value {
 fn tag_order(order: &safe_cex_types::Order) -> Value {
     let mut value = json!(order);
     for (key, n) in [
-        ("price", order.price),
+        ("price", order.price.to_number()),
         ("amount", order.amount),
         ("filled", order.filled),
         ("remaining", order.remaining),
@@ -234,7 +234,7 @@ fn tag_order(order: &safe_cex_types::Order) -> Value {
     ] {
         value[key] = tag_number(n);
     }
-    if let Some(extra) = &order.extra {
+    if let Some(extra) = order.extra.as_ref() {
         if let Some(n) = extra.remaining_native {
             value["extra"]["remainingNative"] = tag_number(n);
         }

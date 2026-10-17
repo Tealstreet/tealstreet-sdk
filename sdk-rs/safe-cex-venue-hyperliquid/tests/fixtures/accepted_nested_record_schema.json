@@ -949,51 +949,6 @@
       ],
       "caseCount": 62,
       "privateWireSha256": "2f4636d32d29fa7171248b05f91ec373a886f2acd186574ba3f3c90eca143246"
-    },
-    "SpotClearinghouseBalance": {
-      "fields": [
-        [
-          "coin",
-          "coin",
-          "string"
-        ],
-        [
-          "token",
-          "token",
-          [
-            "optional",
-            "number"
-          ]
-        ],
-        [
-          "hold",
-          "hold",
-          "string"
-        ],
-        [
-          "total",
-          "total",
-          "string"
-        ],
-        [
-          "entryNtl",
-          "entry_ntl",
-          [
-            "optional",
-            "string"
-          ]
-        ]
-      ],
-      "publicDeserializerSha256": "01b98781d1b58ca3d07a34b38325b7a459be9f730bbc4248eb898fdcd4297ac2",
-      "nativeFields": [
-        "coin",
-        "token",
-        "hold",
-        "total",
-        "entryNtl"
-      ],
-      "caseCount": 32,
-      "privateWireSha256": "56a526f958768aca334638680c20d0232bc1698eb3febd1d3b968a2a05dc8e8d"
     }
   },
   "dependencies": {
@@ -1399,39 +1354,6 @@
         [
           "enum",
           "Tif"
-        ]
-      ]
-    ],
-    "SpotClearinghouseBalance": [
-      [
-        "coin",
-        "coin",
-        "string"
-      ],
-      [
-        "token",
-        "token",
-        [
-          "optional",
-          "number"
-        ]
-      ],
-      [
-        "hold",
-        "hold",
-        "string"
-      ],
-      [
-        "total",
-        "total",
-        "string"
-      ],
-      [
-        "entryNtl",
-        "entry_ntl",
-        [
-          "optional",
-          "string"
         ]
       ]
     ],

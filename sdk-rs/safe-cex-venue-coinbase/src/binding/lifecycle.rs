@@ -117,7 +117,7 @@ impl Host {
                 .map(|position| {
                     let mut fields = position.fields.clone();
                     if let Some(info) = &position.info {
-                        fields.info = Some(info.borrow().clone());
+                        fields.info = (Some(info.borrow().clone())).into();
                     }
                     fields
                 })
@@ -276,7 +276,13 @@ impl LifecycleHost for Host {
                     let _ = self.base().log(message, severity);
                 },
                 |message| {
-                    let _ = self.base().emit("warning", serde_json::json!(message));
+                    let _ = self.base().emit_args(
+                        "warning",
+                        &[
+                            serde_json::json!(message),
+                            serde_json::json!({"forceToast": true}),
+                        ],
+                    );
                 },
             )
             .map_err(|error| Rc::new(error.into()))

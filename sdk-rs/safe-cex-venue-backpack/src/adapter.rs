@@ -58,13 +58,7 @@ impl BackpackExchange {
         );
         let base = Rc::new(base);
         let o = base.options();
-        let options = Rc::new(RefCell::new(crate::api_factory::Options {
-            testnet: o.testnet.unwrap_or(false),
-            recv_window: o.extra.as_ref().and_then(|v| v.recv_window),
-            tunnel: o.tealstreet_tunnel.unwrap_or(false),
-            key: o.key.clone(),
-            secret: o.secret.clone(),
-        }));
+        let options = Rc::new(RefCell::new(o));
         let xhr = crate::api_factory::create_api(
             Rc::new(RefCell::new(crate::native_http::Factory {
                 base: base.clone(),
@@ -363,7 +357,7 @@ impl reads::Host for Frame {
         (self.owner.date_parse)(v)
     }
     fn clock(&mut self) -> Result<f64, ExchangeError> {
-        Ok(self.owner.runtime.now_ms())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn public_only(&mut self) -> Result<bool, ExchangeError> {
         let o = self.owner.base.options();
@@ -606,18 +600,19 @@ impl actions::Host for Frame {
         let o = o.borrow();
         Ok(actions::Options {
             symbol: units(&o.symbol),
-            kind: o.r#type,
-            side: o.side,
+            r#type: o.r#type.into_property(),
+            side: o.side.into_property(),
             amount: o.amount,
-            price: Some(o.price),
-            time_in_force: o.time_in_force,
+            price: o.price.into_value(),
+            time_in_force: (o.time_in_force).into_value(),
             reduce_only: o.reduce_only,
             trigger_price: None,
             take_profit: None,
             stop_loss: None,
             tp_trigger_type: None,
             sl_trigger_type: None,
-            client_id: None,
+            client_order_id: None,
+            ..Default::default()
         })
     }
     fn order_id(&mut self, o: &Self::Existing) -> Result<JsString, ExchangeError> {

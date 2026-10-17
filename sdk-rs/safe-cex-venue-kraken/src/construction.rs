@@ -22,7 +22,6 @@ pub trait ConstructorHost: ReadHost {
         options: Handle<Self>,
         store: Handle<Self>,
     ) -> ReadResult<Self, Handle<Self>>;
-    fn initialize(&self, venue: Venue, receiver: Handle<Self>) -> ReadResult<Self, ()>;
     fn secondary_client<'a>(
         &'a self,
         options: Handle<Self>,
@@ -66,24 +65,4 @@ pub(crate) fn construct_with<H: ConstructorHost>(
         h.assign(&receiver, &units("historyXhr"), client)?;
     }
     Ok(receiver)
-}
-pub fn futures_constructor<H: ConstructorHost>(
-    h: &H,
-    name: Handle<H>,
-    options: Handle<H>,
-    store: Handle<H>,
-) -> ReadResult<H, Handle<H>> {
-    construct_with(h, Venue::Futures, name, options, store, |receiver| {
-        h.initialize(Venue::Futures, receiver)
-    })
-}
-pub fn spot_constructor<H: ConstructorHost>(
-    h: &H,
-    name: Handle<H>,
-    options: Handle<H>,
-    store: Handle<H>,
-) -> ReadResult<H, Handle<H>> {
-    construct_with(h, Venue::Spot, name, options, store, |receiver| {
-        h.initialize(Venue::Spot, receiver)
-    })
 }

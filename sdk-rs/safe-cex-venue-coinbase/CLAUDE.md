@@ -1,5 +1,15 @@
 # Coinbase venue parity port
 
+The production private write-check timeout emits warning arguments as
+`(reason, {forceToast: true})`; retain the second emitter argument and the
+once-only latch until a received user frame resets it. Portfolio selection
+projects only `uuid` and `type` into mutable `PortfolioState`, retaining unused
+metadata as JSON. The declaration DTO remains strict; missing or malformed
+`name`/`deleted` cannot reject runtime selection or balance reads. Production
+regressions are in `tests/private_binding_frames.rs` and `tests/exchange_binding.rs`;
+`scripts/health-portfolio-binding-controls.py` compiles each boundary reversion,
+requires its named failure, and restores the source byte-for-byte.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/coinbase/CLAUDE.md).
 Core contract: [shared exchange trait](../safe-cex-exchange/CLAUDE.md).
 
@@ -238,3 +248,8 @@ The JSON duplicate-key grammar now maps to `json_key_scanner.rs` method by metho
 Coinbase create/cancel and REST fallback bodies are mapped individually in `order_create.rs`: amount/price precision formatter, optimistic native Order carrier, own typed market resolver, hot Promise placement/cancellation, order polling/backoff and fresh WS/REST merging. Production Exchange assembly lives in `binding/`; its gate scope and remaining notification findings are recorded in `BINDING_GATES.md`. Explicit receiver capabilities preserve operation boundaries; transport returns native hot Promises. `CoinbaseOrderResponse` retains a shared root and shallow object/array field identities; primitive info fields copy. Tests use the actual installed p-iteration implementation, decoded native values and source error/timing/alias probes. String response IDs and own genuine Market records are the declared typed boundary; inherited non-Market prototype outputs are excluded.
 
 Public frame classification is complete in `starbase_public_frames.rs`, using `json_key_scanner.rs` before a guarded native JSON.parse bridge. Retain UTF16 strings/keys, f64 overflow/underflow/signed-zero, shared array/object payloads and primitive copies; serde Value cannot replace this data carrier. Context remains a plain typed JSON record. This module owns no socket or dispatch. Gates: `FRAME_CLASSIFICATION_GATES.md`.
+
+`PlaceOrderRequest` serializes `leverage` before `order_configuration`, matching
+the source formatOrder object literal. The production transport regression
+observes exact encoded POST bytes for Coinbase and CoinbaseSpot; it drives the
+real class graph, signers, client factory and installed transport adapter.

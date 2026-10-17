@@ -261,6 +261,13 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.mapPosition
     pub fn map_position(&self, row: &J) -> Result<Option<Position>, ExchangeError> {
+        self.map_position_with_log(row, |message| self.base.log(message, "warning"))
+    }
+    pub(crate) fn map_position_with_log(
+        &self,
+        row: &J,
+        log: impl FnOnce(&str) -> Result<(), ExchangeError>,
+    ) -> Result<Option<Position>, ExchangeError> {
         let entry = if truthy(data::v(row, "avgPrice")?) {
             data::v(row, "avgPrice")?.clone()
         } else {
@@ -276,10 +283,7 @@ impl ApexOmniExchange {
         let unrealized_pnl = float(&or_zero(data::v(row, "unrealisedPnl")?))?;
         let symbol = text(get(row, "symbol"))?;
         let Some(market) = self.base.store.markets_by_id().get(&symbol).cloned() else {
-            self.base.log(
-                &format!("Market not found for position symbol: {symbol}"),
-                "warning",
-            )?;
+            log(&format!("Market not found for position symbol: {symbol}"))?;
             return Ok(None);
         };
         let id = safe_cex_types::model_utils::create_position_id(
@@ -324,21 +328,21 @@ impl ApexOmniExchange {
         Ok(Some(Position {
             id,
             symbol: market.symbol,
-            side,
+            side: side.into(),
             entry_price,
             notional: contracts * entry_price,
             leverage: math_round(leverage),
             unrealized_pnl,
-            realized_pnl: Some(float(&or_zero(data::v(row, "curRealisedPnl")?))?),
+            realized_pnl: (Some(float(&or_zero(data::v(row, "curRealisedPnl")?))?)).into(),
             contracts,
             liquidation_price: float(&or_zero(data::v(row, "liqPrice")?))?,
-            position_mode: Some(PositionMode::Hedged),
-            margin_type: Some(MarginType::Cross),
-            info: Some(fields(row)?),
-            last_update: Some(self.base.runtime.now_ms()),
-            margin_size: None,
-            extra: None,
-            option: None,
+            position_mode: (Some(PositionMode::Hedged)).into(),
+            margin_type: (Some(MarginType::Cross)).into(),
+            info: (Some(fields(row)?)).into(),
+            last_update: (Some(self.base.runtime.now_ms())).into(),
+            margin_size: (None).into(),
+            extra: (None).into(),
+            option: (None).into(),
         }))
     }
     // ts: ApexOmniExchange.mapOrder
@@ -460,47 +464,47 @@ impl ApexOmniExchange {
             }
         };
         let order = Order {
-            client_order_id: None,
+            client_order_id: (None).into(),
             id: field_string(raw_id)?,
-            status: *status,
+            status: (*status).into(),
             symbol: market.symbol,
-            r#type: *order_type,
-            side: *side,
-            price,
+            r#type: (*order_type).into(),
+            side: (*side).into(),
+            price: price.into(),
             amount,
             filled,
             remaining,
             reduce_only,
-            info: Some(fields(row)?),
-            time_in_force,
+            info: (Some(fields(row)?)).into(),
+            time_in_force: time_in_force.into(),
             last_update,
-            tp_trigger_type,
-            sl_trigger_type,
-            parent_id: None,
-            close: None,
-            trigger_type: None,
-            take_profit: None,
-            stop_loss: None,
-            extra: None,
+            tp_trigger_type: tp_trigger_type.into(),
+            sl_trigger_type: sl_trigger_type.into(),
+            parent_id: (None).into(),
+            close: (None).into(),
+            trigger_type: (None).into(),
+            take_profit: (None).into(),
+            stop_loss: (None).into(),
+            extra: (None).into(),
         };
         let mut orders = vec![order.clone()];
         for (id, price, kind, updated, trigger) in brackets {
             let mut bracket = order.clone();
             bracket.id = id;
-            bracket.r#type = kind;
+            bracket.r#type = (kind).into();
             bracket.side = if order.side == OrderSide::Buy {
-                OrderSide::Sell
+                safe_cex_types::ModelField::Value(OrderSide::Sell)
             } else {
-                OrderSide::Buy
+                safe_cex_types::ModelField::Value(OrderSide::Buy)
             };
-            bracket.price = price;
+            bracket.price = (price).into();
             bracket.filled = 0.0;
             bracket.remaining = order.amount;
             bracket.last_update = updated;
             if kind == OrderType::StopLoss {
-                bracket.sl_trigger_type = trigger;
+                bracket.sl_trigger_type = (trigger).into();
             } else {
-                bracket.tp_trigger_type = trigger;
+                bracket.tp_trigger_type = (trigger).into();
             }
             orders.push(bracket);
         }
@@ -739,21 +743,21 @@ impl ApexOmniExchange {
                         Some(PositionMode::Hedged),
                     ),
                     symbol: market.symbol.clone(),
-                    side,
+                    side: side.into(),
                     entry_price: 0.0,
                     notional: 0.0,
                     unrealized_pnl: 0.0,
                     contracts: 0.0,
                     leverage,
                     liquidation_price: 0.0,
-                    position_mode: Some(PositionMode::Hedged),
-                    margin_type: Some(MarginType::Cross),
-                    realized_pnl: None,
-                    last_update: None,
-                    info: None,
-                    margin_size: None,
-                    extra: None,
-                    option: None,
+                    position_mode: (Some(PositionMode::Hedged)).into(),
+                    margin_type: (Some(MarginType::Cross)).into(),
+                    realized_pnl: (None).into(),
+                    last_update: (None).into(),
+                    info: (None).into(),
+                    margin_size: (None).into(),
+                    extra: (None).into(),
+                    option: (None).into(),
                 });
             }
         }

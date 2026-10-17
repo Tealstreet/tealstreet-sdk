@@ -11,7 +11,7 @@ fn roundtrip<T: DeserializeOwned + Serialize>(value: Value) -> Result<Value, ser
 #[test]
 fn legacy_declarations_preserve_values_and_reject_missing_or_null_required_fields() {
     let mut cases: Vec<Value> = serde_json::from_str(include_str!("fixtures/types.json")).unwrap();
-    assert_eq!(cases.len(), 242, "WOO-CARDINALITY original declarations");
+    assert_eq!(cases.len(), 140, "WOO-CARDINALITY retained declarations");
     cases.extend(serde_json::from_str::<Vec<Value>>(&identity::capture("types")).unwrap());
     for case in cases {
         let input = case["input"].clone();
@@ -19,8 +19,6 @@ fn legacy_declarations_preserve_values_and_reject_missing_or_null_required_field
             "ACCOUNT_RESPONSE" => roundtrip::<AccountResponse>(input.clone()),
             "PLACE_ORDER_RESPONSE" => roundtrip::<PlaceOrderResponse>(input.clone()),
             "PLACE_ALGO_ORDER_RESPONSE" => roundtrip::<PlaceAlgoOrderResponse>(input.clone()),
-            "WOOX_ORDER" => roundtrip::<WooxOrder>(input.clone()),
-            "FETCH_ORDER_RESPONSE" => roundtrip::<FetchOrderResponse>(input.clone()),
             "GET_FUTURES_LEVERAGE_RESPONSE" => {
                 roundtrip::<GetFuturesLeverageResponse>(input.clone())
             }

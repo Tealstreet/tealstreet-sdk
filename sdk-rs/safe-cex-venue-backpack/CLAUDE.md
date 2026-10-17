@@ -293,6 +293,13 @@ scripted transport. TS backpack overrides neither `fetchSymbolMaxLeverage`,
 `scheduleCancel` nor `fetchPublicTrades`, so their Rust overrides return the
 inherited `base.ts` 'Not implemented' rejection; do not invent venue bodies.
 
+The SDK market projection retains `limits.price.min` from the source price
+filters, so the portable `assertMinimumPrice` guard can refuse prices below the
+venue minimum. Only `isSpot` is present in the source SDK flags; CCXT's separate
+`swap`, `future` and `inverse` fields do not create SDK `isPerpetual`, `isExpiring`
+or `isInverse` fields. `tests/market_projection.rs` drives the real HTTP binding
+and executes the actual TypeScript price guard on its serialized market output.
+
 The adapter's `native_value::Value` is an alias of the shared `js_runtime::Js`,
 so HTTP/socket frames and runtime callers share the same object/array references.
 `NativeValue` retains the existing prepared-data/checked UTF-8 projection profile;
@@ -318,6 +325,13 @@ uses the local Ed25519 secret exactly as the source: a missing secret logs the
 original RangeError and sends no subscription, even when HTTP is hosted. See
 [the hosted signer evidence](HOSTED_SIGNER_EVIDENCE.md); no hosted WS path is added.
 
+The API factory carries the complete shared ExchangeOptions through native
+construction and adapter installation, including proxy flags, region, overrides
+and public-only state. Requests inherit the shared HTTP factory's routed base
+URL and 20-second timeout. The native_routing regressions run native_inputs,
+the production Exchange binding and actual Direct/Tealstreet providers to check
+direct-transport refusal, override routing, JA routing/authorization and timeout.
+
 Private reconnects use the inherited orders-only snapshot refresh. They must not
 call `tick`, which schedules another recurring account/position/balance poll.
 `tests/private_reopen.rs` drives the real socket lifecycle and authentication,
@@ -325,3 +339,9 @@ checks that reconnect refreshes orders, and advances the runtime clock to verify
 that the original polling chain remains the only one.
 The same socket-event fixture covers private order and position Store commits,
 fill emission, and the real REST balance refresh triggered by an order-fill frame.
+
+Native REST and private subscription signatures read the synchronized shared
+virtual clock. REST ticker IDs and position timestamps use that same source
+clock. Rate limiting, heartbeat timing and private refresh throttles retain their
+source monotonic or Date.now clocks. The native routing and private reopen
+regressions distinguish synced time from an unrelated host clock.

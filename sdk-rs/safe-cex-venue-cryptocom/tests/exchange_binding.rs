@@ -1072,3 +1072,253 @@ fn create_api_routes_through_the_provider_and_tunnel_adapter() {
         }
     }
 }
+
+fn private_socket(h: &Harness) -> std::rc::Rc<support::Socket> {
+    h.runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/user"))
+        .expect("private user socket")
+        .1
+        .clone()
+}
+
+fn private_frame(h: &Harness, frame: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    private_socket(h)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+    for _ in 0..4 {
+        h.runtime.advance(50.0);
+    }
+}
+
+fn authenticated_private_venue() -> Harness {
+    let h = started(|_| {});
+    h.runtime.advance(1000.0);
+    private_frame(&h, json!({"method":"public/auth","code":0}));
+    assert!(
+        private_socket(&h).sent.borrow().iter().any(|text| {
+            let f: Value = serde_json::from_str(text).expect("sent JSON");
+            f["method"] == "subscribe"
+                && f["params"]["channels"]
+                    == json!([
+                        "user.order",
+                        "user.advance.order",
+                        "user.positions",
+                        "user.balance"
+                    ])
+        }),
+        "private subscription reaches transport after auth"
+    );
+    h
+}
+
+fn live_order(id: &str, status: &str, filled: &str) -> Value {
+    json!({"order_id":id,"instrument_name":SYMBOL,"quantity":"4",
+        "cumulative_quantity":filled,"limit_price":"29001.5","order_type":"LIMIT",
+        "side":"BUY","status":status,"update_time":77,"create_time":22,
+        "time_in_force":"GOOD_TILL_CANCEL","exec_inst":["REDUCE_ONLY"]})
+}
+
+fn stored_order(h: &Harness, id: &str) -> Order {
+    safe_cex_store::Store::orders(h.store.as_ref())
+        .iter()
+        .find(|o| o.id == id)
+        .unwrap_or_else(|| panic!("private order {id} reached Store"))
+        .clone()
+}
+
+// Source onMessage processes result/channel even when the frame also has code:0.
+#[test]
+fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
+    let h = authenticated_private_venue();
+    let mut unknown = live_order("unknown", "ACTIVE", "0");
+    unknown["instrument_name"] = json!("UNKNOWN-PERP");
+    let advanced = json!({"order_id":"ws-advanced","instrument_name":SYMBOL,
+        "quantity":"2","cumulative_quantity":"0","ref_price":"25000.5",
+        "limit_price":"24000","order_type":"STOP_LOSS","side":"SELL",
+        "order_status":"ACTIVE","time_created":10,"time_updated":66,
+        "time_in_force":"IMMEDIATE_OR_CANCEL"});
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.order","data":[unknown,live_order("ws-order","ACTIVE","0")]}}),
+    );
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.advance.order","data":[advanced]}}),
+    );
+    let order = stored_order(&h, "ws-order");
+    assert_eq!(
+        (order.amount, order.filled, order.remaining),
+        (4.0, 0.0, 4.0)
+    );
+    assert_eq!(
+        (
+            order.status.unwrap(),
+            order.side.unwrap(),
+            order.r#type.unwrap()
+        ),
+        (OrderStatus::Open, OrderSide::Buy, OrderType::Limit)
+    );
+    assert_eq!(order.price, 29001.5);
+    assert_eq!(order.last_update, 77.0);
+    assert!(order.reduce_only);
+    let advanced = stored_order(&h, "ws-advanced");
+    assert_eq!(
+        (advanced.r#type.unwrap(), advanced.side.unwrap()),
+        (OrderType::StopLoss, OrderSide::Sell)
+    );
+    assert_eq!(
+        (advanced.price.to_number(), advanced.last_update),
+        (25000.5, 66.0)
+    );
+    assert!(
+        !safe_cex_store::Store::orders(h.store.as_ref())
+            .iter()
+            .any(|o| o.id == "unknown")
+    );
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.order","data":[
+        live_order("ws-order","ACTIVE","1.5")]}}),
+    );
+    let partial = stored_order(&h, "ws-order");
+    assert_eq!(
+        (partial.status.unwrap(), partial.filled, partial.remaining),
+        (OrderStatus::Open, 1.5, 2.5)
+    );
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.order","data":[
+        live_order("ws-order","FILLED","4"), live_order("O1","CANCELED","1.5")]}}),
+    );
+    let filled = stored_order(&h, "ws-order");
+    assert_eq!(
+        (filled.status.unwrap(), filled.filled, filled.remaining),
+        (OrderStatus::Closed, 4.0, 0.0)
+    );
+    assert_eq!(stored_order(&h, "O1").status, OrderStatus::Canceled);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn private_position_frames_update_hedged_sides_and_remove_zero_quantity() {
+    let h = authenticated_private_venue();
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.positions","data":[
+            {"instrument_name":"UNKNOWN-PERP","quantity":"9"},
+            {"instrument_name":SYMBOL,"quantity":"-2","cost":"-60000",
+             "target_leverage":"7","liquidation_price":"40000.5","mark_price":"30001",
+             "open_position_pnl":"-3.5","isolation_type":"ISOLATED_MARGIN",
+             "isolation_id":"isolation-1","update_timestamp_ms":88},
+            {"instrument_name":SYMBOL,"quantity":"1","cost":"28000",
+             "leverage":"4","open_position_pnl":"5","isolation_type":"CROSS_MARGIN",
+             "update_timestamp_ms":89}
+        ]}}),
+    );
+    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    assert_eq!(
+        positions.len(),
+        2,
+        "both rows delivered without unknown market"
+    );
+    let short = positions
+        .iter()
+        .find(|p| p.side == PositionSide::Short)
+        .expect("short");
+    assert_eq!(
+        (short.contracts, short.entry_price, short.notional),
+        (2.0, -30000.0, 60000.0)
+    );
+    assert_eq!((short.leverage, short.liquidation_price), (7.0, 40000.5));
+    assert_eq!(short.unrealized_pnl, -3.5);
+    assert_eq!(
+        short.margin_type,
+        Some(safe_cex_types::MarginType::Isolated)
+    );
+    assert_eq!(
+        short.position_mode,
+        Some(safe_cex_types::PositionMode::Hedged)
+    );
+    assert_eq!(short.last_update, Some(88.0));
+    let serialized = serde_json::to_value(short).expect("position JSON");
+    assert_eq!(
+        serialized["info"],
+        json!({"markPrice":30001.0,"isolationId":"isolation-1"})
+    );
+    let long = positions
+        .iter()
+        .find(|p| p.side == PositionSide::Long)
+        .expect("long");
+    assert_eq!(
+        (long.contracts, long.entry_price, long.leverage),
+        (1.0, 28000.0, 4.0)
+    );
+    assert_ne!(short.id, long.id, "hedged sides keep distinct identities");
+    drop(positions);
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.positions","data":[
+        {"instrument_name":SYMBOL,"quantity":"0","cost":"0"}]}}),
+    );
+    assert!(
+        safe_cex_store::Store::positions(h.store.as_ref()).is_empty(),
+        "flat frame removes both sides"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates() {
+    let h = authenticated_private_venue();
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.balance","data":[{
+            "total_margin_balance":"200","total_available_balance":"140",
+            "total_initial_margin":"60","total_session_unrealized_pnl":"-6",
+            "position_balances":[
+                {"instrument_name":"USD","quantity":"20","max_withdrawal_balance":"12"},
+                {"instrument_name":"BTC","quantity":"2","max_withdrawal_balance":"3"}
+            ]
+        }]}}),
+    );
+    let balance = safe_cex_store::Store::balance(h.store.as_ref());
+    assert_eq!(
+        (balance.total, balance.free, balance.used, balance.upnl),
+        (200.0, 140.0, 60.0, -6.0)
+    );
+    assert_eq!(
+        serde_json::to_value(&balance.currencies).unwrap(),
+        json!({
+            "USD":{"total":20.0,"free":12.0,"used":8.0,"upnl":0.0},
+            "BTC":{"total":2.0,"free":3.0,"used":0.0,"upnl":0.0}
+        }),
+        "WS currency shape follows source, replacing REST available/locked"
+    );
+    let before = serde_json::to_value(&*balance).unwrap();
+    drop(balance);
+    assert!(safe_cex_store::Store::loaded(h.store.as_ref()).balance);
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.balance","data":[]}}),
+    );
+    assert_eq!(
+        serde_json::to_value(&*safe_cex_store::Store::balance(h.store.as_ref())).unwrap(),
+        before
+    );
+    h.venue().dispose().expect("dispose");
+}

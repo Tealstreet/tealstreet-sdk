@@ -761,3 +761,121 @@ fn source_identity_flags_survive_spot_facade_construction() {
         h.venue().dispose().unwrap();
     }
 }
+
+fn private_frame_fixture() -> Harness {
+    let h = futures(|http| {
+        http.ok(
+            "GET",
+            "/v3/leveragepreferences",
+            json!({"result":"success","leveragePreferences":[]}),
+        );
+        http.ok("GET", "/v3/openorders", open_orders());
+        http.ok("GET", "/v3/openpositions", open_positions());
+        http.ok("GET", "/v3/accounts", accounts());
+    });
+    h.drive(h.venue().start())
+        .expect("production constructor and startup");
+    h.runtime.pump();
+    h
+}
+fn private_frame(h: &Harness, value: Value) {
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(value.to_string()),
+        ));
+    h.runtime.pump();
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+}
+#[test]
+fn constructed_private_orders_frame_updates_store() {
+    let h = private_frame_fixture();
+    private_frame(
+        &h,
+        json!({"feed":"open_orders_snapshot","orders":[{"order_id":"frame-order","instrument":SYMBOL,"type":"lmt","direction":0,"qty":3,"filled":0.5,"limit_price":29100}]}),
+    );
+    let rows = h.store.orders();
+    assert_eq!(rows.len(), 1);
+    let order = &rows[0];
+    assert_eq!(
+        (order.id.as_str(), order.symbol.as_str()),
+        ("frame-order", SYMBOL)
+    );
+    assert_eq!(
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
+        (29100.0, 3.0, 0.5, 2.5)
+    );
+    assert_eq!(order.r#type, OrderType::Limit);
+}
+#[test]
+fn constructed_private_fill_frame_updates_order_and_emits_fill() {
+    let h = private_frame_fixture();
+    let fills = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let saved = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, data| {
+            saved.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    private_frame(
+        &h,
+        json!({"feed":"fills","fills":[{"order_id":"o-1","instrument":SYMBOL,"qty":0.25,"price":30002,"buy":true}]}),
+    );
+    let rows = h.store.orders();
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].filled, rows[0].remaining), (0.25, 1.75));
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert_eq!(fill["id"], "o-1");
+    assert_eq!(fill["symbol"], SYMBOL);
+    assert_eq!(fill["side"], "buy");
+    assert_eq!(fill["amount"].as_f64(), Some(0.25));
+    assert_eq!(fill["price"].as_f64(), Some(30002.0));
+}
+#[test]
+fn constructed_private_position_frame_updates_store() {
+    let h = private_frame_fixture();
+    private_frame(
+        &h,
+        json!({"feed":"open_positions","positions":[{"instrument":SYMBOL,"balance":3,"entry_price":29000,"mark_price":30000,"pnl":7,"liquidation_threshold":25000}]}),
+    );
+    let rows = h.store.positions();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].symbol, SYMBOL);
+    assert_eq!(
+        (
+            rows[0].contracts,
+            rows[0].entry_price,
+            rows[0].notional,
+            rows[0].unrealized_pnl
+        ),
+        (3.0, 29000.0, 90000.0, 7.0)
+    );
+}
+#[test]
+fn constructed_private_balance_frame_updates_store() {
+    let h = private_frame_fixture();
+    private_frame(
+        &h,
+        json!({"feed":"account_balances","accounts":{"flex":{"type":"multiCollateralMarginAccount","portfolioValue":1250,"availableMargin":1100,"initialMargin":100,"maintenanceMargin":50,"pnl":9}}}),
+    );
+    let b = h.store.balance();
+    assert_eq!(
+        (b.total, b.free, b.used, b.upnl),
+        (1250.0, 1100.0, 150.0, 9.0)
+    );
+}
