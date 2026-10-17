@@ -73,12 +73,6 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
 // factory step: public skip, broker injection, remote/keyless bypass, V1/V3 signing.
 fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
     let typed: ExchangeOptions = base_exchange::exchange_options(&options)?;
-    if typed.tealstreet_tunnel == Some(true) {
-        return Err(Thrown::error(
-            "Error",
-            "Tealstreet tunnel transport is not available in the Rust WOO binding",
-        ));
-    }
     let timeout = typed
         .extra
         .as_ref()
@@ -95,8 +89,9 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
         })
         .map(|(_, v)| *v)
         .unwrap_or_default();
-    let xhr = client::create(
+    let xhr = client::factory::create(
         rt.shared.http.clone(),
+        &*rt.shared.runtime.transport(),
         Js::object(vec![
             ("baseURL", Js::str(base_url)),
             ("timeout", Js::Number(timeout)),
@@ -119,7 +114,9 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 ]),
             ),
         ]),
-    );
+        &options,
+        rt.base(),
+    )?;
     xhr.call_method(
         "__configureRetry",
         vec![Js::object(vec![
@@ -131,11 +128,24 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
             ),
         ])],
     )?;
+    if typed.tealstreet_tunnel == Some(true) {
+        client::factory::install_transport_adapter(
+            rt.shared.http.clone(),
+            &*rt.shared.runtime.transport(),
+            &xhr,
+            &options,
+            rt.base().name.clone(),
+            safe_cex_transport::RestAdapterVariant::Default,
+        )?;
+    }
     let runtime = rt.shared.runtime.clone();
     let interceptor = Js::function("", move |_, a| {
-        // The signer works on the JSON view; callables (paramsSerializer) ride across.
+        // Keep Axios callables outside signing's JSON view.
         let original = arg(&a, 0);
-        let serializer = original.get("paramsSerializer")?;
+        let callables = ["paramsSerializer", "adapter"]
+            .map(|key| original.get(key).map(|value| (key, value)))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
         let config = to_json(&original)?;
         // BaseExchange injects executable signer handles into these live options.
         let remote = options.get("remoteSigner")?.truthy();
@@ -155,8 +165,10 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 .await
                 .map_err(|e| Thrown::error("Error", &e))?;
                 let next = from_json(&next);
-                if !serializer.is_undefined() {
-                    next.set("paramsSerializer", serializer)?;
+                for (key, value) in callables {
+                    if !value.is_undefined() {
+                        next.set(key, value)?;
+                    }
                 }
                 Ok(next)
             }),

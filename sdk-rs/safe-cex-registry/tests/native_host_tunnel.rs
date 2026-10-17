@@ -1,4 +1,4 @@
-//! tealstreetTunnel on the production native host: Binance/Phemex REST uses HOW
+//! tealstreetTunnel on the production native host: venue REST uses HOW
 //! tunnel (rpc.http frames) to a local tradetunnel, authenticated with the account's
 //! proxy token, and never reaches the venue origin directly.
 #![cfg(not(target_arch = "wasm32"))]
@@ -26,6 +26,109 @@ struct LocalTunnel {
     inner: NativeTunnelHost,
     origin: String,
 }
+
+async fn source_factory_tunnel(name: safe_cex_types::ExchangeName, mut options: Value) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("ws://{}", listener.local_addr().unwrap());
+    let tunnel = Rc::new(Tunnel::default());
+    tokio::task::spawn_local(serve_tunnel(listener, Rc::new(|_| None), tunnel.clone()));
+    let runtime = native_tealstreet_runtime_with(
+        Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+        Rc::new(LocalTunnel {
+            inner: NativeTunnelHost,
+            origin,
+        }),
+    );
+    options["tealstreetTunnel"] = json!(true);
+    let h = venue_harness(
+        name.clone(),
+        Rc::new(|request| {
+            request
+                .path
+                .ends_with("/time")
+                .then(|| json!({"serverTime":1700000000000u64}))
+        }),
+        options,
+        None,
+        runtime,
+    )
+    .await;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        h.exchange.validate_account(),
+    )
+    .await
+    .expect("tunneled account validation completes");
+    assert!(
+        !tunnel.seen.borrow().is_empty(),
+        "{name:?} reached rpc.http: {result:?}"
+    );
+    assert!(
+        h.seen.borrow().iter().all(|request| {
+            name == safe_cex_types::ExchangeName::Asterdex && request.path.ends_with("/time")
+        }),
+        "{name:?} account request bypassed its tunnel: {:?}",
+        h.seen.borrow()
+    );
+    assert!(
+        !tunnel.tokens.borrow().is_empty(),
+        "{name:?} authenticated its tunnel"
+    );
+    assert!(tunnel.tokens.borrow().iter().all(|token| token == TOKEN));
+    assert!(
+        tunnel.frames.borrow().iter().all(|frame| {
+            if name == safe_cex_types::ExchangeName::Okx {
+                frame["format"] == "raw"
+            } else {
+                frame.get("format").is_none()
+            }
+        }),
+        "{name:?} uses its source adapter variant"
+    );
+    assert_eq!(
+        h.store.request_stats().unwrap().other,
+        tunnel.seen.borrow().len() as f64,
+        "{name:?} records every actual tunnel 404 on its owning Store"
+    );
+    h.exchange.dispose().unwrap();
+}
+
+macro_rules! factory_tunnel_case {
+    ($test:ident, $name:ident, $options:expr) => {
+        #[test]
+        fn $test() {
+            run_local(source_factory_tunnel(
+                safe_cex_types::ExchangeName::$name,
+                $options,
+            ));
+        }
+    };
+}
+factory_tunnel_case!(
+    okx_factory_tunnel,
+    Okx,
+    json!({"key":"native-key","secret":SECRET,"passphrase":"native-passphrase"})
+);
+factory_tunnel_case!(
+    asterdex_factory_tunnel,
+    Asterdex,
+    json!({"key":"native-key","secret":SECRET})
+);
+factory_tunnel_case!(
+    orderly_factory_tunnel,
+    Kodiakfi,
+    json!({"key":"native-key","secret":"11111111111111111111111111111111","applicationId":"account-native"})
+);
+factory_tunnel_case!(
+    woo_factory_tunnel,
+    Woo,
+    json!({"key":"native-key","secret":SECRET})
+);
+factory_tunnel_case!(
+    breakoutprop_factory_tunnel,
+    Breakoutprop,
+    json!({"key":"k","secret":"p","applicationId":"default"})
+);
 impl TunnelHost for LocalTunnel {
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn TunnelTask> {
         self.inner.spawn_local(future)
