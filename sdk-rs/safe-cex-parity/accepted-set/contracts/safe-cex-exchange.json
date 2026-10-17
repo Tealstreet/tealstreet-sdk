@@ -6474,9 +6474,9 @@
       "symbol": "BTCUSDT",
       "interval": "1m"
     },
-    "evidence": "Flattened Candle plus subscription labels: distinct authored prices/volume and exhaustive native interval/side projection, no reserialization.",
+    "evidence": "Native candle fields plus subscription labels. ModelField<AnyTimeframe> retains source month and absent/undefined interval states; the Bybit maintained bulk-member corpus covers all three classes and native codec tests retain presence and numeric bits.",
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(native)=>serde_json::json!({\"ok\":true,\"symbol\":native.symbol,\"intervalOrdinal\":match native.interval {safe_cex_types::Timeframe::M1=>0,safe_cex_types::Timeframe::M3=>1,safe_cex_types::Timeframe::M5=>2,safe_cex_types::Timeframe::M15=>3,safe_cex_types::Timeframe::M30=>4,safe_cex_types::Timeframe::H1=>5,safe_cex_types::Timeframe::H2=>6,safe_cex_types::Timeframe::H4=>7,safe_cex_types::Timeframe::H6=>8,safe_cex_types::Timeframe::H12=>9,safe_cex_types::Timeframe::D1=>10,safe_cex_types::Timeframe::W1=>11},\"timestampBits\":native.candle.timestamp.to_bits().to_string(),\"openBits\":native.candle.open.to_bits().to_string(),\"highBits\":native.candle.high.to_bits().to_string(),\"lowBits\":native.candle.low.to_bits().to_string(),\"closeBits\":native.candle.close.to_bits().to_string(),\"volumeBits\":native.candle.volume.to_bits().to_string(),\"lastSideOrdinal\":native.candle.last_side.map(|side|match side {safe_cex_types::OrderSide::Buy=>0,safe_cex_types::OrderSide::Sell=>1})}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(native)=>serde_json::json!({\"ok\":true,\"symbol\":native.symbol,\"intervalOrdinal\":match native.interval {safe_cex_types::ModelField::Value(safe_cex_types::AnyTimeframe::Variant1(value))=>match value {safe_cex_types::Timeframe::M1=>0,safe_cex_types::Timeframe::M3=>1,safe_cex_types::Timeframe::M5=>2,safe_cex_types::Timeframe::M15=>3,safe_cex_types::Timeframe::M30=>4,safe_cex_types::Timeframe::H1=>5,safe_cex_types::Timeframe::H2=>6,safe_cex_types::Timeframe::H4=>7,safe_cex_types::Timeframe::H6=>8,safe_cex_types::Timeframe::H12=>9,safe_cex_types::Timeframe::D1=>10,safe_cex_types::Timeframe::W1=>11},safe_cex_types::ModelField::Value(safe_cex_types::AnyTimeframe::Variant0(value))=>match value {safe_cex_types::SecondsTimeframe::S1=>12,safe_cex_types::SecondsTimeframe::S5=>13,safe_cex_types::SecondsTimeframe::S15=>14,safe_cex_types::SecondsTimeframe::S30=>15},safe_cex_types::ModelField::Value(safe_cex_types::AnyTimeframe::Variant2(value))=>match value {safe_cex_types::ExtendedTimeframe::H3=>16,safe_cex_types::ExtendedTimeframe::H5=>17,safe_cex_types::ExtendedTimeframe::H7=>18,safe_cex_types::ExtendedTimeframe::H8=>19,safe_cex_types::ExtendedTimeframe::H9=>20,safe_cex_types::ExtendedTimeframe::H10=>21,safe_cex_types::ExtendedTimeframe::H11=>22,safe_cex_types::ExtendedTimeframe::H24=>23,safe_cex_types::ExtendedTimeframe::D2=>24,safe_cex_types::ExtendedTimeframe::D3=>25,safe_cex_types::ExtendedTimeframe::MN1=>26},safe_cex_types::ModelField::Absent=>-1,safe_cex_types::ModelField::Undefined=>-2},\"timestampBits\":native.candle.timestamp.to_bits().to_string(),\"openBits\":native.candle.open.to_bits().to_string(),\"highBits\":native.candle.high.to_bits().to_string(),\"lowBits\":native.candle.low.to_bits().to_string(),\"closeBits\":native.candle.close.to_bits().to_string(),\"volumeBits\":native.candle.volume.to_bits().to_string(),\"lastSideOrdinal\":native.candle.last_side.map(|side|match side {safe_cex_types::OrderSide::Buy=>0,safe_cex_types::OrderSide::Sell=>1})}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "symbol",
         "intervalOrdinal",
@@ -6593,6 +6593,55 @@
           },
           "output": {
             "ok": false
+          }
+        },
+        {
+          "input": {
+            "timestamp": 11,
+            "open": 2,
+            "high": 9,
+            "low": 1,
+            "close": 7,
+            "volume": 13,
+            "lastSide": "buy",
+            "symbol": "BTCUSDT",
+            "interval": "1M"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSDT",
+            "intervalOrdinal": 26,
+            "timestampBits": "4622382067542392832",
+            "openBits": "4611686018427387904",
+            "highBits": "4621256167635550208",
+            "lowBits": "4607182418800017408",
+            "closeBits": "4619567317775286272",
+            "volumeBits": "4623507967449235456",
+            "lastSideOrdinal": 0
+          }
+        },
+        {
+          "input": {
+            "timestamp": 11,
+            "open": 2,
+            "high": 9,
+            "low": 1,
+            "close": 7,
+            "volume": 13,
+            "lastSide": "buy",
+            "symbol": "BTCUSDT"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSDT",
+            "intervalOrdinal": -1,
+            "timestampBits": "4622382067542392832",
+            "openBits": "4611686018427387904",
+            "highBits": "4621256167635550208",
+            "lowBits": "4607182418800017408",
+            "closeBits": "4619567317775286272",
+            "volumeBits": "4623507967449235456",
+            "lastSideOrdinal": 0
           }
         }
       ]
@@ -11190,6 +11239,50 @@
                 {
                   "type": {
                     "resolved_path": {
+                      "path": "safe_cex_types::js_coercion::JsCoercionError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Typed coercion-error projection preserves the supplied native name, unprefixed message and typed origin; it does not parse or validate an input DTO. Executes both contrasting native error kinds.",
+        "call": "{ let cause=match $value.as_str().expect(\"case\") {\"type\"=>safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"Cannot convert object to primitive value\"},\"range\"=>safe_cex_num::JsCoercionError{name:\"RangeError\",message:\"outside range\"},_=>panic!(\"unknown native fixture\")}; let decoded=<$type as From<safe_cex_num::JsCoercionError>>::from(cause); let native=decoded.origin.as_ref().expect(\"typed origin\").error().downcast_ref::<safe_cex_num::JsCoercionError>().expect(\"typed cause\"); serde_json::json!({\"name\":decoded.name.clone(),\"message\":decoded.message.clone(),\"causeName\":native.name,\"causeMessage\":native.message}) }",
+        "cases": [
+          {
+            "input": "type",
+            "output": {
+              "name": "TypeError",
+              "message": "Cannot convert object to primitive value",
+              "causeName": "TypeError",
+              "causeMessage": "Cannot convert object to primitive value"
+            }
+          },
+          {
+            "input": "range",
+            "output": {
+              "name": "RangeError",
+              "message": "outside range",
+              "causeName": "RangeError",
+              "causeMessage": "outside range"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
                       "path": "safe_cex_transport::provider::RestFailure",
                       "args": null
                     }
@@ -11201,8 +11294,8 @@
           }
         },
         "input": "observed",
-        "reason": "Actual REST failure conversion parses encoded JSON response bytes, preserves non-JSON text fallback and keeps authoritative typed origin/request/raw bytes; no owner serialization.",
-        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:None,message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.clone(),\"context\":decoded.context.clone(),\"response\":decoded.response.clone(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
+        "reason": "Actual REST failure conversion parses encoded JSON response bytes, preserves non-JSON text fallback and keeps authoritative typed origin/request/raw bytes; no owner serialization. The JavaScript transport-kind case additionally observes TypeError name while retaining the complete native request/response origin.",
+        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:if $value[\"js\"].as_bool().unwrap_or(false){Some(Box::new(safe_cex_transport::TransportError::JavaScript(safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"native failure\"})))}else{None},message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.clone(),\"context\":decoded.context.clone(),\"response\":decoded.response.clone(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
         "cases": [
           {
             "input": {
@@ -11253,6 +11346,35 @@
               },
               "originRequestUrl": "/original",
               "originBody": "not JSON"
+            }
+          },
+          {
+            "input": {
+              "body": "{\"code\":{\"toString\":0}}",
+              "status": 422,
+              "js": true
+            },
+            "output": {
+              "name": "TypeError",
+              "message": "native failure",
+              "code": "CODE",
+              "context": {
+                "retained": 7
+              },
+              "response": {
+                "status": 422,
+                "statusText": "reason",
+                "headers": {
+                  "x-proof": "header-A"
+                },
+                "data": {
+                  "code": {
+                    "toString": 0
+                  }
+                }
+              },
+              "originRequestUrl": "/original",
+              "originBody": "{\"code\":{\"toString\":0}}"
             }
           }
         ]

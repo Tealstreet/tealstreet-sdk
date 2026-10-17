@@ -2,7 +2,7 @@
 //! interceptors (FIFO), axios-retry and axios-rate-limit spacing.
 use super::{
     promise::{JsFuture, Promise, await_js},
-    value::{Js, Thrown, arg, from_json, to_json},
+    value::{Js, Thrown, arg, from_json, from_retained_input, to_json, to_retained_input},
 };
 use crate::runtime::ExchangeRuntime;
 use safe_cex_transport::{
@@ -498,7 +498,8 @@ async fn send_once(
 
 async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
     let adapter = config.get("adapter")?;
-    let response = if adapter.is_callable() {
+    let custom_adapter = adapter.is_callable();
+    let response = if custom_adapter {
         await_js(adapter.call(Js::Undefined, vec![config.clone()])?).await?
     } else {
         host.send(config.clone()).await?
@@ -507,9 +508,13 @@ async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
         response.define("config", config.clone())?;
     }
     transform_response(&response, &config)?;
-    let status = response.get("status")?.to_number().unwrap_or(200.0);
-    if !(200.0..300.0).contains(&status) {
-        return Err(axios_error(&response, &config)?);
+    // Axios custom adapters settle their own responses. HOW deliberately
+    // fulfills every HTTP status; only the default HTTP host settles here.
+    if !custom_adapter {
+        let status = response.get("status")?.to_number().unwrap_or(200.0);
+        if !(200.0..300.0).contains(&status) {
+            return Err(axios_error(&response, &config)?);
+        }
     }
     Ok(response)
 }
@@ -599,7 +604,7 @@ impl JsRestAdapter {
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
         let config = Js::object(vec![]);
         for (name, value) in &request.config_extensions {
-            config.define(name, from_json(value))?;
+            config.define(name, from_retained_input(value.clone()))?;
         }
         // Typed parameters remain authoritative over an extension of that name.
         if let Some(params) = &request.params {
@@ -864,12 +869,11 @@ fn rest_request_data(
                 | "transformRequest"
                 | "transformResponse"
                 | "safeCexSkipRemoteSigning"
-        ) || value.is_undefined()
-            || value.is_callable()
+        ) || value.is_callable()
         {
             continue;
         }
-        config_extensions.insert(key, to_json(&value)?);
+        config_extensions.insert(key, to_retained_input(&value)?);
     }
     let timeout = config.get("timeout")?;
     // ts: markSkipRemoteSigning tags a public request a hosted signer need not see.
@@ -913,7 +917,7 @@ fn response_data(body: RestResponseBody) -> Js {
 fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     let result = config.spread_object()?;
     for (name, value) in &request.config_extensions {
-        result.set(name, from_json(value))?;
+        result.set(name, from_retained_input(value.clone()))?;
     }
     result.set("method", Js::str(&request.method))?;
     result.set("url", Js::str(&request.url))?;

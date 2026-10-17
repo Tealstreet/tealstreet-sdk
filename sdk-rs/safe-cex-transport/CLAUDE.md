@@ -165,16 +165,22 @@ requires (REST keeps the default). One TLS stack: rustls on the `ring` provider 
 native roots; do not add a dependency that pulls aws-lc. Run inside a tokio
 `LocalSet`. Proofs live in `safe-cex-registry/tests/native_host_*.rs`.
 
-`RestRequest::config_extensions` retains JSON-data adapter config separately from
-headers across terminal adapter calls and hosted signing. The shared JS client
-copies non-executable extension properties into it; callbacks and ordinary
+`RestRequest::config_extensions` uses the canonical `RetainedJsonInput` data
+carrier separately from headers across terminal adapter calls, hosted signing,
+retry, and effective response/error config. Own undefined and native f64 values
+(including NaN payloads, infinities and signed zero) remain native. The shared JS
+client uses its existing typed capture/restore codec; callbacks and ordinary
 request fields keep their existing capabilities and typed paths. HOW alone
 projects truthy `grvtCookie`/`grvtAccountId` extensions into Cookie/account headers,
 matching the actual browser adapter. Direct HTTP keeps X-Ts-Grvt-Session source
 semantics. Unknown extension properties are retained, not emitted as HTTP headers
-or HOW arguments. The existing JSON data boundary applies to extension values;
-this is not an arbitrary executable Axios object carrier. The live source corpus
-in tests/grvt-config-source.cjs covers seven missing/truthy/falsy/overwrite cases.
+or HOW arguments. HOW applies native truthiness first, then the shared
+JSON.stringify projection at its actual frame boundary. This data-only typed profile retains its existing
+BigInt/string, UTF-8, depth and owned-tree limitations; it does not carry arbitrary
+executable Axios objects or live aliases. The live source corpus in
+tests/grvt-config-source.cjs covers seven JSON cases plus five separately named
+native-value cases. The hosted-signing receipt witness checks own undefined,
+NaN payload bits and signed zero at the terminal adapter before any projection.
 
 The native terminal combines baseURL and relative URLs using Axios
 buildFullPath/combineURLs semantics: exactly one joining slash, empty relative
@@ -223,3 +229,20 @@ keep their existing ownership. See `QUERY_PARITY_EVIDENCE.md` for executed sourc
 HTTP witnesses, and the remaining reqwest apostrophe normalization.
 
 `rate_limit::RateLimiter::acquire` is the cancellation-safe FIFO slot shared with `RateLimitedAdapter`. Native clients acquire it before signing each attempt; the adapter retains the same window, failed-request accounting and effective receipt. Dropping a pending acquire removes its ticket without consuming capacity. `tests/p2c.rs::signing_rate_slots_release_cancelled_waiters_without_spending_capacity` exercises the direct gate.
+
+Native HTTP failures inspect connector causes before assigning a network code.
+DNS lookup refusal and expired certificates remain non-retryable under the
+maintained network-read predicate; temporary DNS and genuine connection refusal
+retain their retry eligibility. `native::network_tests` exercises the physical
+ReqwestAdapter and read retry policy with an injected resolver and a real local
+TLS handshake. Its ephemeral certificate setup needs Node and openssl; it commits
+no certificates or private keys. The installed Axios and maintained predicate
+witness is `scripts/native-network-source.cjs` with SAFE_CEX_TYPESCRIPT_PATH set.
+The connector's erased DNS context is pinned by that native regression, while
+rustls certificate failures are identified through typed nested io causes.
+Specific rustls expiry/validity/revocation/signature/purpose categories map to
+Node-style codes. Hostname mismatch keeps ERR_TLS_CERT_ALTNAME_INVALID and its
+installed retry eligibility, rather than inventing a blanket TLS retry refusal.
+Other InvalidCertificate categories use CERT_REJECTED to retain
+the certificate refusal category; rustls UnknownIssuer cannot identify every
+OpenSSL self-signed/chain/leaf label, so exact label equivalence is unclaimed.

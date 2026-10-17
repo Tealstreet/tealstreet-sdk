@@ -161,7 +161,7 @@ impl ReadTransport for Transport {
                             .clone()
                             .expect("factory configures signature retry");
                         if signature_rejected_response(&failure, &retry, &predicate)
-                            .map_err(|e| ExchangeError::new(e.to_string()))?
+                            .map_err(ExchangeError::from)?
                         {
                             continue;
                         }

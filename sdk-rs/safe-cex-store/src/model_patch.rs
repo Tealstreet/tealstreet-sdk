@@ -328,14 +328,33 @@ pub(crate) fn merge_position(
     incoming: safe_cex_types::Position,
 ) {
     let old = std::mem::replace(target, incoming);
-    target.margin_type = target.margin_type.take().or(old.margin_type);
-    target.position_mode = target.position_mode.take().or(old.position_mode);
-    target.realized_pnl = target.realized_pnl.take().or(old.realized_pnl);
-    target.margin_size = target.margin_size.take().or(old.margin_size);
-    target.info = target.info.take().or(old.info);
-    target.extra = target.extra.take().or(old.extra);
-    target.last_update = target.last_update.take().or(old.last_update);
-    target.option = target.option.take().or(old.option);
+    if target.side.is_absent() {
+        target.side = old.side;
+    }
+    if target.margin_type.is_absent() {
+        target.margin_type = old.margin_type;
+    }
+    if target.position_mode.is_absent() {
+        target.position_mode = old.position_mode;
+    }
+    if target.realized_pnl.is_absent() {
+        target.realized_pnl = old.realized_pnl;
+    }
+    if target.margin_size.is_absent() {
+        target.margin_size = old.margin_size;
+    }
+    if target.info.is_absent() {
+        target.info = old.info;
+    }
+    if target.extra.is_absent() {
+        target.extra = old.extra;
+    }
+    if target.last_update.is_absent() {
+        target.last_update = old.last_update;
+    }
+    if target.option.is_absent() {
+        target.option = old.option;
+    }
 }
 
 impl PatchModel for safe_cex_types::Market {

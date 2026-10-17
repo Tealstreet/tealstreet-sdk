@@ -66,6 +66,9 @@ pub struct BybitExchange {
     pub(crate) snapshot_refresh: std::cell::OnceCell<
         Rc<crate::private_snapshot_refresh::PrivateSnapshotRefresh<crate::binding::rt::Rt>>,
     >,
+    stream_topics: RefCell<std::collections::HashMap<String, crate::ws_public::streams::Topics>>,
+    candle_recoveries:
+        RefCell<std::collections::HashMap<String, Rc<crate::ws_public::candle_recovery::Recovery>>>,
     // fetchMarginAccountInfos assigns this wire field without coercion. Keep
     // absence and nonnumeric values: only the numeric value 1 means CONTRACT.
     pub(crate) unified_margin_status: RefCell<Option<serde_json::Value>>,
@@ -78,15 +81,7 @@ pub struct BybitExchange {
     pub(crate) api_key_info: RefCell<Option<crate::types::BybitApiKeyInfo>>,
     pub(crate) batch_limit: Cell<f64>,
     pub(crate) force_unified_balance: Cell<bool>,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired as the remaining receiver members land")
-    )]
     pub(crate) execution_query_max_range_ms: f64,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired as the remaining receiver members land")
-    )]
     pub(crate) default_executions_lookback_ms: f64,
 }
 
@@ -95,6 +90,30 @@ pub struct BybitExchange {
     expect(dead_code, reason = "wired as the remaining receiver members land")
 )]
 impl BybitExchange {
+    pub(crate) fn candle_recovery(
+        &self,
+        socket: &Rc<safe_cex_exchange::websocket::BaseWebSocket>,
+        category: &str,
+    ) -> Rc<crate::ws_public::candle_recovery::Recovery> {
+        self.candle_recoveries
+            .borrow_mut()
+            .entry(category.into())
+            .or_insert_with(|| {
+                crate::ws_public::candle_recovery::Recovery::new(
+                    socket,
+                    &self.base,
+                    self.subscription_topics(category),
+                )
+            })
+            .clone()
+    }
+    pub(crate) fn subscription_topics(&self, category: &str) -> crate::ws_public::streams::Topics {
+        self.stream_topics
+            .borrow_mut()
+            .entry(category.into())
+            .or_default()
+            .clone()
+    }
     pub(crate) fn xhr(&self) -> &Rc<SecondaryKeyClients> {
         self.xhr
             .get()
@@ -397,6 +416,8 @@ impl BybitExchange {
             js: std::cell::OnceCell::new(),
             order_state: Default::default(),
             snapshot_refresh: std::cell::OnceCell::new(),
+            stream_topics: RefCell::new(Default::default()),
+            candle_recoveries: RefCell::new(Default::default()),
             unified_margin_status: RefCell::new(Some(serde_json::json!(6))),
             margin_type: Cell::new(safe_cex_types::MarginType::Cross),
             needs_reinit: Cell::new(false),

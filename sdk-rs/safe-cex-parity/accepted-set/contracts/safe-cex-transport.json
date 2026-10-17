@@ -5691,8 +5691,8 @@
       }
     },
     "category": "decoder",
-    "evidence": "Relay parser requires a nonempty first ts-relay parameter and removes it while preserving other query keys and fragments.",
-    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "evidence": "Actual parseRelayUrl in packages/http-over-websocket/src/tunnelEndpoints.ts retains TypeError/Invalid URL for URL construction and Error/not a relay url for missing or empty first relay parameters. Remaining query serialization follows URLSearchParams deletion, including spaces and tilde.",
+    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(crate::TransportError::JavaScript(error)) => serde_json::json!({\"name\":error.name,\"message\":error.message}), Err(error) => serde_json::json!({\"name\":\"Error\",\"message\":error.to_string()}) }",
     "cases": [
       {
         "input": "wss://tunnel.test/a?v=2&ts-relay=wss%3A%2F%2Fvenue#frag",
@@ -5706,19 +5706,31 @@
       {
         "input": "wss://tunnel.test/a",
         "output": {
-          "error": true
+          "name": "Error",
+          "message": "not a relay url: wss://tunnel.test/a"
         }
       },
       {
         "input": "wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue",
         "output": {
-          "error": true
+          "name": "Error",
+          "message": "not a relay url: wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue"
         }
       },
       {
         "input": "relative",
         "output": {
-          "error": true
+          "name": "TypeError",
+          "message": "Invalid URL"
+        }
+      },
+      {
+        "input": "wss://tunnel.test/a?tag=a%20b&ts-relay=wss%3A%2F%2Fvenue&other=%7E#frag",
+        "output": {
+          "ok": [
+            "wss://tunnel.test/a?tag=a+b&other=%7E#frag",
+            "wss://venue"
+          ]
         }
       }
     ]
@@ -5788,8 +5800,8 @@
       }
     },
     "category": "decoder",
-    "evidence": "Relay parser requires a nonempty first ts-relay parameter and removes it while preserving other query keys and fragments.",
-    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "evidence": "Actual parseRelayUrl in packages/http-over-websocket/src/tunnelEndpoints.ts retains TypeError/Invalid URL for URL construction and Error/not a relay url for missing or empty first relay parameters. Remaining query serialization follows URLSearchParams deletion, including spaces and tilde.",
+    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(crate::TransportError::JavaScript(error)) => serde_json::json!({\"name\":error.name,\"message\":error.message}), Err(error) => serde_json::json!({\"name\":\"Error\",\"message\":error.to_string()}) }",
     "cases": [
       {
         "input": "wss://tunnel.test/a?v=2&ts-relay=wss%3A%2F%2Fvenue#frag",
@@ -5803,19 +5815,31 @@
       {
         "input": "wss://tunnel.test/a",
         "output": {
-          "error": true
+          "name": "Error",
+          "message": "not a relay url: wss://tunnel.test/a"
         }
       },
       {
         "input": "wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue",
         "output": {
-          "error": true
+          "name": "Error",
+          "message": "not a relay url: wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue"
         }
       },
       {
         "input": "relative",
         "output": {
-          "error": true
+          "name": "TypeError",
+          "message": "Invalid URL"
+        }
+      },
+      {
+        "input": "wss://tunnel.test/a?tag=a%20b&ts-relay=wss%3A%2F%2Fvenue&other=%7E#frag",
+        "output": {
+          "ok": [
+            "wss://tunnel.test/a?tag=a+b&other=%7E#frag",
+            "wss://venue"
+          ]
         }
       }
     ]

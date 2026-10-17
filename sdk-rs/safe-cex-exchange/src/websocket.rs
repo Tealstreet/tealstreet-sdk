@@ -97,6 +97,10 @@ pub trait WsProtocol {
         true
     }
 
+    /// Source receive timers dispatch the instance's checkLastReceived override.
+    fn check_last_received(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.check_last_received()
+    }
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         Err(ExchangeError::new("Not implemented"))
     }
@@ -2265,7 +2269,7 @@ impl BaseWebSocket {
             (s.last_received, s.ping_sent)
         };
         let diff = now - received;
-        let received_at = iso_timestamp(received);
+        let received_at = iso_timestamp(received)?;
         let stale = self
             .get_watchdog_stale_threshold_ms()
             .unwrap_or(WS_RECONNECT_THRESHOLD_MS);
@@ -2505,7 +2509,7 @@ impl BaseWebSocket {
                             }
                             Timer::Receive => {
                                 if socket.state.borrow().last_received != 0.0 {
-                                    socket.check_last_received()?;
+                                    socket.protocol.check_last_received(&socket)?;
                                     socket.parent.sync_socket_health_to_store()?;
                                     socket.schedule(Timer::Receive, 1000.0);
                                 }
@@ -2547,33 +2551,12 @@ pub struct WsHealth {
     pub reconnect_count: usize,
 }
 
-fn iso_timestamp(milliseconds: f64) -> String {
-    let milliseconds = milliseconds.trunc() as i64;
-    let days = milliseconds.div_euclid(86_400_000);
-    let time = milliseconds.rem_euclid(86_400_000);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let day_of_era = z - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let mut year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_offset = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_offset + 2) / 5 + 1;
-    let month = month_offset + if month_offset < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
-    let year = if (0..=9999).contains(&year) {
-        format!("{year:04}")
-    } else {
-        format!("{year:+07}")
-    };
-    format!(
-        "{year}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        time / 3_600_000,
-        time / 60_000 % 60,
-        time / 1000 % 60,
-        time % 1000
-    )
+fn iso_timestamp(milliseconds: f64) -> Result<String, ExchangeError> {
+    safe_cex_num::js_date_to_iso_string(milliseconds).map_err(|error| {
+        let mut value = ExchangeError::new(error.message);
+        value.name = error.name.into();
+        value
+    })
 }
 fn stringify(data: &Value) -> String {
     match data {
@@ -5264,9 +5247,12 @@ mod tests {
     }
     #[test]
     fn watchdog_log_timestamp_matches_js_iso_dates() {
-        assert_eq!(iso_timestamp(0.0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso_timestamp(-1.0), "1969-12-31T23:59:59.999Z");
-        assert_eq!(iso_timestamp(951782400123.0), "2000-02-29T00:00:00.123Z");
+        assert_eq!(iso_timestamp(0.0).unwrap(), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso_timestamp(-1.0).unwrap(), "1969-12-31T23:59:59.999Z");
+        assert_eq!(
+            iso_timestamp(951782400123.0).unwrap(),
+            "2000-02-29T00:00:00.123Z"
+        );
     }
     #[test]
     fn review_managed_reconnect_can_synchronously_dispose() {

@@ -342,6 +342,17 @@ fill emission, and the real REST balance refresh triggered by an order-fill fram
 
 The constructed native HTTP client acquires its rate slot before invoking the signing interceptor, including network retry attempts. `tests/rate_limit_signing.rs` fills the real ten-request window and verifies the queued request reads its timestamp after dequeue.
 
+
+The assembled HTTP client now selects its separately constructed secondary client
+for GET reads. Each key keeps its own signing interceptors and resolved route;
+write methods retain the primary client and its ten-request budget. Secondary
+reads have no rate wrapper. The HTTP builder is reusable so each client receives
+fresh shared factory state. Secondary options preserve absent versus empty
+credentials and replace the primary proxy override with the source's secondary
+proxy or provider public CORS default. Native routing regressions exercise the
+real binding/factory, verify the secondary signature against an RFC8032 public
+key, and distinguish the separate rate budgets.
+
 Native REST and private subscription signatures read the synchronized shared
 virtual clock. REST ticker IDs and position timestamps use that same source
 clock. Rate limiting, heartbeat timing and private refresh throttles retain their

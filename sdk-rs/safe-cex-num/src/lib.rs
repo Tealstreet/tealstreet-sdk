@@ -701,7 +701,7 @@ mod math_extrema;
 pub use math_extrema::{math_max, math_min};
 
 mod date;
-pub use date::{js_date_parse, js_date_parse_utf16, js_time_clip};
+pub use date::{js_date_parse, js_date_parse_utf16, js_date_to_iso_string, js_time_clip};
 
 mod lodash_case;
 pub use lodash_case::{lodash_camel_case, lodash_snake_case};
