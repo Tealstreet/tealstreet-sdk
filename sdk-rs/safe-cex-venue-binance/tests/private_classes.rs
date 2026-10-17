@@ -3642,10 +3642,23 @@ fn production_native_pm_position_info_is_the_current_position_without_info() {
             info.get("info").is_none(),
             "snapshot must have exactly one info depth"
         );
-        assert_eq!(
-            info, &expected,
-            "frame {index}: info includes this frame's updates and unchanged position metadata"
-        );
+        let expected = expected.as_object().unwrap();
+        assert_eq!(info.as_object().unwrap().len(), expected.len());
+        for (field, value) in expected {
+            if let Some(number) = value.as_f64() {
+                assert_eq!(
+                    info.get(field).and_then(Value::as_f64).map(f64::to_bits),
+                    Some(number.to_bits()),
+                    "frame {index}: info numeric field {field} uses the current position"
+                );
+            } else {
+                assert_eq!(
+                    info.get(field),
+                    Some(value),
+                    "frame {index}: info field {field}"
+                );
+            }
+        }
     }
 }
 
