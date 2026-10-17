@@ -67,10 +67,7 @@
     "global isLighterPartnerAttributionApprovalMissingRejection",
     "global isLighterPartnerAttributionTierRejection"
   ],
-  "safe-cex-venue-mexc": [
-    "global bigIntAsStringJsonParse",
-    "global isMexcControlChannel"
-  ],
+  "safe-cex-venue-mexc": [],
   "safe-cex-venue-okx": [],
   "safe-cex-venue-orderly": [],
   "safe-cex-venue-paradex": [
