@@ -734,6 +734,13 @@ primary short/extended recovery differs from dedicated inverse single recovery;
 Spot inherits empty history. The full reader source corpus covers requests, results
 and diagnostics; mapper source corpora retain their separate scalar contracts.
 
+Primary/demo option reads now bind the chain, expiry and account-Greeks receiver
+members, including the source account opt-in guard. Quotes stay native through
+numeric coercion, duplicate-symbol joins and sorting against live Store markets.
+Dedicated Spot/Inverse retain the base options refusals. The actual HTTP/source
+comparison has 79 passing cases, including tied-right sorting through the
+canonical shared String.prototype.localeCompare implementation.
+
 ## Native HyroTrader composition
 
 `BybitExchange::create(Hyrotrader, ...)` selects its explicit simulator origin,
@@ -776,3 +783,10 @@ income/range and closed PnL for primary/demo/inverse, historical orders for
 primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
 order history. `history_capability_binding` exercises the actual capability calls
 and signed HTTP; direct trait coverage alone does not witness this dispatch path.
+
+HyroTrader inherits all three option-read methods but its optionsEnabled override
+always returns false. Route those trait and dynamic calls through the inherited
+receiver so they preserve the source options-disabled Error before HTTP, including
+when the account option-market flag is true. hyro_binding compares all six paths
+with maintained Bybit methods and the actual Hyro guard; spot/inverse family
+routing remains independently defined.

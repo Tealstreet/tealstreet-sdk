@@ -313,13 +313,51 @@ fn audit_duplicate_selection_retains_last_value_validation_and_key_position() {
     assert_eq!(value["z"].as_str(), Some("kept"));
     for raw in [
         r#"{"z":"kept","z":"\ud800"}"#,
-        r#"{"z":invalid,"z":"kept"}"#,
+        r#"{"z":"kept","z":"\udc00"}"#,
     ] {
+        // JSON.parse retains lone code units. Only the later UTF-8 Value
+        // projection refuses them; the canonical retained input stays lossless.
+        let source = std::process::Command::new("node")
+            .args([
+                "-e",
+                "const s=JSON.parse(process.argv[1]).z; process.stdout.write(JSON.stringify(Array.from({length:s.length},(_,i)=>s.charCodeAt(i))));",
+                raw,
+            ])
+            .output()
+            .expect("Node JSON.parse duplicate-selection oracle");
         assert!(
-            serde_json::from_str::<RetainedJsonInput>(raw).is_err(),
-            "AUDIT surviving invalid string or invalid syntax still refused"
+            source.status.success(),
+            "{}",
+            String::from_utf8_lossy(&source.stderr)
+        );
+        let expected: Vec<u16> = serde_json::from_slice(&source.stdout).unwrap();
+        let retained = serde_json::from_str::<RetainedJsonInput>(raw)
+            .expect("JSON.parse admits surviving lone surrogate code units");
+        let RetainedJsonInput::Object(entries) = &retained else {
+            panic!("retained duplicate object");
+        };
+        assert_eq!(
+            entries.len(),
+            1,
+            "last duplicate replaces its earlier value"
+        );
+        assert_eq!(entries[0].0, [u16::from(b'z')]);
+        let RetainedJsonInput::Text(units) = &entries[0].1 else {
+            panic!("surviving duplicate string remains native text");
+        };
+        assert_eq!(
+            units, &expected,
+            "retained native code units match JSON.parse"
+        );
+        assert!(
+            retained.into_value().is_err(),
+            "UTF-8 Value projection must refuse a surviving lone surrogate"
         );
     }
+    assert!(
+        serde_json::from_str::<RetainedJsonInput>(r#"{"z":invalid,"z":"kept"}"#).is_err(),
+        "AUDIT invalid syntax is refused even before an overwritten value"
+    );
     let overwritten = format!(
         "{{\"z\":{}0{},\"z\":\"kept\"}}",
         "[".repeat(140),
