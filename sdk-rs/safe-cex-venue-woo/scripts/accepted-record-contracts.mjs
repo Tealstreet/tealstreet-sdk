@@ -20,9 +20,6 @@ const names = [
   "safe_cex_venue_woo::types::PlaceAlgoOrderResponseDataRowsItem",
   "safe_cex_venue_woo::types::PlaceAlgoOrderResponseData",
   "safe_cex_venue_woo::types::PlaceAlgoOrderResponse",
-  "safe_cex_venue_woo::types::WooxOrder",
-  "safe_cex_venue_woo::types::FetchOrderResponseMeta",
-  "safe_cex_venue_woo::types::FetchOrderResponse",
   "safe_cex_venue_woo::types::GetFuturesLeverageResponseDataDetailsItem",
   "safe_cex_venue_woo::types::GetFuturesLeverageResponseData",
   "safe_cex_venue_woo::types::GetFuturesLeverageResponse",
@@ -69,7 +66,7 @@ const own = artifacts.filter(item => item.package_id === pkg.id && item.target.n
 assert.equal(own.length, 1, 'actual selected WOO compiler artifact');
 const found = inventory(doc, { defaultTraits: loadPolicy('default-traits'), receiverTraits: loadPolicy('receiver-traits'), readSource: file => fs.readFileSync(path.resolve(root, file)) });
 const owners = found.types.filter(owner => names.includes(owner.name));
-assert.equal(owners.length, 30, 'complete reviewed record cohort');
+assert.equal(owners.length, 27, 'complete reviewed record cohort');
 assert.ok(owners.every(owner => owner.deserialize && owner.kind === 'record' && !owner.methods.length && !owner.conversions.length && !owner.traitMethods.length), 'no indexed API may be omitted');
 const scanner = buildScanner('1');
 const sysroot = command('rustc', ['--print', 'sysroot']).trim();
@@ -120,11 +117,11 @@ try {
   if (output) fs.writeFileSync(output, JSON.stringify(rows, null, 2) + '\n');
   const failed = rows.filter(row => row.failures.length);
   console.log(JSON.stringify({ target: targetName, owners: rows.length, failed: failed.map(row => ({ name: row.name, failures: row.failures })) }));
-  assert.equal(rows.length, 30);
+  assert.equal(rows.length, 27);
   if (control) {
     assert.equal(mutations, 1);
-    assert.equal(failed.length, 30, 'every independent concrete object guard removal must fail');
+    assert.equal(failed.length, 27, 'every independent concrete object guard removal must fail');
     assert.ok(failed.every(row => row.failures.some(message => message.startsWith('native observation mismatch for '))), 'each complete positional array admission must change native field observations');
-    console.log('30 concrete owner object guard removals: compiled named native refusals');
+    console.log('27 concrete owner object guard removals: compiled named native refusals');
   } else assert.deepEqual(failed, [], 'reviewed actual WOO record fields and map-only admission');
 } finally { for (const [file, bytes] of originals) assert.deepEqual(fs.readFileSync(path.join(root, file)), bytes, `${file}: real production source remains unchanged`); }

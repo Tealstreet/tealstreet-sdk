@@ -154,3 +154,12 @@ returning cached markets, including an empty startup cache. This intentionally
 raises the source trace-only diagnostic at the existing typed Market boundary;
 it does not admit or replace the refused row. The production-binding witness is
 `tests/native_market_refusal.rs`; its control restores trace-only logging.
+
+The production native query signer uses the shared JsRoot query profile rather
+than pre-sorting UTF-8 bytes. Sorting applies recursively to objects and array
+index keys, so repeat arrays with at least 11 entries follow localeCompare too.
+The scoped `--lib native_query_tests` regression constructs the actual venue/API
+client over the existing scripted wire and compares its signatures to the
+maintained TypeScript createAPI interceptor with real qs and SHA primitives.
+Its source oracle mode leaves the original factory/request/response corpus
+unchanged. Primitive IO/clock fixtures do not replace the native client or signer.

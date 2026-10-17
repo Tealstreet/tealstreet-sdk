@@ -218,3 +218,11 @@ Before positions load, only order-side raw-mode recovery reads the account,
 and the empty positions result keeps reduceOnly omitted as in the source.
 The production binding tests cover cached placement/cancellation, unloaded
 formatting, and the single cached recovery read after positions load.
+
+
+`tests/support/private_binding_topics.rs` drives authenticated frames through the
+real constructed private socket and shared Store. Separate cases cover order
+snapshots replacing Store without fill notifications, terminal deltas emitting
+the execution price, supported-market position updates, and per-currency balance
+merging with current position PnL. These are coverage of existing source behavior,
+not additional venue fixes.
