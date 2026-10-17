@@ -36,5 +36,5 @@ assert.equal(native.status,0,'native SDK boundary oracle failed');
 const drift=spawnSync('git',['diff','--exit-code','--','sdk-rs/safe-cex-crypto/tests/fixtures/*.json'],{cwd:root,stdio:'inherit'});
 assert.equal(drift.status,0,'crypto oracle fixture regeneration drift');
 
-const identity=spawnSync('cargo',['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--jobs','1'],{cwd:root,stdio:'inherit',env:process.env});
-assert.equal(identity.status,0,'native Stark domain field identity supplement failed');
+const identity=spawnSync('cargo',['test','--manifest-path','sdk-rs/Cargo.toml','--locked','-p','safe-cex-crypto','--test','stark_enum_cardinality','--test','field_identities','--test','independent_lighter_field_identity','--test','live_poseidon_types','--jobs','1','--','--include-ignored'],{cwd:root,stdio:'inherit',env:process.env});
+assert.equal(identity.status,0,'native cryptographic identity supplements failed');
