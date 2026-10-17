@@ -195,3 +195,24 @@ pub fn refresh_markets<'a, F: Future<Output = Result<Vec<Market>, ExchangeError>
         Ok(changes)
     }
 }
+
+#[cfg(test)]
+mod accepted_contract_tests {
+    #[test]
+    fn accepted_market_error_factory() {
+        for (name, message) in [
+            ("TypeError", "protocol denied"),
+            ("", ""),
+            ("NativeDiagnostic", "café\n\0💠"),
+        ] {
+            let actual = super::error(name, message);
+            assert_eq!(actual.name, name, "native diagnostic name");
+            assert_eq!(actual.message, message, "native diagnostic text");
+            assert_eq!(
+                actual.metadata.as_ref(),
+                &safe_cex_exchange::runtime::ExchangeErrorMetadata::default(),
+                "fresh native metadata"
+            );
+        }
+    }
+}

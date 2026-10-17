@@ -6,12 +6,29 @@ use safe_cex_types::object_map::JsObjectMap;
 use serde::{Deserialize, Serialize};
 
 // ts: WooV3AccountPositionMode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3AccountPositionMode {
     #[serde(rename = "ONE_WAY")]
     OneWay,
     #[serde(rename = "HEDGE_MODE")]
     HedgeMode,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3AccountPositionMode")]
+enum AcceptedWooV3AccountPositionModeWire {
+    #[serde(rename = "ONE_WAY")]
+    OneWay,
+    #[serde(rename = "HEDGE_MODE")]
+    HedgeMode,
+}
+impl<'de> Deserialize<'de> for WooV3AccountPositionMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3AccountPositionModeWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountPositionMode {
     fn check_number_output(&self) {
@@ -19,12 +36,29 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3AccountPositionMode 
     }
 }
 // ts: WooV3FuturesMarginMode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3FuturesMarginMode {
     #[serde(rename = "CROSS")]
     Cross,
     #[serde(rename = "ISOLATED")]
     Isolated,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3FuturesMarginMode")]
+enum AcceptedWooV3FuturesMarginModeWire {
+    #[serde(rename = "CROSS")]
+    Cross,
+    #[serde(rename = "ISOLATED")]
+    Isolated,
+}
+impl<'de> Deserialize<'de> for WooV3FuturesMarginMode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3FuturesMarginModeWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for WooV3FuturesMarginMode {
     fn check_number_output(&self) {

@@ -13,7 +13,7 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     T::deserialize(d).map(Some)
 }
 // ts: WooV3RegularTimeInForce
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3RegularTimeInForce {
     #[serde(rename = "GTC")]
     Gtc,
@@ -24,18 +24,56 @@ pub enum WooV3RegularTimeInForce {
     #[serde(rename = "POST_ONLY")]
     PostOnly,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3RegularTimeInForce")]
+enum AcceptedWooV3RegularTimeInForceWire {
+    #[serde(rename = "GTC")]
+    Gtc,
+    #[serde(rename = "IOC")]
+    Ioc,
+    #[serde(rename = "FOK")]
+    Fok,
+    #[serde(rename = "POST_ONLY")]
+    PostOnly,
+}
+impl<'de> Deserialize<'de> for WooV3RegularTimeInForce {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3RegularTimeInForceWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
 impl JsNumberOutput for WooV3RegularTimeInForce {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{Gtc,Ioc,Fok,PostOnly});
     }
 }
 // Supporting exact anonymous string union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3RegularPlaceKind {
     #[serde(rename = "LIMIT")]
     Limit,
     #[serde(rename = "MARKET")]
     Market,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3RegularPlaceKind")]
+enum AcceptedWooV3RegularPlaceKindWire {
+    #[serde(rename = "LIMIT")]
+    Limit,
+    #[serde(rename = "MARKET")]
+    Market,
+}
+impl<'de> Deserialize<'de> for WooV3RegularPlaceKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3RegularPlaceKindWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
 }
 impl JsNumberOutput for WooV3RegularPlaceKind {
     fn check_number_output(&self) {
@@ -43,7 +81,7 @@ impl JsNumberOutput for WooV3RegularPlaceKind {
     }
 }
 // Supporting exact anonymous string union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3RegularPlaceType {
     #[serde(rename = "LIMIT")]
     Limit,
@@ -56,13 +94,36 @@ pub enum WooV3RegularPlaceType {
     #[serde(rename = "POST_ONLY")]
     PostOnly,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3RegularPlaceType")]
+enum AcceptedWooV3RegularPlaceTypeWire {
+    #[serde(rename = "LIMIT")]
+    Limit,
+    #[serde(rename = "MARKET")]
+    Market,
+    #[serde(rename = "IOC")]
+    Ioc,
+    #[serde(rename = "FOK")]
+    Fok,
+    #[serde(rename = "POST_ONLY")]
+    PostOnly,
+}
+impl<'de> Deserialize<'de> for WooV3RegularPlaceType {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3RegularPlaceTypeWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
 impl JsNumberOutput for WooV3RegularPlaceType {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{Limit,Market,Ioc,Fok,PostOnly});
     }
 }
 // Supporting exact anonymous string union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3RegularMutationStatus {
     #[serde(rename = "NEW")]
     New,
@@ -79,18 +140,62 @@ pub enum WooV3RegularMutationStatus {
     #[serde(rename = "COMPLETED")]
     Completed,
 }
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3RegularMutationStatus")]
+enum AcceptedWooV3RegularMutationStatusWire {
+    #[serde(rename = "NEW")]
+    New,
+    #[serde(rename = "CANCELLED")]
+    Cancelled,
+    #[serde(rename = "PARTIAL_FILLED")]
+    PartialFilled,
+    #[serde(rename = "FILLED")]
+    Filled,
+    #[serde(rename = "REJECTED")]
+    Rejected,
+    #[serde(rename = "INCOMPLETE")]
+    Incomplete,
+    #[serde(rename = "COMPLETED")]
+    Completed,
+}
+impl<'de> Deserialize<'de> for WooV3RegularMutationStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3RegularMutationStatusWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
+}
 impl JsNumberOutput for WooV3RegularMutationStatus {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self,enum{New,Cancelled,PartialFilled,Filled,Rejected,Incomplete,Completed});
     }
 }
 // Supporting exact anonymous string union.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum WooV3RegularCancelStatus {
     #[serde(rename = "CANCELLED")]
     Cancelled,
     #[serde(rename = "REJECTED")]
     Rejected,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "WooV3RegularCancelStatus")]
+enum AcceptedWooV3RegularCancelStatusWire {
+    #[serde(rename = "CANCELLED")]
+    Cancelled,
+    #[serde(rename = "REJECTED")]
+    Rejected,
+}
+impl<'de> Deserialize<'de> for WooV3RegularCancelStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        AcceptedWooV3RegularCancelStatusWire::deserialize(serde::de::value::StringDeserializer::<
+            D::Error,
+        >::new(value))
+    }
 }
 impl JsNumberOutput for WooV3RegularCancelStatus {
     fn check_number_output(&self) {
