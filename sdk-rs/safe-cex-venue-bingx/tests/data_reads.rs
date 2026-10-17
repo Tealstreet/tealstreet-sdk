@@ -199,6 +199,20 @@ fn fixture(input: Value) -> (BingxDataReads, Rc<DefaultStore>, Rc<Transport>, Rc
 }
 #[test]
 fn data_reads_match_actual_typescript() {
+    let asset_rows = corpus()["assetRows"].as_array().unwrap();
+    assert_eq!(asset_rows.len(), 10, "independent source asset cases");
+    for (index, row) in asset_rows.iter().enumerate() {
+        assert_eq!(row["field"], if index < 5 { "base" } else { "quote" });
+        assert_eq!(
+            row["type"],
+            ["object", "boolean", "null", "number", "undefined"][index % 5]
+        );
+        let markets = row["result"].as_array().unwrap();
+        assert_eq!(markets.len(), 3);
+        assert_eq!(markets[0]["base"], "BTC");
+        assert_eq!(markets[1]["symbol"], "BADUSDT");
+        assert_eq!(markets[2]["base"], "ETH");
+    }
     let names = [
         "validateAccount",
         "fetchBalance",

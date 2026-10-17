@@ -81,6 +81,20 @@ function observe(value){if(typeof value==='number'){if(Number.isNaN(value))retur
  prefixVenue.store={markets:[market]};prefixVenue.emitAndLogError=message=>prefixReports.push(message);
  prefixVenue.xhr={get:async()=>({data:prefix.responses[0]})};
  await prefixVenue.fetchMarkets();chosen.push({method:'market-source-prefix',reports:prefixReports});
+ const assetRows=[];
+ for(const field of ['asset','currency']) for(const value of [{asset:'wrong'},false,null,17,undefined]) {
+  const bad={...rawMarket,symbol:'BAD-USDT',[field]:value};
+  const venue=new Reads();
+  venue.store={markets:[market]};
+  venue.emitAndLogError=()=>assert.fail('source retains malformed asset');
+  venue.xhr={get:async()=>({data:{data:[rawMarket,bad,{...rawMarket,symbol:'ETH-USDT',asset:'ETH'}]}})};
+  const result=await venue.fetchMarkets();
+  assert.equal(result.length,3,'source keeps malformed row and siblings');
+  const outputField=field==='asset'?'base':'quote';
+  assert.equal(result[1][outputField],value,'source retains raw asset identity');
+  assetRows.push({field:outputField,type:value===null?'null':typeof value,result:observe(result)});
+ }
+ assert.equal(assetRows.length,10,'market asset source corpus');
  const boundaryInput={code:0,data:[{asset:'USDT',balance:'1',userId:'a\ud800b'}]};
  const venue=new Reads();venue.store={balance};venue.xhr={get:async()=>({data:boundaryInput})};
  const boundary=(await venue.fetchBalance()).info.userId;
@@ -94,5 +108,5 @@ function observe(value){if(typeof value==='number'){if(Number.isNaN(value))retur
   audit.push({input,hint,type:typeof result.error,sameHint:result.error===hint,result:observe(result.error),reports:observe(reports)});
  }
  assert.equal(audit.length,3,'BINGX-AUDIT independent source hint floor');
- process.stdout.write(JSON.stringify({runtime:{node:process.version,arch:process.arch,platform:process.platform},market,balance,names,cases,chosen,audit,boundary:{raw:JSON.stringify(boundaryInput),units:Array.from({length:boundary.length},(_,i)=>boundary.charCodeAt(i))}}));
+ process.stdout.write(JSON.stringify({runtime:{node:process.version,arch:process.arch,platform:process.platform},market,balance,names,cases,chosen,audit,assetRows,boundary:{raw:JSON.stringify(boundaryInput),units:Array.from({length:boundary.length},(_,i)=>boundary.charCodeAt(i))}}));
 })().catch(e=>{console.error(e);process.exitCode=1;});
