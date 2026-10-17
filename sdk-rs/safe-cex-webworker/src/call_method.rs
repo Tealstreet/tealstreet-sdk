@@ -1,4 +1,7 @@
-use crate::error_post::WorkerErrorPost;
+use crate::{
+    data_post::{WorkerDataPayload, WorkerDataPost},
+    error_post::WorkerErrorPost,
+};
 use crate::{
     handler::BaseHandler,
     payload::{StoreWorkerOp, StoreWorkerPayload},
@@ -6,6 +9,7 @@ use crate::{
 };
 use safe_cex_exchange::{
     exchange::Exchange,
+    js_runtime::value::{Js, from_json, from_typed},
     runtime::{ExchangeError, ExchangeFuture},
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -15,36 +19,46 @@ use std::{future::Future, pin::Pin, rc::Rc};
 pub struct CallMethodHandler {
     base: Rc<BaseHandler>,
     exchange: Rc<dyn Exchange>,
-    post: Rc<dyn Fn(StoreWorkerPayload)>,
+    post: WorkerDataPost,
     symbol_metadata_throttler: Rc<ThrottleManager<String>>,
 }
 struct ReplyGuard {
-    post: Rc<dyn Fn(StoreWorkerPayload)>,
+    post: WorkerDataPost,
     request_id: String,
     sent: bool,
+    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
 }
 impl ReplyGuard {
-    fn send(&mut self, success: bool, result: Option<Value>) {
-        let mut data = json!({"requestId":self.request_id,"success":success});
+    fn send(&mut self, success: bool, result: Option<Js>) -> Result<(), ExchangeError> {
+        let data = Js::object(vec![
+            ("requestId", Js::str(&self.request_id)),
+            ("success", Js::Bool(success)),
+        ]);
         if let Some(result) = result {
-            data["result"] = result;
+            data.define("result", result)
+                .map_err(|e| e.to_exchange_error())?;
         }
         self.sent = true;
-        (self.post)(StoreWorkerPayload {
+        self.post.send(WorkerDataPayload {
             op: StoreWorkerOp::CallMethodDone,
-            instance_id: None,
-            data: Some(data),
-        });
+            data,
+        })
     }
 }
 impl Drop for ReplyGuard {
     fn drop(&mut self) {
         // Drop settles exactly once, including when the host discards an unpolled task.
-        if !self.sent {
-            self.send(
+        if !self.sent
+            && let Err(error) = self.send(
                 false,
-                Some(json!({"name":"Error","message":"Worker request cancelled"})),
-            );
+                Some(Js::object(vec![
+                    ("name", Js::str("Error")),
+                    ("message", Js::str("Worker request cancelled")),
+                ])),
+            )
+        {
+            self.runtime
+                .report_exception(&error, &json!({"operation":"worker cancelled reply"}));
         }
     }
 }
@@ -52,15 +66,15 @@ fn arg<T: DeserializeOwned>(args: &[Value], index: usize) -> Result<T, ExchangeE
     serde_json::from_value(args.get(index).cloned().unwrap_or(Value::Null))
         .map_err(|e| ExchangeError::new(format!("Invalid worker argument {index}: {e}")))
 }
-fn encode<T: Serialize>(result: T) -> Result<Option<Value>, ExchangeError> {
-    serde_json::to_value(result)
+fn encode<T: Serialize>(result: T) -> Result<Option<Js>, ExchangeError> {
+    from_typed(&result)
         .map(Some)
-        .map_err(|e| ExchangeError::new(e.to_string()))
+        .map_err(|e| e.to_exchange_error())
 }
 impl CallMethodHandler {
     pub fn new(
         exchange: Rc<dyn Exchange>,
-        post: Rc<dyn Fn(StoreWorkerPayload)>,
+        post: WorkerDataPost,
         error_post: WorkerErrorPost,
     ) -> Rc<Self> {
         let venue = exchange.clone();
@@ -105,10 +119,11 @@ impl CallMethodHandler {
             post: self.post.clone(),
             request_id,
             sent: false,
+            runtime: self.exchange.base().runtime.clone(),
         };
         let handler = self.clone();
         Box::pin(async move {
-            if !matches!(
+            let known = matches!(
                 method.as_str(),
                 "setLeverage"
                     | "scheduleCancel"
@@ -129,40 +144,53 @@ impl CallMethodHandler {
                     | "fetchClosedPnl"
                     | "fetchIncomeHistory"
                     | "fetchIncomeHistoryRange"
-            ) {
+            );
+            let outcome = if !known {
                 handler
                     .exchange
                     .base()
                     .runtime
                     .console("error", &format!("Unknown method {method}"));
-                reply.send(false, None);
-                return;
-            }
-            match handler.execute(&method, &args).await {
-                Ok(result) => reply.send(true, result),
+                reply.send(false, None)
+            } else {
+                handler
+                    .execute(&method, &args)
+                    .await
+                    .and_then(|result| reply.send(true, Some(result.unwrap_or(Js::Undefined))))
+            };
+            match outcome {
+                Ok(()) => {}
                 Err(error) => {
                     handler
                         .exchange
                         .base()
                         .runtime
                         .console("error", &format!("Error calling method: {error}"));
-                    let mut serialized = json!({"message":error.message,"name":error.name});
-                    if let Some(stack) = &error.stack {
-                        serialized["stack"] = json!(stack);
-                    }
+                    let serialized = Js::object(vec![
+                        ("message", Js::str(&error.message)),
+                        ("name", Js::str(&error.name)),
+                        (
+                            "stack",
+                            error.stack.as_deref().map_or(Js::Undefined, Js::str),
+                        ),
+                    ]);
                     if let Some(code) = &error.code {
-                        serialized["code"] = code.clone();
+                        serialized
+                            .define("code", from_json(code))
+                            .expect("fresh error data");
                     }
-                    reply.send(false, Some(serialized));
+                    if let Err(error) = reply.send(false, Some(serialized)) {
+                        handler
+                            .exchange
+                            .base()
+                            .runtime
+                            .report_exception(&error, &json!({"operation":"worker error reply"}));
+                    }
                 }
             }
         })
     }
-    fn execute<'a>(
-        &'a self,
-        method: &'a str,
-        args: &'a [Value],
-    ) -> ExchangeFuture<'a, Option<Value>> {
+    fn execute<'a>(&'a self, method: &'a str, args: &'a [Value]) -> ExchangeFuture<'a, Option<Js>> {
         Box::pin(async move {
             let venue = self.exchange.as_ref();
             match method {
@@ -183,7 +211,7 @@ impl CallMethodHandler {
                 }
                 "updateSymbolMetadata" => {
                     self.symbol_metadata_throttler.call(arg(args, 0)?);
-                    Ok(Some(Value::Null))
+                    Ok(Some(Js::Null))
                 }
                 "changeMarginType" => {
                     venue
@@ -206,9 +234,9 @@ impl CallMethodHandler {
                 }
                 "reconnect" => {
                     venue.base().reconnect()?;
-                    Ok(Some(Value::Null))
+                    Ok(Some(Js::Null))
                 }
-                "recoverAfterOffline" => Ok(Some(Value::Bool(venue.recover_after_offline()?))),
+                "recoverAfterOffline" => Ok(Some(Js::Bool(venue.recover_after_offline()?))),
                 "fetchOHLCV" => encode(venue.fetch_ohlcv(arg(args, 0)?).await?),
                 "fetchHistoricalFills" => {
                     encode(venue.fetch_historical_fills(arg(args, 0)?).await?)
@@ -228,7 +256,7 @@ impl CallMethodHandler {
                         })
                         .collect();
                     venue.base().remove_orders(&ids?)?;
-                    Ok(Some(Value::Null))
+                    Ok(Some(Js::Null))
                 }
                 "fetchHistoricalOrders" => {
                     encode(venue.fetch_historical_orders(arg(args, 0)?).await?)

@@ -330,7 +330,7 @@ impl RemoteSigningAdapter {
     fn execute_signed_with_receipt(
         &self,
         request: SigningRequest,
-        config_extensions: IndexMap<String, Value>,
+        config_extensions: IndexMap<String, safe_cex_types::retained_json::RetainedJsonInput>,
     ) -> crate::RestFuture<'_, crate::RestExecution> {
         let mut original = RestRequest {
             method: request.config.method.clone(),

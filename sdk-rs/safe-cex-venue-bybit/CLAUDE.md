@@ -631,9 +631,12 @@ axios-retry, plus two native clock-reentry profiles. The private adapter witness
 checks zero and omitted namespaces. `scripts/request-retry-controls.py` restores
 the fixed budget and dropped namespace independently; each must compile and fail
 its named runtime assertion, then exact restored bytes must pass. Its subprocesses
-have timeouts and private temporary logs. This evidence covers JSON-shaped retry
-configuration; it does not claim executable per-request retry callbacks or the
-source's arbitrary live Axios configuration objects.
+have timeouts and private temporary logs. The retained-config supplement now
+covers own `retries: undefined` and NaN through the constructed venue's actual TypedHttpHost, BybitApi and terminal
+adapter. Both match the maintained Axios/axios-retry one-attempt outcome; native
+NaN and own undefined are observed before any JSON projection. Missing retries
+still defaults to three. Executable per-request retry callbacks and arbitrary
+live Axios configuration objects remain outside the data-only typed profile.
 
 The Exchange cancellation surface invokes the venue `cancelSymbolOrders` member,
 so an empty local order cache still sends `/v5/order/cancel-all` through the
