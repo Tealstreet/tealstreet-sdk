@@ -168,6 +168,10 @@ Venue census159ported/106divergent/266pending. Original13FINDINGs remain named.
 15rows pending->ported:8json_models.rs declarations +7json_boundaries.rs leaves.
 json_values.rs supplies owned UTF-16-key/string and binary64 raw JSON snapshots,
 last duplicate selection before typed value decoding and JS integer-key order.
+The shared `RetainedJsonInput` capture preserves surviving lone UTF-16 code units
+like JSON.parse; its explicit UTF-8 Value projection refuses them. The duplicate
+selection control in `tests/divergence_types.rs` compares actual retained units
+against Node and separately requires projection refusal and syntax validation.
 Any-indexed UserRateLimit/OrderStatus also accept arrays in strict TypeScript.
 The helpers bind opaque JavaScript host primitive operations and preserve native
 object/error identity, receivers and catch boundaries, including revoked proxies.
