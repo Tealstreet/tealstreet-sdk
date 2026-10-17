@@ -807,3 +807,8 @@ Primary/demo and Spot defer typed asset refusals until source mapping completes;
 dedicated inverse admits assets after building its native rows. Each refused row
 reports its identity and field values, while valid siblings survive fetch/refresh.
 This intentionally differs from TS retaining malformed asset fields.
+
+Submission checks unknown outcome only for one payload carrying a caller client ID.
+The real HTTP regression sends a rejected first split lot with a non-coercible
+error code and verifies later lots still place; a single order without a caller
+ID also skips classification, while a caller-ID control still reaches it.
