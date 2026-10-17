@@ -374,3 +374,9 @@ trait defaults and pass after binding; the complete constructed target passes
 23 tests. Six independent compiled production faults fail named tests, and each
 exact restoration passes all six regressions. Venue-local parity passes 695
 manifest rows and 1,404 public Rust items with full workspace target resolution.
+
+Strict host all-target and WASM library lint pass. The override contract passes
+8 tests including the live TypeScript inventory, and the production binding
+inventory passes 25 tests. After the shared ModelField and library-pin merges,
+all 23 constructed tests and the all-features cancellation inventory (6 tests,
+explicit export ignored) pass.
