@@ -24,6 +24,7 @@ use safe_cex_types::{
 };
 use std::{
     cell::RefCell,
+    collections::{HashMap, HashSet},
     rc::{Rc, Weak},
     sync::Arc,
 };
@@ -220,14 +221,41 @@ pub fn create(
                     Js::function("off", move |this, a| {
                         let event = text(&arg(&a, 0))?;
                         let listener = arg(&a, 1);
-                        let mut rows = off_rows.borrow_mut();
-                        if let Some(at) = rows
+                        let snapshot = off_rows.borrow().clone();
+                        let functions: HashMap<_, _> = snapshot
                             .iter()
-                            .position(|(e, f, _)| *e == event && f.same_reference(&listener))
-                        {
-                            let (_, _, id) = rows.remove(at);
-                            off_base.off(&event, Some(&id));
-                        }
+                            .filter(|(name, _, _)| *name == event)
+                            .map(|(_, function, id)| (id.clone(), function.clone()))
+                            .collect();
+                        let retained: HashSet<_> = off_base
+                            .retain_event_listeners(&event, |id| {
+                                if !listener.truthy() {
+                                    return Ok(false);
+                                }
+                                let Some(function) = functions.get(id) else {
+                                    return Ok(true);
+                                };
+                                Ok::<_, Thrown>(
+                                    !function.strict_equals(&listener)
+                                        && !function.get("_")?.strict_equals(&listener),
+                                )
+                            })?
+                            .into_iter()
+                            .collect();
+                        let displaced =
+                            {
+                                let mut rows = off_rows.borrow_mut();
+                                let (displaced, mut others): (Vec<_>, Vec<_>) =
+                                    std::mem::take(&mut *rows)
+                                        .into_iter()
+                                        .partition(|(name, _, _)| *name == event);
+                                others.extend(snapshot.into_iter().filter(|(name, _, id)| {
+                                    *name == event && retained.contains(id)
+                                }));
+                                *rows = others;
+                                displaced
+                            };
+                        drop(displaced);
                         Ok(this)
                     }),
                 ),

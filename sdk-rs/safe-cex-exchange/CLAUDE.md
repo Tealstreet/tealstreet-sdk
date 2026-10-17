@@ -1305,3 +1305,12 @@ Its native record codec preserves absent, own undefined and concrete intervals,
 including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
+
+The JS emitter facade follows the installed tiny-emitter removal algorithm:
+omitted or falsy callbacks clear the event, and callback removal filters every
+matching function or live `_` alias. Alias getters run without a listener borrow;
+a successful removal commits the original filtered snapshot, preserving source
+reentrant removal/addition behavior. Getter errors preserve their original value
+and side effects. Core host listeners share that snapshot, and an in-flight emit
+keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
+production native runtime and BaseExchange facade against installed tiny-emitter.

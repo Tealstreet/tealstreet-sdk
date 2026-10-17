@@ -614,14 +614,39 @@ impl BaseExchange {
         id
     }
     pub fn off(&self, event: &str, id: Option<&str>) {
-        let mut listeners = self.listeners.borrow_mut();
-        if let Some(id) = id {
-            if let Some(rows) = listeners.get_mut(event) {
-                rows.retain(|row| row.0 != id);
+        self.retain_event_listeners(event, |candidate| {
+            Ok::<_, std::convert::Infallible>(id.is_some_and(|id| id != candidate))
+        })
+        .unwrap_or_else(|never| match never {});
+    }
+    pub(crate) fn retain_event_listeners<E>(
+        &self,
+        event: &str,
+        mut retain: impl FnMut(&str) -> Result<bool, E>,
+    ) -> Result<Vec<String>, E> {
+        let snapshot = self
+            .listeners
+            .borrow()
+            .get(event)
+            .cloned()
+            .unwrap_or_default();
+        let mut retained = Vec::new();
+        for row in snapshot {
+            if retain(&row.0)? {
+                retained.push(row);
             }
-        } else {
-            listeners.remove(event);
         }
+        let ids = retained.iter().map(|row| row.0.clone()).collect();
+        let displaced = {
+            let mut listeners = self.listeners.borrow_mut();
+            if retained.is_empty() {
+                listeners.remove(event)
+            } else {
+                listeners.insert(event.into(), retained)
+            }
+        };
+        drop(displaced);
+        Ok(ids)
     }
     pub fn emit(&self, event: &str, data: serde_json::Value) -> Result<(), ExchangeError> {
         self.emit_args(event, &[data])
