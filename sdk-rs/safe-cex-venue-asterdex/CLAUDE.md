@@ -26,8 +26,7 @@ preservation and refusal behavior. Prototype lookup witnesses execute the actual
 source before serialization; shared TableHit carries lookup identity.
 
 `account_fetch.rs` and `order_execution.rs` own account/order REST workflows;
-`builder_approval.rs`, `virtual_clock.rs` and `listen_key.rs` own their respective
-state and lifecycle. Public/private streams apply Store changes and callbacks;
+`virtual_clock.rs` and `listen_key.rs` own their respective state and lifecycle. Public/private streams apply Store changes and callbacks;
 `STREAM_FINDINGS_GATE_EXITS.md` records their effect-order and null/prototype cases.
 
 `api_runtime.rs` owns Axios-compatible factories and their actual interceptor
@@ -83,7 +82,7 @@ and use the existing exchange_options decoder when inspecting fields beside a
 runtime handle. Bare clock axios sends skip the shared remote adapter; account
 clients keep the same hosted identity through post-sign transport selection.
 
-`ALIAS_CONTRACT_REVIEW.md` records the eight original native/default aliases.
+`ALIAS_CONTRACT_REVIEW.md` records the seven retained native/default aliases.
 The selected gate retains full discovery and authenticates actual compiler
 artifacts before native Serde/conversion probes and compiled identity controls.
 
@@ -95,3 +94,7 @@ request config-extension carrier. The real API interceptors suppress only the
 already-gone `-2011` response; cancellation still logs completion.
 `tests/exchange_trait.rs` covers both HTTP-success and HTTP-error envelopes through
 the constructed venue, signer, transport and event emitter.
+
+The unused browser-wallet workflow copy in `builder_approval.rs` and its standalone
+oracle were removed: no native binding consumed them. Browser-only manifest rows
+are not-applicable; retained pure builder helpers keep their existing mappings.

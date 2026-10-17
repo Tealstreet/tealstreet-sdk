@@ -18,7 +18,7 @@ process.env.RUSTC_BOOTSTRAP = '1';
 const workspace = fs.realpathSync(fileURLToPath(new URL('../..', import.meta.url)));
 const selected = [
   'public_subscriptions::BookCallback', 'public_subscriptions::CandleCallback',
-  'public_subscriptions::BookCleanup', 'builder_approval::ApprovalFuture',
+  'public_subscriptions::BookCleanup',
   'runtime_host::ResultValue', 'runtime_host::Task', 'runtime_host::Function',
   'native_exchange::AsterDEXHttpFactory',
 ].map(name => `safe_cex_venue_asterdex::${name}`).sort();
@@ -88,7 +88,7 @@ try {
   { target: 'native', features: [], jobs: 1 });
   fs.writeFileSync(path.join(metadata.target_directory, 'asterdex-alias-results.json'), `${JSON.stringify(rows, null, 2)}\n`);
   console.log(`ASTER_ALIAS_ROWS ${JSON.stringify({ names: state.names, rows })}`);
-  assert.deepEqual(state.names.sort(), selected, 'all eight verified aliases execute the native emitter');
+  assert.deepEqual(state.names.sort(), selected, 'all seven verified aliases execute the native emitter');
   assert.deepEqual(rows.map(row => row.name).sort(), selected);
   for (const row of rows) assert.deepEqual(row.failures, [], row.name);
   const decoders = rows.filter(row => !row.classificationOnly);
@@ -97,8 +97,8 @@ try {
     assert.equal(row.category, 'non-decoder-alias', row.name);
     assert.equal(row.deserialize, false, row.name);
   }
-  console.log('Aster aliases: one native decoder and seven native non-decoder alias receipts; eight authenticated aliases, zero failures.');
-  console.log('Scope is the original eight native/default aliases; other owners, locals, features and wasm remain separate.');
+  console.log('Aster aliases: one native decoder and six native non-decoder alias receipts; seven authenticated aliases, zero failures.');
+  console.log('Scope is the seven retained native/default aliases; other owners, locals, features and wasm remain separate.');
 } finally {
   hook.deregister();
   delete globalThis.__asterAliasRootControl;

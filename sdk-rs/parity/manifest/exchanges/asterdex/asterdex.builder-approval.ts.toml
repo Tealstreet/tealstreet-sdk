@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/asterdex/asterdex.builder-approval.ts"
-rust_files = [ "safe-cex-venue-asterdex/src/builder.rs", "safe-cex-venue-asterdex/src/builder_approval.rs" ]
+rust_files = [ "safe-cex-venue-asterdex/src/builder.rs" ]
 
 [[symbol]]
 ts = "AsterBuilderApprovalStatus"
@@ -38,17 +38,17 @@ note = ""
 ts = "buildAsterApprovalRequest"
 kind = "const-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-asterdex/src/builder.rs::build_aster_approval_request", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalRequest" ]
+rs = "safe-cex-venue-asterdex/src/builder.rs::build_aster_approval_request"
 status = "ported"
-note = "Shared TransportRegistry supplies the default private proxy; the headers/url record is returned as a tuple. Nonempty baseUrl bypasses the provider, empty resolved headers preserve direct URL, and header failures propagate before reading proxy URL. No venue state crosses the await. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalRequest`. Per-call fetch request carrier (url, method, headers, body) built from buildAsterApprovalRequest output and passed to the host fetch in checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet; record shape only, no TypeScript symbol."
+note = "Retained native builder helper with its existing source/accepted-contract evidence. Unused browser workflow carriers from builder_approval.rs were removed; this helper makes no browser workflow or wallet-host claim."
 
 [[symbol]]
 ts = "normalizeAddress"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/builder_approval.rs::normalize_address"
-status = "divergent"
-note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Native reproduces source preguard/field-name/zero-address branches around checksum validation, but replaces ethers checksum text with compact shared diagnostics. Shorter diagnostics alone do not establish FORCED, a required surrogate unit, or Rust inability. State a chosen diagnostic/dependency policy or retain an owned error defect; do not infer program observation from the error label alone. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-5. Historical note follows: FORCED: normalize_address now implements the venue isAsterDEXAddress preguard, field-name error and zero-address rejection around shared EIP-55 validation. Valid outputs and malformed/zero diagnostics match; a mixed-case checksum failure remains the shared compact \"bad address checksum\" instead of ethers full value/version diagnostic. This supersedes the previous primitive-only mapping without claiming diagnostic parity."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript browser workflow only: no production native consumer or BrowserWallet/ApprovalHost implementation. The standalone Rust copy, tests and corpus were removed rather than advertising an unbound browser implementation."
 
 [[symbol]]
 ts = "extractBuilderRows"
@@ -78,17 +78,17 @@ note = ""
 ts = "getProviderErrorMessage"
 kind = "const-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-asterdex/src/builder.rs::get_provider_error_message", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalFailure" ]
+rs = "safe-cex-venue-asterdex/src/builder.rs::get_provider_error_message"
 status = "ported"
-note = "Host Error instances pass their message separately before JSON serialization erases it; JSON objects and strings retain the original fallbacks. Live oracle includes native Error objects with empty and nonempty messages. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalFailure`. Rust carrier for a thrown provider/fetch value plus its Error message, consumed by getProviderErrorMessage inside the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet; no separate TypeScript symbol."
+note = "Retained native builder helper with its existing source/accepted-contract evidence. Unused browser workflow carriers from builder_approval.rs were removed; this helper makes no browser workflow or wallet-host claim."
 
 [[symbol]]
 ts = "switchToAsterSignatureChain"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-asterdex/src/builder_approval.rs::switch_to_aster_signature_chain", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalFailure::error", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalFuture", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::current_time_ms", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::fetch", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::registry", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::wallet", "safe-cex-venue-asterdex/src/builder_approval.rs::BrowserWallet", "safe-cex-venue-asterdex/src/builder_approval.rs::BrowserWallet::request" ]
-status = "ported"
-note = "Runs actual EIP-1193 host requests: no-wallet result, switch 0x38, add BNB chain only on numeric 4902, user rejection on 4001, unsupported success on -32601/4200, and source error-message fallback order. String error codes do not match numeric cases; requests and decoded result are source-oracle pinned. Provider is resolved again after the rejected switch await before add-chain dispatch, preserving source wallet replacement. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalFailure::error`. Constructor of the thrown-value carrier from a plain Error message (new Error(msg) equivalent) used by the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalFuture`. Type alias for the boxed host future returned by wallet.request and fetch in the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet; aliases add no TypeScript symbol. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost`. Host capability trait binding window.ethereum, Date.now, the transport registry and global fetch for the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet; no separate TypeScript symbol. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::current_time_ms`. Required member of the ApprovalHost capability trait (window.ethereum lookup, Date.now, transport registry or global fetch) used by the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::fetch`. Required member of the ApprovalHost capability trait (window.ethereum lookup, Date.now, transport registry or global fetch) used by the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::registry`. Required member of the ApprovalHost capability trait (window.ethereum lookup, Date.now, transport registry or global fetch) used by the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalHost::wallet`. Required member of the ApprovalHost capability trait (window.ethereum lookup, Date.now, transport registry or global fetch) used by the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::BrowserWallet`. Host capability trait for the EIP-1193 window.ethereum provider used by the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet; no separate TypeScript symbol. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::BrowserWallet::request`. Required member of the BrowserWallet capability: the EIP-1193 window.ethereum.request call used by the AsterDEX builder approval rows switchToAsterSignatureChain, normalizeAddress, checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript browser workflow only: no production native consumer or BrowserWallet/ApprovalHost implementation. The standalone Rust copy, tests and corpus were removed rather than advertising an unbound browser implementation."
 
 [[symbol]]
 ts = "buildAsterApproveBuilderTypedData"
@@ -109,15 +109,15 @@ note = "Composes the validated optional builder fee configuration with the highe
 [[symbol]]
 ts = "checkAsterBuilderApproved"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-asterdex/src/builder_approval.rs::check_aster_builder_approved", "safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalResponse", "safe-cex-venue-asterdex/src/builder_approval.rs::CheckParams" ]
-status = "divergent"
-note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Compact checksum diagnostics and typed CheckParams are representable error/input policies, not FORCED limitations. Source catches original ethers messages into its returned result. The native signing-before-fetch-catch placement is real, but the note needs separate reasons/costs for its carrier restrictions and any caller-polled scheduling; no exact error or async equivalence is certified. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-4. Historical note follows: FORCED: check_aster_builder_approved implements validation, monotonic scoped nonce, EIP-712 code signing outside the fetch catch, proxy resolution, API-key fallback, first matching builder row, null-row TypeError catch and Number.EPSILON fee-cap comparison. Its shared get_address signer/input failures expose compact native crypto messages instead of ethers diagnostic metadata; typed CheckParams reject wrong-kind required strings at ingress. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalResponse`. Per-call fetch response carrier (status, ok, parsed json) returned by the host fetch to checkAsterBuilderApproved and approveAsterBuilderFeeWithBrowserWallet; record shape only, no TypeScript symbol. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::CheckParams`. Deserialized carrier for the inline params object of checkAsterBuilderApproved (apiKey, baseUrl, builderConfig, builderAddress, requiredFeeRate, signer and user fields, testnet); holds only that row's arguments and."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript browser workflow only: no production native consumer or BrowserWallet/ApprovalHost implementation. The standalone Rust copy, tests and corpus were removed rather than advertising an unbound browser implementation."
 
 [[symbol]]
 ts = "approveAsterBuilderFeeWithBrowserWallet"
 kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-venue-asterdex/src/builder_approval.rs::approve_aster_builder_fee_with_browser_wallet", "safe-cex-venue-asterdex/src/builder_approval.rs::ApproveParams" ]
-status = "divergent"
-note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Source returns truthy payload.msg/error without narrowing its value; native converts a non-string into a named failure and eventually a String result. Calling this FORCED because result.message is String is unsupported: a broader result carrier is expressible. Price the chosen carrier, lost returned value and rationale; compact checksum diagnostics likewise do not prove impossibility. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-3. Historical note follows: FORCED: approve_aster_builder_fee_with_browser_wallet executes network switch, account validation, typed-data signature, ordered URLSearchParams-equivalent form encoding, proxy fetch and strict numeric response code 200. Native result.message is a String, so a truthy object/number response msg is returned as a named native failure instead of being forwarded as the source message; checksum failures also use shared compact crypto diagnostics. Split member `safe-cex-venue-asterdex/src/builder_approval.rs::ApproveParams`. Deserialized carrier for the inline params object of approveAsterBuilderFeeWithBrowserWallet (baseUrl, builderAddress, builderName, maxFeeRate, testnet, userAddress); holds only that row's arguments and."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript browser workflow only: no production native consumer or BrowserWallet/ApprovalHost implementation. The standalone Rust copy, tests and corpus were removed rather than advertising an unbound browser implementation."
