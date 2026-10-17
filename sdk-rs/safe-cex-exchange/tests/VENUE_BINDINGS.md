@@ -39,3 +39,23 @@ Shared install_library adds Number.parseInt and virtualClock.getCurrentTime via
 define_on; these are bound. Five Hyperliquid market-bootstrap timeout reads go
 through an imported class and are not free module bindings. These initial scanner
 false positives were corrected before landing the seed baseline.
+
+With `--all-features` on a native host, the method gate also scans literal standard
+JS/Dayjs method requests, including forwarded lookup wrappers, closure-field host
+APIs and macros. It reads callable availability from actual production
+NativeRuntime/ScopeShared values with installed shared builtins and library;
+test hosts never supply the implementation surface. Hyperliquid's separate realm
+is excluded from this shared-runtime check.
+
+`venue-standard-methods.json` recognizes names from Node and the installed source
+Dayjs/BigNumber packages. Regenerate with
+`node sdk-rs/safe-cex-exchange/tests/venue_method_gate/catalog.cjs`; it may only
+expand relative to the PR base, preventing removal from hiding an unsupported
+name. `venue-known-unbound-methods.json` follows the same shrinking ratchet as
+the global/intrinsic baseline. Set `VENUE_METHOD_INVENTORY` for source locations.
+
+This method check is deliberately a name inventory, not receiver-type inference:
+a callable with the same name on another builtin family can mask a missing
+receiver-specific method. It does not prove semantics, dynamic keys or runtime
+reachability. Shared method fixes still require Node/source verification and
+production-runtime regressions; add new lookup idioms and controls to this gate.

@@ -46,11 +46,50 @@ fn global_object(e: &Expr) -> bool {
         _ => false,
     }
 }
+// Unknown feature/target predicates stay possible; only provably test-only code
+// is excluded. In particular any(test, feature=...) still has a production arm.
+fn production_cfg(meta: &syn::Meta) -> Option<bool> {
+    use syn::parse::Parser;
+    match meta {
+        syn::Meta::Path(path) if path.is_ident("test") => Some(false),
+        syn::Meta::List(list) => {
+            let args = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+                .parse2(list.tokens.clone())
+                .ok()?;
+            let values: Vec<_> = args.iter().map(production_cfg).collect();
+            if list.path.is_ident("all") {
+                if values.contains(&Some(false)) {
+                    Some(false)
+                } else if values.iter().all(|v| *v == Some(true)) {
+                    Some(true)
+                } else {
+                    None
+                }
+            } else if list.path.is_ident("any") {
+                if values.contains(&Some(true)) {
+                    Some(true)
+                } else if values.iter().all(|v| *v == Some(false)) {
+                    Some(false)
+                } else {
+                    None
+                }
+            } else if list.path.is_ident("not") && values.len() == 1 {
+                values[0].map(|v| !v)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
 fn skip(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
         a.path().is_ident("test")
             || (a.path().is_ident("cfg")
-                && a.meta.to_token_stream().to_string().replace(' ', "") == "cfg(test)")
+                && a.parse_args::<syn::Meta>()
+                    .ok()
+                    .as_ref()
+                    .is_some_and(|m| production_cfg(m) == Some(false)))
     })
 }
 #[derive(Default)]
@@ -898,7 +937,7 @@ fn every_venue_reference_has_a_production_binding() {
         .map(|(venue, rows)| (venue, rows.into_keys().collect()))
         .collect();
     let baseline = serde_json::from_str(include_str!("venue-known-unbound.json")).unwrap();
-    let previous = previous_baseline(ws);
+    let previous = previous_baseline(ws, BASELINE_PATH);
     assert_ratchet(&observed, &baseline, previous.as_ref());
 }
 
@@ -919,10 +958,10 @@ fn assert_ratchet(observed: &Names, baseline: &Names, previous: Option<&Names>) 
     }
     assert_eq!(
         observed, baseline,
-        "Unbound inventory changed: fix new names; remove fixed names from venue-known-unbound.json in the same PR"
+        "Unbound inventory changed: fix new names; remove fixed names from the corresponding known-unbound baseline in the same PR"
     );
 }
-fn previous_baseline(workspace: &Path) -> Option<Names> {
+fn previous_baseline(workspace: &Path, baseline_path: &str) -> Option<Names> {
     use std::process::Command;
     let base = match std::env::var("VENUE_BINDING_BASE_REF") {
         Ok(base) if !base.is_empty() => base,
@@ -946,7 +985,7 @@ fn previous_baseline(workspace: &Path) -> Option<Names> {
         "binding-ratchet base commit must be fetched"
     );
     let out = Command::new("git")
-        .args(["show", &format!("{base}:{BASELINE_PATH}")])
+        .args(["show", &format!("{base}:{baseline_path}")])
         .current_dir(workspace)
         .output()
         .unwrap();
@@ -954,7 +993,7 @@ fn previous_baseline(workspace: &Path) -> Option<Names> {
         Some(serde_json::from_slice(&out.stdout).expect("base binding baseline must be valid JSON"))
     } else {
         let exists = Command::new("git")
-            .args(["ls-tree", "--name-only", &base, "--", BASELINE_PATH])
+            .args(["ls-tree", "--name-only", &base, "--", baseline_path])
             .current_dir(workspace)
             .output()
             .unwrap();
@@ -1180,4 +1219,27 @@ fn review_control_public_lighter_module_bindings_are_checked() {
     );
     scan.visit_file(&ast);
     assert!(scan.refs.contains_key("global missingPublicImport"));
+}
+
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[path = "venue_method_gate/mod.rs"]
+mod method_surface;
+
+#[test]
+fn compound_test_only_cfg_never_supplies_production_bindings() {
+    let ast = syn::parse_file(r#"
+        #[cfg(all(test, not(target_arch="wasm32")))] mod fixtures { fn install(g:&Js){ g.define("fakeModule",value); } }
+        #[cfg(all(feature="native",test))] impl Host { fn install(g:&Js){g.define("fakeImpl",value);} }
+        #[cfg(any(test,feature="native"))] fn install(g:&Js){g.define("real",value);}
+        #[cfg(not(not(test)))] fn hidden(g:&Js){g.define("fakeNot",value);}
+    "#).unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(scan.globals.contains("real"));
+    for fake in ["fakeModule", "fakeImpl", "fakeNot"] {
+        assert!(!scan.globals.contains(fake), "{fake}");
+    }
 }

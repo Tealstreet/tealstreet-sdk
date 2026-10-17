@@ -1,0 +1,77 @@
+{
+  "master": "e58fb67060",
+  "inventory": {
+    "safe-cex-venue-apexomni": {},
+    "safe-cex-venue-asterdex": {},
+    "safe-cex-venue-backpack": {},
+    "safe-cex-venue-binance": {},
+    "safe-cex-venue-bingx": {},
+    "safe-cex-venue-bitget": {},
+    "safe-cex-venue-bitrue": {
+      "utcOffset": [
+        "src/public_bodies.rs::map_kline"
+      ]
+    },
+    "safe-cex-venue-bitunix": {},
+    "safe-cex-venue-blofin": {},
+    "safe-cex-venue-breakoutprop": {},
+    "safe-cex-venue-bybit": {},
+    "safe-cex-venue-coinbase": {},
+    "safe-cex-venue-cryptocom": {},
+    "safe-cex-venue-grvt": {
+      "pop": [
+        "src/api_runtime.rs::last_segment"
+      ]
+    },
+    "safe-cex-venue-kraken": {},
+    "safe-cex-venue-kucoin": {},
+    "safe-cex-venue-lighter": {
+      "pop": [
+        "src/exchange_single_placement.rs::parameters"
+      ]
+    },
+    "safe-cex-venue-mexc": {},
+    "safe-cex-venue-okx": {},
+    "safe-cex-venue-orderly": {
+      "reverse": [
+        "src/binding/host.rs::reverse"
+      ]
+    },
+    "safe-cex-venue-paradex": {},
+    "safe-cex-venue-phemex": {
+      "startOf": [
+        "src/binding/data.rs::end_time"
+      ]
+    },
+    "safe-cex-venue-polymarket": {},
+    "safe-cex-venue-txflow": {},
+    "safe-cex-venue-weex": {},
+    "safe-cex-venue-woo": {
+      "call": [
+        "src/shadow_compare.rs::has_own"
+      ],
+      "freeze": [
+        "src/public_canonical.rs::freeze",
+        "src/shadow_compare.rs::freeze",
+        "src/snapshot_parity.rs::freeze"
+      ],
+      "hasOwn": [
+        "src/public_canonical.rs::normalize_kline_interval"
+      ],
+      "is": [
+        "src/snapshot_parity.rs::compare_fields",
+        "src/snapshot_parity.rs::compare_order_book_side"
+      ],
+      "isSafeInteger": [
+        "src/exchange_class.rs::client_rule",
+        "src/snapshot_parity.rs::validate_kline_context"
+      ],
+      "localeCompare": [
+        "src/public_canonical.rs::sorted_by_symbol"
+      ],
+      "pop": [
+        "src/response_class.rs::normalize_requested_symbol"
+      ]
+    }
+  }
+}
