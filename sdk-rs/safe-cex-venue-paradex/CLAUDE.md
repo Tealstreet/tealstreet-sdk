@@ -99,6 +99,17 @@ The balance oracle reuses scalarRaw from utilities_oracle.cjs byte-for-byte,
 executes one Node process, and holds GET settlement while draining cross-realm
 initialization promise adoption. Native fields and completed counts are pinned.
 
+Production `ParadexExchange` now overrides its stream and history trait hooks;
+the constructed member dispatcher calls the existing account REST bodies instead
+of leaving their allocated arrows unbound. Its fills/income/order capabilities
+are branded, and the existing state-operation journal delegate uses the canonical
+shared journal reader with symbol-scoped fills. The native adapter retains wrapped
+income failures as native causes; it does not duplicate reconstruction arithmetic.
+Socket registrations, REST candle polling and cleanup reuse their existing source
+bodies. Book registration and cleanup are split to retain the captured Set safely
+across the native callback lifetime, with no leaked host or second listener state.
+Real regressions are the `real_trait_` cases in `tests/exchange_trait.rs`.
+
 `history_reads.rs` maps fetchIncomeHistoryRange through one fallible callback and
 await. Missing and empty incomeType bypass filtering. Shared owned records do not
 represent JavaScript array/object aliases or own-undefined property reflection.
@@ -181,7 +192,12 @@ refusals remain explicit in the manifest rather than claiming SDK-wide parity.
 are explicit constructor dependencies. See [BINDING_GATES.md](BINDING_GATES.md)
 for constructed trait coverage, actual SDK signatures and compiled controls.
 Preserve source fetchPositions balance writes and exchange disposal without base
-cleanup. Only constructed private onOpen uses the approved shared authentication
+cleanup. The required `local_wall_time_to_utc` dependency reaches both exchange
+order-mapper callers. Embeddings supply their host timezone policy; the native
+registry explicitly chooses UTC. The constructed UTC-7 regression compares REST
+and stored dates with Node Date, checks explicit-Z/date-only bypass, and keeps
+private order updates on their separate raw Date.now clock.
+Only constructed private onOpen uses the approved shared authentication
 recovery contract; direct authenticate keeps the original catch and log behavior.
 
 Native `cancel_all_orders` and `cancel_symbol_orders` call the venue receiver

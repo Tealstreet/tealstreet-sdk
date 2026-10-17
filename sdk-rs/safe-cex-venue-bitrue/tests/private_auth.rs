@@ -261,7 +261,6 @@ struct State {
     response_interceptor: RefCell<V>,
     initial_incremental: RefCell<V>,
     expected_update: RefCell<V>,
-    group: String,
     prototype_dispose: V,
     instances: RefCell<Vec<V>>,
 }
@@ -905,7 +904,11 @@ impl PrivateHost for Host {
         ))
     }
     fn now(&self) -> Result<V, E> {
-        self.effect(if self.group == "api" { "clock" } else { "now" }, vec![])?;
+        self.effect("now", vec![])?;
+        Ok(self.number(2000.0))
+    }
+    fn virtual_now(&self) -> Result<V, E> {
+        self.effect("clock", vec![])?;
         Ok(self.number(2000.0))
     }
     fn parse_message(&self, v: V) -> Result<V, E> {
@@ -1239,7 +1242,6 @@ fn setup(group: &str, cfg: V) -> Host {
         response_interceptor: RefCell::new(undef.clone()),
         initial_incremental: RefCell::new(undef.clone()),
         expected_update: RefCell::new(undef),
-        group: group.to_owned(),
         prototype_dispose: Rc::new(Raw::Function("dispose")),
         instances: RefCell::new(vec![]),
     }));

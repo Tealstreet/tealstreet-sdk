@@ -36,8 +36,7 @@ pub trait ApexSocketHost {
     fn add_listener(&self, listener: SocketListener) -> Result<(), ExchangeError>;
     fn send(&self, frame: &str, with_log: bool) -> Result<(), ExchangeError>;
     fn set_ping_at(&self, at: f64) -> Result<(), ExchangeError>;
-    fn ping_timeout(&self) -> Option<u64>;
-    fn set_ping_timeout(&self, timer: Option<u64>) -> Result<(), ExchangeError>;
+    fn schedule_ping(&self, delay_ms: u64) -> Result<(), ExchangeError>;
     fn track_last_received(&self) -> Result<(), ExchangeError>;
     fn diagnostic_receive(&self, frame: &str) -> Result<(), ExchangeError>;
     fn record_stats(&self, topic: &str) -> Result<(), ExchangeError>;

@@ -1503,7 +1503,7 @@ fn native_position_controls_match_thirty_two_source_compositions() {
         };
         let positions: Vec<_> = h.store.positions().iter().map(|p| {
             let leverage = if p.leverage.is_nan() { "NaN".into() } else if p.leverage.to_bits() == (-0.0f64).to_bits() { "-0".into() } else {safe_cex_num::js_number_string(p.leverage)};
-            json!({"symbol":p.symbol,"mode":match p.position_mode {Some(PositionMode::OneWay)=>"oneway",Some(PositionMode::Hedged)=>"hedged",None=>"undefined"},"leverage":leverage})
+            json!({"symbol":p.symbol,"mode":match p.position_mode.into_value() {Some(PositionMode::OneWay)=>"oneway",Some(PositionMode::Hedged)=>"hedged",None=>"undefined"},"leverage":leverage})
         }).collect();
         let posts: Vec<_> = h
             .wire
@@ -1644,4 +1644,68 @@ fn native_position_mode_keeps_proxy_status_and_nonempty_failure_override() {
         }
         assert_eq!(h.wire.calls("/v5/order/create")[0].body["positionIdx"], 0);
     }
+}
+
+fn periodic_private_tick(name: safe_cex_types::ExchangeName) {
+    let mut opts = options();
+    opts.extra = Some(serde_json::from_value(json!({"tickInterval":100})).unwrap());
+    let h = support::harness_as(name, opts, |w| {
+        w.ok(
+            "GET",
+            "/v5/account/info",
+            json!({"marginMode":"REGULAR_MARGIN","unifiedMarginStatus":6}),
+        );
+        w.ok("GET", "/v5/user/query-api", json!({"vipLevel":"No VIP"}));
+        w.ok("GET", "/v5/account/fee-rate", json!({"list":[]}));
+        w.ok(
+            "GET",
+            "/v5/market/instruments-info",
+            json!({"list":[instrument("BTCUSDT","Trading")]}),
+        );
+        w.route_when(
+            "GET",
+            "/v5/market/instruments-info",
+            "status",
+            "PreLaunch",
+            json!({"retCode":0,"retMsg":"OK","result":{"list":[]}}),
+        );
+        w.ok("GET", "/v5/market/tickers", json!({"list":[]}));
+        w.ok(
+            "GET",
+            "/v5/order/realtime",
+            json!({"list":[],"nextPageCursor":""}),
+        );
+        w.ok("GET", "/v5/position/list", position_list("10"));
+        w.ok("GET", "/v5/account/wallet-balance", wallet());
+    });
+    h.drive(h.venue().start()).unwrap();
+    h.advance(500.0);
+    let before = h.wire.calls("/v5/position/list").len();
+    h.advance(1500.0);
+    assert!(
+        h.wire.calls("/v5/position/list").len() > before,
+        "periodic tick must fetch real positions after startup: reports={:?}, logs={:?}",
+        h.runtime.reports.borrow(),
+        h.runtime.logs.borrow()
+    );
+    assert!(
+        !h.runtime
+            .reports
+            .borrow()
+            .iter()
+            .any(|e| e.contains("waitForRemoteSigner")),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn primary_periodic_private_tick_reaches_real_signer_gate() {
+    periodic_private_tick(safe_cex_types::ExchangeName::Bybit);
+}
+
+#[test]
+fn demo_periodic_private_tick_reaches_real_signer_gate() {
+    periodic_private_tick(safe_cex_types::ExchangeName::Bybitdemo);
 }

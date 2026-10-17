@@ -26,8 +26,12 @@ fn mutation(e: safe_cex_store::StoreMutationError) -> Thrown {
 fn ids(value: &Js) -> Result<Vec<String>, Thrown> {
     let mut out = vec![];
     for v in value.array_values().unwrap_or_default() {
-        let id = if v.is_object() { v.get("id")? } else { v };
-        out.push(id.to_display());
+        let id = v.get("id")?;
+        if !matches!(id, Js::SymbolIterator)
+            && let Ok(id) = String::from_utf16(&id.to_js_string()?)
+        {
+            out.push(id);
+        }
     }
     Ok(out)
 }
@@ -47,16 +51,22 @@ fn patch(value: &Js) -> Result<ModelPatch, Thrown> {
     }
     let fields = Js::object(vec![]);
     let mut numbers = vec![];
+    let mut undefined = vec![];
     for (key, value) in value.own_entries()? {
         let field = String::from_utf16_lossy(&key);
         // `info` is explicitly opaque JSON, rather than a typed model number.
-        if field != "info" && matches!(value, Js::Number(_)) {
+        if value.is_undefined() {
+            undefined.push(field);
+        } else if field != "info" && matches!(value, Js::Number(_)) {
             numbers.push((field, to_typed::<f64>(&value)?));
         } else {
             fields.define_key(&key, value)?;
         }
     }
     let mut changes = ModelPatch::from(json_patch(&fields)?);
+    for key in undefined {
+        changes.set_undefined(key);
+    }
     for (key, value) in numbers {
         changes.set_number(key, value);
     }
@@ -73,6 +83,14 @@ fn option_patch<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
     let mut changes = patch(&fields)?;
     if !option.is_undefined() {
         changes.set_native("option", to_typed::<T>(&option)?);
+    }
+    Ok(changes)
+}
+
+fn position_patch(value: &Js) -> Result<ModelPatch, Thrown> {
+    let mut changes = option_patch::<PositionOption>(value)?;
+    if value.has_own("option") && value.get("option")?.is_undefined() {
+        changes.set_undefined("option");
     }
     Ok(changes)
 }
@@ -159,11 +177,8 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updatePosition",
         Rc::new(|st, a| {
-            st.update_position(
-                &id_of(&arg(&a, 0))?,
-                &option_patch::<PositionOption>(&arg(&a, 1))?,
-            )
-            .map_err(mutation)?;
+            st.update_position(&id_of(&arg(&a, 0))?, &position_patch(&arg(&a, 1))?)
+                .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -173,7 +188,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
             let mut updates = vec![];
             for pair in arg(&a, 0).array_values().unwrap_or_default() {
                 let (position, changes) = (pair.get("0")?, pair.get("1")?);
-                updates.push((id_of(&position)?, option_patch::<PositionOption>(&changes)?));
+                updates.push((id_of(&position)?, position_patch(&changes)?));
             }
             st.update_positions(&updates).map_err(mutation)?;
             Ok(Js::Undefined)
@@ -296,7 +311,11 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "removeOrders",
         Rc::new(|st, a| {
-            let ids = ids(&arg(&a, 0))?;
+            let orders = arg(&a, 0);
+            if orders.array_values().is_some_and(|rows| rows.is_empty()) || st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let ids = ids(&orders)?;
             let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             st.remove_orders(&refs).map_err(mutation)?;
             Ok(Js::Undefined)

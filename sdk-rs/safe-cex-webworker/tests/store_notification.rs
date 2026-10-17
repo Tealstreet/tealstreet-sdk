@@ -1,3 +1,7 @@
+#[path = "support/data_trace.rs"]
+mod data_trace;
+#[path = "support/error_post.rs"]
+mod error_post_support;
 use serde_json::Value;
 
 #[test]
@@ -275,7 +279,11 @@ fn native_store_notification_reaches_worker_after_committed_mutation() {
                         }
                     }
                     "remove" => {
-                        let handler = CallMethodHandler::new(venue.clone(), post);
+                        let handler = CallMethodHandler::new(
+                            venue.clone(),
+                            data_trace::post(post),
+                            error_post_support::unexpected(),
+                        );
                         ready(handler.handle_call_method(
                             "r".into(),
                             "removeOrders".into(),

@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { contractFor } from './accepted-contracts.mjs';
+import { contractJson } from './accepted-contract-files.mjs';
 import { aliasContract } from './accepted-aliases.mjs';
 import { defaultWitnessContract, telemetryDefaultWitness } from './accepted-defaults.mjs';
 import { grvtFieldsBody } from './accepted-grvt-fields.mjs';
@@ -32,7 +33,7 @@ function aliasBody(type, targetType, contract) {
   const alternate = `|value| { let alternate = crate::__accepted_set_runtime::AliasAlternate::<${targetType}>(std::marker::PhantomData); let mut paths: Vec<_> = [${aliasTraitMethods.map(([, method, name]) => `(${literal(name)}, (&&alternate).${method}(value))`).join(',')}].into_iter().filter_map(|(name, accepted)| accepted.map(|accepted| (name, accepted))).collect(); if (&&alternate).has_static_from() && (&&alternate).probe_from_str_ref(value).is_none() { paths.push(("unsupported From<&'static str>", false)); } if (&&alternate).has_static_try() && (&&alternate).probe_try_str_ref(value).is_none() { paths.push(("unsupported TryFrom<&'static str>", false)); } paths }`;
   if (contract.aliasProbeKind === 'reviewed-grvt-fields') return `{ ${equality} use crate::__accepted_set_runtime::{AliasStaticFrom as _, AliasStaticTry as _, ${aliasTraitMethods.map(([trait]) => `${trait} as _`).join(', ')}}; ${grvtFieldsBody(type, targetType, contract, alternate)} }`;
   const native = `|path, value| { let alternate = crate::__accepted_set_runtime::AliasAlternate::<${targetType}>(std::marker::PhantomData); match path { ${aliasTraitMethods.map(([, , name, method]) => `${literal(name)} => (&&alternate).${method}(value, &|${contract.nativeProjection ? 'decoded' : '_decoded'}| ${contract.nativeProjection?.replaceAll('$decoded', 'decoded') ?? 'serde_json::Value::Null'}),`).join(' ')} _ => None } }`;
-  return `{ ${equality} use crate::__accepted_set_runtime::{DetectAlias as _, AliasStaticFrom as _, AliasStaticTry as _, ${aliasTraitMethods.map(([trait]) => `${trait} as _`).join(', ')}}; let probe = crate::__accepted_set_runtime::AliasProbe::<${targetType}>(std::marker::PhantomData); (&&&probe).probe(${literal(type.name)}, ${canonical}, ${literal(JSON.stringify(contract))}, |${observation ? 'value' : '_value'}| ${observation ? observation.call.replaceAll('$type', targetType).replaceAll('$value', 'value') : 'serde_json::Value::Null'}, ${native}, ${alternate}); }`;
+  return `{ ${equality} use crate::__accepted_set_runtime::{DetectAlias as _, AliasStaticFrom as _, AliasStaticTry as _, ${aliasTraitMethods.map(([trait]) => `${trait} as _`).join(', ')}}; let probe = crate::__accepted_set_runtime::AliasProbe::<${targetType}>(std::marker::PhantomData); (&&&probe).probe(${literal(type.name)}, ${canonical}, ${literal(contractJson(contract))}, |${observation ? 'value' : '_value'}| ${observation ? observation.call.replaceAll('$type', targetType).replaceAll('$value', 'value') : 'serde_json::Value::Null'}, ${native}, ${alternate}); }`;
 }
 function offset(source, [line, column]) {
   const lines = source.split('\n');
@@ -112,20 +113,20 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
       const auditBody = problem
         ? `crate::__accepted_set_runtime::unclassified(${literal(type.name)}, ${literal(problem)});`
         : type.kind === 'trait-defaults'
-        ? `crate::__accepted_set_runtime::audit_function(${literal(type.name)}, ${literal(JSON.stringify(contract))}, |value| ${telemetryDefaultWitness()});`
+        ? `crate::__accepted_set_runtime::audit_function(${literal(type.name)}, ${literal(contractJson(contract))}, |value| ${telemetryDefaultWitness()});`
         : type.kind === 'alias' && contract.category === 'tooling-exemption'
-        ? `crate::__accepted_set_runtime::audit_tooling_alias(${literal(type.name)}, ${literal(JSON.stringify(contract))});`
+        ? `crate::__accepted_set_runtime::audit_tooling_alias(${literal(type.name)}, ${literal(contractJson(contract))});`
         : type.kind === 'alias'
         ? aliasBody(type, targetType, contract)
         : type.kind === 'function' || type.kind === 'trait-classifications' || contract?.shape === 'observed'
-        ? `crate::__accepted_set_runtime::audit_function(${literal(type.name)}, ${literal(JSON.stringify(contract))}, |${contract.category !== 'non-decoder' ? 'value' : '_value'}| ${contract.category !== 'non-decoder' ? contract.call.replaceAll('$type', targetType).replaceAll('$value', 'value') : 'serde_json::Value::Null'});`
+        ? `crate::__accepted_set_runtime::audit_function(${literal(type.name)}, ${literal(contractJson(contract))}, |${contract.category !== 'non-decoder' ? 'value' : '_value'}| ${contract.category !== 'non-decoder' ? contract.call.replaceAll('$type', targetType).replaceAll('$value', 'value') : 'serde_json::Value::Null'});`
         : type.deserialize === false
-        ? `crate::__accepted_set_runtime::audit_alternate(${literal(type.name)}, ${literal(JSON.stringify(contract))}, |${alternate ? 'value' : '_value'}| vec![${alternate}]);`
-        : `crate::__accepted_set_runtime::audit::<${targetType}>(${literal(type.name)}, ${literal(type.kind)}, ${contract ? `Some(${literal(JSON.stringify(contract))})` : 'None'}, |value| { #[allow(unused_imports)] use serde::Deserialize as _; <${targetType}>::deserialize(value).is_ok() }, |${alternate ? 'value' : '_value'}| vec![${alternate}], |${contract?.observation ? 'value' : '_value'}| ${contract?.observation ? contract.observation.call.replaceAll('$type', targetType).replaceAll('$value', 'value') : 'serde_json::Value::Null'});`;
+        ? `crate::__accepted_set_runtime::audit_alternate(${literal(type.name)}, ${literal(contractJson(contract))}, |${alternate ? 'value' : '_value'}| vec![${alternate}]);`
+        : `crate::__accepted_set_runtime::audit::<${targetType}>(${literal(type.name)}, ${literal(type.kind)}, ${contract ? `Some(${literal(contractJson(contract))})` : 'None'}, |value| { #[allow(unused_imports)] use serde::Deserialize as _; <${targetType}>::deserialize(value).is_ok() }, |${alternate ? 'value' : '_value'}| vec![${alternate}], |${contract?.observation ? 'value' : '_value'}| ${contract?.observation ? contract.observation.call.replaceAll('$type', targetType).replaceAll('$value', 'value') : 'serde_json::Value::Null'});`;
       const native = !problem && contract?.nativeObservation;
-      const supplemental = !problem ? (contract?.entrypoints ?? []).filter(entry => entry.input === 'observed' && contract.shape !== 'observed').map(entry => `crate::__accepted_set_runtime::audit_native_observations(${literal(type.name)}, ${literal(JSON.stringify(entry))}, |value| ${entry.call.replaceAll('$type', targetType).replaceAll('$value', 'value')});`).join(' ') : '';
+      const supplemental = !problem ? (contract?.entrypoints ?? []).filter(entry => entry.input === 'observed' && contract.shape !== 'observed').map(entry => `crate::__accepted_set_runtime::audit_native_observations(${literal(type.name)}, ${literal(contractJson(entry))}, |value| ${entry.call.replaceAll('$type', targetType).replaceAll('$value', 'value')});`).join(' ') : '';
       const nativeBody = native
-        ? `crate::__accepted_set_runtime::audit_native_observations(${literal(type.name)}, ${literal(JSON.stringify(native))}, |value| ${native.call.replaceAll('$type', targetType).replaceAll('$value', 'value')}); ${auditBody}`
+        ? `crate::__accepted_set_runtime::audit_native_observations(${literal(type.name)}, ${literal(contractJson(native))}, |value| ${native.call.replaceAll('$type', targetType).replaceAll('$value', 'value')}); ${auditBody}`
         : auditBody;
       const body = `${supplemental} ${nativeBody}`;
       // Diagnostics and explicit non-decoder classifications do not reference a
@@ -151,7 +152,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
       assert.deepEqual(fs.readFileSync(destination), bytes, `${local.label}: source changed before local probe`);
       const at = offset(bytes.toString('utf8'), [local.line, local.column + 1]);
       const contract = contracts?.[local.label];
-      const body = `use crate::__accepted_set_runtime::{DetectLocal as _, LocalFromStr as _, LocalFromString as _, LocalFromStrRef as _, LocalFromValue as _, LocalFromMap as _}; let probe = crate::__accepted_set_runtime::LocalProbe::<${local.ident}>(std::marker::PhantomData); (&&probe).check_from_str(${literal(local.label)}); (&&probe).check_from_string(${literal(local.label)}); (&&probe).check_from_str_ref(${literal(local.label)}); (&&probe).check_from_value(${literal(local.label)}); (&&probe).check_from_map(${literal(local.label)}); (&&&probe).probe(${literal(local.label)}, ${contract ? `Some(${literal(JSON.stringify(contract))})` : 'None'});`;
+      const body = `use crate::__accepted_set_runtime::{DetectLocal as _, LocalFromStr as _, LocalFromString as _, LocalFromStrRef as _, LocalFromValue as _, LocalFromMap as _}; let probe = crate::__accepted_set_runtime::LocalProbe::<${local.ident}>(std::marker::PhantomData); (&&probe).check_from_str(${literal(local.label)}); (&&probe).check_from_string(${literal(local.label)}); (&&probe).check_from_str_ref(${literal(local.label)}); (&&probe).check_from_value(${literal(local.label)}); (&&probe).check_from_map(${literal(local.label)}); (&&&probe).probe(${literal(local.label)}, ${contract ? `Some(${literal(contractJson(contract))})` : 'None'});`;
       const symbol = `__accepted_set_local_${i}`;
       const added = `\n\n#[allow(dead_code)] #[unsafe(export_name = "${wasm ? `__accepted_set_${i}` : symbol}")] fn ${symbol}() { ${body} }\n`;
       const list = edits.get(destination) ?? [];

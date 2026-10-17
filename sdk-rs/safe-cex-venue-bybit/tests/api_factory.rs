@@ -1523,9 +1523,13 @@ fn native_request_retry_override_retains_source_budget() {
             request.method = "post".into();
             request.body = Some(RestBody::Untransformed(json!({"request":true})));
         }
-        request
-            .config_extensions
-            .insert("axios-retry".into(), json!({"retries": budget}));
+        request.config_extensions.insert(
+            "axios-retry".into(),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"retries": budget}),
+            )
+            .unwrap(),
+        );
         let result = ready(f.api.execute_with_receipt(request));
         assert_eq!(
             f.wire.requests.borrow().len(),
@@ -1565,9 +1569,11 @@ fn native_request_retry_override_retains_source_budget() {
         replies.push(response(r#"{"retCode":0,"retMsg":"OK"}"#));
         let f = fixture(replies);
         let mut request = get("/private");
-        request
-            .config_extensions
-            .insert("axios-retry".into(), json!({"retries":budget}));
+        request.config_extensions.insert(
+            "axios-retry".into(),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"retries":budget}))
+                .unwrap(),
+        );
         assert!(
             ready(f.api.execute_with_receipt(request)).is_err(),
             "request_retry_clock_budget_exhausted {budget}"

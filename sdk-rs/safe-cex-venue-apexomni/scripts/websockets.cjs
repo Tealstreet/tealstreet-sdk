@@ -71,7 +71,6 @@ class SocketBase {
  emitWsReconnected(){record('reconnected');}
  reconnect(){record('reconnect');}
  emitAndLogError(error){record('error',error instanceof Error?error.message:String(error));}
- log(message,severity){this.parent.log(message,severity);}
  dispose(){record('base:dispose');disposed=true;if(this.pingTimeoutId){clear(this.pingTimeoutId);this.pingTimeoutId=undefined;}}
 }
 const wsContext={exports:{},BaseWebSocket:SocketBase,...enums,...tables,ENABLE_RECONNECTING_WEBSOCKET:false,
@@ -127,7 +126,7 @@ for(const privacy of ['public','private'])for(const name of privacy==='public'?p
  else if(name==='auth')result=await socket.auth();
  else if(name==='fills')socket.handleFillTopic(input);
  else if(name==='orders'){socket.handleOrderTopic(input);if(variant===0)socket.handleOrderTopic(input);}
- else if(name==='positions')socket.handlePositionTopic(input);
+ else if(name==='positions'){try{socket.handlePositionTopic(input);}catch(error){result={errorName:error.name,errorMessage:error.message};}}
  else if(name==='accounts')socket.handleWsAccountsV2Topic(input);
  else if(name==='ordersThrottle'||name==='positionsThrottle'){
   const method=name==='ordersThrottle'?'throttleFetchOrders':'throttleFetchPositions';

@@ -10,6 +10,7 @@ use support::{Harness, harness, options};
 include!("support/binding_streams.rs");
 include!("support/binding_failures.rs");
 include!("support/binding_factory.rs");
+include!("support/private_lifecycle.rs");
 include!("support/placement_parity.rs");
 
 fn raw_order() -> Value {
@@ -19,7 +20,12 @@ fn contract() -> Value {
     json!({"symbol":"BTC-USDC","crossSymbolName":"BTCUSDC","baseTokenId":"BTC","settleAssetId":"USDC","l2PairId":"11","enableTrade":true,"stepSize":"0.001","tickSize":"0.01","minOrderSize":"0.001","maxOrderSize":"1000","displayMinLeverage":"1","displayMaxLeverage":"50","initialMarginRate":"0.1"})
 }
 fn fixture() -> Harness {
+    fixture_with_tick_interval(None)
+}
+fn fixture_with_tick_interval(tick_interval: Option<f64>) -> Harness {
     let mut opts = options();
+    opts.extra = tick_interval
+        .map(|interval| serde_json::from_value(json!({"tickInterval": interval})).unwrap());
     opts.omni_key_seed = Some(format!("0x{}1b", "01".repeat(64)));
     opts.passphrase = Some("fixture-passphrase".into());
     let h = harness(ExchangeName::Apexomni, opts, |http| {
@@ -116,6 +122,7 @@ fn bound_fetch_markets() {
 #[test]
 fn bound_place_order() {
     let h = fixture();
+    let source_clock = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
     let ids = h
         .drive(h.exchange.base().place_order(h.exchange.as_ref(), placed()))
         .unwrap();
@@ -135,6 +142,7 @@ fn bound_place_order() {
     );
     assert_eq!(calls[0].headers["APEX-API-KEY"], "fixture-key");
     let source = std::process::Command::new("node")
+        .env("SAFE_CEX_VIRTUAL_TIME", source_clock.to_string())
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/scripts/binding-signature.cjs"
@@ -204,3 +212,20 @@ inherited_test!(
     "BTCUSDC".into(),
     None
 );
+
+#[test]
+fn bound_amendment_omits_undefined_side() {
+    let h = fixture();
+    let order = h.drive(h.venue().fetch_orders(None)).unwrap().remove(0);
+    let mut row = serde_json::to_value(order).unwrap();
+    row.as_object_mut().unwrap().remove("side");
+    let opts = serde_json::from_value(json!({"order":row,"update":{"price":102.129}})).unwrap();
+    assert_eq!(
+        h.drive(h.venue().update_order(opts)).unwrap(),
+        ["9007199254740993"]
+    );
+    let calls = h.http.calls("/v3/order");
+    assert_eq!(calls.len(), 1);
+    assert!(!calls[0].data.as_object().unwrap().contains_key("side"));
+    done(&h);
+}

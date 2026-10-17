@@ -325,7 +325,7 @@ fn watchdog_uses_last_open_grace_after_reconnect() {
     assert_eq!(io.closed.get(), 1);
 }
 #[test]
-fn online_transition_reconnects_once_and_emit_throttle_is_strict() {
+fn online_transition_recovers_once_and_emit_throttle_is_strict() {
     let (venue, runtime, _, _) = fixture();
     let s = socket(&venue, &runtime, 1);
     venue.base().set_socket(SocketSlot::Public, Some(s));
@@ -836,6 +836,42 @@ mod js_sockets {
         })
     }
 
+    #[test]
+    fn native_recovery_reads_the_live_receiver_policy() {
+        let (venue, runtime, _, _) = fixture();
+        let context = JsSocketContext::new(runtime);
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let core = core_of(&context, &socket).unwrap();
+        let base = core.base().unwrap();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "the base policy defaults to true"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(false))
+            .unwrap();
+        assert!(
+            !base.recover_after_offline(true).unwrap(),
+            "native recovery must read the source receiver false flag"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(true))
+            .unwrap();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "policy reads remain live"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(false))
+            .unwrap();
+        base.dispose();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "disposal precedes the reload policy"
+        );
+    }
+
     fn live_socket(runtime: &Rc<Runtime>) -> Rc<Io> {
         runtime.pump();
         runtime.io.borrow().last().expect("dialed").clone()
@@ -1240,4 +1276,109 @@ mod js_sockets {
         let base = core_of(&context, &socket).unwrap().base().unwrap();
         assert_eq!(base.diagnostics().lifetime_close_count, 1);
     }
+}
+
+struct OnlineRecoveryProtocol;
+impl WsProtocol for OnlineRecoveryProtocol {
+    fn on_open(&self, _: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
+        Box::pin(async { Ok(()) })
+    }
+    fn ping(&self, _: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        Ok(())
+    }
+    fn connect_and_subscribe(
+        &self,
+        socket: Rc<BaseWebSocket>,
+        _: bool,
+    ) -> Result<(), ExchangeError> {
+        socket.start_websocket("wss://venue".into(), vec![], None);
+        Ok(())
+    }
+}
+
+fn assert_online_recovery_after_failures(failures: usize) {
+    let (venue, runtime, _, _) = fixture();
+    let socket = BaseWebSocket::new(
+        91,
+        WsExchangeParent::new(&venue),
+        runtime.clone(),
+        Rc::new(OnlineRecoveryProtocol),
+    );
+    venue
+        .base()
+        .set_socket(SocketSlot::Public, Some(socket.clone()));
+    run(socket.create_websocket("wss://venue".into(), vec![], None)).unwrap();
+    for _ in 0..failures {
+        socket.on_close(Some(1006), "offline").unwrap();
+    }
+    assert_eq!(socket.is_reconnect_pause_active(), failures == 8);
+    assert_eq!(runtime.io.borrow().len(), 1);
+    venue.base().set_online_status(false).unwrap();
+    venue.base().set_online_status(true).unwrap();
+    runtime.pump();
+    assert!(
+        !socket.is_reconnect_pause_active(),
+        "online recovery clears the two-minute failure pause"
+    );
+    assert_eq!(
+        runtime.io.borrow().len(),
+        2,
+        "online recovery must bypass the pending reconnect delay after {failures} failures"
+    );
+    socket.on_close(Some(1006), "new failure").unwrap();
+    assert!(
+        !socket.is_reconnect_pause_active(),
+        "the failure streak restarts after recovery"
+    );
+    runtime.advance(1999.0);
+    runtime.pump();
+    assert_eq!(runtime.io.borrow().len(), 2);
+    runtime.advance(1.0);
+    runtime.pump();
+    assert_eq!(
+        runtime.io.borrow().len(),
+        3,
+        "the first retry uses the reset two-second backoff"
+    );
+}
+
+#[test]
+fn online_transition_runs_pending_reconnect_now() {
+    assert_online_recovery_after_failures(1);
+}
+
+#[test]
+fn online_transition_clears_the_two_minute_failure_pause() {
+    assert_online_recovery_after_failures(8);
+}
+
+#[test]
+fn online_transition_clears_the_explicit_reconnect_cap() {
+    let (venue, runtime, _, _) = fixture();
+    let socket = socket(&venue, &runtime, 92);
+    venue
+        .base()
+        .set_socket(SocketSlot::Public, Some(socket.clone()));
+    let io = runtime.io.borrow().last().unwrap().clone();
+    for _ in 0..101 {
+        socket.reconnect().unwrap();
+    }
+    assert_eq!(
+        io.closed.get(),
+        100,
+        "the source explicit-reconnect cap is reached"
+    );
+    venue.base().set_online_status(false).unwrap();
+    venue.base().set_online_status(true).unwrap();
+    assert_eq!(
+        io.closed.get(),
+        101,
+        "online recovery must bypass and clear the reconnect cap"
+    );
+    socket.reconnect().unwrap();
+    assert_eq!(
+        io.closed.get(),
+        102,
+        "explicit reconnect works again after online recovery"
+    );
 }

@@ -403,3 +403,19 @@ production class and socket bodies. Retained historical logs are archives, not
 coverage claims. Production lifecycle and admin coverage lives in
 `tests/exchange_binding.rs`; streams/history and private data frames are separate
 follow-up obligations.
+
+The binding’s REST and private WebSocket auth helpers read the shared synchronized
+VirtualClock directly. Do not reconstruct a clock from one raw runtime reading.
+The isolated native_clock target syncs the actual singleton, checks emitted IDs,
+nonces and HMACs, authenticates the private socket and maps a private order frame
+whose missing update timestamp falls back to the same synchronized clock.
+
+The concrete binding's spread and IteratorRecord slots consume the shared native
+GetIterator protocol. Spread keeps astral code points and lone UTF-16 units;
+for-of caches next once and pulls between source body calls. Body throws perform
+IteratorClose without replacing their original cause; next/done/value errors do
+not close. Pair destructuring closes early and validates the return result.
+`binding::exchange::iterable_tests` reuses the real constructor/transport harness
+and connected public socket; it checks callback identity, emitted subscription
+channels, native string units, pull ordering and cleanup. These iterator-valued
+inputs exercise latent language contracts; maintained wire inputs remain arrays.

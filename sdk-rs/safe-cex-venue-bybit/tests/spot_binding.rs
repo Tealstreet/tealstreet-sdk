@@ -374,3 +374,39 @@ fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
     h.venue().dispose().unwrap();
     assert!(private.closed.get());
 }
+
+#[test]
+fn split_spot_orders_omit_brackets_only_after_the_first_lot() {
+    let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let options: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":200,"price":25000,"stopLoss":24000,"takeProfit":26000})).unwrap();
+    let ids = h
+        .drive(Box::pin(h.venue().base().place_order(h.venue(), options)))
+        .expect("real Spot split placement");
+    assert_eq!(ids, ["created", "created"]);
+    let calls = h.wire.calls("/v5/order/create");
+    assert_eq!(calls.len(), 2);
+    for call in &calls {
+        assert_eq!(call.body["qty"], "100");
+        assert_eq!(call.body["price"], "25000");
+        assert_eq!(call.body["category"], "spot");
+    }
+    assert_eq!(calls[0].body["stopLoss"], "24000");
+    assert_eq!(calls[0].body["takeProfit"], "26000");
+    for field in ["stopLoss", "takeProfit", "slTriggerBy", "tpTriggerBy"] {
+        assert!(
+            calls[1].body.get(field).is_none(),
+            "second lot must omit {field}"
+        );
+    }
+    h.venue().dispose().unwrap();
+}

@@ -328,21 +328,22 @@ impl ApexOmniExchange {
         Ok(Some(Position {
             id,
             symbol: market.symbol,
-            side,
+            side: side.into(),
             entry_price,
             notional: contracts * entry_price,
             leverage: math_round(leverage),
             unrealized_pnl,
-            realized_pnl: Some(float(&or_zero(data::v(row, "curRealisedPnl")?))?),
+            realized_pnl: (Some(float(&or_zero(data::v(row, "curRealisedPnl")?))?)).into(),
             contracts,
             liquidation_price: float(&or_zero(data::v(row, "liqPrice")?))?,
-            position_mode: Some(PositionMode::Hedged),
-            margin_type: Some(MarginType::Cross),
-            info: Some(fields(row)?),
-            last_update: Some(self.base.runtime.now_ms()),
-            margin_size: None,
-            extra: None,
-            option: None,
+            position_mode: (Some(PositionMode::Hedged)).into(),
+            margin_type: (Some(MarginType::Cross)).into(),
+            info: (Some(fields(row)?)).into(),
+            last_update: (Some(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()))
+                .into(),
+            margin_size: (None).into(),
+            extra: (None).into(),
+            option: (None).into(),
         }))
     }
     // ts: ApexOmniExchange.mapOrder
@@ -398,7 +399,7 @@ impl ApexOmniExchange {
             numeric(&nullish_zero(property(row, "size")?))?,
             numeric(&nullish_zero(data::v(row, "cumSuccessFillSize")?))?,
         );
-        let last_update = self.base.runtime.now_ms();
+        let last_update = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let trigger_type = |part: &J| -> Result<Option<OrderStopTriggerType>, ExchangeError> {
             let key = text(data::v(part, "triggerPriceType")?)?;
             Ok(match js_table_lookup(&protocol::ORDER_TRIGGER_TYPE, &key) {
@@ -435,7 +436,7 @@ impl ApexOmniExchange {
         ] {
             if price > 0.0 {
                 let id = format!("{}{suffix}", text(raw_id)?);
-                let updated = self.base.runtime.now_ms();
+                let updated = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
                 brackets.push((id, price, kind, updated, trigger_type(part)?));
             }
         }
@@ -464,47 +465,47 @@ impl ApexOmniExchange {
             }
         };
         let order = Order {
-            client_order_id: None,
+            client_order_id: (None).into(),
             id: field_string(raw_id)?,
-            status: *status,
+            status: (*status).into(),
             symbol: market.symbol,
-            r#type: *order_type,
-            side: *side,
-            price,
+            r#type: (*order_type).into(),
+            side: (*side).into(),
+            price: price.into(),
             amount,
             filled,
             remaining,
             reduce_only,
-            info: Some(fields(row)?),
-            time_in_force,
+            info: (Some(fields(row)?)).into(),
+            time_in_force: time_in_force.into(),
             last_update,
-            tp_trigger_type,
-            sl_trigger_type,
-            parent_id: None,
-            close: None,
-            trigger_type: None,
-            take_profit: None,
-            stop_loss: None,
-            extra: None,
+            tp_trigger_type: tp_trigger_type.into(),
+            sl_trigger_type: sl_trigger_type.into(),
+            parent_id: (None).into(),
+            close: (None).into(),
+            trigger_type: (None).into(),
+            take_profit: (None).into(),
+            stop_loss: (None).into(),
+            extra: (None).into(),
         };
         let mut orders = vec![order.clone()];
         for (id, price, kind, updated, trigger) in brackets {
             let mut bracket = order.clone();
             bracket.id = id;
-            bracket.r#type = kind;
+            bracket.r#type = (kind).into();
             bracket.side = if order.side == OrderSide::Buy {
-                OrderSide::Sell
+                safe_cex_types::ModelField::Value(OrderSide::Sell)
             } else {
-                OrderSide::Buy
+                safe_cex_types::ModelField::Value(OrderSide::Buy)
             };
-            bracket.price = price;
+            bracket.price = (price).into();
             bracket.filled = 0.0;
             bracket.remaining = order.amount;
             bracket.last_update = updated;
             if kind == OrderType::StopLoss {
-                bracket.sl_trigger_type = trigger;
+                bracket.sl_trigger_type = (trigger).into();
             } else {
-                bracket.tp_trigger_type = trigger;
+                bracket.tp_trigger_type = (trigger).into();
             }
             orders.push(bracket);
         }
@@ -743,21 +744,21 @@ impl ApexOmniExchange {
                         Some(PositionMode::Hedged),
                     ),
                     symbol: market.symbol.clone(),
-                    side,
+                    side: side.into(),
                     entry_price: 0.0,
                     notional: 0.0,
                     unrealized_pnl: 0.0,
                     contracts: 0.0,
                     leverage,
                     liquidation_price: 0.0,
-                    position_mode: Some(PositionMode::Hedged),
-                    margin_type: Some(MarginType::Cross),
-                    realized_pnl: None,
-                    last_update: None,
-                    info: None,
-                    margin_size: None,
-                    extra: None,
-                    option: None,
+                    position_mode: (Some(PositionMode::Hedged)).into(),
+                    margin_type: (Some(MarginType::Cross)).into(),
+                    realized_pnl: (None).into(),
+                    last_update: (None).into(),
+                    info: (None).into(),
+                    margin_size: (None).into(),
+                    extra: (None).into(),
+                    option: (None).into(),
                 });
             }
         }

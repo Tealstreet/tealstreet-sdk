@@ -57,6 +57,8 @@ pub struct SocketCore {
     pub on_close_member: RefCell<Option<Js>>,
     /// The JS `pingAt` value; every write also reaches the core's ping time.
     ping_at: RefCell<Js>,
+    /// Source Number field before lazy native-core creation.
+    last_received: Cell<f64>,
     /// Prevent a source `super.dispose()` from dispatching its override again.
     disposing: Cell<bool>,
 }
@@ -197,6 +199,10 @@ impl JsProtocol {
     }
     fn emit(&self, event: &str, payload: Js) -> Result<(), ExchangeError> {
         let core = self.core()?;
+        let grouped = core
+            .base
+            .get()
+            .is_some_and(|base| base.grouped_listener_dispatch());
         let current = core.listeners.borrow().clone();
         let listeners: Vec<Js> = current
             .borrow()
@@ -209,13 +215,16 @@ impl JsProtocol {
             if event == "close" && skip.as_ref().is_some_and(|s| s.same_reference(&listener)) {
                 continue;
             }
-            let result = listener
-                .call(Js::Undefined, vec![payload.clone()])
-                .map_err(core_error)?;
-            if let Js::Promise(p) = result
-                && let Some(Err(e)) = p.result()
-            {
-                return Err(core_error(e));
+            if let Err(thrown) = listener.call(Js::Undefined, vec![payload.clone()]) {
+                core.context.runtime.report_exception(
+                    &core_error(thrown),
+                    &serde_json::json!({ "operation": "websocket listener", "event": event }),
+                );
+                // RWS invokes its listeners in one host callback; plain EventTarget
+                // reports each exception independently and continues dispatch.
+                if grouped {
+                    break;
+                }
             }
         }
         Ok(())
@@ -283,6 +292,23 @@ fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -
 }
 
 impl WsProtocol for JsProtocol {
+    fn recovers_after_offline(&self) -> bool {
+        let Some(core) = self.0.upgrade() else {
+            return false;
+        };
+        let this = core.this.borrow().clone();
+        match this.get("recoversAfterOffline") {
+            Ok(value) => value.truthy(),
+            Err(thrown) => {
+                core.context.runtime.report_exception(
+                    &core_error(thrown),
+                    &serde_json::json!({ "operation": "recoversAfterOffline" }),
+                );
+                false
+            }
+        }
+    }
+
     fn dispose(&self) {
         let Some(core) = self.0.upgrade() else {
             return;
@@ -301,6 +327,14 @@ impl WsProtocol for JsProtocol {
                 &serde_json::json!({ "operation": "dispose" }),
             );
         }
+    }
+
+    fn check_last_received(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        let core = self.core()?;
+        let this = core.this.borrow().clone();
+        this.call_method("checkLastReceived", vec![])
+            .map(|_| ())
+            .map_err(core_error)
     }
 
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
@@ -429,6 +463,7 @@ impl SocketCore {
             self.context.runtime.clone(),
             Rc::new(JsProtocol(Rc::downgrade(self))),
         );
+        base.set_last_received(self.last_received.get());
         let _ = self.base.set(base.clone());
         self.apply_pong_policy(&base)?;
         Ok(base)
@@ -500,6 +535,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         listeners: RefCell::default(),
         on_close_member: RefCell::default(),
         ping_at: RefCell::new(Js::Number(0.0)),
+        last_received: Cell::new(0.0),
         disposing: Cell::new(false),
     });
     let def = |name: &str, f: Js| {
@@ -548,10 +584,30 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         );
     }
     let _ = socket.define("messageHandlers", Js::object(vec![]));
-    let _ = socket.define("lastReceived", Js::Number(0.0));
+    {
+        let (reader, writer) = (core.clone(), core.clone());
+        socket.define_accessor(
+            "lastReceived",
+            Some(Rc::new(move |_| {
+                Ok(Js::Number(reader.base.get().map_or_else(
+                    || reader.last_received.get(),
+                    |base| base.last_received(),
+                )))
+            })),
+            Some(Rc::new(move |_, value: Js| {
+                let value = value.to_number()?;
+                writer.last_received.set(value);
+                if let Some(base) = writer.base.get() {
+                    base.set_last_received(value);
+                }
+                Ok(())
+            })),
+        );
+    }
     // TS field initializers. The Rust core owns ping/pong and reconnect timing,
     // so these are the derived classes' own state, not views of the core.
     for (field, value) in [
+        ("recoversAfterOffline", Js::Bool(true)),
         ("lastCloseTime", Js::Number(0.0)),
         ("onCloseCount", Js::Number(0.0)),
         ("reconnecting", Js::Bool(false)),
@@ -618,6 +674,16 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
             "trackLastReceived",
             Js::function("trackLastReceived", move |_, _| {
                 core.base()?.track_last_received().map_err(ex)?;
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let core = core.clone();
+        def(
+            "checkLastReceived",
+            Js::function("checkLastReceived", move |_, _| {
+                core.base()?.check_last_received().map_err(ex)?;
                 Ok(Js::Undefined)
             }),
         );
