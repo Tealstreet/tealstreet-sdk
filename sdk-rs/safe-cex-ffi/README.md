@@ -27,6 +27,14 @@ instructions if missing. Setup does not install Bun.
 `CARGO` can specify the Cargo executable. Build output is ignored under `dist/`;
 both smokes rebuild before executing and fail on errors/timeouts.
 
+`tests/native-account-placement.test.mjs` exercises client-ID minting/placement,
+option capability errors and nuke dispatch through the real Node addon, using a
+loopback public-data gateway and HTTP server. Run it after
+`node sdk-rs/safe-cex-ffi/scripts/build.mjs node` with
+`node --test sdk-rs/safe-cex-ffi/tests/native-account-placement.test.mjs`.
+The matching scoped Rust suite is
+`cargo test -p safe-cex-registry --test native_account_placement` from `sdk-rs`.
+
 With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 `nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
 JSON account host. Events and private Store slices are forwarded to JS; signing
