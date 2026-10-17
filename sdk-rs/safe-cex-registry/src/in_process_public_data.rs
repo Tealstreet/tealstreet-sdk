@@ -1,6 +1,9 @@
 use crate::{
     public_data::EXTERNAL_PUBLIC_DATA_RECONNECT_THRESHOLD_MS,
-    public_data_host::{PublicDataCleanup, PublicDataParent, PublicDataSnapshot, PublicDataUpdate},
+    public_data_host::{
+        MarketBatch, PublicDataCleanup, PublicDataParent, PublicDataSnapshot, PublicDataUpdate,
+        TickerBatch,
+    },
 };
 use safe_cex_exchange::runtime::{ExchangeError, LogSeverity};
 use safe_cex_types::{Candle, OHLCVOptions, OrderBook};
