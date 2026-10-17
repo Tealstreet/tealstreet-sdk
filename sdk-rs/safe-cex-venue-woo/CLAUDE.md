@@ -390,3 +390,11 @@ already-ported trigger predicate stays an extra observation. Record/array/String
 allowed-enum outputs retain D800 in source and have explicit whole-input native
 refusals. Ownership, live-method and fixed-intrinsic costs remain separately priced.
 The ledger tracks cumulative discoveries and each zero-code cohort independently.
+
+The first accepted-set batch reviews 32 V3 string enum owners independently,
+including every declared tag and tagged-object refusal through four native
+entry paths. Twenty older derived enums now use the same String admission and
+private remote schema as `v3_contracts`. See
+[accepted contract review and focused commands](ACCEPTED_CONTRACT_REVIEW.md).
+The focused runner retains full compiler discovery and selected-source scope
+checks; it does not classify the remaining Woo owners or aliases.

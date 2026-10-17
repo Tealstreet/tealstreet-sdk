@@ -348,6 +348,14 @@ from the actual live native signing/auth targets and per-body mutation controls.
 SigningValue admission, other owners and the existing domain boundaries remain
 independent obligations; no production behavior or manifest status is changed.
 
+
+The websocket accepted-contract slice separately reviews seventeen captured
+native field carriers and the private field guard/borrow helper. See
+WS_RECORD_CONTRACT_REVIEW.md and scripts/ws-record-contracts.mjs for independent
+field/presence/bit/cardinality cases and mutation controls. This is the declared
+static projection boundary, with no JSON/property binding or live alias claim.
+Other owners, aliases, construction and full discovery/matrix remain owed.
+
 The twenty-owner helper batch reviews three enum-returning mapping decoders and
 seventeen specific comparison/rendering/dispatch/state roles. Every owner has a
 direct native witness and individual compiling body control; compiler

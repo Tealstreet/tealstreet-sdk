@@ -91,3 +91,7 @@ pub mod core_exchange_class;
 pub mod core_exchange_leaves;
 
 pub mod spot_binding;
+
+#[cfg(test)]
+#[path = "../tests/support/accepted_projection_aliases.rs"]
+mod accepted_projection_aliases;

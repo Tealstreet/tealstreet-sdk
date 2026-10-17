@@ -1,0 +1,6558 @@
+{
+  "safe_cex_venue_woo::v3_contracts::WooV3Endpoint": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WOO_V3_ENDPOINTS/WooV3Endpoint. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "/v3/public/instruments",
+      "/v3/public/futures",
+      "/v3/public/orderbook",
+      "/v3/public/kline",
+      "/v3/public/klineHistory",
+      "/v3/trade/order",
+      "/v3/trade/orders",
+      "/v3/trade/algoOrder",
+      "/v3/trade/algoOrders",
+      "/v3/trade/allOrders",
+      "/v3/trade/cancelAllAfter",
+      "/v3/trade/transactionHistory",
+      "/v3/account/info",
+      "/v3/account/listenKey",
+      "/v3/asset/balances",
+      "/v3/futures/positions",
+      "/v3/futures/positionMode",
+      "/v3/futures/leverage",
+      "/v3/spotMargin/leverage"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::PublicInstruments => \"PublicInstruments\", $type::PublicFutures => \"PublicFutures\", $type::PublicOrderbook => \"PublicOrderbook\", $type::PublicKline => \"PublicKline\", $type::PublicKlineHistory => \"PublicKlineHistory\", $type::TradeOrder => \"TradeOrder\", $type::TradeOrders => \"TradeOrders\", $type::TradeAlgoOrder => \"TradeAlgoOrder\", $type::TradeAlgoOrders => \"TradeAlgoOrders\", $type::TradeAllOrders => \"TradeAllOrders\", $type::TradeCancelAllAfter => \"TradeCancelAllAfter\", $type::TransactionHistory => \"TransactionHistory\", $type::AccountInfo => \"AccountInfo\", $type::AccountListenKey => \"AccountListenKey\", $type::AssetBalances => \"AssetBalances\", $type::FuturesPositions => \"FuturesPositions\", $type::FuturesPositionMode => \"FuturesPositionMode\", $type::FuturesLeverage => \"FuturesLeverage\", $type::SpotMarginLeverage => \"SpotMarginLeverage\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "/v3/public/instruments",
+          "output": {
+            "owned": "PublicInstruments",
+            "borrowed": "PublicInstruments",
+            "qualified": "PublicInstruments",
+            "raw": "PublicInstruments"
+          }
+        },
+        {
+          "input": "/v3/public/futures",
+          "output": {
+            "owned": "PublicFutures",
+            "borrowed": "PublicFutures",
+            "qualified": "PublicFutures",
+            "raw": "PublicFutures"
+          }
+        },
+        {
+          "input": "/v3/public/orderbook",
+          "output": {
+            "owned": "PublicOrderbook",
+            "borrowed": "PublicOrderbook",
+            "qualified": "PublicOrderbook",
+            "raw": "PublicOrderbook"
+          }
+        },
+        {
+          "input": "/v3/public/kline",
+          "output": {
+            "owned": "PublicKline",
+            "borrowed": "PublicKline",
+            "qualified": "PublicKline",
+            "raw": "PublicKline"
+          }
+        },
+        {
+          "input": "/v3/public/klineHistory",
+          "output": {
+            "owned": "PublicKlineHistory",
+            "borrowed": "PublicKlineHistory",
+            "qualified": "PublicKlineHistory",
+            "raw": "PublicKlineHistory"
+          }
+        },
+        {
+          "input": "/v3/trade/order",
+          "output": {
+            "owned": "TradeOrder",
+            "borrowed": "TradeOrder",
+            "qualified": "TradeOrder",
+            "raw": "TradeOrder"
+          }
+        },
+        {
+          "input": "/v3/trade/orders",
+          "output": {
+            "owned": "TradeOrders",
+            "borrowed": "TradeOrders",
+            "qualified": "TradeOrders",
+            "raw": "TradeOrders"
+          }
+        },
+        {
+          "input": "/v3/trade/algoOrder",
+          "output": {
+            "owned": "TradeAlgoOrder",
+            "borrowed": "TradeAlgoOrder",
+            "qualified": "TradeAlgoOrder",
+            "raw": "TradeAlgoOrder"
+          }
+        },
+        {
+          "input": "/v3/trade/algoOrders",
+          "output": {
+            "owned": "TradeAlgoOrders",
+            "borrowed": "TradeAlgoOrders",
+            "qualified": "TradeAlgoOrders",
+            "raw": "TradeAlgoOrders"
+          }
+        },
+        {
+          "input": "/v3/trade/allOrders",
+          "output": {
+            "owned": "TradeAllOrders",
+            "borrowed": "TradeAllOrders",
+            "qualified": "TradeAllOrders",
+            "raw": "TradeAllOrders"
+          }
+        },
+        {
+          "input": "/v3/trade/cancelAllAfter",
+          "output": {
+            "owned": "TradeCancelAllAfter",
+            "borrowed": "TradeCancelAllAfter",
+            "qualified": "TradeCancelAllAfter",
+            "raw": "TradeCancelAllAfter"
+          }
+        },
+        {
+          "input": "/v3/trade/transactionHistory",
+          "output": {
+            "owned": "TransactionHistory",
+            "borrowed": "TransactionHistory",
+            "qualified": "TransactionHistory",
+            "raw": "TransactionHistory"
+          }
+        },
+        {
+          "input": "/v3/account/info",
+          "output": {
+            "owned": "AccountInfo",
+            "borrowed": "AccountInfo",
+            "qualified": "AccountInfo",
+            "raw": "AccountInfo"
+          }
+        },
+        {
+          "input": "/v3/account/listenKey",
+          "output": {
+            "owned": "AccountListenKey",
+            "borrowed": "AccountListenKey",
+            "qualified": "AccountListenKey",
+            "raw": "AccountListenKey"
+          }
+        },
+        {
+          "input": "/v3/asset/balances",
+          "output": {
+            "owned": "AssetBalances",
+            "borrowed": "AssetBalances",
+            "qualified": "AssetBalances",
+            "raw": "AssetBalances"
+          }
+        },
+        {
+          "input": "/v3/futures/positions",
+          "output": {
+            "owned": "FuturesPositions",
+            "borrowed": "FuturesPositions",
+            "qualified": "FuturesPositions",
+            "raw": "FuturesPositions"
+          }
+        },
+        {
+          "input": "/v3/futures/positionMode",
+          "output": {
+            "owned": "FuturesPositionMode",
+            "borrowed": "FuturesPositionMode",
+            "qualified": "FuturesPositionMode",
+            "raw": "FuturesPositionMode"
+          }
+        },
+        {
+          "input": "/v3/futures/leverage",
+          "output": {
+            "owned": "FuturesLeverage",
+            "borrowed": "FuturesLeverage",
+            "qualified": "FuturesLeverage",
+            "raw": "FuturesLeverage"
+          }
+        },
+        {
+          "input": "/v3/spotMargin/leverage",
+          "output": {
+            "owned": "SpotMarginLeverage",
+            "borrowed": "SpotMarginLeverage",
+            "qualified": "SpotMarginLeverage",
+            "raw": "SpotMarginLeverage"
+          }
+        },
+        {
+          "input": {
+            "/v3/public/instruments": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/public/futures": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/public/orderbook": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/public/kline": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/public/klineHistory": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/trade/order": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/trade/orders": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/trade/algoOrder": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/trade/algoOrders": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/trade/allOrders": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/trade/cancelAllAfter": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/trade/transactionHistory": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/account/info": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/account/listenKey": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/asset/balances": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/futures/positions": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/futures/positionMode": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/futures/leverage": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "/v3/spotMargin/leverage": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "/v3/public/instruments"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " /v3/public/instruments",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "/v3/public/instruments ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeff/v3/public/instruments",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3HttpMethod": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3HttpMethod. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Get => \"Get\", $type::Post => \"Post\", $type::Put => \"Put\", $type::Delete => \"Delete\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "GET",
+          "output": {
+            "owned": "Get",
+            "borrowed": "Get",
+            "qualified": "Get",
+            "raw": "Get"
+          }
+        },
+        {
+          "input": "POST",
+          "output": {
+            "owned": "Post",
+            "borrowed": "Post",
+            "qualified": "Post",
+            "raw": "Post"
+          }
+        },
+        {
+          "input": "PUT",
+          "output": {
+            "owned": "Put",
+            "borrowed": "Put",
+            "qualified": "Put",
+            "raw": "Put"
+          }
+        },
+        {
+          "input": "DELETE",
+          "output": {
+            "owned": "Delete",
+            "borrowed": "Delete",
+            "qualified": "Delete",
+            "raw": "Delete"
+          }
+        },
+        {
+          "input": {
+            "GET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POST": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "PUT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "DELETE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "GET"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " GET",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "GET ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffGET",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3MigrationGate": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3MigrationGate. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "publicReadParity",
+      "privateReadParity",
+      "regularWriteDemoLifecycle",
+      "algoWriteDemoLifecycle",
+      "cancelAllAfterDemoLifecycle",
+      "accountWriteDemoLifecycle",
+      "publicWebsocketParity",
+      "privateWebsocketParity"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::PublicReadParity => \"PublicReadParity\", $type::PrivateReadParity => \"PrivateReadParity\", $type::RegularWriteDemoLifecycle => \"RegularWriteDemoLifecycle\", $type::AlgoWriteDemoLifecycle => \"AlgoWriteDemoLifecycle\", $type::CancelAllAfterDemoLifecycle => \"CancelAllAfterDemoLifecycle\", $type::AccountWriteDemoLifecycle => \"AccountWriteDemoLifecycle\", $type::PublicWebsocketParity => \"PublicWebsocketParity\", $type::PrivateWebsocketParity => \"PrivateWebsocketParity\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "publicReadParity",
+          "output": {
+            "owned": "PublicReadParity",
+            "borrowed": "PublicReadParity",
+            "qualified": "PublicReadParity",
+            "raw": "PublicReadParity"
+          }
+        },
+        {
+          "input": "privateReadParity",
+          "output": {
+            "owned": "PrivateReadParity",
+            "borrowed": "PrivateReadParity",
+            "qualified": "PrivateReadParity",
+            "raw": "PrivateReadParity"
+          }
+        },
+        {
+          "input": "regularWriteDemoLifecycle",
+          "output": {
+            "owned": "RegularWriteDemoLifecycle",
+            "borrowed": "RegularWriteDemoLifecycle",
+            "qualified": "RegularWriteDemoLifecycle",
+            "raw": "RegularWriteDemoLifecycle"
+          }
+        },
+        {
+          "input": "algoWriteDemoLifecycle",
+          "output": {
+            "owned": "AlgoWriteDemoLifecycle",
+            "borrowed": "AlgoWriteDemoLifecycle",
+            "qualified": "AlgoWriteDemoLifecycle",
+            "raw": "AlgoWriteDemoLifecycle"
+          }
+        },
+        {
+          "input": "cancelAllAfterDemoLifecycle",
+          "output": {
+            "owned": "CancelAllAfterDemoLifecycle",
+            "borrowed": "CancelAllAfterDemoLifecycle",
+            "qualified": "CancelAllAfterDemoLifecycle",
+            "raw": "CancelAllAfterDemoLifecycle"
+          }
+        },
+        {
+          "input": "accountWriteDemoLifecycle",
+          "output": {
+            "owned": "AccountWriteDemoLifecycle",
+            "borrowed": "AccountWriteDemoLifecycle",
+            "qualified": "AccountWriteDemoLifecycle",
+            "raw": "AccountWriteDemoLifecycle"
+          }
+        },
+        {
+          "input": "publicWebsocketParity",
+          "output": {
+            "owned": "PublicWebsocketParity",
+            "borrowed": "PublicWebsocketParity",
+            "qualified": "PublicWebsocketParity",
+            "raw": "PublicWebsocketParity"
+          }
+        },
+        {
+          "input": "privateWebsocketParity",
+          "output": {
+            "owned": "PrivateWebsocketParity",
+            "borrowed": "PrivateWebsocketParity",
+            "qualified": "PrivateWebsocketParity",
+            "raw": "PrivateWebsocketParity"
+          }
+        },
+        {
+          "input": {
+            "publicReadParity": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "privateReadParity": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "regularWriteDemoLifecycle": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "algoWriteDemoLifecycle": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "cancelAllAfterDemoLifecycle": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "accountWriteDemoLifecycle": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "publicWebsocketParity": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "privateWebsocketParity": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "publicReadParity"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " publicReadParity",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "publicReadParity ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffpublicReadParity",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3MigrationRouteRuntimeLifecycle": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3MigrationRoute.runtimeLifecycle. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "already-v3",
+      "ownerless"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::AlreadyV3 => \"AlreadyV3\", $type::Ownerless => \"Ownerless\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "already-v3",
+          "output": {
+            "owned": "AlreadyV3",
+            "borrowed": "AlreadyV3",
+            "qualified": "AlreadyV3",
+            "raw": "AlreadyV3"
+          }
+        },
+        {
+          "input": "ownerless",
+          "output": {
+            "owned": "Ownerless",
+            "borrowed": "Ownerless",
+            "qualified": "Ownerless",
+            "raw": "Ownerless"
+          }
+        },
+        {
+          "input": {
+            "already-v3": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "ownerless": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "already-v3"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " already-v3",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "already-v3 ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffalready-v3",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3PositionPositionSide": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3Position.positionSide. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "BOTH",
+      "LONG",
+      "SHORT"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Both => \"Both\", $type::Long => \"Long\", $type::Short => \"Short\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "BOTH",
+          "output": {
+            "owned": "Both",
+            "borrowed": "Both",
+            "qualified": "Both",
+            "raw": "Both"
+          }
+        },
+        {
+          "input": "LONG",
+          "output": {
+            "owned": "Long",
+            "borrowed": "Long",
+            "qualified": "Long",
+            "raw": "Long"
+          }
+        },
+        {
+          "input": "SHORT",
+          "output": {
+            "owned": "Short",
+            "borrowed": "Short",
+            "qualified": "Short",
+            "raw": "Short"
+          }
+        },
+        {
+          "input": {
+            "BOTH": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "LONG": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "SHORT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "BOTH"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " BOTH",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "BOTH ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffBOTH",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3AccountInfoPositionMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3AccountInfo.positionMode. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "ONE_WAY",
+      "HEDGE_MODE"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::OneWay => \"OneWay\", $type::HedgeMode => \"HedgeMode\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "ONE_WAY",
+          "output": {
+            "owned": "OneWay",
+            "borrowed": "OneWay",
+            "qualified": "OneWay",
+            "raw": "OneWay"
+          }
+        },
+        {
+          "input": "HEDGE_MODE",
+          "output": {
+            "owned": "HedgeMode",
+            "borrowed": "HedgeMode",
+            "qualified": "HedgeMode",
+            "raw": "HedgeMode"
+          }
+        },
+        {
+          "input": {
+            "ONE_WAY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "HEDGE_MODE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "ONE_WAY"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " ONE_WAY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "ONE_WAY ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffONE_WAY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3PlaceOrderRequestSide": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3PlaceOrderRequest.side. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "BUY",
+      "SELL"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Buy => \"Buy\", $type::Sell => \"Sell\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "BUY",
+          "output": {
+            "owned": "Buy",
+            "borrowed": "Buy",
+            "qualified": "Buy",
+            "raw": "Buy"
+          }
+        },
+        {
+          "input": "SELL",
+          "output": {
+            "owned": "Sell",
+            "borrowed": "Sell",
+            "qualified": "Sell",
+            "raw": "Sell"
+          }
+        },
+        {
+          "input": {
+            "BUY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "SELL": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "BUY"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " BUY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "BUY ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffBUY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3PlaceOrderRequestType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3PlaceOrderRequest.type. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "LIMIT",
+      "MARKET",
+      "IOC",
+      "FOK",
+      "POST_ONLY",
+      "ASK",
+      "BID",
+      "AC",
+      "RPI"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Limit => \"Limit\", $type::Market => \"Market\", $type::Ioc => \"Ioc\", $type::Fok => \"Fok\", $type::PostOnly => \"PostOnly\", $type::Ask => \"Ask\", $type::Bid => \"Bid\", $type::Ac => \"Ac\", $type::Rpi => \"Rpi\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "LIMIT",
+          "output": {
+            "owned": "Limit",
+            "borrowed": "Limit",
+            "qualified": "Limit",
+            "raw": "Limit"
+          }
+        },
+        {
+          "input": "MARKET",
+          "output": {
+            "owned": "Market",
+            "borrowed": "Market",
+            "qualified": "Market",
+            "raw": "Market"
+          }
+        },
+        {
+          "input": "IOC",
+          "output": {
+            "owned": "Ioc",
+            "borrowed": "Ioc",
+            "qualified": "Ioc",
+            "raw": "Ioc"
+          }
+        },
+        {
+          "input": "FOK",
+          "output": {
+            "owned": "Fok",
+            "borrowed": "Fok",
+            "qualified": "Fok",
+            "raw": "Fok"
+          }
+        },
+        {
+          "input": "POST_ONLY",
+          "output": {
+            "owned": "PostOnly",
+            "borrowed": "PostOnly",
+            "qualified": "PostOnly",
+            "raw": "PostOnly"
+          }
+        },
+        {
+          "input": "ASK",
+          "output": {
+            "owned": "Ask",
+            "borrowed": "Ask",
+            "qualified": "Ask",
+            "raw": "Ask"
+          }
+        },
+        {
+          "input": "BID",
+          "output": {
+            "owned": "Bid",
+            "borrowed": "Bid",
+            "qualified": "Bid",
+            "raw": "Bid"
+          }
+        },
+        {
+          "input": "AC",
+          "output": {
+            "owned": "Ac",
+            "borrowed": "Ac",
+            "qualified": "Ac",
+            "raw": "Ac"
+          }
+        },
+        {
+          "input": "RPI",
+          "output": {
+            "owned": "Rpi",
+            "borrowed": "Rpi",
+            "qualified": "Rpi",
+            "raw": "Rpi"
+          }
+        },
+        {
+          "input": {
+            "LIMIT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "MARKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "IOC": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "FOK": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POST_ONLY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "ASK": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "BID": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "AC": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "RPI": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "LIMIT"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " LIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "LIMIT ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffLIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3PlaceOrderRequestPositionSide": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3PlaceOrderRequest.positionSide. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "BOTH",
+      "LONG",
+      "SHORT"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Both => \"Both\", $type::Long => \"Long\", $type::Short => \"Short\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "BOTH",
+          "output": {
+            "owned": "Both",
+            "borrowed": "Both",
+            "qualified": "Both",
+            "raw": "Both"
+          }
+        },
+        {
+          "input": "LONG",
+          "output": {
+            "owned": "Long",
+            "borrowed": "Long",
+            "qualified": "Long",
+            "raw": "Long"
+          }
+        },
+        {
+          "input": "SHORT",
+          "output": {
+            "owned": "Short",
+            "borrowed": "Short",
+            "qualified": "Short",
+            "raw": "Short"
+          }
+        },
+        {
+          "input": {
+            "BOTH": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "LONG": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "SHORT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "BOTH"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " BOTH",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "BOTH ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffBOTH",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3PlaceOrderRequestMarginMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3PlaceOrderRequest.marginMode. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "CROSS",
+      "ISOLATED"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Cross => \"Cross\", $type::Isolated => \"Isolated\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "CROSS",
+          "output": {
+            "owned": "Cross",
+            "borrowed": "Cross",
+            "qualified": "Cross",
+            "raw": "Cross"
+          }
+        },
+        {
+          "input": "ISOLATED",
+          "output": {
+            "owned": "Isolated",
+            "borrowed": "Isolated",
+            "qualified": "Isolated",
+            "raw": "Isolated"
+          }
+        },
+        {
+          "input": {
+            "CROSS": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "ISOLATED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "CROSS"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " CROSS",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "CROSS ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffCROSS",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3PlaceOrderRequestBidAskLevel": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3PlaceOrderRequest.bidAskLevel. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Level1 => \"Level1\", $type::Level2 => \"Level2\", $type::Level3 => \"Level3\", $type::Level4 => \"Level4\", $type::Level5 => \"Level5\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "1",
+          "output": {
+            "owned": "Level1",
+            "borrowed": "Level1",
+            "qualified": "Level1",
+            "raw": "Level1"
+          }
+        },
+        {
+          "input": "2",
+          "output": {
+            "owned": "Level2",
+            "borrowed": "Level2",
+            "qualified": "Level2",
+            "raw": "Level2"
+          }
+        },
+        {
+          "input": "3",
+          "output": {
+            "owned": "Level3",
+            "borrowed": "Level3",
+            "qualified": "Level3",
+            "raw": "Level3"
+          }
+        },
+        {
+          "input": "4",
+          "output": {
+            "owned": "Level4",
+            "borrowed": "Level4",
+            "qualified": "Level4",
+            "raw": "Level4"
+          }
+        },
+        {
+          "input": "5",
+          "output": {
+            "owned": "Level5",
+            "borrowed": "Level5",
+            "qualified": "Level5",
+            "raw": "Level5"
+          }
+        },
+        {
+          "input": {
+            "1": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "2": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "3": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "4": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "5": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "1"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " 1",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "1 ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeff1",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_contracts::WooV3ListenKeyRequestType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.contracts.ts::WooV3ListenKeyRequest.type. Individually reviewed closed literal domain; actual Rust variants are observed through owned, borrowed, qualified and raw-text Deserialize. Tagged-null maps for EVERY valid tag are forbidden. These inert declaration identities do not enable any V3 migration gate.",
+    "entrypoints": [],
+    "literals": [
+      "WEBSOCKET"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Websocket => \"Websocket\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "WEBSOCKET",
+          "output": {
+            "owned": "Websocket",
+            "borrowed": "Websocket",
+            "qualified": "Websocket",
+            "raw": "Websocket"
+          }
+        },
+        {
+          "input": {
+            "WEBSOCKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "WEBSOCKET"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " WEBSOCKET",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "WEBSOCKET ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffWEBSOCKET",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_account_writes::WooV3AccountPositionMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.account-writes.ts::WooV3AccountPositionMode. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "ONE_WAY",
+      "HEDGE_MODE"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::OneWay => \"OneWay\", $type::HedgeMode => \"HedgeMode\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "ONE_WAY",
+          "output": {
+            "owned": "OneWay",
+            "borrowed": "OneWay",
+            "qualified": "OneWay",
+            "raw": "OneWay"
+          }
+        },
+        {
+          "input": "HEDGE_MODE",
+          "output": {
+            "owned": "HedgeMode",
+            "borrowed": "HedgeMode",
+            "qualified": "HedgeMode",
+            "raw": "HedgeMode"
+          }
+        },
+        {
+          "input": {
+            "ONE_WAY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "HEDGE_MODE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "ONE_WAY"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " ONE_WAY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "ONE_WAY ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffONE_WAY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_account_writes::WooV3FuturesMarginMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.account-writes.ts::WooV3FuturesMarginMode. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "CROSS",
+      "ISOLATED"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Cross => \"Cross\", $type::Isolated => \"Isolated\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "CROSS",
+          "output": {
+            "owned": "Cross",
+            "borrowed": "Cross",
+            "qualified": "Cross",
+            "raw": "Cross"
+          }
+        },
+        {
+          "input": "ISOLATED",
+          "output": {
+            "owned": "Isolated",
+            "borrowed": "Isolated",
+            "qualified": "Isolated",
+            "raw": "Isolated"
+          }
+        },
+        {
+          "input": {
+            "CROSS": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "ISOLATED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "CROSS"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " CROSS",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "CROSS ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffCROSS",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private::WooV3AccountMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3AccountMode. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "MARGIN",
+      "SPOT"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Margin => \"Margin\", $type::Spot => \"Spot\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "MARGIN",
+          "output": {
+            "owned": "Margin",
+            "borrowed": "Margin",
+            "qualified": "Margin",
+            "raw": "Margin"
+          }
+        },
+        {
+          "input": "SPOT",
+          "output": {
+            "owned": "Spot",
+            "borrowed": "Spot",
+            "qualified": "Spot",
+            "raw": "Spot"
+          }
+        },
+        {
+          "input": {
+            "MARGIN": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "SPOT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "MARGIN"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " MARGIN",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "MARGIN ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffMARGIN",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private::WooV3AccountPositionMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3AccountPositionMode. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "ONE_WAY",
+      "HEDGE_MODE"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::OneWay => \"OneWay\", $type::HedgeMode => \"HedgeMode\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "ONE_WAY",
+          "output": {
+            "owned": "OneWay",
+            "borrowed": "OneWay",
+            "qualified": "OneWay",
+            "raw": "OneWay"
+          }
+        },
+        {
+          "input": "HEDGE_MODE",
+          "output": {
+            "owned": "HedgeMode",
+            "borrowed": "HedgeMode",
+            "qualified": "HedgeMode",
+            "raw": "HedgeMode"
+          }
+        },
+        {
+          "input": {
+            "ONE_WAY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "HEDGE_MODE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "ONE_WAY"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " ONE_WAY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "ONE_WAY ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffONE_WAY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private::WooV3PositionSide": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3PositionSide. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "BOTH",
+      "LONG",
+      "SHORT"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Both => \"Both\", $type::Long => \"Long\", $type::Short => \"Short\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "BOTH",
+          "output": {
+            "owned": "Both",
+            "borrowed": "Both",
+            "qualified": "Both",
+            "raw": "Both"
+          }
+        },
+        {
+          "input": "LONG",
+          "output": {
+            "owned": "Long",
+            "borrowed": "Long",
+            "qualified": "Long",
+            "raw": "Long"
+          }
+        },
+        {
+          "input": "SHORT",
+          "output": {
+            "owned": "Short",
+            "borrowed": "Short",
+            "qualified": "Short",
+            "raw": "Short"
+          }
+        },
+        {
+          "input": {
+            "BOTH": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "LONG": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "SHORT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "BOTH"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " BOTH",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "BOTH ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffBOTH",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private_orders::WooV3OrderSide": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3OrderSide. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "BUY",
+      "SELL"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Buy => \"Buy\", $type::Sell => \"Sell\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "BUY",
+          "output": {
+            "owned": "Buy",
+            "borrowed": "Buy",
+            "qualified": "Buy",
+            "raw": "Buy"
+          }
+        },
+        {
+          "input": "SELL",
+          "output": {
+            "owned": "Sell",
+            "borrowed": "Sell",
+            "qualified": "Sell",
+            "raw": "Sell"
+          }
+        },
+        {
+          "input": {
+            "BUY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "SELL": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "BUY"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " BUY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "BUY ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffBUY",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private_orders::WooV3OrderStatus": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3OrderStatus. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "NEW",
+      "CANCELLED",
+      "PARTIAL_FILLED",
+      "FILLED",
+      "REJECTED"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::New => \"New\", $type::Cancelled => \"Cancelled\", $type::PartialFilled => \"PartialFilled\", $type::Filled => \"Filled\", $type::Rejected => \"Rejected\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "NEW",
+          "output": {
+            "owned": "New",
+            "borrowed": "New",
+            "qualified": "New",
+            "raw": "New"
+          }
+        },
+        {
+          "input": "CANCELLED",
+          "output": {
+            "owned": "Cancelled",
+            "borrowed": "Cancelled",
+            "qualified": "Cancelled",
+            "raw": "Cancelled"
+          }
+        },
+        {
+          "input": "PARTIAL_FILLED",
+          "output": {
+            "owned": "PartialFilled",
+            "borrowed": "PartialFilled",
+            "qualified": "PartialFilled",
+            "raw": "PartialFilled"
+          }
+        },
+        {
+          "input": "FILLED",
+          "output": {
+            "owned": "Filled",
+            "borrowed": "Filled",
+            "qualified": "Filled",
+            "raw": "Filled"
+          }
+        },
+        {
+          "input": "REJECTED",
+          "output": {
+            "owned": "Rejected",
+            "borrowed": "Rejected",
+            "qualified": "Rejected",
+            "raw": "Rejected"
+          }
+        },
+        {
+          "input": {
+            "NEW": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "CANCELLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "PARTIAL_FILLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "FILLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "REJECTED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "NEW"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " NEW",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "NEW ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffNEW",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private_orders::WooV3RegularOrderType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3RegularOrderType. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "LIMIT",
+      "MARKET",
+      "IOC",
+      "POST_ONLY",
+      "AC",
+      "FOK",
+      "LIQUIDATE",
+      "BID",
+      "ASK",
+      "RPI",
+      "LIQUIDATE_BLP",
+      "ADL"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Limit => \"Limit\", $type::Market => \"Market\", $type::Ioc => \"Ioc\", $type::PostOnly => \"PostOnly\", $type::Ac => \"Ac\", $type::Fok => \"Fok\", $type::Liquidate => \"Liquidate\", $type::Bid => \"Bid\", $type::Ask => \"Ask\", $type::Rpi => \"Rpi\", $type::LiquidateBlp => \"LiquidateBlp\", $type::Adl => \"Adl\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "LIMIT",
+          "output": {
+            "owned": "Limit",
+            "borrowed": "Limit",
+            "qualified": "Limit",
+            "raw": "Limit"
+          }
+        },
+        {
+          "input": "MARKET",
+          "output": {
+            "owned": "Market",
+            "borrowed": "Market",
+            "qualified": "Market",
+            "raw": "Market"
+          }
+        },
+        {
+          "input": "IOC",
+          "output": {
+            "owned": "Ioc",
+            "borrowed": "Ioc",
+            "qualified": "Ioc",
+            "raw": "Ioc"
+          }
+        },
+        {
+          "input": "POST_ONLY",
+          "output": {
+            "owned": "PostOnly",
+            "borrowed": "PostOnly",
+            "qualified": "PostOnly",
+            "raw": "PostOnly"
+          }
+        },
+        {
+          "input": "AC",
+          "output": {
+            "owned": "Ac",
+            "borrowed": "Ac",
+            "qualified": "Ac",
+            "raw": "Ac"
+          }
+        },
+        {
+          "input": "FOK",
+          "output": {
+            "owned": "Fok",
+            "borrowed": "Fok",
+            "qualified": "Fok",
+            "raw": "Fok"
+          }
+        },
+        {
+          "input": "LIQUIDATE",
+          "output": {
+            "owned": "Liquidate",
+            "borrowed": "Liquidate",
+            "qualified": "Liquidate",
+            "raw": "Liquidate"
+          }
+        },
+        {
+          "input": "BID",
+          "output": {
+            "owned": "Bid",
+            "borrowed": "Bid",
+            "qualified": "Bid",
+            "raw": "Bid"
+          }
+        },
+        {
+          "input": "ASK",
+          "output": {
+            "owned": "Ask",
+            "borrowed": "Ask",
+            "qualified": "Ask",
+            "raw": "Ask"
+          }
+        },
+        {
+          "input": "RPI",
+          "output": {
+            "owned": "Rpi",
+            "borrowed": "Rpi",
+            "qualified": "Rpi",
+            "raw": "Rpi"
+          }
+        },
+        {
+          "input": "LIQUIDATE_BLP",
+          "output": {
+            "owned": "LiquidateBlp",
+            "borrowed": "LiquidateBlp",
+            "qualified": "LiquidateBlp",
+            "raw": "LiquidateBlp"
+          }
+        },
+        {
+          "input": "ADL",
+          "output": {
+            "owned": "Adl",
+            "borrowed": "Adl",
+            "qualified": "Adl",
+            "raw": "Adl"
+          }
+        },
+        {
+          "input": {
+            "LIMIT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "MARKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "IOC": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POST_ONLY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "AC": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "FOK": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "LIQUIDATE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "BID": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "ASK": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "RPI": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "LIQUIDATE_BLP": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "ADL": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "LIMIT"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " LIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "LIMIT ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffLIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private_orders::WooV3AlgoType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3AlgoType. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "STOP",
+      "OCO",
+      "TRAILING_STOP",
+      "POSITIONAL_TP_SL",
+      "TP_SL",
+      "BRACKET",
+      "STOP_BRACKET",
+      "TAKE_PROFIT",
+      "STOP_LOSS"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Stop => \"Stop\", $type::Oco => \"Oco\", $type::TrailingStop => \"TrailingStop\", $type::PositionalTpSl => \"PositionalTpSl\", $type::TpSl => \"TpSl\", $type::Bracket => \"Bracket\", $type::StopBracket => \"StopBracket\", $type::TakeProfit => \"TakeProfit\", $type::StopLoss => \"StopLoss\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "STOP",
+          "output": {
+            "owned": "Stop",
+            "borrowed": "Stop",
+            "qualified": "Stop",
+            "raw": "Stop"
+          }
+        },
+        {
+          "input": "OCO",
+          "output": {
+            "owned": "Oco",
+            "borrowed": "Oco",
+            "qualified": "Oco",
+            "raw": "Oco"
+          }
+        },
+        {
+          "input": "TRAILING_STOP",
+          "output": {
+            "owned": "TrailingStop",
+            "borrowed": "TrailingStop",
+            "qualified": "TrailingStop",
+            "raw": "TrailingStop"
+          }
+        },
+        {
+          "input": "POSITIONAL_TP_SL",
+          "output": {
+            "owned": "PositionalTpSl",
+            "borrowed": "PositionalTpSl",
+            "qualified": "PositionalTpSl",
+            "raw": "PositionalTpSl"
+          }
+        },
+        {
+          "input": "TP_SL",
+          "output": {
+            "owned": "TpSl",
+            "borrowed": "TpSl",
+            "qualified": "TpSl",
+            "raw": "TpSl"
+          }
+        },
+        {
+          "input": "BRACKET",
+          "output": {
+            "owned": "Bracket",
+            "borrowed": "Bracket",
+            "qualified": "Bracket",
+            "raw": "Bracket"
+          }
+        },
+        {
+          "input": "STOP_BRACKET",
+          "output": {
+            "owned": "StopBracket",
+            "borrowed": "StopBracket",
+            "qualified": "StopBracket",
+            "raw": "StopBracket"
+          }
+        },
+        {
+          "input": "TAKE_PROFIT",
+          "output": {
+            "owned": "TakeProfit",
+            "borrowed": "TakeProfit",
+            "qualified": "TakeProfit",
+            "raw": "TakeProfit"
+          }
+        },
+        {
+          "input": "STOP_LOSS",
+          "output": {
+            "owned": "StopLoss",
+            "borrowed": "StopLoss",
+            "qualified": "StopLoss",
+            "raw": "StopLoss"
+          }
+        },
+        {
+          "input": {
+            "STOP": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "OCO": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "TRAILING_STOP": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POSITIONAL_TP_SL": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "TP_SL": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "BRACKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "STOP_BRACKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "TAKE_PROFIT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "STOP_LOSS": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "STOP"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " STOP",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "STOP ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffSTOP",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private_orders::WooV3TriggerPriceType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3TriggerPriceType. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "MARKET_PRICE",
+      "INDEX_PRICE",
+      "LAST_PRICE"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::MarketPrice => \"MarketPrice\", $type::IndexPrice => \"IndexPrice\", $type::LastPrice => \"LastPrice\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "MARKET_PRICE",
+          "output": {
+            "owned": "MarketPrice",
+            "borrowed": "MarketPrice",
+            "qualified": "MarketPrice",
+            "raw": "MarketPrice"
+          }
+        },
+        {
+          "input": "INDEX_PRICE",
+          "output": {
+            "owned": "IndexPrice",
+            "borrowed": "IndexPrice",
+            "qualified": "IndexPrice",
+            "raw": "IndexPrice"
+          }
+        },
+        {
+          "input": "LAST_PRICE",
+          "output": {
+            "owned": "LastPrice",
+            "borrowed": "LastPrice",
+            "qualified": "LastPrice",
+            "raw": "LastPrice"
+          }
+        },
+        {
+          "input": {
+            "MARKET_PRICE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "INDEX_PRICE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "LAST_PRICE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "MARKET_PRICE"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " MARKET_PRICE",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "MARKET_PRICE ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffMARKET_PRICE",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private_orders::WooV3TriggerStatus": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3TriggerStatus. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "USELESS",
+      "TRIGGERED",
+      "CANCELLED",
+      "SUCCESS"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Useless => \"Useless\", $type::Triggered => \"Triggered\", $type::Cancelled => \"Cancelled\", $type::Success => \"Success\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "USELESS",
+          "output": {
+            "owned": "Useless",
+            "borrowed": "Useless",
+            "qualified": "Useless",
+            "raw": "Useless"
+          }
+        },
+        {
+          "input": "TRIGGERED",
+          "output": {
+            "owned": "Triggered",
+            "borrowed": "Triggered",
+            "qualified": "Triggered",
+            "raw": "Triggered"
+          }
+        },
+        {
+          "input": "CANCELLED",
+          "output": {
+            "owned": "Cancelled",
+            "borrowed": "Cancelled",
+            "qualified": "Cancelled",
+            "raw": "Cancelled"
+          }
+        },
+        {
+          "input": "SUCCESS",
+          "output": {
+            "owned": "Success",
+            "borrowed": "Success",
+            "qualified": "Success",
+            "raw": "Success"
+          }
+        },
+        {
+          "input": {
+            "USELESS": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "TRIGGERED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "CANCELLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "SUCCESS": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "USELESS"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " USELESS",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "USELESS ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffUSELESS",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_private_orders::WooV3MarginMode": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.private.ts::WooV3MarginMode. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "ISOLATED",
+      "CROSSED"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Isolated => \"Isolated\", $type::Crossed => \"Crossed\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "ISOLATED",
+          "output": {
+            "owned": "Isolated",
+            "borrowed": "Isolated",
+            "qualified": "Isolated",
+            "raw": "Isolated"
+          }
+        },
+        {
+          "input": "CROSSED",
+          "output": {
+            "owned": "Crossed",
+            "borrowed": "Crossed",
+            "qualified": "Crossed",
+            "raw": "Crossed"
+          }
+        },
+        {
+          "input": {
+            "ISOLATED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "CROSSED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "ISOLATED"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " ISOLATED",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "ISOLATED ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffISOLATED",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularTimeInForce": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.regular-writes.ts::WooV3RegularTimeInForce. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "GTC",
+      "IOC",
+      "FOK",
+      "POST_ONLY"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Gtc => \"Gtc\", $type::Ioc => \"Ioc\", $type::Fok => \"Fok\", $type::PostOnly => \"PostOnly\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "GTC",
+          "output": {
+            "owned": "Gtc",
+            "borrowed": "Gtc",
+            "qualified": "Gtc",
+            "raw": "Gtc"
+          }
+        },
+        {
+          "input": "IOC",
+          "output": {
+            "owned": "Ioc",
+            "borrowed": "Ioc",
+            "qualified": "Ioc",
+            "raw": "Ioc"
+          }
+        },
+        {
+          "input": "FOK",
+          "output": {
+            "owned": "Fok",
+            "borrowed": "Fok",
+            "qualified": "Fok",
+            "raw": "Fok"
+          }
+        },
+        {
+          "input": "POST_ONLY",
+          "output": {
+            "owned": "PostOnly",
+            "borrowed": "PostOnly",
+            "qualified": "PostOnly",
+            "raw": "PostOnly"
+          }
+        },
+        {
+          "input": {
+            "GTC": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "IOC": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "FOK": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POST_ONLY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "GTC"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " GTC",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "GTC ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffGTC",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularPlaceKind": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.regular-writes.ts::WooV3RegularPlaceInput.type. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "LIMIT",
+      "MARKET"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Limit => \"Limit\", $type::Market => \"Market\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "LIMIT",
+          "output": {
+            "owned": "Limit",
+            "borrowed": "Limit",
+            "qualified": "Limit",
+            "raw": "Limit"
+          }
+        },
+        {
+          "input": "MARKET",
+          "output": {
+            "owned": "Market",
+            "borrowed": "Market",
+            "qualified": "Market",
+            "raw": "Market"
+          }
+        },
+        {
+          "input": {
+            "LIMIT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "MARKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "LIMIT"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " LIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "LIMIT ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffLIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularPlaceType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.regular-writes.ts::WooV3RegularPlaceResult.type. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "LIMIT",
+      "MARKET",
+      "IOC",
+      "FOK",
+      "POST_ONLY"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Limit => \"Limit\", $type::Market => \"Market\", $type::Ioc => \"Ioc\", $type::Fok => \"Fok\", $type::PostOnly => \"PostOnly\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "LIMIT",
+          "output": {
+            "owned": "Limit",
+            "borrowed": "Limit",
+            "qualified": "Limit",
+            "raw": "Limit"
+          }
+        },
+        {
+          "input": "MARKET",
+          "output": {
+            "owned": "Market",
+            "borrowed": "Market",
+            "qualified": "Market",
+            "raw": "Market"
+          }
+        },
+        {
+          "input": "IOC",
+          "output": {
+            "owned": "Ioc",
+            "borrowed": "Ioc",
+            "qualified": "Ioc",
+            "raw": "Ioc"
+          }
+        },
+        {
+          "input": "FOK",
+          "output": {
+            "owned": "Fok",
+            "borrowed": "Fok",
+            "qualified": "Fok",
+            "raw": "Fok"
+          }
+        },
+        {
+          "input": "POST_ONLY",
+          "output": {
+            "owned": "PostOnly",
+            "borrowed": "PostOnly",
+            "qualified": "PostOnly",
+            "raw": "PostOnly"
+          }
+        },
+        {
+          "input": {
+            "LIMIT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "MARKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "IOC": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "FOK": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POST_ONLY": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "LIMIT"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " LIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "LIMIT ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffLIMIT",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularMutationStatus": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.regular-writes.ts::WooV3RegularMutationResult.status. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "NEW",
+      "CANCELLED",
+      "PARTIAL_FILLED",
+      "FILLED",
+      "REJECTED",
+      "INCOMPLETE",
+      "COMPLETED"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::New => \"New\", $type::Cancelled => \"Cancelled\", $type::PartialFilled => \"PartialFilled\", $type::Filled => \"Filled\", $type::Rejected => \"Rejected\", $type::Incomplete => \"Incomplete\", $type::Completed => \"Completed\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "NEW",
+          "output": {
+            "owned": "New",
+            "borrowed": "New",
+            "qualified": "New",
+            "raw": "New"
+          }
+        },
+        {
+          "input": "CANCELLED",
+          "output": {
+            "owned": "Cancelled",
+            "borrowed": "Cancelled",
+            "qualified": "Cancelled",
+            "raw": "Cancelled"
+          }
+        },
+        {
+          "input": "PARTIAL_FILLED",
+          "output": {
+            "owned": "PartialFilled",
+            "borrowed": "PartialFilled",
+            "qualified": "PartialFilled",
+            "raw": "PartialFilled"
+          }
+        },
+        {
+          "input": "FILLED",
+          "output": {
+            "owned": "Filled",
+            "borrowed": "Filled",
+            "qualified": "Filled",
+            "raw": "Filled"
+          }
+        },
+        {
+          "input": "REJECTED",
+          "output": {
+            "owned": "Rejected",
+            "borrowed": "Rejected",
+            "qualified": "Rejected",
+            "raw": "Rejected"
+          }
+        },
+        {
+          "input": "INCOMPLETE",
+          "output": {
+            "owned": "Incomplete",
+            "borrowed": "Incomplete",
+            "qualified": "Incomplete",
+            "raw": "Incomplete"
+          }
+        },
+        {
+          "input": "COMPLETED",
+          "output": {
+            "owned": "Completed",
+            "borrowed": "Completed",
+            "qualified": "Completed",
+            "raw": "Completed"
+          }
+        },
+        {
+          "input": {
+            "NEW": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "CANCELLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "PARTIAL_FILLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "FILLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "REJECTED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "INCOMPLETE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "COMPLETED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "NEW"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " NEW",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "NEW ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffNEW",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_regular_writes::WooV3RegularCancelStatus": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.regular-writes.ts::WooV3RegularCancelPendingResult.status. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "CANCELLED",
+      "REJECTED"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Cancelled => \"Cancelled\", $type::Rejected => \"Rejected\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "CANCELLED",
+          "output": {
+            "owned": "Cancelled",
+            "borrowed": "Cancelled",
+            "qualified": "Cancelled",
+            "raw": "Cancelled"
+          }
+        },
+        {
+          "input": "REJECTED",
+          "output": {
+            "owned": "Rejected",
+            "borrowed": "Rejected",
+            "qualified": "Rejected",
+            "raw": "Rejected"
+          }
+        },
+        {
+          "input": {
+            "CANCELLED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "REJECTED": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "CANCELLED"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " CANCELLED",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "CANCELLED ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffCANCELLED",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_algo_writes::WooV3AlgoTriggerPriceType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.algo-writes.ts::WooV3AlgoTriggerPriceType. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "MARKET_PRICE",
+      "MARK_PRICE",
+      "INDEX_PRICE",
+      "LAST_PRICE"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::MarketPrice => \"MarketPrice\", $type::MarkPrice => \"MarkPrice\", $type::IndexPrice => \"IndexPrice\", $type::LastPrice => \"LastPrice\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "MARKET_PRICE",
+          "output": {
+            "owned": "MarketPrice",
+            "borrowed": "MarketPrice",
+            "qualified": "MarketPrice",
+            "raw": "MarketPrice"
+          }
+        },
+        {
+          "input": "MARK_PRICE",
+          "output": {
+            "owned": "MarkPrice",
+            "borrowed": "MarkPrice",
+            "qualified": "MarkPrice",
+            "raw": "MarkPrice"
+          }
+        },
+        {
+          "input": "INDEX_PRICE",
+          "output": {
+            "owned": "IndexPrice",
+            "borrowed": "IndexPrice",
+            "qualified": "IndexPrice",
+            "raw": "IndexPrice"
+          }
+        },
+        {
+          "input": "LAST_PRICE",
+          "output": {
+            "owned": "LastPrice",
+            "borrowed": "LastPrice",
+            "qualified": "LastPrice",
+            "raw": "LastPrice"
+          }
+        },
+        {
+          "input": {
+            "MARKET_PRICE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "MARK_PRICE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "INDEX_PRICE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "LAST_PRICE": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "MARKET_PRICE"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " MARKET_PRICE",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "MARKET_PRICE ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffMARKET_PRICE",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_algo_writes::WooV3AlgoPlaceFamily": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.algo-writes.ts::WooV3AlgoPlaceInput.family. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "STOP_MARKET",
+      "TRAILING_STOP",
+      "POSITIONAL_TP_SL"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::StopMarket => \"StopMarket\", $type::TrailingStop => \"TrailingStop\", $type::PositionalTpSl => \"PositionalTpSl\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "STOP_MARKET",
+          "output": {
+            "owned": "StopMarket",
+            "borrowed": "StopMarket",
+            "qualified": "StopMarket",
+            "raw": "StopMarket"
+          }
+        },
+        {
+          "input": "TRAILING_STOP",
+          "output": {
+            "owned": "TrailingStop",
+            "borrowed": "TrailingStop",
+            "qualified": "TrailingStop",
+            "raw": "TrailingStop"
+          }
+        },
+        {
+          "input": "POSITIONAL_TP_SL",
+          "output": {
+            "owned": "PositionalTpSl",
+            "borrowed": "PositionalTpSl",
+            "qualified": "PositionalTpSl",
+            "raw": "PositionalTpSl"
+          }
+        },
+        {
+          "input": {
+            "STOP_MARKET": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "TRAILING_STOP": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POSITIONAL_TP_SL": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "STOP_MARKET"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " STOP_MARKET",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "STOP_MARKET ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffSTOP_MARKET",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_woo::v3_algo_writes::WooV3AlgoPlaceType": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/woo/woo.v3.algo-writes.ts::WooV3AlgoPlaceResponseRow.algoType. Individually reviewed closed string union. Native variants are inspected through owned, borrowed, qualified and raw-text Deserialize; every valid tagged-null map is forbidden. Declaration ingress does not enable inert V3 routes.",
+    "entrypoints": [],
+    "literals": [
+      "STOP",
+      "TRAILING_STOP",
+      "POSITIONAL_TP_SL",
+      "TAKE_PROFIT",
+      "STOP_LOSS"
+    ],
+    "observation": {
+      "call": "{ use serde::Deserialize as _; let observe = |result: Result<$type, serde_json::Error>| result.ok().map(|decoded| match decoded { $type::Stop => \"Stop\", $type::TrailingStop => \"TrailingStop\", $type::PositionalTpSl => \"PositionalTpSl\", $type::TakeProfit => \"TakeProfit\", $type::StopLoss => \"StopLoss\" }); let text = $value.to_string(); serde_json::json!({\"owned\":observe(serde_json::from_value::<$type>($value.clone())),\"borrowed\":observe(<$type as serde::Deserialize>::deserialize($value)),\"qualified\":observe($type::deserialize($value.clone())),\"raw\":observe(serde_json::from_str::<$type>(&text))}) }",
+      "cases": [
+        {
+          "input": "STOP",
+          "output": {
+            "owned": "Stop",
+            "borrowed": "Stop",
+            "qualified": "Stop",
+            "raw": "Stop"
+          }
+        },
+        {
+          "input": "TRAILING_STOP",
+          "output": {
+            "owned": "TrailingStop",
+            "borrowed": "TrailingStop",
+            "qualified": "TrailingStop",
+            "raw": "TrailingStop"
+          }
+        },
+        {
+          "input": "POSITIONAL_TP_SL",
+          "output": {
+            "owned": "PositionalTpSl",
+            "borrowed": "PositionalTpSl",
+            "qualified": "PositionalTpSl",
+            "raw": "PositionalTpSl"
+          }
+        },
+        {
+          "input": "TAKE_PROFIT",
+          "output": {
+            "owned": "TakeProfit",
+            "borrowed": "TakeProfit",
+            "qualified": "TakeProfit",
+            "raw": "TakeProfit"
+          }
+        },
+        {
+          "input": "STOP_LOSS",
+          "output": {
+            "owned": "StopLoss",
+            "borrowed": "StopLoss",
+            "qualified": "StopLoss",
+            "raw": "StopLoss"
+          }
+        },
+        {
+          "input": {
+            "STOP": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "TRAILING_STOP": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "POSITIONAL_TP_SL": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "TAKE_PROFIT": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {
+            "STOP_LOSS": null
+          },
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": 1,
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": [
+            "STOP"
+          ],
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "UNREVIEWED_LITERAL",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": " STOP",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "STOP ",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        },
+        {
+          "input": "\ufeffSTOP",
+          "output": {
+            "owned": null,
+            "borrowed": null,
+            "qualified": null,
+            "raw": null
+          }
+        }
+      ]
+    }
+  }
+}
