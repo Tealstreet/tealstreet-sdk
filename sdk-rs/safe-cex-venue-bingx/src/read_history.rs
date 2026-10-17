@@ -202,10 +202,10 @@ impl BingxReadHistory {
                     if mark.is_some_and(|m| {
                         m.is_finite()
                             && m > 0.0
-                            && ((order.side == OrderSide::Buy && order.price < m)
-                                || (order.side == OrderSide::Sell && order.price > m))
+                            && ((order.side == OrderSide::Buy && order.price.to_number() < m)
+                                || (order.side == OrderSide::Sell && order.price.to_number() > m))
                     }) {
-                        order.r#type = OrderType::TakeProfit;
+                        order.r#type = (OrderType::TakeProfit).into();
                         order.tp_trigger_type = order.sl_trigger_type;
                     }
                 }

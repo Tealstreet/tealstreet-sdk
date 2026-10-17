@@ -158,8 +158,11 @@ impl MexcPrivateHandlers {
             // Store writes commit before `?` propagates notification failures.
             store.add_or_update_orders(orders.clone())?;
             for order in &orders {
-                if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
-                    store.update_order_status(&order.id, order.status)?;
+                if let safe_cex_types::ModelField::Value(
+                    status @ (OrderStatus::Closed | OrderStatus::Canceled),
+                ) = order.status
+                {
+                    store.update_order_status(&order.id, status)?;
                 }
             }
         }

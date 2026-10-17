@@ -75,7 +75,7 @@ pub fn get_position_for_order<'a>(
 }
 // ts: KucoinExchange.getKucoinMarginMode
 pub fn get_kucoin_margin_mode(position: Option<&Position>) -> Option<&'static str> {
-    match position.and_then(|p| p.margin_type) {
+    match position.and_then(|p| (p.margin_type).into_value()) {
         Some(MarginType::Cross) => Some("CROSS"),
         Some(MarginType::Isolated) => Some("ISOLATED"),
         None => None,
@@ -86,7 +86,7 @@ pub fn get_kucoin_position_side(
     opts: &PlaceOrderOpts,
     position: Option<&Position>,
 ) -> Option<&'static str> {
-    if position.and_then(|p| p.position_mode) != Some(PositionMode::Hedged) {
+    if position.and_then(|p| (p.position_mode).into_value()) != Some(PositionMode::Hedged) {
         return None;
     }
     Some(if target_side(opts) == PositionSide::Long {

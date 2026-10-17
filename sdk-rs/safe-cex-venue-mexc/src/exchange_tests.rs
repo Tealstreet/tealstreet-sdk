@@ -162,7 +162,7 @@ fn cancel_order(raw: &Value) -> Order {
     }));
     order.amount = raw["amount"].as_f64().unwrap();
     order.remaining = raw["remaining"].as_f64().unwrap();
-    order.info = raw.get("info").cloned();
+    order.info = raw.get("info").cloned().into();
     order
 }
 fn pairs_object(pairs: &[(String, f64)]) -> Value {
@@ -452,7 +452,7 @@ fn mexc_rejected_order_propagates_notification_after_commit() {
         "id":"reject-id","symbol":"BTCUSDT","status":"open",
         "type":"limit","lastUpdate":1
     }));
-    canceled.status = safe_cex_types::OrderStatus::Open;
+    canceled.status = safe_cex_types::OrderStatus::Open.into();
     Store::update(
         store.as_ref(),
         StoreUpdate {

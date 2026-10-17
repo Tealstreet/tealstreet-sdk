@@ -59,7 +59,17 @@ fn model_fields_preserve_units_zero_values_and_optional_absence() {
     roundtrip::<Order>(order.clone());
     roundtrip::<Position>(position.clone());
     roundtrip::<Market>(market.clone());
-    for field in ["price", "remaining", "lastUpdate"] {
+    let mut missing_price = order.clone();
+    missing_price.as_object_mut().unwrap().remove("price");
+    let decoded: Order = serde_json::from_value(missing_price).unwrap();
+    assert!(decoded.price.is_absent());
+    assert!(
+        serde_json::to_value(decoded)
+            .unwrap()
+            .get("price")
+            .is_none()
+    );
+    for field in ["remaining", "lastUpdate"] {
         let mut incomplete = order.clone();
         incomplete.as_object_mut().unwrap().remove(field);
         assert!(

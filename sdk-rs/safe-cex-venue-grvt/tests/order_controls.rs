@@ -475,7 +475,7 @@ fn place_batch_native_results_and_builder_variant() {
     }
 }
 
-fn replacement_fields(native: &PlaceOrderOpts, expected: &Value) {
+fn replacement_fields(native: &safe_cex_types::PreparedOrderOpts, expected: &Value) {
     assert_eq!(
         native.symbol,
         expected["symbol"].as_str().unwrap(),

@@ -7232,3 +7232,147 @@ reason = "Imported SDK JsonRpcSigner.initZklinkSigner Ethereum-signature branch 
 [[exempt]]
 rs = "safe-cex-crypto/src/zklink/contract.rs::ContractSigner::sign_contract"
 reason = "Imported SDK JsonRpcSigner.createSignedContract outside extracted TS roots: exact preimage, existing Rescue/MuSig primitive, canonical decimal fields and source signature wire record. The venue transaction_signing.rs::sign_contract still owns the mapped TS orchestration. Pinned npm24-contract field/signature corpus exercises this capability."
+
+[[exempt]]
+rs = "safe-cex-store/src/model_patch.rs::ModelPatch::set_undefined"
+reason = "Native Store model-patch carrier plumbing for an own undefined property; optional Order/Position fields retain that state instead of losing it before the mapped update path. Does not define Store upsert merge policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::MODEL_FIELD"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::MODEL_RECORD"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::and_then"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_deref"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_field_ref"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_mut"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::as_ref"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::expect"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::filter"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::into_property"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::into_value"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_absent"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_none"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_some"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_some_and"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::is_undefined"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::map"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::ok_or_else"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::or"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::or_else"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::serialize_field"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::take"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::to_number"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap_or"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap_or_default"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::unwrap_or_else"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::value"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::UNDEFINED"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::deserialize_info"
+reason = "Shared model presence codec plumbing: distinguishes an absent property, an own undefined property, and a typed value for Order/Position. Read helpers expose the source property-read value; the record serializer omits undefined in JSON while the native bridge retains own-key presence. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-types/src/prepared_order.rs::PreparedOrderOpts"
+reason = "Internal prepared placement input representation for mapped amendment paths copying Order.type/side, which can be undefined at runtime. Public PlaceOrderOpts remains strict. This carrier adds no placement algorithm or fallback."
+
+[[exempt]]
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::PreparedExecutionOptions"
+reason = "Internal prepared placement input representation for mapped amendment paths copying Order.type/side, which can be undefined at runtime. Public PlaceOrderOpts remains strict. This carrier adds no placement algorithm or fallback."
+
+[[exempt]]
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::PreparedExecutionOrder"
+reason = "Internal prepared placement input representation for mapped amendment paths copying Order.type/side, which can be undefined at runtime. Public PlaceOrderOpts remains strict. This carrier adds no placement algorithm or fallback."
+
+[[exempt]]
+rs = "safe-cex-types/src/model_field.rs::ModelField::get_or_insert_with"
+reason = "Shared model presence mutation used by the webworker Order.extra postprocessor: reads absent and undefined as undefined, and creates a present value when the source initializes that property. No additional TypeScript symbol or venue policy."

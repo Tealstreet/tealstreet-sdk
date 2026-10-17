@@ -29,7 +29,7 @@ pub trait ApexServices {
     fn throttle_fetch_orders(&self) -> Result<(), ExchangeError>;
     fn place_orders(
         &self,
-        orders: Vec<safe_cex_types::PlaceOrderOpts>,
+        orders: Vec<safe_cex_types::PreparedOrderOpts>,
     ) -> ExchangeFuture<'_, Vec<String>>;
     fn dayjs_value_ms(&self, input: Option<f64>) -> Result<f64, ExchangeError>;
     fn dayjs_subtract(&self, end_ms: f64, amount: f64, unit: &str) -> Result<f64, ExchangeError>;
