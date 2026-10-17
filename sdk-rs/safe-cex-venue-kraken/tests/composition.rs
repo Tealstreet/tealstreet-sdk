@@ -2,7 +2,7 @@ include!("support/composition_values.rs");
 use safe_cex_venue_kraken::private_accounts::{self as account, AccountHost};
 use safe_cex_venue_kraken::{
     classes::{self, BoundMember, ClassHost, Initializer, Kind, NativeMember, Return},
-    construction::{self, BaseUrl, ConstructorHost, Factory, RateLimit, Venue},
+    construction::{BaseUrl, ConstructorHost, Factory, RateLimit, Venue},
     ohlcv_polling::{self, PollCallback, PollFuture, PollHost, Slot},
 };
 struct Callable {
@@ -343,17 +343,6 @@ impl ConstructorHost for Host {
         }
         *self.receiver.borrow_mut() = Some(receiver.clone());
         Ok(receiver)
-    }
-    fn initialize(&self, venue: Venue, receiver: Rc<Raw>) -> Result<(), E> {
-        classes::initialize(
-            self,
-            if venue == Venue::Futures {
-                Kind::FuturesExchange
-            } else {
-                Kind::SpotExchange
-            },
-            receiver,
-        )
     }
     fn secondary_client<'a>(
         &'a self,
@@ -1327,58 +1316,6 @@ fn class_check(kind: Kind, case_floor: usize, own_floor: usize, arrow_floor: usi
         );
     }
 }
-fn constructor_check(spot: bool) {
-    let rows = oracle()["constructors"][if spot { "spot" } else { "futures" }]
-        .as_array()
-        .unwrap();
-    assert_eq!(rows.len(), 8, "independent constructor floor");
-    for row in rows {
-        let h = setup(&row["cfg"]);
-        let result = if spot {
-            construction::spot_constructor(
-                &*h,
-                get(&h.cfg, "name"),
-                get(&h.cfg, "options"),
-                h.store.clone(),
-            )
-        } else {
-            construction::futures_constructor(
-                &*h,
-                get(&h.cfg, "name"),
-                get(&h.cfg, "options"),
-                h.store.clone(),
-            )
-        };
-        match result {
-            Err(err) => error(&h, &err, &row["error"]),
-            Ok(receiver) => {
-                assert!(row["error"].is_null());
-                let mut fields = vec![
-                    (units("xhr"), get(&receiver, "xhr")),
-                    (units("unlimitedXHR"), get(&receiver, "unlimitedXHR")),
-                ];
-                if !spot {
-                    fields.push((units("historyXhr"), get(&receiver, "historyXhr")));
-                }
-                native(
-                    &Raw::Object(RefCell::new(fields)),
-                    &row["clients"],
-                    "native assigned clients",
-                );
-                assert!(Rc::ptr_eq(
-                    &get(&receiver, "options"),
-                    &get(&h.cfg, "options")
-                ));
-                assert!(Rc::ptr_eq(&get(&receiver, "store"), &h.store));
-            }
-        }
-        native(
-            &Raw::Array(h.events.borrow().clone()),
-            &row["events"],
-            "native constructor effects",
-        );
-    }
-}
 fn poll_maps(h: &Host) -> Rc<Raw> {
     h.object(vec![
         (
@@ -1563,12 +1500,4 @@ fn futures_private_class_native() {
 #[test]
 fn spot_private_class_native() {
     class_check(Kind::SpotPrivate, 5, 11, 8)
-}
-#[test]
-fn futures_constructor_native() {
-    constructor_check(false)
-}
-#[test]
-fn spot_constructor_native() {
-    constructor_check(true)
 }

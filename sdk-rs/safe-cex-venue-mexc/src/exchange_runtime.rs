@@ -1,5 +1,5 @@
 //! Account polling, cancellation and configuration source bodies over bound owners.
-use crate::private_session::{MethodObserver, TaskHost, observe, start};
+use crate::method_tasks::{MethodObserver, TaskHost, observe, start};
 use std::rc::Rc;
 pub type Callback<V, E> = Rc<dyn Fn(V) -> Result<V, E>>;
 pub type Iteration<'a, V, E> = dyn FnMut(V) -> Result<bool, E> + 'a;
