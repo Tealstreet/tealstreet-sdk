@@ -25379,6 +25379,151 @@
             "same_logger": true
           }
         }
+      },
+      {
+        "input": {
+          "data": {
+            "r": [
+              {
+                "i": "btc_usdt_Perp",
+                "k": "PERPETUAL",
+                "b": "BTC",
+                "q": "USDT",
+                "ms": "0.01",
+                "ts": "0.2",
+                "mp": "9",
+                "ih": "0x11",
+                "bd": 3,
+                "qd": 6
+              },
+              {
+                "i": "bad_asset",
+                "b": false,
+                "q": "USD"
+              },
+              {
+                "i": "eth_usdt",
+                "k": "FUTURE",
+                "b": "ETH",
+                "q": "USD",
+                "ms": "",
+                "ts": false,
+                "mp": 0,
+                "mxs": "7.5",
+                "ia": false,
+                "ih": null
+              }
+            ]
+          },
+          "fail": false,
+          "log_fail": false
+        },
+        "output": {
+          "before": [
+            [
+              "post",
+              "/lite/v1/all_instruments",
+              {}
+            ]
+          ],
+          "events": [
+            [
+              "post",
+              "/lite/v1/all_instruments",
+              {}
+            ],
+            [
+              "response"
+            ],
+            [
+              "log",
+              "Fetched 3 GRVT markets",
+              "debug"
+            ],
+            [
+              "log",
+              "Refused GRVT market row 1 id=\"bad_asset\": base=false quote=\"USD\": GRVT market base and quote must be strings for the shared Market model",
+              "warning"
+            ]
+          ],
+          "result": {
+            "ok": true,
+            "markets": [
+              {
+                "id": "btc_usdt_Perp",
+                "symbol": "BTC_USDT_PERP",
+                "base": "BTC",
+                "quote": "USDT",
+                "active": true,
+                "pretty": null,
+                "precision": [
+                  "3f847ae147ae147b",
+                  "3fc999999999999a"
+                ],
+                "amount": [
+                  "3f847ae147ae147b",
+                  "4022000000000000"
+                ],
+                "leverage": [
+                  "3ff0000000000000",
+                  "4059000000000000"
+                ],
+                "price_limits": false,
+                "flags": [
+                  false,
+                  true,
+                  null,
+                  null,
+                  null
+                ],
+                "contract_size": null,
+                "option": false,
+                "taker": null,
+                "maker": null,
+                "info": {
+                  "ih": "0x11",
+                  "bd": 3,
+                  "qd": 6
+                }
+              },
+              {
+                "id": "eth_usdt",
+                "symbol": "ETH_USDT",
+                "base": "ETH",
+                "quote": "USD",
+                "active": false,
+                "pretty": null,
+                "precision": [
+                  "3f50624dd2f1a9fc",
+                  "3fb999999999999a"
+                ],
+                "amount": [
+                  "3f50624dd2f1a9fc",
+                  "401e000000000000"
+                ],
+                "leverage": [
+                  "3ff0000000000000",
+                  "4059000000000000"
+                ],
+                "price_limits": false,
+                "flags": [
+                  false,
+                  false,
+                  null,
+                  null,
+                  null
+                ],
+                "contract_size": null,
+                "option": false,
+                "taker": null,
+                "maker": null,
+                "info": {
+                  "ih": null
+                }
+              }
+            ]
+          }
+        }
       }
     ]
   },
