@@ -48,7 +48,7 @@ yarn build
 ```
 
 The same tree also builds the Disrupt-branded CLI (`src/brand.ts`): `yarn build
-disrupt` emits `dist/disrupt-<platform>`, logging in through `disrupt.trade` and
+disrupt` emits `dist/disrupt-<platform>`, logging in through `app.disrupt.trade` and
 storing under `~/.disrupt/`.
 
 ### npm package

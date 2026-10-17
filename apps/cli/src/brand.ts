@@ -50,7 +50,7 @@ export const BRANDS: Record<BrandId, Brand> = {
     displayName: 'Disrupt',
     binName: 'disrupt',
     configDirName: '.disrupt',
-    webUrl: 'https://disrupt.trade',
+    webUrl: 'https://app.disrupt.trade',
     docsUrl: 'https://github.com/DisruptTrade/cli#readme',
     releaseRepo: 'DisruptTrade/cli',
     npmPackage: null,

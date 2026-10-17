@@ -28,7 +28,7 @@ The Disrupt build of the same CLI is published separately to
 [`DisruptTrade/cli`](https://github.com/DisruptTrade/cli/releases) with the
 same five assets named `disrupt-<platform>`. It is GitHub-only: no npm
 package and no Homebrew formula. Install it by downloading the binary for
-your platform from that release page. It logs in through `disrupt.trade`,
+your platform from that release page. It logs in through `app.disrupt.trade`,
 keeps its files under `~/.disrupt/`, `disrupt update` polls that repo, and its
 built-in help links to that repository rather than to this site.
 

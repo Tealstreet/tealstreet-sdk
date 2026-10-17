@@ -45,7 +45,7 @@ directory, web-app URL, docs URL or release repo is spelled. `scripts/build.sh
 <brand>` inlines `TEALSTREET_BRAND` with `--define`; dev runs and tests carry no
 define and resolve to `tealstreet`, so every pinned `~/.tealstreet` and
 `tealstreet-*` expectation in the suite stays valid. The `disrupt` brand logs in
-through `https://disrupt.trade`, stores under `~/.disrupt/`, and self-updates
+through `https://app.disrupt.trade` (the apex is a landing page and 404s on `/api/cli/*`), stores under `~/.disrupt/`, and self-updates
 from `DisruptTrade/cli`.
 
 **That URL is the entire auth change.** The web app picks the Auth0 tenant from

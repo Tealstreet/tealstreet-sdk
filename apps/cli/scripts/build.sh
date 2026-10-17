@@ -25,7 +25,7 @@ fi
 BRAND="${1:-tealstreet}"
 case "$BRAND" in
   tealstreet) BIN_NAME="tealstreet"; PROD_WEB_URL="https://preview.tealstreet.io" ;;
-  disrupt)    BIN_NAME="disrupt";    PROD_WEB_URL="https://disrupt.trade" ;;
+  disrupt)    BIN_NAME="disrupt";    PROD_WEB_URL="https://app.disrupt.trade" ;;
   *) echo "Unknown brand: $BRAND (expected tealstreet|disrupt)"; exit 1 ;;
 esac
 VERSION=${2:-$(node -p "require('./package.json').version")}
