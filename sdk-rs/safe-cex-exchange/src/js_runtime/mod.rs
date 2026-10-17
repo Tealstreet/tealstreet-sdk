@@ -5,6 +5,7 @@ pub mod base_exchange;
 pub mod builtins;
 pub mod client;
 pub mod globals;
+pub(crate) mod jobs;
 pub mod library;
 pub mod ops;
 pub mod promise;

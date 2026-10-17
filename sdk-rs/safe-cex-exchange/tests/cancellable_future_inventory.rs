@@ -516,21 +516,57 @@ fn export_cancellable_future_discovery() {
 }
 
 fn witness_attributes_active(attrs: &[syn::Attribute]) -> bool {
+    fn enabled(meta: &syn::Meta) -> Option<bool> {
+        match meta {
+            syn::Meta::Path(path) if path.is_ident("test") => Some(true),
+            syn::Meta::NameValue(value) => {
+                let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(name),
+                    ..
+                }) = &value.value
+                else {
+                    return None;
+                };
+                if value.path.is_ident("feature") {
+                    return match name.value().as_str() {
+                        "health" => Some(cfg!(feature = "health")),
+                        "native" => Some(cfg!(feature = "native")),
+                        _ => None,
+                    };
+                }
+                (value.path.is_ident("target_arch") && name.value() == "wasm32")
+                    .then_some(cfg!(target_arch = "wasm32"))
+            }
+            syn::Meta::List(list) => {
+                use syn::parse::Parser;
+                let args =
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
+                        .parse2(list.tokens.clone())
+                        .ok()?;
+                let values: Vec<bool> = args.iter().map(enabled).collect::<Option<_>>()?;
+                if list.path.is_ident("all") {
+                    Some(values.iter().all(|value| *value))
+                } else if list.path.is_ident("any") {
+                    Some(values.iter().any(|value| *value))
+                } else if list.path.is_ident("not") && values.len() == 1 {
+                    Some(!values[0])
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
     attrs.iter().all(|attr| {
         if attr.path().is_ident("ignore") || attr.path().is_ident("cfg_attr") {
             return false;
         }
         if attr.path().is_ident("cfg") {
-            return match &attr.meta {
-                syn::Meta::List(list) if list.tokens.to_string() == "test" => true,
-                syn::Meta::List(list) => match syn::parse2::<syn::Meta>(list.tokens.clone()) {
-                    Ok(syn::Meta::NameValue(value)) if value.path.is_ident("feature") => {
-                        matches!(value.value, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(name), .. }) if name.value() == "health") && cfg!(feature = "health")
-                    }
-                    _ => false,
-                },
-                _ => false,
-            };
+            return attr
+                .parse_args::<syn::Meta>()
+                .ok()
+                .and_then(|meta| enabled(&meta))
+                == Some(true);
         }
         true
     })
@@ -577,6 +613,18 @@ fn cancellation_witness_must_be_enabled_and_not_ignored() {
         (
             "#[cfg(test)] mod tests { #[test] fn evidence() { drop(task); } }",
             1,
+        ),
+        (
+            "#![cfg(all(feature = \"native\", not(target_arch = \"wasm32\")))] #[test] fn evidence() { drop(task); }",
+            usize::from(cfg!(all(feature = "native", not(target_arch = "wasm32")))),
+        ),
+        (
+            "#![cfg(all(feature = \"native\", not(target_arch = \"wasm32\")))] #[cfg(not(feature = \"native\"))] #[test] fn evidence() { drop(task); }",
+            0,
+        ),
+        (
+            "#[cfg(not(unknown_gate))] #[test] fn evidence() { drop(task); }",
+            0,
         ),
         ("#[test] #[ignore] fn evidence() { drop(task); }", 0),
         (

@@ -19,12 +19,13 @@ use std::{
     collections::{BTreeMap, VecDeque},
     future::Future,
     pin::Pin,
-    rc::Rc,
+    rc::{Rc, Weak},
     sync::Arc,
     task::{Context, Poll, Waker},
 };
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
+type Sleeper = (f64, Weak<RefCell<Option<Waker>>>);
 
 pub struct Runtime {
     pub now: Rc<Cell<f64>>,
@@ -33,6 +34,7 @@ pub struct Runtime {
     pub errors: RefCell<Vec<String>>,
     pub sent: Rc<RefCell<Vec<String>>>,
     pub random_values: RefCell<VecDeque<f64>>,
+    sleepers: RefCell<Vec<Sleeper>>,
 }
 
 struct Task(Rc<Cell<bool>>);
@@ -44,6 +46,21 @@ impl ExchangeTask for Task {
 
 impl Runtime {
     pub fn pump(&self) {
+        let mut ready = vec![];
+        self.sleepers.borrow_mut().retain(|(deadline, sleeper)| {
+            let Some(sleeper) = sleeper.upgrade() else {
+                return false;
+            };
+            if self.now.get() >= *deadline
+                && let Some(waker) = sleeper.borrow_mut().take()
+            {
+                ready.push(waker);
+            }
+            true
+        });
+        for waker in ready {
+            waker.wake();
+        }
         let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
         let mut pending = vec![];
         for (mut f, c) in jobs {
@@ -69,10 +86,15 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, d: u64) -> ExchangeFuture<'static, ()> {
         let at = self.now.get() + d as f64;
         let now = self.now.clone();
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = Rc::new(RefCell::new(None));
+        self.sleepers
+            .borrow_mut()
+            .push((at, Rc::downgrade(&sleeper)));
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -245,6 +267,7 @@ pub fn fixture_with_settings(
         errors: RefCell::default(),
         sent: Rc::default(),
         random_values: RefCell::default(),
+        sleepers: RefCell::default(),
     });
     let store = Rc::new(DefaultStore::new());
     let options: ExchangeOptions = serde_json::from_value(options).unwrap();
