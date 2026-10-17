@@ -24,6 +24,13 @@ GitHub. Every release ships the same set of artifacts:
 | `tealstreet-linux-arm64`     | Linux arm64        |
 | `tealstreet-windows-x64.exe` | Windows x64        |
 
+The Disrupt build of the same CLI is published separately to
+[`DisruptTrade/cli`](https://github.com/DisruptTrade/cli/releases) with the
+same five assets named `disrupt-<platform>`. It is GitHub-only: no npm
+package and no Homebrew formula. Install it by downloading the binary for
+your platform from that release page. It logs in through `disrupt.trade`,
+keeps its files under `~/.disrupt/`, and `disrupt update` polls that repo.
+
 A fifth asset, `tealstreet-windows-x64.exe`, covers Windows x64.
 `bun build --compile` appends the `.exe` itself on a Windows target, so the
 suffix is part of the asset name, the `SHA256SUMS` entry and the cached

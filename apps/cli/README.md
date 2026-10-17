@@ -47,6 +47,10 @@ yarn build
 ./dist/tealstreet-darwin-arm64        # or -darwin-x64 / -linux-x64 / -linux-arm64
 ```
 
+The same tree also builds the Disrupt-branded CLI (`src/brand.ts`): `yarn build
+disrupt` emits `dist/disrupt-<platform>`, logging in through `disrupt.trade` and
+storing under `~/.disrupt/`.
+
 ### npm package
 
 The public `@tealstreet/cli` package is a thin installer/launcher. It does not
