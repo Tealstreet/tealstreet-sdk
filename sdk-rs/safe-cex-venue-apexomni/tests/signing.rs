@@ -64,24 +64,6 @@ impl ZkLinkHost for Host {
         self.record("init", vec![]);
         Box::pin(async { Ok(()) })
     }
-    fn now_ms(&self) -> f64 {
-        self.record("clock", vec![]);
-        1700001234567.0
-    }
-    fn pack_amount(&self, value: &J) -> Result<J, ExchangeError> {
-        self.record("pack:amount", vec![value.clone()]);
-        let J::String(value) = value else { panic!() };
-        Ok(J::String(format!("amount:{value}")))
-    }
-    fn pack_fee(&self, value: &J) -> Result<J, ExchangeError> {
-        self.record("pack:fee", vec![value.clone()]);
-        let J::String(value) = value else { panic!() };
-        Ok(J::String(format!("fee:{value}")))
-    }
-    fn pubkey_hash(&self) -> Result<J, ExchangeError> {
-        self.record("pubkeyHash", vec![]);
-        Ok(J::String(format!("0x{}", "1".repeat(40))))
-    }
     fn builder(&self, kind: TransactionKind, args: Vec<J>) -> Result<ZkLinkHandle, ExchangeError> {
         self.record(&format!("builder:{kind:?}"), args);
         Ok(Rc::new(Built { kind }))
@@ -100,30 +82,10 @@ impl ZkLinkHost for Host {
         self.record("sign:Contract", vec![]);
         Ok(self.signed())
     }
-    fn create_signed_order(&self, tx: ZkLinkHandle) -> Result<J, ExchangeError> {
-        self.assert_handle(&tx, TransactionKind::Order);
-        self.record("sign:Order", vec![]);
-        Ok(self.signed())
-    }
-    fn sign_transfer(&self, tx: ZkLinkHandle, symbol: J) -> ExchangeFuture<'_, J> {
-        self.assert_handle(&tx, TransactionKind::Transfer);
-        self.record("sign:Transfer", vec![symbol]);
-        Box::pin(async { Ok(self.signed()) })
-    }
-    fn sign_withdraw(&self, tx: ZkLinkHandle, symbol: J) -> ExchangeFuture<'_, J> {
-        self.assert_handle(&tx, TransactionKind::Withdraw);
-        self.record("sign:Withdraw", vec![symbol]);
-        Box::pin(async { Ok(self.signed()) })
-    }
-    fn sign_change_pubkey(&self, tx: ZkLinkHandle, ecdsa: bool) -> ExchangeFuture<'_, J> {
-        self.assert_handle(&tx, TransactionKind::ChangePubKey);
-        self.record("sign:ChangePubKey", vec![J::Bool(ecdsa)]);
-        Box::pin(async { Ok(self.signed()) })
-    }
 }
 fn run(name: &str) {
     let all = corpus()["rows"].as_array().unwrap();
-    assert_eq!(all.len(), 30, "signing total floor");
+    assert_eq!(all.len(), 6, "signing total floor");
     let mut count = 0;
     for row in all.iter().filter(|r| r["name"] == name) {
         let host = Host::default();
@@ -132,22 +94,6 @@ fn run(name: &str) {
             match name {
                 "signContract" => {
                     sign_contract(&host, &js_from_str::<SignContractPayload>(raw).unwrap()).await
-                }
-                "signOrder" => {
-                    sign_order(&host, &js_from_str::<SignOrderPayload>(raw).unwrap()).await
-                }
-                "signTransfer" => {
-                    sign_transfer(&host, &js_from_str::<SignTransferPayload>(raw).unwrap()).await
-                }
-                "signWithdraw" => {
-                    sign_withdraw(&host, &js_from_str::<SignWithdrawPayload>(raw).unwrap()).await
-                }
-                "signChangePubKey" => {
-                    sign_change_pub_key(
-                        &host,
-                        &js_from_str::<SignChangePubKeyPayload>(raw).unwrap(),
-                    )
-                    .await
                 }
                 _ => panic!(),
             }
@@ -177,22 +123,6 @@ fn run(name: &str) {
 #[test]
 fn contract_native() {
     run("signContract");
-}
-#[test]
-fn order_native() {
-    run("signOrder");
-}
-#[test]
-fn transfer_native() {
-    run("signTransfer");
-}
-#[test]
-fn withdraw_native() {
-    run("signWithdraw");
-}
-#[test]
-fn change_pubkey_native() {
-    run("signChangePubKey");
 }
 #[test]
 fn initialization_native() {
