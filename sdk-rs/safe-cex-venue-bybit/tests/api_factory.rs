@@ -1,8 +1,6 @@
 #![allow(clippy::arc_with_non_send_sync)]
 #[path = "support/api_factory_clock_budget.rs"]
 pub mod api_factory_clock_budget;
-#[path = "support/api_factory_optional_config.rs"]
-pub mod api_factory_optional_config;
 #[path = "support/api_factory_params.rs"]
 pub mod api_factory_params;
 #[path = "support/api_factory_params_astral.rs"]
@@ -588,17 +586,8 @@ fn retry_config_cases() -> Vec<Value> {
             2,
         ),
     ];
-    let expected_predicates = [false, true, true, false, true, true];
-    assert_eq!(
-        expected_predicates.len(),
-        6,
-        "factory_retry_config_native_pure_declared_cases"
-    );
-    let mut predicate_totals = [0_usize; 2];
     let mut results = Vec::new();
-    for (index, (id, method, url, failure_url, failure_method, expected)) in
-        inputs.into_iter().enumerate()
-    {
+    for (id, method, url, failure_url, failure_method, expected) in inputs {
         let signature_error = id == "signature-error-empty-method";
         let first_reply = if signature_error {
             Reply::RejectedMethod {
@@ -620,50 +609,6 @@ fn retry_config_cases() -> Vec<Value> {
         if method == "post" {
             request.body = Some(RestBody::Untransformed(json!({"x":1})));
         }
-        let mut failure_config = request.clone();
-        failure_config.transform_axios_request().unwrap();
-        failure_config.url = failure_url.unwrap_or(url).into();
-        failure_config.method = failure_method.unwrap_or(method).into();
-        let predicate_error = if signature_error {
-            RestFailure {
-                code: Some("ERR_BAD_RESPONSE".into()),
-                transport_error: None,
-                message: "scripted signature rejection".into(),
-                response: Some(Box::new(RestResponse {
-                    status: 400,
-                    reason: Some("Bad Request".into()),
-                    headers: Default::default(),
-                    body: RestResponseBody::Transformed(json!({"ret_msg":"error sign!"})),
-                })),
-                request: Box::new(failure_config),
-                context: Some(Box::new(json!({"retainedCause":71}))),
-            }
-        } else {
-            RestFailure::from_transport(
-                TransportError::Network(NetworkFailure::from_code(
-                    "scripted network".into(),
-                    Some("ERR_NETWORK".into()),
-                )),
-                failure_config,
-            )
-        };
-        if signature_error {
-            assert!(
-                !safe_cex_transport::retry::is_network_error(&predicate_error),
-                "factory_retry_config_native_signature_not_network"
-            );
-            assert_eq!(
-                predicate_error.request.method, "",
-                "factory_retry_config_native_signature_predicate_unclassified_method"
-            );
-        }
-        let predicate =
-            safe_cex_venue_bybit::api::should_retry_bybit_request(&predicate_error).unwrap();
-        assert_eq!(
-            predicate, expected_predicates[index],
-            "factory_retry_config_native_pure_value {id}"
-        );
-        predicate_totals[usize::from(!predicate)] += 1;
         let result = ready(f.api.execute_with_receipt(request));
         assert_eq!(
             f.wire.requests.borrow().len(),
@@ -735,13 +680,8 @@ fn retry_config_cases() -> Vec<Value> {
         } else {
             assert_eq!(f.owner.base.auth_failure_streak(), 0);
         }
-        results.push(json!({"id":id,"attempts":f.wire.requests.borrow().len(),"resolved":f.wire.requests.borrow().len()==2,"predicate":predicate}));
+        results.push(json!({"id":id,"attempts":f.wire.requests.borrow().len(),"resolved":f.wire.requests.borrow().len()==2}));
     }
-    assert_eq!(
-        predicate_totals,
-        [4, 2],
-        "factory_retry_config_native_pure_branch_floors"
-    );
     assert_eq!(results.len(), 6, "factory_retry_config_native_inventory");
     results
 }
@@ -1046,10 +986,6 @@ fn native_retry_failure_config_and_original_read_guard() {
     retry_config_cases();
 }
 #[test]
-fn native_retry_optional_config_helper_predicates() {
-    api_factory_optional_config::collect_native();
-}
-#[test]
 fn native_astral_params_refusal_preserves_source_input_context() {
     api_factory_params_astral::collect_native();
 }
@@ -1073,15 +1009,10 @@ fn compare_response_and_clock_reentry(native: &[Value]) {
         }
     }
 }
-fn compare_retry_failure_config_boundaries(native: &[Value], optional_config: &[Value]) {
+fn compare_retry_failure_config_boundaries(native: &[Value]) {
     let source = source("create-api-retry-config-boundaries.cjs", 6);
-    api_factory_optional_config::compare_source(optional_config, &source);
     for i in 0..6 {
         assert_eq!(native[i]["id"], source["cases"][i]["id"]);
-        assert_eq!(
-            native[i]["predicate"], source["cases"][i]["source"]["predicate"],
-            "factory_retry_source_pure_comparison {i}"
-        );
         if i == 2 {
             assert_eq!(native[i]["attempts"], 1, "CHOSEN original-read-token guard");
             assert_eq!(
@@ -1230,7 +1161,6 @@ fn source_and_native_factory_surface() {
     let timeouts = api_factory_timeout::collect_native();
     let clock_budgets = api_factory_clock_budget::collect_native();
     let params = api_factory_params::collect_native();
-    let optional_config = api_factory_optional_config::collect_native();
     let proxy_regions = api_factory_proxy_region::collect_native();
     let astral_params = api_factory_params_astral::collect_native();
     native_how_query_ownership_survives_all_forwarders();
@@ -1249,7 +1179,7 @@ fn source_and_native_factory_surface() {
         "factory_native_complete_corpus_before_source"
     );
     compare_response_and_clock_reentry(&responses);
-    compare_retry_failure_config_boundaries(&retry_configs, &optional_config);
+    compare_retry_failure_config_boundaries(&retry_configs);
     compare_response_transform_boundaries(&transforms);
     compare_retry_condition_boundaries(&conditions);
     api_factory_probe::compare_source(&probes);
@@ -1364,34 +1294,11 @@ fn retry_condition_cases() -> Vec<Value> {
     assert_eq!(inputs.len(), 22, "factory_condition_native_declared_cases");
     let mut results = Vec::new();
     let mut totals = [0_usize; 3];
-    let mut predicate_totals = [0_usize; 3];
     for (id, raw, expected) in inputs {
         let body: Value = serde_json::from_str(raw).unwrap();
         let mut request = get("/private");
         request.method = "post".into();
         request.body = Some(RestBody::Untransformed(json!({"request":true})));
-        let predicate_error = RestFailure {
-            code: Some("ERR_BAD_RESPONSE".into()),
-            transport_error: None,
-            message: "original venue rejection".into(),
-            response: Some(Box::new(RestResponse {
-                status: 400,
-                reason: Some("Bad Request".into()),
-                headers: Default::default(),
-                body: RestResponseBody::Transformed(body.clone()),
-            })),
-            request: Box::new(request.clone()),
-            context: Some(Box::new(json!({"retainedCause":71}))),
-        };
-        let predicate = safe_cex_venue_bybit::api::should_retry_bybit_request(&predicate_error);
-        let value = predicate.unwrap();
-        assert_eq!(
-            value,
-            expected == "retry",
-            "factory_condition_native_pure_value {id}"
-        );
-        predicate_totals[usize::from(!value)] += 1;
-        let predicate_observation = json!({"kind":"boolean","value":value});
         let f = fixture(vec![
             Reply::Rejected(RestResponseBody::Encoded(raw.as_bytes().to_vec())),
             response(r#"{"retCode":0,"retMsg":"OK"}"#),
@@ -1463,13 +1370,8 @@ fn retry_condition_cases() -> Vec<Value> {
             }
             _ => unreachable!(),
         };
-        results.push(json!({"id":id,"attempts":attempts,"outcome":outcome,"authFailures":f.owner.base.auth_failure_streak(),"authSuccesses":f.owner.accesses.borrow().len(),"predicate":predicate_observation}));
+        results.push(json!({"id":id,"attempts":attempts,"outcome":outcome,"authFailures":f.owner.base.auth_failure_streak(),"authSuccesses":f.owner.accesses.borrow().len()}));
     }
-    assert_eq!(
-        predicate_totals,
-        [6, 16, 0],
-        "factory_condition_native_pure_branch_floors"
-    );
     assert_eq!(totals, [6, 16, 0], "factory_condition_native_branch_floors");
     assert_eq!(results.len(), 22, "factory_condition_native_executed_cases");
     results
@@ -1485,13 +1387,7 @@ fn compare_retry_condition_boundaries(native: &[Value]) {
             native[i]["id"], source["cases"][i]["id"],
             "factory_condition_source_id {i}"
         );
-        for field in [
-            "attempts",
-            "outcome",
-            "authFailures",
-            "authSuccesses",
-            "predicate",
-        ] {
+        for field in ["attempts", "outcome", "authFailures", "authSuccesses"] {
             assert_eq!(
                 native[i][field], source["cases"][i]["source"][field],
                 "factory_condition_source_value {i}/{field}"

@@ -643,3 +643,10 @@ Spot retains its existing spot-only body. Retirement consumes only `id` and
 `symbol`, including cancellation snapshots, and reports resolved venue rejection
 without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
 four production constructors and the real retained receiver/HTTP client path.
+
+Retry-condition coverage uses the real HTTP factory in `tests/api_factory.rs`.
+The dead `api::should_retry_bybit_request` copy and its fake-only optional-config
+supplement were removed. Keep the factory attempt, HMAC, effective error-config
+and retained-error assertions. `scripts/factory-retry-condition-control.py`
+inverts the production instruments-info exclusion, requires a compiled attempt
+count failure and restores exact source bytes before requiring a passing run.
