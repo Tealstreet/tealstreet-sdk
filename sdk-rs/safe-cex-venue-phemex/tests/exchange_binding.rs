@@ -547,3 +547,137 @@ fn dispose_runs_source_super_cleanup() {
         "source super call removes inherited listeners"
     );
 }
+
+fn one_way_account() -> Value {
+    let mut reply = account();
+    let p = &mut reply["data"]["positions"][0];
+    p["posMode"] = json!("OneWay");
+    p["posSide"] = json!("Merged");
+    reply
+}
+fn one_way_venue() -> Harness {
+    harness(ExchangeName::Phemex, options(), |http| {
+        http.ok("GET", "/public/products", instruments());
+        http.ok("GET", "/md/v3/ticker/24hr/all", tickers());
+        http.ok("GET", "/g-accounts/accountPositions", one_way_account());
+        http.ok("PUT", "/g-orders/create", created());
+        http.ok("DELETE", "/g-orders", json!({"code":0,"data":[]}));
+    })
+}
+#[test]
+fn cached_position_controls_placement_without_account_reads() {
+    let h = one_way_venue();
+    seed(&h);
+    let positions = h
+        .drive(h.venue().fetch_positions(Some(vec![SYMBOL.into()])))
+        .unwrap();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.http.requests.borrow_mut().clear();
+    let mut opts = order();
+    opts.reduce_only = Some(true);
+    h.drive(h.venue().base().place_order(h.venue(), opts))
+        .unwrap();
+    let calls = h.http.calls("/g-orders/create");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["posSide"], "Merged");
+    assert_eq!(calls[0].params["reduceOnly"], "true");
+    assert!(
+        h.http.calls("/g-accounts/accountPositions").is_empty(),
+        "both order-side and reduceOnly lookups must use the cache"
+    );
+}
+#[test]
+fn cancel_without_info_uses_cached_position_side_without_account_reads() {
+    let h = one_way_venue();
+    seed(&h);
+    let positions = h
+        .drive(h.venue().fetch_positions(Some(vec![SYMBOL.into()])))
+        .unwrap();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.http.requests.borrow_mut().clear();
+    let mut first = existing();
+    first.info = None;
+    let mut second = first.clone();
+    second.id = "second-order".into();
+    h.drive(h.venue().cancel_orders(vec![first, second]))
+        .unwrap();
+    assert_eq!(h.http.calls("/g-orders")[0].params["posSide"], "Merged");
+    assert!(
+        h.http.calls("/g-accounts/accountPositions").is_empty(),
+        "cancel side lookup must use the store"
+    );
+}
+#[test]
+fn unloaded_positions_omit_reduce_only_after_raw_mode_lookup() {
+    // Hosted startup deliberately leaves loaded.positions false. Only the raw
+    // mode recovery may read REST; it must not populate the positions cache.
+    let h = one_way_venue();
+    seed(&h);
+    assert!(!h.store.loaded().positions);
+    let mut opts = order();
+    opts.reduce_only = Some(true);
+    h.drive(h.venue().base().place_order(h.venue(), opts))
+        .unwrap();
+    let calls = h.http.calls("/g-orders/create");
+    assert_eq!(calls[0].params["posSide"], "Merged");
+    assert!(
+        calls[0].params.get("reduceOnly").is_none(),
+        "TS omits reduceOnly when the unloaded position helper returns []"
+    );
+    assert_eq!(
+        h.http.calls("/g-accounts/accountPositions").len(),
+        1,
+        "only raw mode recovery reads the account"
+    );
+    assert!(h.store.positions().is_empty());
+}
+#[test]
+fn loaded_missing_position_is_fetched_once_and_cached_for_formatting() {
+    let h = one_way_venue();
+    seed(&h);
+    let mut loaded = h.store.loaded().clone();
+    loaded.positions = true;
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            loaded: Some(loaded),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let mut opts = order();
+    opts.reduce_only = Some(true);
+    h.drive(h.venue().base().place_order(h.venue(), opts))
+        .unwrap();
+    assert_eq!(
+        h.http.calls("/g-accounts/accountPositions").len(),
+        1,
+        "order-side fetch must be reused by reduceOnly formatting"
+    );
+    assert_eq!(
+        h.store.positions().len(),
+        1,
+        "recovery commits the fetched row"
+    );
+    assert_eq!(
+        h.http.calls("/g-orders/create")[0].params["reduceOnly"],
+        "true"
+    );
+}

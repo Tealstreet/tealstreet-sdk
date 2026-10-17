@@ -150,15 +150,10 @@ impl OrderHost for Host {
         name: &'static str,
         args: Vec<Js>,
     ) -> Result<JsFuture<'static>, Thrown> {
-        let args = if name == "positions" {
-            vec![Js::array(args)]
-        } else {
-            args
-        };
         let name = match name {
             "initExternal" => "initExternalPublicData",
             "market" => "getOrFetchMarket",
-            "positions" => "fetchPositions",
+            "positions" => "getOrFetchPositionsForSymbol",
             "positionSide" => "getOrderPositionSide",
             "formatCreate" => "formatCreateOrder",
             "formatTrailing" => "formatCreateTrailingStopLossOrder",
