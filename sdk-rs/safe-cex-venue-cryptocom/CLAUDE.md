@@ -29,6 +29,10 @@ venue's rejection formatter. Delaying rejection formatting preserves the HTTP
 response/config used to identify a signature rejection. Removing the wrapper
 must fail the non-2xx signature-resend E2E test until the shared ordering is fixed.
 
+`cancelSymbolOrders` and `cancelAllOrders` forward to the source bodies, which post
+the venue `private/cancel-all-orders`; the base store-only sweep would miss
+orders the Store has not mapped. Both rethrow a venue rejection.
+
 Source REST `fetchBalance` returns currency records with `available`/`locked`
 under an `as any` cast. The binding uses shared `CurrencyBalance::AvailableLocked`
 at both validation and Store boundaries, preserving those exact fields. It does
