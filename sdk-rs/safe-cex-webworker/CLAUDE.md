@@ -19,8 +19,11 @@ only weak references, so discarded host tasks cannot retain the manager.
 Worker payloads preserve missing versus explicit-null data. Incoming/outgoing op
 sets are pinned against the live TypeScript unions. Store payloads reuse the
 existing StoreUpdate directly, including PackedTickerDelta, rather than duplicate
-that contract. Ordinary worker payloads retain their owned JSON boundary; native book and
-Error post capabilities bypass that projection.
+that contract. Incoming commands and ordinary worker payloads retain their owned JSON boundary.
+CallMethod results and OHLCV DATA posts use required WorkerDataPost with existing
+runtime Js, alongside separate native book and Error capabilities. DATA envelopes
+have no Serialize implementation; browser materialization retains native numbers
+and own undefined before postMessage. No default or JSON adapter is supplied.
 
 The CLI executor is injected and owns its emitted handled results; the handler
 never manufactures success from a resolved void future. Missing/rejected executors
@@ -73,9 +76,10 @@ Pass current options and metadata into each displayed-position pass. Freezing th
 UPnL policy at construction loses live tuning changes; rebuilding the processor
 to apply them would wrongly discard its rolling PnL queues.
 
-CallMethodHandler keeps unassigned results null and omits assigned void results
-at the JSON boundary. Unknown methods omit result; Error replies retain optional
-stack/code. Pre-spawn reply guards settle dropped tasks once; metadata throttling
+CallMethodHandler keeps unassigned results null and assigned void results as own
+undefined at the DATA post boundary. Unknown methods omit result; Error replies
+retain own stack and present code. Post rejection enters the source error-reply
+catch; if that post also rejects, the runtime receives the original failure. Pre-spawn reply guards settle dropped tasks once; metadata throttling
 stays detached, so its late failure reports to the host rather than changing
 the already-successful method reply. removeOrders accepts objects carrying id.
 

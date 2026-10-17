@@ -11,7 +11,7 @@ fn observe(value: Result<Option<f64>, JsCoercionError>) -> Value {
             json!({"type":"number","bits":format!("{:016x}", if n.is_nan() { 0x7ff8_0000_0000_0000 } else { n.to_bits() })})
         }
         Ok(None) => json!({"type":"undefined"}),
-        Err(_) => json!({"error":"TypeError"}),
+        Err(error) => json!({"error":error.name,"message":error.message}),
     }
 }
 
