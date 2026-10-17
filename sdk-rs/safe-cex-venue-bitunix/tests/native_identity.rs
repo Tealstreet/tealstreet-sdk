@@ -200,7 +200,7 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
             let captured = errors.clone();
             venue.base().on(
                 "error",
-                Rc::new(move |_, value: &Value| {
+                Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
                     captured.borrow_mut().push(value.clone());
                     Ok(())
                 }),
@@ -232,7 +232,11 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
                 1,
                 "one visible field refusal per call"
             );
-            assert!(errors.borrow()[0].as_str().unwrap().contains(&message));
+            assert!(
+                String::from_utf16(errors.borrow()[0].as_str().unwrap().as_ref())
+                    .unwrap()
+                    .contains(&message)
+            );
             assert!(
                 wire.requests.lock().unwrap().is_empty(),
                 "batch preflight must refuse before any hydration or order HTTP"
@@ -240,4 +244,86 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
             venue.dispose().unwrap();
         }
     }
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitunix");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 80);
+    let (venue, rt, store, _) = support::fixture();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            tickers: Some(ticker_coercion::seed("bitunix")),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    rt.dial.set(true);
+    venue
+        .base()
+        .get_socket(SocketSlot::Public)
+        .unwrap()
+        .connect_and_subscribe(false)
+        .unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    let primary = rt.dialed.borrow().first().unwrap().1.clone();
+    venue
+        .base()
+        .get_socket(SocketSlot::PublicSecondary)
+        .unwrap()
+        .connect_and_subscribe(false)
+        .unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    let secondary = rt.dialed.borrow().get(1).unwrap().1.clone();
+    assert!(!Rc::ptr_eq(&primary, &secondary));
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("bitunix")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if case["channel"] == "price" {
+            &secondary
+        } else {
+            &primary
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            for _ in 0..8 {
+                rt.pump();
+            }
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    assert!(
+        !rt.console
+            .borrow()
+            .iter()
+            .any(|(level, _)| level == "error"),
+        "{:?}",
+        rt.console.borrow()
+    );
+    venue.dispose().unwrap();
 }
