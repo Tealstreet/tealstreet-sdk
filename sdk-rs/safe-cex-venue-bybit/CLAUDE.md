@@ -809,3 +809,8 @@ reports its identity and field values, while valid siblings survive fetch/refres
 This intentionally differs from TS retaining malformed string fields. Fee joins compare primitive symbol values strictly; distinct
 JSON objects/arrays never match by contents. Source numeric/property errors retain
 priority over typed row refusals.
+
+Submission checks unknown outcome only for one payload carrying a caller client ID.
+The real HTTP regression sends a rejected first split lot with a non-coercible
+error code and verifies later lots still place; a single order without a caller
+ID also skips classification, while a caller-ID control still reaches it.

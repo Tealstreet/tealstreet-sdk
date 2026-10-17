@@ -191,7 +191,7 @@ pub(crate) fn map_order(
         amount,
         filled,
         remaining,
-        reduce_only,
+        reduce_only: reduce_only.into(),
         close: (inverse.then_some(close)).into(),
         info: (Some(row.clone())).into(),
         time_in_force: (tif).into(),
