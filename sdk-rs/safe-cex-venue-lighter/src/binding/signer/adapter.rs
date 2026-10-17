@@ -16,7 +16,7 @@ use crate::{
     transaction_promise::NativePromise,
     transaction_signing::{SigningResult, TransactionSigningError},
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, to_json};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use std::{
     cell::{OnceCell, RefCell},
     rc::{Rc, Weak},
@@ -76,10 +76,9 @@ fn runtime(host: &Host) -> Runtime {
                 .encode_utf16()
                 .collect())
         },
-        // ts: isLighterInvalidNonceError, over the thrown value's JSON view.
+        // ts: isLighterInvalidNonceError reads the original thrown value.
         invalid_nonce: |_, e| {
-            let value = to_json(&to_thrown(e.clone()).value).map_err(to_signing)?;
-            is_lighter_invalid_nonce_error(Some(&value)).map_err(|c| to_signing(c.into()))
+            is_lighter_invalid_nonce_error(Some(&to_thrown(e.clone()).value)).map_err(to_signing)
         },
         // ts: new Promise((resolve) => setTimeout(resolve, ms))
         delay: |h, ms| {
