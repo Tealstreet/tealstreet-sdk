@@ -1191,6 +1191,73 @@ fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
 }
 
 #[test]
+fn ticker_reads_ignore_missing_unused_declaration_fields() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = json!({"symbol":"BTCUSD","bid":91.25,"ask":94.5});
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[row.clone()]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].bid, rows[0].ask, rows[0].last),
+        (91.25, 94.5, 91.25)
+    );
+    assert_eq!(rows[0].info, Some(row));
+}
+
+#[test]
+fn ticker_reads_ignore_malformed_unused_declaration_fields() {
+    let f = fixture();
+    f.fetch_markets();
+    let row = json!({"symbol":"BTCUSD","bid":81.25,"ask":84.5,"type":{},"time":null});
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[row.clone()]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        (rows[0].bid, rows[0].ask, rows[0].mark),
+        (81.25, 84.5, 81.25)
+    );
+    assert_eq!(rows[0].info, Some(row));
+}
+
+fn malformed_ticker_fallback(prefix: Value) {
+    let f = fixture();
+    f.fetch_markets();
+    let cached = f.run(f.exchange.fetch_tickers()).unwrap();
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            tickers: Some(cached.clone()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let cached = f.store.tickers().to_vec();
+    let errors = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    *f.wire.candle_response.borrow_mut() = Some(json!({"events":[
+        prefix,null
+    ]}));
+    let rows = f.run(f.exchange.fetch_tickers()).unwrap();
+    assert_eq!(rows, cached);
+    assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("Cannot read properties of null (reading 'symbol')")
+    );
+}
+
+#[test]
 fn account_lookup_reads_only_selected_account_fields() {
     let f = fixture();
     f.wire.faults.borrow_mut().push_back((
@@ -1351,6 +1418,20 @@ fn portfolio_absent_open_positions_retains_filter_type_error() {
     assert_eq!(
         error.message,
         "Cannot read properties of undefined (reading 'filter')"
+    );
+}
+
+#[test]
+fn ticker_reads_report_consumed_field_failure_and_return_cached_tickers() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":1,"ask":2}),
+    );
+}
+
+#[test]
+fn ticker_reads_defer_scalar_projection_until_source_mapping_completes() {
+    malformed_ticker_fallback(
+        json!({"symbol":"BTCUSD","type":"Quote","time":"unused","bid":"13","ask":14}),
     );
 }
 
