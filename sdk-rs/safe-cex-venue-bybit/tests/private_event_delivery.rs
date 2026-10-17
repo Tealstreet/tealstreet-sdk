@@ -77,7 +77,7 @@ fn production_private_frames_publish_orders_incremental_fills_and_terminal_statu
         h.venue().base().on(
             "fill",
             Rc::new(move |_, value| {
-                observed.borrow_mut().push(value[0].clone());
+                observed.borrow_mut().push(value.clone());
                 Ok(())
             }),
         );
@@ -342,7 +342,7 @@ fn private_delivery_matches_actual_source_handler_mapper_fill_and_store_bodies()
             h.venue().base().on(
                 "fill",
                 Rc::new(move |_, value| {
-                    observed.borrow_mut().push(value[0].clone());
+                    observed.borrow_mut().push(value.clone());
                     Ok(())
                 }),
             );
