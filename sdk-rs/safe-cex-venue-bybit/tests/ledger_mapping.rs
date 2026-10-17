@@ -1,6 +1,12 @@
 use safe_cex_types::*;
 use safe_cex_venue_bybit::{fee_overlay::*, ledger_mapping::*};
 use serde_json::Value;
+fn project_category(value: Option<&Value>) -> Result<IncomeCategory, String> {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
+    bybit_transaction_category(&value.map(from_json).unwrap_or(Js::Undefined))
+        .and_then(|v| to_typed(&v))
+        .map_err(|e| e.to_exchange_error().message)
+}
 fn number(actual: f64, expected: &Value, name: &str) {
     let bits = if actual.is_nan() {
         "nan".into()
@@ -29,7 +35,7 @@ fn outcome<T, E: AsRef<str>>(actual: Result<T, E>, expected: &Value) -> Option<T
         );
         None
     } else if expected["refusal"] == true {
-        assert!(actual.is_err(), "LEDGER native typed refusal");
+        assert!(actual.is_err(), "LEDGER native typed refusal: {expected}");
         None
     } else {
         Some(actual.unwrap_or_else(|e| panic!("{}", e.as_ref())))
@@ -99,7 +105,7 @@ fn ledger_native_source_parity() {
                 }
             }
             "bybitTransactionCategory" => {
-                if let Some(v) = outcome(bybit_transaction_category(value.as_ref()), e) {
+                if let Some(v) = outcome(project_category(value.as_ref()), e) {
                     assert_eq!(
                         v,
                         serde_json::from_value::<IncomeCategory>(e["ok"].clone()).unwrap(),
@@ -117,7 +123,7 @@ fn ledger_native_source_parity() {
     );
     for c in f["categories"].as_array().unwrap() {
         let e = &c["result"];
-        if let Some(v) = outcome(bybit_transaction_category(Some(&c["type"])), e) {
+        if let Some(v) = outcome(project_category(Some(&c["type"])), e) {
             assert_eq!(
                 v,
                 serde_json::from_value::<IncomeCategory>(e["ok"].clone()).unwrap(),
@@ -126,7 +132,7 @@ fn ledger_native_source_parity() {
         }
     }
     assert!(
-        bybit_transaction_category(Some(&Value::String("constructor".into()))).is_err(),
+        project_category(Some(&Value::String("constructor".into()))).is_err(),
         "LEDGER native inherited category refusal"
     );
     assert_eq!(f["inherited"]["refusal"], true);
@@ -292,7 +298,11 @@ fn ledger_native_source_parity() {
     for c in f["incomes"].as_array().unwrap() {
         let e = &c["result"];
         let Some(records) = outcome(
-            map_bybit_transaction_to_income_records(c["row"].as_object().unwrap()),
+            map_bybit_transaction_to_income_records(
+                &safe_cex_exchange::js_runtime::value::from_json(&c["row"]),
+            )
+            .and_then(|v| safe_cex_exchange::js_runtime::value::to_typed::<Vec<IncomeRecord>>(&v))
+            .map_err(|e| e.to_exchange_error().message),
             e,
         ) else {
             continue;
