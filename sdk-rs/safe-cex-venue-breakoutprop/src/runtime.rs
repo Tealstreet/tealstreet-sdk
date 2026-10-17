@@ -331,7 +331,7 @@ impl BreakoutRuntime {
         let utc = |n| self.reads.local_to_utc(n);
         let report = |s: &str| self.report(&ExchangeError::new(s), false);
         let balance = portfolio::format_balance(input, store, &utc, &report)?;
-        let positions = portfolio::format_positions(input, store, None, &utc)?;
+        let positions = portfolio::format_positions(input, store, None, &utc, &report)?;
         let orders = portfolio::format_orders(input, store, &utc, &report)?;
         let mut loaded = store.loaded().clone();
         loaded.balance = true;
