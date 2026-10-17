@@ -64,8 +64,11 @@ impl ApexOmniExchange {
                 .filter(|value| safe_cex_num::js_truthy(Some(value)))
                 .cloned()
                 .unwrap_or_else(|| serde_json::Value::String(error.message.clone()));
-            self.base
-                .emit_and_log_error(ExchangeErrorInput::Raw(message.clone()), None, None)?;
+            self.base.emit_and_log_error(
+                ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(&message)),
+                None,
+                None,
+            )?;
             return Ok(AccountValidationError::from_value(
                 if safe_cex_num::js_truthy(Some(&message)) {
                     message

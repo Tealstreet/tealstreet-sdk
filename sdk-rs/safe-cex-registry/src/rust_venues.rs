@@ -387,8 +387,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                     if let Some(parent) = fill_parent.borrow().upgrade() {
                         parent.base().emit(
                             "fill",
-                            serde_json::to_value(fill)
-                                .map_err(|e| ExchangeError::new(e.to_string()))?,
+                            safe_cex_exchange::js_runtime::value::from_typed(&fill)?,
                         )?;
                     }
                     Ok(())

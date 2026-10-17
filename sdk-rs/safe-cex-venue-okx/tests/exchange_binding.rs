@@ -347,7 +347,7 @@ fn change_margin_type_reports_cross_only_without_a_request() {
     h.venue().base().on(
         "error",
         std::rc::Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.to_string());
+            sink.borrow_mut().push(data.to_display());
             Ok(())
         }),
     );
@@ -520,7 +520,10 @@ fn record_private_fills(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value
     h.venue().base().on(
         "fill",
         std::rc::Rc::new(move |_, payload| {
-            sink.borrow_mut().push(payload.clone());
+            sink.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(payload)
+                    .expect("finite fixture fill"),
+            );
             Ok(())
         }),
     );
@@ -755,7 +758,7 @@ fn record_errors(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
     h.venue().base().on(
         "error",
         std::rc::Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.to_string());
+            sink.borrow_mut().push(data.to_display());
             Ok(())
         }),
     );

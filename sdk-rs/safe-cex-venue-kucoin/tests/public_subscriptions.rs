@@ -12,7 +12,7 @@ use std::{
 fn public_subscriptions_native_arguments_before_source() {
     let mut cause = ExchangeError::new("subscription failure");
     cause.name = "TypeError".into();
-    cause.code = Some(json!("SUBSCRIBE"));
+    cause.code = Some(safe_cex_exchange::js_runtime::value::Js::str("SUBSCRIBE"));
     cause.store_subscriber_ids = vec![7, 3];
     let error = Rc::new(cause);
     let mut active = vec![];

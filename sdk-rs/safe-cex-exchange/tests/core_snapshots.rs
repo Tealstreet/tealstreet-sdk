@@ -569,7 +569,9 @@ fn error_listener_throw_aborts_snapshot_before_retry_sleep() {
     );
     let mut expected = ExchangeError::new("error listener failed");
     expected.name = "TypeError".into();
-    expected.code = Some(serde_json::json!("E_LISTENER"));
+    expected.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+        &serde_json::json!("E_LISTENER"),
+    ));
     let error = expected.clone();
     venue
         .base

@@ -24,6 +24,7 @@ fn errors(h: &Harness) -> Rc<RefCell<Vec<Value>>> {
     h.venue().base().on(
         "error",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             sink.borrow_mut().push(value.clone());
             Ok(())
         }),

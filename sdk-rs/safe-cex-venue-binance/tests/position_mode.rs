@@ -20,7 +20,9 @@ fn run<T>(future: impl Future<Output = T>) -> T {
 fn fixture_error() -> ExchangeError {
     let mut error = ExchangeError::new("fixture request");
     error.name = "RangeError".into();
-    error.code = Some(json!("fixture-code"));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "fixture-code"
+    )));
     error.response = Some(json!({"status":503,"data":{"msg":"venue message"}}));
     error
 }
@@ -64,7 +66,7 @@ fn position_mode_readers_match_live_source() {
             Ok(value) => (json!(value), Value::Null),
             Err(actual) => (
                 Value::Null,
-                json!({"name":actual.name,"message":actual.message,"code":actual.code,"same":actual==error,"response":actual.response}),
+                json!({"name":actual.name,"message":actual.message,"code":observed_error_code(&actual.code),"same":actual==error,"response":actual.response}),
             ),
         };
         assert_eq!(
@@ -112,4 +114,17 @@ fn readers_await_once_and_preserve_rejection_metadata() {
         );
         assert_eq!(calls.get(), 1);
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

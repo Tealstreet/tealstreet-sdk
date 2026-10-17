@@ -89,7 +89,9 @@ fn closed_position_reader_matches_source() {
         let clock = Cell::new(0);
         let mut emit_failure = ExchangeError::new("fixture emitter");
         emit_failure.name = "SyntaxError".into();
-        emit_failure.code = Some(json!("emit-code"));
+        emit_failure.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "emit-code"
+        )));
         let result = run(derive_binance_closed_positions(
             &opts,
             case["publicOnly"] == true,
@@ -129,7 +131,7 @@ fn closed_position_reader_matches_source() {
             ),
             Err(error) => (
                 Value::Null,
-                json!({"name":error.name,"message":error.message,"code":error.code,"same":error==emit_failure}),
+                json!({"name":error.name,"message":error.message,"code":observed_error_code(&error.code),"same":error==emit_failure}),
             ),
         };
         assert_eq!(
@@ -209,4 +211,17 @@ fn closed_reader_oracle_controls_fail_loudly() {
         .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("MODULE_NOT_FOUND"));
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

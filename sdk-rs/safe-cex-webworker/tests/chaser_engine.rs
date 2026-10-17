@@ -179,7 +179,7 @@ impl ChaserHost for Host {
         ready(Ok(()))
     }
     fn error_properties(&self, e: &ExchangeError) -> Value {
-        json!({"name":e.name,"message":e.message,"code":e.code,"response":e.response})
+        json!({"name":e.name,"message":e.message,"code":e.code.as_ref().map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap()),"response":e.response})
     }
     fn console_error(&self, e: &ExchangeError) -> Result<(), ExchangeError> {
         self.events
@@ -249,9 +249,10 @@ fn fixture(
         ex.base().on(
             event,
             Rc::new(move |name, data| {
-                h.events
-                    .borrow_mut()
-                    .push(format!("{name}:{}", data.as_str().unwrap()));
+                h.events.borrow_mut().push(format!(
+                    "{name}:{}",
+                    String::from_utf16_lossy(data.as_str().unwrap())
+                ));
                 Ok(())
             }),
         );
@@ -503,7 +504,7 @@ fn monitor_tracks_mutations_ticker_queue_and_two_missing_confirmations() {
             .base()
             .emit(
                 "update",
-                json!({"orders":orders,"updateIds":{"orders":orders_id,"positions":positions_id}}),
+                safe_cex_exchange::js_runtime::value::from_json(&json!({"orders":orders,"updateIds":{"orders":orders_id,"positions":positions_id}})),
             )
             .unwrap();
     };
@@ -576,7 +577,7 @@ fn monitor_tracks_mutations_ticker_queue_and_two_missing_confirmations() {
         Rc::new(move |_, data| {
             if data
                 .as_str()
-                .is_some_and(|s| s.contains("processInstance starting"))
+                .is_some_and(|s| String::from_utf16_lossy(s).contains("processInstance starting"))
             {
                 changing.options().borrow_mut().max_attempts = 11.;
             }
@@ -628,7 +629,9 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
             .base()
             .emit(
                 "update",
-                json!({"orders":[order("o",99.)],"updateIds":{"orders":id,"positions":1}}),
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"orders":[order("o",99.)],"updateIds":{"orders":id,"positions":1}}),
+                ),
             )
             .unwrap()
     };
@@ -694,7 +697,9 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
         .base()
         .emit(
             "update",
-            json!({"orders":[order("o",99.)],"updateIds":{"orders":1,"positions":1}}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"orders":[order("o",99.)],"updateIds":{"orders":1,"positions":1}}),
+            ),
         )
         .unwrap();
     h.drain();
@@ -717,13 +722,23 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
     for (id, symbol) in [("other", "BTC"), ("o", "OTHER")] {
         i.exchange
             .base()
-            .emit("fill", json!({"orderId":id,"symbol":symbol,"amount":3}))
+            .emit(
+                "fill",
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"orderId":id,"symbol":symbol,"amount":3}),
+                ),
+            )
             .unwrap();
         assert_eq!(i.filled_size().to_bits(), 0f64.to_bits());
     }
     i.exchange
         .base()
-        .emit("fill", json!({"orderId":"o","symbol":"BTC","amount":3}))
+        .emit(
+            "fill",
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"orderId":"o","symbol":"BTC","amount":3}),
+            ),
+        )
         .unwrap();
     assert!(
         i.is_stopped(),
@@ -743,7 +758,9 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
             .base()
             .emit(
                 "update",
-                json!({"orders":[order("o",100.)],"updateIds":{"orders":id,"positions":1}}),
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"orders":[order("o",100.)],"updateIds":{"orders":id,"positions":1}}),
+                ),
             )
             .unwrap();
         assert!(
@@ -756,7 +773,9 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
         .base()
         .emit(
             "update",
-            json!({"orders":[order("o",100.)],"updateIds":{"orders":null,"positions":1}}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"orders":[order("o",100.)],"updateIds":{"orders":null,"positions":1}}),
+            ),
         )
         .unwrap();
     assert!(!i.pending_orders_update());

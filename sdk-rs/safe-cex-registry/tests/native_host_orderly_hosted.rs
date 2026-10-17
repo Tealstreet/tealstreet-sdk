@@ -232,7 +232,12 @@ async fn exercise(local: bool) {
         h.exchange.base().on_args(
             "log",
             Rc::new(move |_, args| {
-                capture.borrow_mut().push(serde_json::json!(args));
+                capture.borrow_mut().push(
+                    safe_cex_exchange::js_runtime::value::to_json(
+                        &safe_cex_exchange::js_runtime::value::Js::array(args.to_vec()),
+                    )
+                    .unwrap(),
+                );
                 Ok(())
             }),
         );

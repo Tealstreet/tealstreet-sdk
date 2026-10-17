@@ -67,18 +67,24 @@ fn error(name: &str) -> Failure {
         "history fixture"
     });
     e.name = "RangeError".into();
-    e.code = Some(json!("history-code"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "history-code"
+    )));
     e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
     Rc::new(e)
 }
 fn error_wire(e: &Failure, want: &Failure) -> Value {
-    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
+    json!({"original":Rc::ptr_eq(e,want),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))})
 }
 fn original(e: &Failure, want: &Failure, l: &str) {
     assert!(Rc::ptr_eq(e, want), "{l}: original Error Rc");
     assert_eq!(e.name, "RangeError", "{l}");
     assert_eq!(e.message, want.message, "{l}");
-    assert_eq!(e.code, Some(json!("history-code")), "{l}");
+    assert_eq!(
+        observed_error_code(&e.code),
+        Some(json!("history-code")),
+        "{l}"
+    );
     assert_eq!(
         e.response,
         Some(json!({"status":503,"data":{"msg":"venue detail"}})),
@@ -1606,4 +1612,17 @@ fn seed() {
         actual.push(json!({"name":name,"trace":state.trace,"notices":state.notices.iter().map(Notice::wire).collect::<Vec<_>>(),"callbackRefs":state.callback_refs,"callbacks":state.callbacks.iter().map(wire).collect::<Vec<_>>(),"cleanups":state.cleanups,"params":state.params.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"paramsRefs":state.params.as_ref().map(|p|json!({"root":p.same(&opts),"nested":p.read("nested").unwrap().same(&nested)})),"cleanup":cleanup.is_ok(),"jobs":jobs,"jobFailures":job_errors.iter().map(|e|error_wire(e,&err)).collect::<Vec<_>>(),"failure":primary.as_ref().map(|e|error_wire(e,&err))}));
     }
     compare("seed", actual, 15);
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

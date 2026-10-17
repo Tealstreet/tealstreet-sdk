@@ -12,7 +12,9 @@ use std::{
 fn failure(data: &Value, phase: &str) -> ExchangeError {
     let mut error = ExchangeError::new(format!("{phase} failed"));
     error.response = Some(json!({"data":data}));
-    error.code = Some(json!(phase));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        phase
+    )));
     error
 }
 
@@ -52,7 +54,9 @@ fn futures_position_mode_preserves_confirmation_error_precedence() {
         let trace = RefCell::new(vec![]);
         let applied = Cell::new(0);
         let mut emitter_error = ExchangeError::new("emitter failed");
-        emitter_error.code = Some(json!("emitter-code"));
+        emitter_error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "emitter-code"
+        )));
         let outcome = {
             let mut future = std::pin::pin!(change_binance_position_mode(
                 &store,
@@ -94,7 +98,7 @@ fn futures_position_mode_preserves_confirmation_error_precedence() {
                 Poll::Pending => panic!("ready POST must settle"),
             }
         };
-        let error = outcome.err().map(|error| json!({"name":error.name,"message":error.message,"code":error.code,"same":error==emitter_error}));
+        let error = outcome.err().map(|error| json!({"name":error.name,"message":error.message,"code":observed_error_code(&error.code),"same":error==emitter_error}));
         assert_eq!(
             json!({"trace":*trace.borrow(),"error":error}),
             case["expected"],
@@ -149,4 +153,17 @@ fn futures_position_mode_waits_for_one_post_before_confirmation() {
     ));
     assert_eq!(sends.get(), 1, "one POST through repeated polls");
     assert_eq!(confirmed.get(), 1, "one confirmed mode after success");
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

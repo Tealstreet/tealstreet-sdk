@@ -258,7 +258,7 @@ fn four_live_pings_preserve_native_clock_identity_disposal_and_failure() {
             let fail = outcome == 1;
             let mut failure = ExchangeError::new("native send failure");
             failure.name = "TypeError".into();
-            failure.code = Some(json!("WS_SEND"));
+            failure.code = Some(safe_cex_exchange::js_runtime::value::Js::str("WS_SEND"));
             failure.context = Some(json!({"retained":17}));
             if fail {
                 *fixture.runtime.io.failure.borrow_mut() = Some(failure.clone());
@@ -399,7 +399,8 @@ fn spot_topics_native_values_before_wire() {
                         fixture.runtime.io.ready.set(if connected { 1 } else { 3 });
                         let mut failure = ExchangeError::new("topic send failure");
                         failure.name = "TypeError".into();
-                        failure.code = Some(json!("TOPIC_SEND"));
+                        failure.code =
+                            Some(safe_cex_exchange::js_runtime::value::Js::str("TOPIC_SEND"));
                         failure.context = Some(json!({"retained":17}));
                         failure.store_subscriber_ids = vec![7, 3];
                         if fail {

@@ -14,9 +14,9 @@ note = "Split standard Error envelope from boxed enhanced Axios contextual metad
 ts = "enhanceAxiosError"
 kind = "function"
 layer = "adapted"
-rs = "safe-cex-exchange/src/error_reporting.rs::enhance_axios_error"
+rs = [ "safe-cex-exchange/src/error_reporting.rs::enhance_axios_error", "safe-cex-exchange/src/error_reporting.rs::truthy" ]
 status = "ported"
-note = "Host supplies Error/XHR identity and ISO timestamp; returns existing ExchangeError envelope, preserving response precedence and same-Error enhanced originalMessage. Live actual TypeScript oracle exercises browser and nonbrowser paths."
+note = "Host supplies Error/XHR identity and ISO timestamp; returns existing ExchangeError envelope, preserving response precedence and same-Error enhanced originalMessage. Live actual TypeScript oracle exercises browser and nonbrowser paths. Split member `safe-cex-exchange/src/error_reporting.rs::truthy`; the JSON-profile truthiness predicate used to select optional enhanced-error fields in this body."
 
 [[symbol]]
 ts = "isNetworkError"

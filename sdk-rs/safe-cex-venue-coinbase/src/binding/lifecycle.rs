@@ -275,8 +275,11 @@ impl LifecycleHost for Host {
                     .emit_args(
                         "warning",
                         &[
-                            serde_json::json!(message),
-                            serde_json::json!({"forceToast": true}),
+                            safe_cex_exchange::js_runtime::value::Js::str(message),
+                            safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                                "forceToast",
+                                safe_cex_exchange::js_runtime::value::Js::Bool(true),
+                            )]),
                         ],
                     )
                     .map_err(failure)

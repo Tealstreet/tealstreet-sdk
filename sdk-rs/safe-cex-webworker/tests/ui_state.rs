@@ -70,7 +70,7 @@ fn active_symbol_changes_match_live_filter_union_and_event_transitions() {
             Rc::new(move |_, symbols| {
                 captured
                     .borrow_mut()
-                    .push(json!({"event":"activeTickerSymbols:changed","symbols":symbols}));
+                    .push(json!({"event":"activeTickerSymbols:changed","symbols":safe_cex_exchange::js_runtime::value::to_json(symbols).unwrap()}));
                 Ok(())
             }),
         );

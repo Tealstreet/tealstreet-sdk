@@ -30,6 +30,7 @@ fn private_login_failure_uses_javascript_json_text() {
         venue.base().on(
             "grafana-pws",
             Rc::new(move |_, message| {
+                let message = safe_cex_exchange::js_runtime::value::to_json(message).unwrap();
                 sink.borrow_mut().push(message.as_str().unwrap().to_owned());
                 Ok(())
             }),

@@ -3,7 +3,7 @@
 #[allow(dead_code)]
 mod support;
 use safe_cex_exchange::{exchange::Exchange, websocket::WsEvent};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     cell::RefCell,
     future::Future,
@@ -43,7 +43,8 @@ fn started() -> (
     let sink = logs.clone();
     venue.base().on(
         "log",
-        Rc::new(move |_, value: &Value| {
+        Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             sink.borrow_mut()
                 .push(value.as_str().unwrap_or_default().to_owned());
             Ok(())

@@ -47,13 +47,23 @@ impl PortfolioThrown {
             ("name".into(), Value::String(error.name.clone())),
             ("message".into(), Value::String(error.message.clone())),
         ]);
-        for (key, field) in [
-            ("response", &error.response),
-            ("code", &error.code),
-            ("config", &error.config),
-        ] {
+        for (key, field) in [("response", &error.response), ("config", &error.config)] {
             if let Some(field) = field {
                 value.insert(key.into(), field.clone());
+            }
+        }
+        if let Some(code) = &error.code {
+            match safe_cex_exchange::js_runtime::value::to_json(code) {
+                Ok(code) => {
+                    value.insert("code".into(), code);
+                }
+                Err(cause) => {
+                    return Self {
+                        value: None,
+                        store_mutation: None,
+                        native: Some(Rc::new(cause.to_exchange_error())),
+                    };
+                }
             }
         }
         Self {

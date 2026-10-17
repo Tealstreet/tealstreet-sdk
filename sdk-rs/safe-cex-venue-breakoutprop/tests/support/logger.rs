@@ -12,7 +12,9 @@ fn logger_error_fixture() -> ExchangeError {
     e.url = Some("/failure".into());
     e.method = Some("PATCH".into());
     e.original_error = Some(json!({"sentinel":true}));
-    e.code = Some(json!("SAMPLE_CODE"));
+    e.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "SAMPLE_CODE"
+    )));
     e
 }
 fn logger_error_observe(e: &ExchangeError) -> Value {
@@ -20,5 +22,18 @@ fn logger_error_observe(e: &ExchangeError) -> Value {
         "is_axios_error":e.is_axios_error,"request":e.request,"stack":e.stack,
         "response":e.response,"context":e.context,"config":e.config,
         "enhanced_message":e.enhanced_message,"url":e.url,"method":e.method,
-        "original_error":e.original_error,"code":e.code})
+        "original_error":e.original_error,"code":observed_error_code(&e.code)})
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite = safe_cex_exchange::js_runtime::value::to_json(value)
+            .expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

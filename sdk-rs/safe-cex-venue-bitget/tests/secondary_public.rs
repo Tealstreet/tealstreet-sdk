@@ -231,7 +231,9 @@ fn exercise(name: ExchangeName, testnet: bool, index: f64) -> Outcome {
         .base()
         .emit(
             "markets:changed",
-            json!({"added":added.iter().map(|s|json!({"symbol":s})).collect::<Vec<_>>()}),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"added":added.iter().map(|s|json!({"symbol":s})).collect::<Vec<_>>()}),
+            ),
         )
         .unwrap();
     assert_eq!(

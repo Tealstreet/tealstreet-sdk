@@ -218,11 +218,11 @@ fn fail(name: &str) -> Failure {
     let mut e = ExchangeError::new("operation fixture");
     e.name = "RangeError".into();
     e.code = Some(if matches!(name, "unknown-number" | "status-unknown") {
-        json!(-2011)
+        safe_cex_exchange::js_runtime::value::from_json(&json!(-2011))
     } else if name == "unknown-string" {
-        json!("-2011")
+        safe_cex_exchange::js_runtime::value::from_json(&json!("-2011"))
     } else {
-        json!(-1000)
+        safe_cex_exchange::js_runtime::value::from_json(&json!(-1000))
     });
     e.response = Some(json!({"status":503,"data":{"msg":"venue detail"}}));
     Rc::new(e)
@@ -331,7 +331,9 @@ fn state(venue: Venue, name: &str) -> Shared {
     };
     let mut replacement = ExchangeError::new("emitter fixture");
     replacement.name = "SyntaxError".into();
-    replacement.code = Some(json!("emit-code"));
+    replacement.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "emit-code"
+    )));
     replacement.response = Some(json!({"status":504,"data":{"msg":"emit detail"}}));
     Rc::new(RefCell::new(State {
         name: name.into(),
@@ -616,7 +618,11 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
         },
         "{l}"
     );
-    assert_eq!(e.code, expected.code, "{l}: native Error code");
+    assert_eq!(
+        observed_error_code(&e.code),
+        observed_error_code(&expected.code),
+        "{l}: native Error code"
+    );
     assert_eq!(
         e.response,
         Some(if replaced {
@@ -628,7 +634,7 @@ fn original(e: &Failure, b: &State, replaced: bool, l: &str) {
     );
 }
 fn error_wire(e: Option<&Failure>, b: &State) -> Value {
-    e.map_or(Value::Null,|e|json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":e.code.clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))
+    e.map_or(Value::Null,|e|json!({"original":Rc::ptr_eq(e,&b.error),"replacement":Rc::ptr_eq(e,&b.replacement),"name":e.name,"message":e.message,"code":observed_error_code(&e.code).clone().unwrap_or(json!({"$undefined":true})),"response":e.response.clone().unwrap_or(json!({"$undefined":true}))}))
 }
 fn state_wire(b: &State, result: &Result<EventValue, Failure>) -> Value {
     json!({"name":b.name,"trace":b.trace.iter().map(Trace::wire).collect::<Vec<_>>(),"calls":b.deletes.iter().map(|(ep,p)|json!({"endpoint":ep,"params":wire(p)})).collect::<Vec<_>>(),"statuses":b.statuses.iter().map(|(one,v,s)|json!({"single":one,"rows":wire(v),"status":wire(&EventValue::enum_value(PrivateEnum::Status(*s)))})).collect::<Vec<_>>(),"emissions":b.emissions.iter().map(wire).collect::<Vec<_>>(),"value":result.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"forwarded":wire(&b.forwarded),"cancelRefs":b.cancel_refs,"formatRefs":b.format_refs,"batchRefs":b.batch_refs,"returnedRef":result.as_ref().is_ok_and(|v|v.same(&b.returned)),"failure":error_wire(result.as_ref().err(),b)})
@@ -1509,4 +1515,17 @@ fn pm_place() {
 #[ignore = "requires TypeScript oracle"]
 fn spot_place() {
     place_test(Venue::Spot, "spot")
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

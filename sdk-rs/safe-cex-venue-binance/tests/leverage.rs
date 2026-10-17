@@ -140,7 +140,9 @@ fn leverage_matches_live_source_and_native_store() {
         let posts = RefCell::new(Vec::<(String, BinanceLeverageRequest)>::new());
         let mut emitter_error = ExchangeError::new("emitter failed");
         emitter_error.name = "RangeError".into();
-        emitter_error.code = Some(json!("emitter-code"));
+        emitter_error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "emitter-code"
+        )));
         let client = if c["variant"] == "binancepm" {
             "papiXhr"
         } else {
@@ -273,7 +275,9 @@ fn leverage_matches_live_source_and_native_store() {
                 "LEVERAGE native error message"
             );
             assert_eq!(
-                error.code.as_ref().unwrap_or(&Value::Null),
+                observed_error_code(&error.code)
+                    .as_ref()
+                    .unwrap_or(&Value::Null),
                 &expected_error["code"],
                 "LEVERAGE native error code"
             );
@@ -409,4 +413,17 @@ fn inherited_market_guard_matches_live_source() {
         assert_eq!(error.name, c["error"]["name"].as_str().unwrap());
         assert_eq!(error.message, c["error"]["message"].as_str().unwrap());
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

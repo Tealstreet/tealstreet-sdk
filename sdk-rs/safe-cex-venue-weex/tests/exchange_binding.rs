@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 mod binding_runtime;
 use binding_runtime::*;
-use safe_cex_exchange::runtime::ExchangeError;
+use safe_cex_exchange::{js_runtime::value::to_typed, runtime::ExchangeError};
 use safe_cex_store::Store;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -287,9 +287,11 @@ fn historical_fill_logs(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value
     h.venue().base().on_args(
         "log",
         std::rc::Rc::new(move |_, args| {
+            let message = to_typed::<String>(&args[0])?;
+            let severity = to_typed::<String>(&args[1])?;
             captured
                 .borrow_mut()
-                .push(json!({"message":args[0],"severity":args[1]}));
+                .push(json!({"message":message,"severity":severity}));
             Ok(())
         }),
     );
@@ -530,7 +532,7 @@ fn rejected_order_leg_keeps_successful_orders_without_error_event() {
     let captured = errors.clone();
     h.venue().base().on(
         "error",
-        std::rc::Rc::new(move |_, value: &Value| {
+        std::rc::Rc::new(move |_, value: &safe_cex_exchange::js_runtime::value::Js| {
             captured.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -892,7 +894,9 @@ fn private_fill_reaches_emitter_and_disposal_cancels_refresh_timers() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
-            delivered.borrow_mut().push(value.clone());
+            delivered.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(value).expect("finite fixture fill"),
+            );
             Ok(())
         }),
     );
@@ -1341,7 +1345,10 @@ fn gap_snapshot_rejection_is_silent_and_keeps_the_existing_book() {
     h.venue().base().on(
         "log",
         Rc::new(move |_, message| {
-            delivered.borrow_mut().push(message.clone());
+            delivered.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(message)
+                    .expect("finite fixture event"),
+            );
             Ok(())
         }),
     );

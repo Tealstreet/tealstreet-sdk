@@ -338,7 +338,7 @@ fn margin_fetch_effects_match_live_source() {
             if fail.contains(&json!(n)) {
                 let mut error = ExchangeError::new(format!("notify {n}"));
                 error.name = "TypeError".into();
-                error.code = Some(json!(n));
+                error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(n)));
                 return Err(error.into());
             }
             Ok(())
@@ -393,7 +393,11 @@ fn margin_fetch_effects_match_live_source() {
                     "MARGIN native error message {index}"
                 );
                 assert_eq!(
-                    error.code.as_ref(),
+                    error
+                        .code
+                        .as_ref()
+                        .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                        .as_ref(),
                     expected.get("code"),
                     "MARGIN native error code {index}"
                 );
@@ -407,7 +411,7 @@ fn margin_fetch_effects_match_live_source() {
         }
         let thrown = result
             .err()
-            .map(|error| json!({"name":error.name,"message":error.message,"code":error.code}));
+            .map(|error| json!({"name":error.name,"message":error.message,"code":error.code.as_ref().map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())}));
         wire_results.push((
             numeric(
                 json!({"calls":venue.calls.get(),"notifications":count.get(),"events":*venue.events.borrow(),"state":json!({"fetched":*store.fetched_leverage(),"leverage":store.positions().iter().map(|p|p.leverage).collect::<Vec<_>>()}),"thrown":thrown})

@@ -27,7 +27,9 @@ fn pm_margin_mode_rejection_matches_source() {
         let mut trace = vec![];
         let mut sentinel = ExchangeError::new("fixture emitter");
         sentinel.name = "RangeError".into();
-        sentinel.code = Some(json!("fixture-code"));
+        sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "fixture-code"
+        )));
         sentinel.response = Some(json!({"status":503,"data":{"msg":"detail"}}));
         let error = {
             let mut future = std::pin::pin!(change_binance_pm_margin_type(|message| {
@@ -52,9 +54,22 @@ fn pm_margin_mode_rejection_matches_source() {
             "PM margin emits once before rejection case{index}"
         );
         assert_eq!(
-            json!({"name":error.name,"message":error.message,"same":error==sentinel,"code":error.code,"response":error.response}),
+            json!({"name":error.name,"message":error.message,"same":error==sentinel,"code":observed_error_code(&error.code),"response":error.response}),
             case["error"],
             "PM margin error precedence and metadata case{index}"
         );
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

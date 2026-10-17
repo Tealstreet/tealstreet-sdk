@@ -118,6 +118,13 @@ venue cleanup, and disposal closes all registrations. Stream notifications carry
 `{subscriptionId, data}` through the existing event watch. Binance gateway tests
 in `native_account_streams` verify live frames and actual unsubscribe traffic.
 
+Native Store delivery reuses the worker's payload preparer and lodash throttle.
+Start cancels pending delivery and posts a full snapshot; live updates strip
+raw info and omit stable slices according to worker versions/update IDs.
+Close and deactivation cancel trailing delivery. The full emitter `update` event
+stays internal, so hosts receive Store state through one callback pipeline.
+`native_account_store` drives real Binance gateway and HTTP updates through it.
+
 Every native HTTP host an account host builds shares one emitter slot;
 `open_native_account` binds the constructed exchange with `bind_http_events`, so
 safeCexAxiosCreate's proxy auth/5xx `error` reaches the account's event watch.
@@ -264,7 +271,7 @@ The accepted-set registry contracts classify each public alias separately. The
 TickerBatch and MarketBatch Rc/RefCell array handles also implement Deserialize;
 their contracts execute ordered model-field observations and reject forbidden
 outer/member shapes. The remaining15 capability aliases are non-decoders. The existing reviewed generic-alias policy pins
-`ConstructorFuture<'static>`, `ModuleFuture<'static>` and `JsonFuture<bool>` to
+`ConstructorFuture<'static>`, `ModuleFuture<'static>` and `NativeAccountFuture<bool>` to
 independently authored native types. Keep the optional constructor, dynamic
 module/error owners and JSON error owner intact. These finite identity probes
 and ordinary Serde/conversion checks do not establish future execution, every

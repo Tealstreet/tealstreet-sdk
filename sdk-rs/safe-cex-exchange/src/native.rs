@@ -417,7 +417,7 @@ impl HttpHost for NativeHttpHost {
             .ok_or_else(|| format!("native HTTP host has no exchange to emit {event}"))?;
         exchange
             .base()
-            .emit(event, Value::String(message.into()))
+            .emit(event, crate::js_runtime::value::Js::str(message))
             .map_err(|error| error.message)
     }
     fn note_success(&self, _exchange: &ExchangeName, _response: &RestResponse) {}

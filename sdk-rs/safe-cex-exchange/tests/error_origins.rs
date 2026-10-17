@@ -233,7 +233,10 @@ fn shared_rest_conversion_retains_typed_request_response_and_transport() {
         "REST origin Debug omits retained request payload"
     );
     assert_eq!(
-        error.code,
+        error
+            .code
+            .as_ref()
+            .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap()),
         Some(json!("ORIGIN_CODE")),
         "REST metadata code view"
     );
@@ -267,7 +270,9 @@ fn shared_store_conversion_keeps_non_notification_origin_and_recovered_core_orig
     );
     let mut original = ExchangeError::new("earlier core failure");
     original.name = "RangeError".into();
-    original.code = Some(serde_json::json!(42));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+        &serde_json::json!(42),
+    ));
     original.origin = Some(ExchangeErrorOrigin::new(ListenerOrigin {
         code: 197,
         live: Rc::new(Cell::new(13)),

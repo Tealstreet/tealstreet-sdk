@@ -191,9 +191,7 @@ fn report_proxy_failure(owner: &BaseExchange, response: &Js) -> Result<(), Throw
         Js::Number(status).to_display()
     );
     owner.runtime.console("error", &message);
-    owner
-        .emit("error", Value::String(message))
-        .map_err(Thrown::from)
+    owner.emit("error", Js::str(&message)).map_err(Thrown::from)
 }
 
 fn same(left: &Js, right: &Js) -> Result<bool, Thrown> {

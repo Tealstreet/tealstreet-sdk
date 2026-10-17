@@ -82,10 +82,14 @@ fn private_filled_order_updates_store_and_emits_execution_price() {
         .clone();
     assert_eq!(order.status, OrderStatus::Closed);
     assert_eq!(order.filled, 0.009);
-    assert_eq!(
-        fills.borrow().as_slice(),
-        &[json!({"id":"private-order","side":"buy","symbol":SYMBOL,"price":99.75,"amount":0.009})]
-    );
+    assert_eq!(fills.borrow().len(), 1);
+    let fill = fills.borrow()[0].clone();
+    assert_eq!(fill.own_entries().unwrap().len(), 5);
+    for (key, expected) in [("id", "private-order"), ("side", "buy"), ("symbol", SYMBOL)] {
+        assert!(fill.get(key).unwrap().strict_equals(&Js::str(expected)));
+    }
+    assert_eq!(fill.get("price").unwrap().as_f64(), Some(99.75));
+    assert_eq!(fill.get("amount").unwrap().as_f64(), Some(0.009));
     h.venue().dispose().unwrap();
 }
 #[test]

@@ -216,6 +216,12 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 exchange.base.on_args(
                     "error",
                     Rc::new(move |event, value| {
+                        let value: Vec<serde_json::Value> = value
+                            .iter()
+                            .map(|value| {
+                                safe_cex_exchange::js_runtime::value::to_json(value).unwrap()
+                            })
+                            .collect();
                         assert_eq!(event, "error", "native actual reporting event");
                         observed.borrow_mut().push(serde_json::json!(value));
                         Ok(())
@@ -465,7 +471,9 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
             ));
             exchange.xhr = failure.clone();
             let mut original = ExchangeError::new("listener failed");
-            original.code = Some(json!("LISTENER"));
+            original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "LISTENER"
+            )));
             original.origin = Some(safe_cex_exchange::runtime::ExchangeErrorOrigin::new(
                 std::io::Error::other("listener origin"),
             ));
@@ -477,6 +485,10 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
             exchange.base.on_args(
                 "error",
                 Rc::new(move |_, args| {
+                    let args: Vec<serde_json::Value> = args
+                        .iter()
+                        .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                        .collect();
                     first_calls.set(first_calls.get() + 1);
                     trace.borrow_mut().push("first".into());
                     assert_eq!(args[0], "7", "native decoded listener raw formatted value");
@@ -546,7 +558,7 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                 expected,
                 "native exact throwing-listener call order"
             );
-            observations.push(json!({"worker":worker,"method":method,"error":{"name":error.name,"message":error.message,"code":error.code},
+            observations.push(json!({"worker":worker,"method":method,"error":{"name":error.name,"message":error.message,"code":observed_error_code(&error.code)},
                 "trace":*runtime.trace.borrow(),"gets":failure.gets.get(),"positionReads":store.position_reads.get()}));
         }
     }
@@ -570,4 +582,12 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
     );
     let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_source_tree(&source, &Value::Array(observations), "listener");
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
+    })
 }

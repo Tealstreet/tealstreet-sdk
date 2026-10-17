@@ -194,7 +194,11 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
         base.on(
             "error",
             Rc::new(move |_, data| {
-                observed.borrow_mut().push(json!(["first", data]));
+                observed.borrow_mut().push(json!([
+                    "first",
+                    safe_cex_exchange::js_runtime::value::to_json(data)
+                        .expect("finite fixture event")
+                ]));
                 count.set(count.get() + 1);
                 if mode == "always" || (mode == "once" && count.get() == 1) {
                     Err(if count.get() == 1 {
@@ -211,7 +215,11 @@ fn live_catch_emission_is_fallible_and_keeps_listener_identity() {
         base.on(
             "error",
             Rc::new(move |_, data| {
-                observed.borrow_mut().push(json!(["second", data]));
+                observed.borrow_mut().push(json!([
+                    "second",
+                    safe_cex_exchange::js_runtime::value::to_json(data)
+                        .expect("finite fixture event")
+                ]));
                 Ok(())
             }),
         );

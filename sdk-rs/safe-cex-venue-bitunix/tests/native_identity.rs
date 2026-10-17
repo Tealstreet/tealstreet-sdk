@@ -110,6 +110,7 @@ fn null_batch_rows_match_actual_source_errors_prefix_and_next_chunk() {
         venue.base().on(
             "error",
             Rc::new(move |_, v| {
+                let v = safe_cex_exchange::js_runtime::value::to_json(v).unwrap();
                 sink.borrow_mut().push(v.as_str().unwrap().to_owned());
                 Ok(())
             }),

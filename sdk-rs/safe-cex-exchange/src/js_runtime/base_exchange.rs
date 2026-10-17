@@ -24,6 +24,7 @@ use safe_cex_types::{
 };
 use std::{
     cell::RefCell,
+    collections::{HashMap, HashSet},
     rc::{Rc, Weak},
     sync::Arc,
 };
@@ -188,12 +189,7 @@ pub fn create(
                     "emit",
                     Js::function("emit", move |_, a| {
                         let event = text(&arg(&a, 0))?;
-                        let args = a
-                            .iter()
-                            .skip(1)
-                            .map(to_json)
-                            .collect::<Result<Vec<_>, _>>()?;
-                        base.emit_args(&event, &args)?;
+                        base.emit_args(&event, a.get(1..).unwrap_or_default())?;
                         Ok(Js::Bool(true))
                     }),
                 ),
@@ -206,8 +202,7 @@ pub fn create(
                         let id = on_base.on_args(
                             &event,
                             Rc::new(move |_, data| {
-                                let args = data.iter().map(super::value::from_json).collect();
-                                callee.call(Js::Undefined, args)?;
+                                callee.call(Js::Undefined, data.to_vec())?;
                                 Ok(())
                             }),
                         );
@@ -220,14 +215,41 @@ pub fn create(
                     Js::function("off", move |this, a| {
                         let event = text(&arg(&a, 0))?;
                         let listener = arg(&a, 1);
-                        let mut rows = off_rows.borrow_mut();
-                        if let Some(at) = rows
+                        let snapshot = off_rows.borrow().clone();
+                        let functions: HashMap<_, _> = snapshot
                             .iter()
-                            .position(|(e, f, _)| *e == event && f.same_reference(&listener))
-                        {
-                            let (_, _, id) = rows.remove(at);
-                            off_base.off(&event, Some(&id));
-                        }
+                            .filter(|(name, _, _)| *name == event)
+                            .map(|(_, function, id)| (id.clone(), function.clone()))
+                            .collect();
+                        let retained: HashSet<_> = off_base
+                            .retain_event_listeners(&event, |id| {
+                                if !listener.truthy() {
+                                    return Ok(false);
+                                }
+                                let Some(function) = functions.get(id) else {
+                                    return Ok(true);
+                                };
+                                Ok::<_, Thrown>(
+                                    !function.strict_equals(&listener)
+                                        && !function.get("_")?.strict_equals(&listener),
+                                )
+                            })?
+                            .into_iter()
+                            .collect();
+                        let displaced =
+                            {
+                                let mut rows = off_rows.borrow_mut();
+                                let (displaced, mut others): (Vec<_>, Vec<_>) =
+                                    std::mem::take(&mut *rows)
+                                        .into_iter()
+                                        .partition(|(name, _, _)| *name == event);
+                                others.extend(snapshot.into_iter().filter(|(name, _, id)| {
+                                    *name == event && retained.contains(id)
+                                }));
+                                *rows = others;
+                                displaced
+                            };
+                        drop(displaced);
                         Ok(this)
                     }),
                 ),
@@ -264,16 +286,7 @@ pub fn create(
             "emitAndLogError",
             Js::function("emitAndLogError", move |_, a| {
                 let error = arg(&a, 0);
-                let input = match &error {
-                    Js::Undefined => ExchangeErrorInput::Missing,
-                    Js::String(s) => ExchangeErrorInput::Message(String::from_utf16_lossy(s)),
-                    Js::Object(o) if o.class == "Error" || o.class == "AxiosError" => {
-                        ExchangeErrorInput::Error(Box::new(
-                            Thrown::new(error.clone()).to_exchange_error(),
-                        ))
-                    }
-                    other => ExchangeErrorInput::Raw(to_json(other)?),
-                };
+                let input = ExchangeErrorInput::Raw(error);
                 let msg = arg(&a, 1);
                 let msg = if msg.is_undefined() {
                     None
@@ -620,9 +633,7 @@ fn worker_rpc(context: &Weak<JsSocketContext>, args: Vec<Js>) -> Result<Js, Thro
                         thrown.value.define("stack", Js::str(&stack))?;
                     }
                     if let Some(code) = code {
-                        thrown
-                            .value
-                            .define("code", super::value::from_json(&code))?;
+                        thrown.value.define("code", code)?;
                     }
                     return Err(thrown);
                 }

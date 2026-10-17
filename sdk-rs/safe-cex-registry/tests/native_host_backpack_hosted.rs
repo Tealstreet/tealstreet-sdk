@@ -163,7 +163,12 @@ fn backpack_secretless_private_auth_preserves_actual_source_failure_and_log() {
         venue.base.on_args(
             "error",
             Rc::new(move |_, value| {
-                capture.borrow_mut().push(serde_json::json!(value));
+                capture.borrow_mut().push(
+                    safe_cex_exchange::js_runtime::value::to_json(
+                        &safe_cex_exchange::js_runtime::value::Js::array(value.to_vec()),
+                    )
+                    .unwrap(),
+                );
                 Ok(())
             }),
         );
