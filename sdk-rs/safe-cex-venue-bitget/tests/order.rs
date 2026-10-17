@@ -105,7 +105,7 @@ fn native_undefined_fields(order: &safe_cex_types::Order, expected: &Value, name
     }
     found
 }
-fn check_mapped_orders(oracle: &Value) {
+fn check_mapped_orders(oracle: &Value, field_identity: bool) {
     use safe_cex_venue_bitget::orders::map_order;
     let mut accepted = 0;
     let mut refused = 0;
@@ -210,7 +210,11 @@ fn check_mapped_orders(oracle: &Value) {
     }
     assert_eq!(
         (visited, source_success, accepted_undefined),
-        (1327, 1263, 78),
+        (
+            1327 + usize::from(field_identity),
+            1263 + usize::from(field_identity),
+            78
+        ),
         "mapOrder source corpus and accepted own-undefined cases"
     );
     assert!(
@@ -306,7 +310,7 @@ fn check_mapped_orders(oracle: &Value) {
         "CHOSEN mapOrder gateway does not observe owned info mutation"
     );
 }
-fn check_inverse_orders(oracle: &Value) {
+fn check_inverse_orders(oracle: &Value, field_identity: bool) {
     use safe_cex_venue_bitget::orders::map_inverse_order;
     let reference = &oracle["inverseOrder"];
     let mut accepted = 0;
@@ -414,7 +418,11 @@ fn check_inverse_orders(oracle: &Value) {
     }
     assert_eq!(
         (visited, source_success, accepted_undefined),
-        (1166, 1095, 100),
+        (
+            1166 + usize::from(field_identity),
+            1095 + usize::from(field_identity),
+            100
+        ),
         "inverse mapOrder source corpus and accepted own-undefined cases"
     );
     assert!(
@@ -564,9 +572,21 @@ fn check_inverse_orders(oracle: &Value) {
         "CHOSEN inverse mapOrder legs do not share info"
     );
 }
-fn check(oracle: Value) {
-    check_mapped_orders(&oracle);
-    check_inverse_orders(&oracle);
+fn check(oracle: Value, field_identity: bool) {
+    for cases in [&oracle["mapOrderCases"], &oracle["inverseOrder"]["cases"]] {
+        assert_eq!(
+            cases
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|case| case["name"] == "field-identity:all")
+                .count(),
+            usize::from(field_identity),
+            "exact field-identity supplement admission"
+        );
+    }
+    check_mapped_orders(&oracle, field_identity);
+    check_inverse_orders(&oracle, field_identity);
     use safe_cex_venue_bitget::stream_positions::*;
     for (i, c) in oracle["payloadTimeCases"]
         .as_array()
@@ -1679,7 +1699,10 @@ fn check(oracle: Value) {
 }
 #[test]
 fn frozen_order_decisions() {
-    check(serde_json::from_str(include_str!("order-oracle.json")).unwrap());
+    check(
+        serde_json::from_str(include_str!("order-oracle.json")).unwrap(),
+        false,
+    );
 }
 #[test]
 #[ignore = "requires Node and TypeScript"]
@@ -1697,7 +1720,7 @@ fn live_order_decisions() {
         String::from_utf8_lossy(&r.stderr)
     );
     let oracle: Value = serde_json::from_slice(&r.stdout).unwrap();
-    check(oracle.clone());
+    check(oracle.clone(), false);
     assert_eq!(
         oracle,
         serde_json::from_str::<Value>(include_str!("order-oracle.json")).unwrap(),
@@ -1919,5 +1942,5 @@ fn order_field_identity_supplement() {
             "order identity supplement inventory"
         );
     }
-    check(oracle);
+    check(oracle, true);
 }
