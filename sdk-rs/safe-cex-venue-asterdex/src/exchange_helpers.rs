@@ -144,7 +144,11 @@ pub fn is_algo_order(order_type: OrderType, info: Option<&Value>) -> bool {
     matches!(
         order_type,
         OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
-    ) || matches!(
+    ) || is_raw_algo_order(info)
+}
+
+fn is_raw_algo_order(info: Option<&Value>) -> bool {
+    matches!(
         info.and_then(|v| v.get("type")).and_then(Value::as_str),
         Some(
             "STOP" | "STOP_MARKET" | "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" | "TRAILING_STOP_MARKET"
@@ -486,7 +490,8 @@ pub fn transform_position(
             } else {
                 MarginType::Cross
             },
-        ).into(),
+        )
+        .into(),
         liquidation_price: number("liquidationPrice", true)?,
         position_mode: Some(mode).into(),
         info: Some(pos.clone()).into(),
@@ -531,8 +536,10 @@ pub fn get_open_algo_orders_count(symbol: &str, orders: &[safe_cex_types::Order]
         .filter(|o| {
             o.symbol == symbol
                 && o.status == safe_cex_types::OrderStatus::Open
-                && o.r#type
-                    .is_some_and(|kind| is_algo_order(kind, o.info.as_ref()))
+                && match o.r#type.into_value() {
+                    Some(kind) => is_algo_order(kind, o.info.as_ref()),
+                    None => is_raw_algo_order(o.info.as_ref()),
+                }
         })
         .count()
 }

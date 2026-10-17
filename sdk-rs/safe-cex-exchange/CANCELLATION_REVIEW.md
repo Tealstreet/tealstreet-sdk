@@ -134,3 +134,7 @@ join ownership, reservations and guards are unchanged. BaseExchange changes only
 prepared input signatures and model enum reads; disposal bodies and task guards
 are unchanged. The maintained AST exporter supplies the two audit producer pins,
 and the BaseExchange guard dependencies retain their whole-file pin after review.
+
+The integrated core websocket adds only schedule_ping as a direct Timer::Ping
+schedule delegate. Its timer registry, disposal and task guards are unchanged;
+the four existing websocket dependency pins now include that reviewed wrapper.

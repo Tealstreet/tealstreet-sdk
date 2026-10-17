@@ -930,3 +930,50 @@ fn production_private_balance_frame_updates_store() {
     drop(balance);
     venue.dispose().unwrap();
 }
+
+#[test]
+fn algo_capacity_counts_raw_stop_info_when_normalized_type_is_undefined() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let (venue, rt, store, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    let venue: Rc<dyn Exchange> = venue;
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    let mut markets = store.markets().to_vec();
+    markets[0].info.as_mut().unwrap()["filters"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"filterType":"MAX_NUM_ALGO_ORDERS","limit":1}));
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let existing = serde_json::from_value(json!({
+        "id":"cached-stop","symbol":"BTCUSDT","status":"open","side":"sell",
+        "price":90,"amount":1,"filled":0,"remaining":1,"reduceOnly":true,
+        "lastUpdate":1700000000000u64,"info":{"type":"STOP"}
+    }))
+    .expect("source models admit an omitted normalized type");
+    store.add_or_update_orders(vec![existing]).unwrap();
+    take(&wire);
+    let opts: PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0.01,"price":90,"reduceOnly":true})).unwrap();
+    let error = drive(&rt, venue.base().place_order(venue.as_ref(), opts))
+        .expect_err("raw STOP info still consumes the source algo capacity");
+    assert_eq!(
+        error.message,
+        "AsterDEX max algo order limit reached for BTCUSDT: 1/1 open, 1 new requested"
+    );
+    assert!(
+        !wire
+            .requests
+            .borrow()
+            .iter()
+            .any(|r| r.method.eq_ignore_ascii_case("POST") && request_path(r) == "/fapi/v1/order")
+    );
+    venue.dispose().unwrap();
+}
