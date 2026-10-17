@@ -6,7 +6,7 @@ use safe_cex_registry::native_account::{
     NativeAccount, NativeAccountSpec, native_account_call, open_native_account,
 };
 use safe_cex_registry::native_value::NativeValue;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::rc::Rc;
 
 fn account() -> Rc<NativeAccount> {
@@ -20,11 +20,11 @@ fn account() -> Rc<NativeAccount> {
     })
     .unwrap()
 }
-fn invalid_argument(result: &Result<NativeValue, Value>) -> bool {
+fn invalid_argument(result: &Result<NativeValue, NativeValue>) -> bool {
     result.as_ref().err().is_some_and(|error| {
-        error["message"]
-            .as_str()
-            .is_some_and(|message| message.starts_with("Invalid argument 0:"))
+        error["message"].to_js().as_str().is_some_and(|message| {
+            String::from_utf16_lossy(message).starts_with("Invalid argument 0:")
+        })
     })
 }
 
@@ -101,7 +101,7 @@ fn historical_options_require_an_object_before_the_real_venue_refusal() {
                 !invalid_argument(&result),
                 "native_account_records::history_accepted {input}: {result:?}"
             );
-            let error = result.unwrap_err();
+            let error = support::boundary_json(result.unwrap_err());
             assert!(
                 error["message"]
                     .as_str()

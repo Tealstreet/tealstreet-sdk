@@ -51,3 +51,38 @@ pub fn post_worker_data(post: js_sys::Function) -> Result<(), JsValue> {
     })
     .map_err(|e| js_sys::Error::new(&e.message).into())
 }
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn post_worker_error_data(post: js_sys::Function) -> Result<(), JsValue> {
+    use safe_cex_exchange::{
+        js_runtime::value::{Js, Thrown},
+        runtime::ExchangeError,
+    };
+    use safe_cex_webworker::{
+        data_post::{WorkerDataPayload, WorkerDataPost},
+        payload::StoreWorkerOp,
+    };
+    use std::rc::Rc;
+    let host = WorkerDataPost::for_browser(Rc::new(move |payload| {
+        post.call1(&JsValue::UNDEFINED, payload)
+            .map(|_| ())
+            .map_err(|error| ExchangeError::new(format!("native post failed: {error:?}")))
+    }));
+    let error = Thrown::error("AxiosError", "retained event error").value;
+    error
+        .define(
+            "stack",
+            Js::str("original event stack\n    at source-event"),
+        )
+        .unwrap();
+    error.define("code", Js::Number(f64::INFINITY)).unwrap();
+    host.send(WorkerDataPayload {
+        op: StoreWorkerOp::Error,
+        data: Js::array(vec![
+            Js::str("failed"),
+            Js::object(vec![("sentryData", Js::object(vec![("error", error)]))]),
+        ]),
+    })
+    .map_err(|error| js_sys::Error::new(&error.message).into())
+}

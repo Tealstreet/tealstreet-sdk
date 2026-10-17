@@ -195,6 +195,7 @@ fn cancel_already_gone(status: u16) {
     venue.base().on(
         "error",
         Rc::new(move |_, args| {
+            let args = safe_cex_exchange::js_runtime::value::to_json(args).unwrap();
             capture.borrow_mut().push(args.clone());
             Ok(())
         }),
@@ -865,6 +866,7 @@ fn production_private_fill_frame_updates_store_and_emits_fill() {
     venue.base().on(
         "fill",
         Rc::new(move |_, data| {
+            let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
             saved.borrow_mut().push(data.clone());
             Ok(())
         }),

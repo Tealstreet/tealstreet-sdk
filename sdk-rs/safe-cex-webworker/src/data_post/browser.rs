@@ -71,7 +71,11 @@ fn materialize(value: &Js, seen: &mut Vec<(Js, JsValue)>) -> Result<JsValue, Exc
             if let Some((_, v)) = seen.iter().find(|(old, _)| old.strict_equals(value)) {
                 return Ok(v.clone());
             }
-            let object = Object::new();
+            let object = if matches!(value, Js::Object(object) if object.class == "Error") {
+                Object::from(js_sys::Error::new(""))
+            } else {
+                Object::new()
+            };
             let output: JsValue = object.clone().into();
             seen.push((value.clone(), output.clone()));
             for (key, child) in value.own_entries().map_err(|e| e.to_exchange_error())? {

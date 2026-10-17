@@ -153,6 +153,7 @@ fn native_synced_clock_reaches_http_sockets_models_and_expiration() {
     h.venue().base().on(
         "fill",
         std::rc::Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             sink.borrow_mut().push(value.clone());
             Ok(())
         }),

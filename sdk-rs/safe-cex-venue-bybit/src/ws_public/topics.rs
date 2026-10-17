@@ -5,6 +5,7 @@ use crate::{
 };
 use safe_cex_exchange::{
     exchange::BaseExchange,
+    js_runtime::value::Js,
     runtime::{ExchangeError, ExchangeFuture, Listener},
     socket_lifecycle::SocketSlot,
     websocket::{BaseWebSocket, WsRuntime},
@@ -65,19 +66,25 @@ fn sync(parent: &BybitExchange, topics: &Topics) -> Result<(), ExchangeError> {
     )?;
     Ok(())
 }
-fn native_markets(values: &[safe_cex_types::Market]) -> primary::Markets {
-    Rc::new(RefCell::new(
-        values
-            .iter()
-            .filter(|value| value.option.is_none())
-            .map(|value| {
-                Rc::new(RefCell::new(primary::Market {
-                    symbol: value.symbol.clone(),
-                    quote: value.quote.clone(),
-                }))
-            })
-            .collect(),
-    ))
+fn native_markets(values: &[Js]) -> Result<primary::Markets, ExchangeError> {
+    let mut markets = Vec::new();
+    for value in values {
+        if value.get("option")?.truthy() {
+            continue;
+        }
+        let string = |key| -> Result<String, ExchangeError> {
+            Ok(value
+                .get(key)?
+                .as_str()
+                .map(|units| String::from_utf16_lossy(units))
+                .unwrap_or_default())
+        };
+        markets.push(Rc::new(RefCell::new(primary::Market {
+            symbol: string("symbol")?,
+            quote: string("quote")?,
+        })));
+    }
+    Ok(Rc::new(RefCell::new(markets)))
 }
 fn send(weak: &Weak<BaseWebSocket>, frame: &str) -> Result<(), ExchangeError> {
     match weak.upgrade() {
@@ -170,11 +177,7 @@ impl PublicTopics {
             let Some(socket) = weak.upgrade() else {
                 return Ok(());
             };
-            // The emitter's native market records have already crossed the shared
-            // typed Store boundary; no arbitrary JS getter/string coercion is claimed.
-            let added = safe_cex_exchange::js_runtime::value::to_typed::<
-                Vec<safe_cex_types::Market>,
-            >(&payload.get("added")?)?;
+            let added = payload.get("added")?.array_values().unwrap_or_default();
             let topics = topics.clone();
             let output_topics = topics.clone();
             let has_ws = socket.has_websocket();
@@ -183,7 +186,18 @@ impl PublicTopics {
             let clock = runtime.clone();
             let operation: ExchangeFuture<'static, ()> = if active_symbols {
                 Box::pin(ticker::on_markets_changed(
-                    added.iter().map(|m| m.symbol.clone()).collect(),
+                    added
+                        .iter()
+                        .map(|market| -> Result<Option<String>, ExchangeError> {
+                            Ok(market
+                                .get("symbol")?
+                                .as_str()
+                                .map(|units| String::from_utf16_lossy(units)))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
+                        .flatten()
+                        .collect(),
                     move || has_ws,
                     move || disposed,
                     move || current_topics(&topics),
@@ -193,7 +207,7 @@ impl PublicTopics {
                 ))
             } else {
                 Box::pin(primary::on_markets_changed(
-                    native_markets(&added),
+                    native_markets(&added)?,
                     move || Ok(has_ws),
                     move || Ok(disposed),
                     move || Ok(category.into()),

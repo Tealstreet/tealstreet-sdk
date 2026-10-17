@@ -36,7 +36,7 @@ async fn call(account: &Rc<NativeAccount>, method: &str) -> Value {
     support::boundary_json(
         native_account_call(account.clone(), method.into(), vec![])
             .await
-            .unwrap_or_else(|error| panic!("{method}: {error}")),
+            .unwrap_or_else(|error| panic!("{method}: {error:?}")),
     )
 }
 #[test]

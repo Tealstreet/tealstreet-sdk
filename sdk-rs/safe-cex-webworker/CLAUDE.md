@@ -669,3 +669,9 @@ closed instead of shrinking the compared fields.
 Command dispatch rejects missing, null and primitive payloads before looking up
 or calling its executor; arrays retain the source object admission. Position
 failure replies use JavaScript Error string rules for empty names and messages.
+
+The exchange event bridge consumes `WorkerDataPost` directly: fill is one native
+value, and log/error events retain their variadic argument array. Assembly hosts
+must supply `post_event(WorkerDataPayload)`; ordinary JSON control payloads keep
+their separate `post_payload` capability. Do not serialize native emitter values
+before invoking the required DATA post.

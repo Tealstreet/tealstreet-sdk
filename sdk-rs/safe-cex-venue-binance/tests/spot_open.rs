@@ -48,7 +48,9 @@ impl WsSocket for Socket {
         if self.fail.get() {
             let mut e = ExchangeError::new("fixture send");
             e.name = "RangeError".into();
-            e.metadata.code = Some(json!("send-code"));
+            e.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "send-code"
+            )));
             Err(e)
         } else {
             Ok(())
@@ -469,7 +471,9 @@ fn catch_emitter_failure_escapes_unchanged_and_skips_force_close() {
             let (socket, trace, parent) = connected_fixture();
             let mut sentinel = ExchangeError::new("original emitter failure");
             sentinel.name = "SyntaxError".into();
-            sentinel.code = Some(json!("emitter-code"));
+            sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "emitter-code"
+            )));
             sentinel.response = Some(json!({"data":{"msg":"emitter-response"}}));
             if emitter_throws {
                 *parent.emit_failure.borrow_mut() = Some(sentinel.clone());

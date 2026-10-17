@@ -800,7 +800,9 @@ impl ApiWire for Wire {
         let fault = self.faults.borrow_mut().pop_front();
         let reply = if let Some((status, has_config)) = fault {
             let mut error = ExchangeError::new("guard error");
-            error.code = Some(json!("EXACT"));
+            error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "EXACT"
+            )));
             Err(ApiFailure {
                 error,
                 status: Some(status),
@@ -811,7 +813,7 @@ impl ApiWire for Wire {
         } else if self.unauthorized.get() > 0 {
             self.unauthorized.set(self.unauthorized.get() - 1);
             let mut error = ExchangeError::new("wire unauthorized");
-            error.code = Some("EXACT".into());
+            error.code = Some(safe_cex_exchange::js_runtime::value::Js::str("EXACT"));
             Err(ApiFailure {
                 error,
                 status: Some(self.status.get()),
@@ -946,7 +948,7 @@ fn final_api_native_auth_and_retry() {
     wire.unauthorized.set(2);
     config.borrow_mut().session_retried = false;
     let error = finish(&s, api.request_config(config.clone())).unwrap_err();
-    assert_eq!(error.code, Some(json!("EXACT")));
+    assert_eq!(observed_error_code(&error.code), Some(json!("EXACT")));
     assert!(config.borrow().session_retried);
     let mut login = DxConfig {
         request: RestRequest {
@@ -978,7 +980,7 @@ fn final_api_native_auth_and_retry() {
         )
         .unwrap_err();
         assert_eq!(error.message, "guard error");
-        assert_eq!(error.code, Some(json!("EXACT")));
+        assert_eq!(observed_error_code(&error.code), Some(json!("EXACT")));
         assert_eq!(
             wire.requests.borrow().len(),
             before + 1,
@@ -1387,7 +1389,9 @@ fn final_portfolio_and_notification_cutovers() {
     let (fail_ctx, fail_reads) = context(fail_s.clone(), fail_ex.clone());
     let mut original = ExchangeError::new("notification failed");
     original.name = "CustomError".into();
-    original.code = Some(json!("SUB"));
+    original.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "SUB"
+    )));
     original.response = Some(json!({"data":{"msg":"source message"}}));
     original.context = Some(json!({"trace":42}));
     let expected = original.clone();
@@ -1399,7 +1403,10 @@ fn final_portfolio_and_notification_cutovers() {
     let error = finish(&fail_s, fail_ctx.start()).unwrap_err();
     assert_eq!(error.message, expected.message);
     assert_eq!(error.name, expected.name);
-    assert_eq!(error.code, expected.code);
+    assert_eq!(
+        observed_error_code(&error.code),
+        observed_error_code(&expected.code)
+    );
     assert_eq!(error.response, expected.response);
     assert_eq!(error.context, expected.context);
     assert_eq!(
@@ -1420,7 +1427,9 @@ fn final_portfolio_and_notification_cutovers() {
         "TICK native caught update error schedules next loop"
     );
     let mut report_error = ExchangeError::new("reporter failed");
-    report_error.code = Some(json!("REPORT"));
+    report_error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+        "REPORT"
+    )));
     let reporter = report_error.clone();
     fail_ex
         .base
@@ -1550,4 +1559,12 @@ impl safe_cex_venue_breakoutprop::native_reads::NativeRuntimeHost for Host {
         }));
         Ok(())
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture")
+    })
 }

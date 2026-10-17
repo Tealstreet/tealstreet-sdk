@@ -840,7 +840,13 @@ fn hosted_factory_selection_and_exact_event_bridge_registration() {
     ];
     let before = h.state.posts.borrow().len();
     for (name, op) in log_events {
-        exchange.base().emit(name, json!("payload")).unwrap();
+        exchange
+            .base()
+            .emit(
+                name,
+                safe_cex_exchange::js_runtime::value::Js::str("payload"),
+            )
+            .unwrap();
         let post = h.state.posts.borrow().last().unwrap().clone();
         assert_eq!(post.op, op, "BOOT native event op");
         assert_eq!(
@@ -856,16 +862,28 @@ fn hosted_factory_selection_and_exact_event_bridge_registration() {
     );
     exchange
         .base()
-        .emit("fill", json!({"orderId":"o","amount":3}))
+        .emit(
+            "fill",
+            safe_cex_exchange::js_runtime::value::from_json(&json!({"orderId":"o","amount":3})),
+        )
         .unwrap();
     assert_eq!(
         h.state.posts.borrow().last().unwrap().op,
         StoreWorkerOp::Fill,
         "BOOT native direct fill bridge op"
     );
-    exchange.base().emit("ws-reconnected", Value::Null).unwrap();
+    exchange
+        .base()
+        .emit(
+            "ws-reconnected",
+            safe_cex_exchange::js_runtime::value::Js::Null,
+        )
+        .unwrap();
     assert!(h.state.posts.borrow().last().unwrap().data.is_none());
-    exchange.base().emit("deactivate", Value::Null).unwrap();
+    exchange
+        .base()
+        .emit("deactivate", safe_cex_exchange::js_runtime::value::Js::Null)
+        .unwrap();
     assert!(w.exchange().is_none());
     assert!(exchange.base().is_disposed());
     assert_eq!(

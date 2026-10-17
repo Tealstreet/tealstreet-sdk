@@ -26,6 +26,7 @@ fn native_transport_error_retains_axios_name_message_and_code() {
         let error = native_account_call(account.clone(), "validateAccount".into(), vec![])
             .await
             .unwrap_err();
+        let error = support::boundary_json(error);
         assert_eq!(error["name"], "AxiosError");
         assert!(
             error["message"]

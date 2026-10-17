@@ -1299,3 +1299,16 @@ truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+Emitter callbacks and `BaseExchange::emit`/`emit_args` carry shared `Js` directly.
+Scalar listeners read a missing first argument as Undefined; variadic listeners
+retain the original argument count. Producers use `from_typed` before any JSON
+serialization; already-JSON inputs opt into `from_json` explicitly. Listener
+errors stop dispatch, and once rows are removed before invoking their callback.
+
+`ExchangeError.code` is `Option<Js>`: absent differs from own Undefined, and
+thrown-error roundtrips retain native number bits and object references. Sentry
+formatter results are also `Js`, including own Undefined keys. The runtime's
+exception-report callbacks remain explicit JSON host boundaries. Worker event
+posts use the required native DATA capability; main-thread worker RPC arguments
+and successful results keep their separately scoped JSON ABI.

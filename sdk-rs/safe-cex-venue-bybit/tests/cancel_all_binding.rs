@@ -127,6 +127,10 @@ fn cancel_symbol_reports_venue_rejection_without_throwing_or_retiring() {
         let _cleanup = h.venue().base().on_args(
             "error",
             std::rc::Rc::new(move |_, message| {
+                let message: Vec<serde_json::Value> = message
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 captured.borrow_mut().push(json!(message));
                 Ok(())
             }),

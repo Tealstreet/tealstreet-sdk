@@ -453,7 +453,10 @@ fn http_failure_preserves_axios_code_and_config() {
         }))
         .unwrap_err();
     assert_eq!(failure.name, "AxiosError");
-    assert_eq!(failure.code, Some(json!("ECONNABORTED")));
+    assert_eq!(
+        observed_error_code(&failure.code),
+        Some(json!("ECONNABORTED"))
+    );
     assert!(failure.is_axios_error);
     assert_eq!(failure.config.as_ref().unwrap()["url"], "instruments/query");
 }
@@ -762,6 +765,7 @@ fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
     f.exchange.base.on(
         "error",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -1188,4 +1192,11 @@ fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
             .all(|request| request["url"] != "marketdata")
     );
     f.exchange.dispose().unwrap();
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref()
+        .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
 }

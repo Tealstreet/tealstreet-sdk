@@ -55,7 +55,7 @@ async fn call(account: &Rc<NativeAccount>, method: &str, args: Value) -> Value {
                 .collect(),
         )
         .await
-        .unwrap_or_else(|error| panic!("{method}: {error}")),
+        .unwrap_or_else(|error| panic!("{method}: {error:?}")),
     )
 }
 

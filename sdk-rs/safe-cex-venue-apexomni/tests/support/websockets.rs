@@ -348,6 +348,7 @@ fn run(privacy: &str, name: &str) {
         parent.base.on(
             "fill",
             Rc::new(move |_, data| {
+                let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
                 emitter.record("emit", vec![s("fill"), J::from(data.clone())]);
                 Ok(())
             }),

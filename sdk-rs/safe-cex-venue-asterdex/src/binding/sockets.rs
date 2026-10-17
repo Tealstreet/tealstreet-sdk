@@ -241,9 +241,15 @@ impl crate::private_stream::PrivateStreamParent for Parent {
         self.rt()?.base().emit(
             "fill",
             Js::object(vec![
-                ("id", from_typed(&fill.id)?),
-                ("orderId", from_typed(&fill.order_id)?),
-                ("symbol", from_typed(&fill.symbol)?),
+                ("id", fill.id.as_deref().map_or(Js::Undefined, Js::str)),
+                (
+                    "orderId",
+                    fill.order_id.as_deref().map_or(Js::Undefined, Js::str),
+                ),
+                (
+                    "symbol",
+                    fill.symbol.as_deref().map_or(Js::Undefined, Js::str),
+                ),
                 ("side", from_typed(&fill.side)?),
                 ("price", Js::Number(fill.price)),
                 ("amount", Js::Number(fill.amount)),

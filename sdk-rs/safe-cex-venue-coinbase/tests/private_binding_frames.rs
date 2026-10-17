@@ -55,6 +55,7 @@ fn connected(name: ExchangeName) -> (Harness, Rc<Socket>, Rc<RefCell<Vec<Value>>
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -192,6 +193,10 @@ fn real_private_write_timeout_emits_forced_toast_once_until_recovery() {
         h.venue().base().on_args(
             "warning",
             Rc::new(move |_, args| {
+                let args: Vec<serde_json::Value> = args
+                    .iter()
+                    .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+                    .collect();
                 seen.borrow_mut().push(args.to_vec());
                 Ok(())
             }),
