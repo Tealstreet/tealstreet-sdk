@@ -17,31 +17,31 @@
     "safe-cex-venue-breakoutprop": {},
     "safe-cex-venue-bybit": {
       "global HYROTRADER_SIMULATOR_URL": [
-        "safe-cex-venue-bybit/src/hyro_snapshot.rs::get_bybit_rest_base_url"
+        "src/hyro_snapshot.rs::get_bybit_rest_base_url"
       ],
       "global HYROTRADER_SIMULATOR_WS_URL": [
-        "safe-cex-venue-bybit/src/hyro_snapshot.rs::get_bybit_private_ws_url",
-        "safe-cex-venue-bybit/src/hyro_snapshot.rs::get_bybit_public_ws_url"
+        "src/hyro_snapshot.rs::get_bybit_private_ws_url",
+        "src/hyro_snapshot.rs::get_bybit_public_ws_url"
       ],
       "global cleanFloat": [
-        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::order_row"
+        "src/inverse_socket_bodies.rs::order_row"
       ],
       "global createIncrementalFills": [
-        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::incremental_fills"
+        "src/inverse_socket_bodies.rs::incremental_fills"
       ],
       "global fetchBybitIncomeHistory": [
-        "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history"
+        "src/inverse_read_surface.rs::fetch_income_history"
       ],
       "global fetchBybitIncomeHistoryRange": [
-        "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history_range"
+        "src/inverse_read_surface.rs::fetch_income_history_range"
       ],
       "global jsonParse": [
-        "safe-cex-venue-bybit/src/hyro_private_session.rs::dispatch",
-        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::private_on_message",
-        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::public_on_message"
+        "src/hyro_private_session.rs::dispatch",
+        "src/inverse_socket_bodies.rs::private_on_message",
+        "src/inverse_socket_bodies.rs::public_on_message"
       ],
       "global resolveBybitExecution": [
-        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::order_row"
+        "src/inverse_socket_bodies.rs::order_row"
       ],
       "intrinsic IteratorClose abrupt": [
         "src/hyro_order_publication.rs::cancel_orders_helper",
@@ -210,21 +210,6 @@
       "global DEFAULT_BUILDER_FEE_TENTHS_BPS": [
         "src/browser_approval_flows.rs::create_builder_info"
       ],
-      "global HIP3_DEX_DISCOVERY_TIMEOUT_MS": [
-        "src/market_bootstrap.rs::body"
-      ],
-      "global HIP3_MARKETS_LOAD_TIMEOUT_CAP_MS": [
-        "src/market_bootstrap.rs::body"
-      ],
-      "global HIP3_MARKETS_LOAD_TIMEOUT_MS": [
-        "src/market_bootstrap.rs::body"
-      ],
-      "global HIP3_PER_DEX_LOAD_BUDGET_MS": [
-        "src/market_bootstrap.rs::body"
-      ],
-      "global SPOT_MARKETS_LOAD_TIMEOUT_MS": [
-        "src/market_bootstrap.rs::body"
-      ],
       "global TEALSTREET_BUILDER_FEE": [
         "src/browser_approval_flows.rs::check_builder_fee_approved"
       ],
@@ -306,12 +291,6 @@
     "safe-cex-venue-kraken": {},
     "safe-cex-venue-kucoin": {},
     "safe-cex-venue-lighter": {
-      "global Number.parseInt": [
-        "src/exchange_historical_fills.rs::fetch_rows",
-        "src/exchange_historical_fills.rs::seconds",
-        "src/exchange_order_snapshot.rs::fallback_orders",
-        "src/exchange_trading_preflight.rs::market_id"
-      ],
       "global isLighterPartnerAttributionApprovalMissingRejection": [
         "src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error"
       ],
@@ -328,9 +307,6 @@
       ]
     },
     "safe-cex-venue-okx": {
-      "global virtualClock.getCurrentTime": [
-        "src/binding/sockets.rs::private_auth"
-      ],
       "intrinsic add": [
         "src/history_stream_api.rs::fetch_income_history"
       ],
@@ -347,12 +323,7 @@
         "src/binding/primitives.rs::call"
       ]
     },
-    "safe-cex-venue-phemex": {
-      "global virtualClock.getCurrentTime": [
-        "src/binding/api.rs::clock",
-        "src/binding/sockets.rs::clock"
-      ]
-    },
+    "safe-cex-venue-phemex": {},
     "safe-cex-venue-polymarket": {},
     "safe-cex-venue-txflow": {},
     "safe-cex-venue-weex": {},

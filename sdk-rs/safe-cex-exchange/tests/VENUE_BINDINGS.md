@@ -25,3 +25,17 @@ Set `VENUE_BINDING_INVENTORY=/tmp/venue-bindings.json` for current file/function
 evidence. `VENUE_BINDING_BASE_REF` selects an already-fetched base commit; local
 runs default to the merge base with origin/master. The initial gate PR alone
 bootstraps the baseline when the base commit has no baseline file.
+
+The scanner follows Lighter binding/function-value lookups and captured module
+lookups. Captured paths preserve their host namespace: OKX/KuCoin distinguish
+`this` from globals; Bitget captures receiver paths and dispatches imports through
+its operation table; Polymarket selects the `imports` receiver explicitly;
+Lighter's capture hosts declare IMPORTED_CALLEES and MODULE_BINDINGS. Two-argument
+socket captures select receiver fields and members. Intrinsic registration
+comes only from production intrinsic/operation dispatchers, not unrelated matches.
+Test-gated impl blocks are excluded alongside test modules and functions.
+
+Shared install_library adds Number.parseInt and virtualClock.getCurrentTime via
+define_on; these are bound. Five Hyperliquid market-bootstrap timeout reads go
+through an imported class and are not free module bindings. These initial scanner
+false positives were corrected before landing the seed baseline.

@@ -68,10 +68,59 @@ struct Scan {
     tables: BTreeMap<String, BTreeSet<String>>,
     local_classes: BTreeMap<String, String>,
     intrinsic_globals: bool,
+    captures: BTreeSet<String>,
+    capture_mode: String,
+    global_aliases: BTreeMap<String, String>,
 }
 impl Scan {
     fn reference(&mut self, kind: &str, value: &Expr) {
         if let Some(name) = literal(value) {
+            let (kind, name) = if kind == "capture" {
+                if self.capture_mode == "receiver-pair" {
+                    return;
+                }
+                if self.capture_mode == "receiver" {
+                    return;
+                }
+                if self.capture_mode == "explicit-imports"
+                    && !["IMPORTED_CALLEES", "MODULE_BINDINGS"].iter().any(|table| {
+                        self.tables
+                            .get(*table)
+                            .is_some_and(|names| names.contains(&name))
+                    })
+                {
+                    return;
+                }
+
+                if name == "this" {
+                    return;
+                }
+                if let Some((_, tail)) = name.split_once(':') {
+                    if tail == "unbound" {
+                        return;
+                    }
+                    if name.starts_with("super:") {
+                        ("capture", name)
+                    } else {
+                        (
+                            "global",
+                            if tail.contains('.') {
+                                tail.to_owned()
+                            } else {
+                                format!("ENDPOINTS.{tail}")
+                            },
+                        )
+                    }
+                } else if name.starts_with("this.") {
+                    return;
+                } else if name == "super" {
+                    ("capture", name)
+                } else {
+                    ("global", name)
+                }
+            } else {
+                (kind, name)
+            };
             self.refs
                 .entry(format!("{kind} {name}"))
                 .or_default()
@@ -79,14 +128,35 @@ impl Scan {
         }
     }
     fn call(&mut self, name: &str, args: &[&Expr], receiver: &str) {
-        let wrapper = self.wrappers.get(name).cloned();
+        let wrapper = if receiver.is_empty() {
+            self.wrappers.get(name).cloned()
+        } else {
+            None
+        };
         let reference = if let Some((ref kind, i)) = wrapper {
             Some((kind.as_str(), i))
         } else {
             match name {
                 "global" | "global_binding" | "global_value" | "global_call" | "call_global"
-                | "import" | "imported" | "binding_value" | "constant" => Some((
+                | "import" | "imported" | "binding_value" | "binding" | "function_value" => Some((
                     "global",
+                    if receiver.is_empty() && args.first().is_some_and(|e| literal(e).is_none()) {
+                        1
+                    } else {
+                        0
+                    },
+                )),
+                "constant" if !receiver.is_empty() => Some(("global", 0)),
+                "capture" => Some((
+                    "capture",
+                    if receiver.is_empty() && args.first().is_some_and(|e| literal(e).is_none()) {
+                        1
+                    } else {
+                        0
+                    },
+                )),
+                "operation" if self.capture_mode == "receiver" => Some((
+                    "intrinsic",
                     if receiver.is_empty() && args.first().is_some_and(|e| literal(e).is_none()) {
                         1
                     } else {
@@ -109,8 +179,30 @@ impl Scan {
             self.reference("global", args[1]);
         }
         if let Some((kind, i)) = reference {
-            if let Some(arg) = args.get(i) {
+            if kind == "capture" && self.capture_mode == "receiver-pair" {
+                if args.get(i).and_then(|e| literal(e)).as_deref() == Some("imports") {
+                    if let Some(key) = args.get(i + 1) {
+                        self.reference("global", key);
+                    }
+                }
+            } else if name == "capture" && args.len() > i + 1 {
+                // Two-argument socket captures select a member on a receiver
+                // field, unlike single-argument module captures.
+            } else if let Some(arg) = args.get(i) {
                 self.reference(kind, arg);
+            }
+        }
+        if name == "define_on" && args.len() > 2 {
+            if let Some(key) = literal(args[1]) {
+                let owner = args[0].to_token_stream().to_string().replace(' ', "");
+                let owner = owner.trim_start_matches('&');
+                self.members
+                    .entry(owner.into())
+                    .or_default()
+                    .insert(key.clone());
+                if let Some(global) = self.global_aliases.get(owner) {
+                    self.globals.insert(format!("{global}.{key}"));
+                }
             }
         }
         if !self.binding {
@@ -256,6 +348,28 @@ fn object_keys(e: &Expr) -> BTreeSet<String> {
     k.0
 }
 impl<'a> Visit<'a> for Scan {
+    fn visit_expr_let(&mut self, n: &'a syn::ExprLet) {
+        if let (syn::Pat::TupleStruct(p), Expr::MethodCall(c)) = (&*n.pat, &*n.expr) {
+            if c.method == "get"
+                && matches!(
+                    c.receiver.to_token_stream().to_string().as_str(),
+                    "g" | "globals"
+                )
+            {
+                if let (Some(syn::Pat::Ident(var)), Some(root)) =
+                    (p.elems.first(), c.args.first().and_then(literal))
+                {
+                    self.global_aliases.insert(var.ident.to_string(), root);
+                }
+            }
+        }
+        visit::visit_expr_let(self, n);
+    }
+    fn visit_item_impl(&mut self, n: &'a syn::ItemImpl) {
+        if !skip(&n.attrs) {
+            visit::visit_item_impl(self, n);
+        }
+    }
     fn visit_local(&mut self, n: &'a syn::Local) {
         if self.binding {
             if let syn::Pat::Ident(p) = &n.pat {
@@ -350,6 +464,8 @@ impl<'a> Visit<'a> for Scan {
             &n.args.iter().collect::<Vec<_>>(),
             if name == "class_pair" && f.contains("::") {
                 "ufcs-class-pair"
+            } else if f.contains('.') {
+                "callback"
             } else {
                 ""
             },
@@ -357,7 +473,16 @@ impl<'a> Visit<'a> for Scan {
         visit::visit_expr_call(self, n);
     }
     fn visit_expr_match(&mut self, n: &'a syn::ExprMatch) {
+        let intrinsic_dispatch = self.function == "intrinsic"
+            || (self.function == "operation" && self.file.contains("/binding/"))
+            || (self.function == "call" && self.file.ends_with("binding/primitives.rs"));
+        let capture_dispatch = self.function == "capture";
+        let global_dispatch = matches!(
+            self.function.as_str(),
+            "import" | "global" | "imported" | "global_binding" | "constant"
+        );
         if self.binding
+            && (intrinsic_dispatch || capture_dispatch || global_dispatch)
             && matches!(
                 n.expr.to_token_stream().to_string().as_str(),
                 "name" | "code" | "n"
@@ -366,17 +491,18 @@ impl<'a> Visit<'a> for Scan {
             for arm in &n.arms {
                 let mut s = Strings::default();
                 s.visit_pat(&arm.pat);
-                if matches!(
-                    self.function.as_str(),
-                    "import" | "global" | "imported" | "global_binding" | "constant"
-                ) {
+                if capture_dispatch {
+                    self.captures.extend(s.0);
+                } else if global_dispatch {
                     self.globals.extend(s.0);
                 } else {
                     self.intrinsics.extend(s.0);
                     if matches!(arm.pat, syn::Pat::Wild(_)) {
                         let body = arm.body.to_token_stream().to_string();
                         let key = n.expr.to_token_stream().to_string();
-                        if body.contains(&format!(". global ({key})")) {
+                        if body.contains(&format!(". global ({key})"))
+                            || body.contains(&format!("global_path (rt , {key})"))
+                        {
                             self.intrinsic_globals = true;
                         }
                     }
@@ -413,13 +539,43 @@ impl<'a> Visit<'a> for Scan {
                 }
             }
         }
-        let body = n.body.to_token_stream().to_string();
-        for receiver in ["number", "date", "math"] {
-            if body.contains(&format!("{receiver} . define (")) {
-                self.members
-                    .entry(receiver.into())
-                    .or_default()
-                    .extend(object_keys(&n.expr));
+        struct Targets(BTreeSet<String>);
+        impl<'a> Visit<'a> for Targets {
+            fn visit_expr_method_call(&mut self, n: &'a syn::ExprMethodCall) {
+                if n.method == "define" {
+                    self.0
+                        .insert(n.receiver.to_token_stream().to_string().replace(' ', ""));
+                }
+                visit::visit_expr_method_call(self, n);
+            }
+            fn visit_expr_call(&mut self, n: &'a syn::ExprCall) {
+                if n.func.to_token_stream().to_string() == "define_on" {
+                    if let Some(owner) = n.args.first() {
+                        self.0.insert(
+                            owner
+                                .to_token_stream()
+                                .to_string()
+                                .replace(' ', "")
+                                .trim_start_matches('&')
+                                .into(),
+                        );
+                    }
+                }
+                visit::visit_expr_call(self, n);
+            }
+        }
+        let mut targets = Targets(BTreeSet::new());
+        targets.visit_block(&n.body);
+        let keys = object_keys(&n.expr);
+        for receiver in targets.0 {
+            self.members
+                .entry(receiver.clone())
+                .or_default()
+                .extend(keys.iter().cloned());
+            if let Some(global) = self.global_aliases.get(&receiver) {
+                for key in &keys {
+                    self.globals.insert(format!("{global}.{key}"));
+                }
             }
         }
         visit::visit_expr_for_loop(self, n);
@@ -484,10 +640,21 @@ impl Discover {
             found: Option<(String, usize)>,
         }
         impl Calls<'_> {
-            fn call(&mut self, name: &str, args: Vec<&Expr>) {
-                let spec = self.known.get(name).cloned().or_else(|| match name {
-                    "global" | "import" | "imported" => Some(("global".into(), 0)),
-                    "intrinsic" => Some(("intrinsic".into(), 0)),
+            fn call(&mut self, name: &str, args: Vec<&Expr>, free: bool) {
+                let spec = if free {
+                    self.known.get(name).cloned()
+                } else {
+                    None
+                }
+                .or_else(|| match name {
+                    "global" | "global_binding" | "import" | "imported" | "binding"
+                    | "binding_value" | "function_value" => {
+                        Some(("global".into(), usize::from(free)))
+                    }
+                    "capture" => Some(("capture".into(), usize::from(free))),
+                    "intrinsic" | "operation" => {
+                        Some(("intrinsic".into(), usize::from(free && args.len() > 2)))
+                    }
                     _ => None,
                 });
                 if let Some((kind, i)) = spec {
@@ -502,7 +669,7 @@ impl Discover {
         }
         impl<'a> Visit<'a> for Calls<'_> {
             fn visit_expr_method_call(&mut self, n: &'a syn::ExprMethodCall) {
-                self.call(&n.method.to_string(), n.args.iter().collect());
+                self.call(&n.method.to_string(), n.args.iter().collect(), false);
                 visit::visit_expr_method_call(self, n);
             }
             fn visit_expr_call(&mut self, n: &'a syn::ExprCall) {
@@ -512,7 +679,7 @@ impl Discover {
                     .rsplit(['.', ':'])
                     .next()
                     .unwrap_or(&f);
-                self.call(name, n.args.iter().collect());
+                self.call(name, n.args.iter().collect(), !f.contains('.'));
                 visit::visit_expr_call(self, n);
             }
         }
@@ -612,7 +779,24 @@ fn files(root: &Path) -> Vec<PathBuf> {
     out
 }
 fn scan(root: &Path, _shared: bool) -> Scan {
-    let mut scan = Scan::default();
+    let capture_mode = match root
+        .parent()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+    {
+        "safe-cex-venue-bitget" => "receiver",
+        "safe-cex-venue-lighter" => "explicit-imports",
+        "safe-cex-venue-polymarket" => "receiver-pair",
+        _ => "module",
+    }
+    .into();
+    let mut scan = Scan {
+        capture_mode,
+        ..Scan::default()
+    };
     let source_files = files(root);
     for file in &source_files {
         let ast = syn::parse_file(&fs::read_to_string(file).unwrap()).unwrap();
@@ -634,6 +818,7 @@ fn scan(root: &Path, _shared: bool) -> Scan {
         scan.locals.clear();
         scan.wrappers.clear();
         scan.local_classes.clear();
+        scan.global_aliases.clear();
         scan.binding = true;
         let ast = syn::parse_file(&fs::read_to_string(file).unwrap()).unwrap();
         for item in &ast.items {
@@ -679,7 +864,9 @@ fn every_venue_reference_has_a_production_binding() {
         let mut missing = BTreeMap::new();
         for (key, sites) in &venue.refs {
             let (kind, name) = key.split_once(' ').unwrap();
-            let bound = if kind == "intrinsic" {
+            let bound = if kind == "capture" {
+                venue.captures.contains(name)
+            } else if kind == "intrinsic" {
                 venue.intrinsics.contains(name)
                     || (venue.intrinsic_globals
                         && (venue.globals.contains(name) || shared.globals.contains(name)))
@@ -896,4 +1083,101 @@ fn class_creation_needs_the_production_class_registration() {
     scan.visit_file(&ast);
     assert!(!scan.globals.contains("Absent"));
     assert!(scan.globals.contains("Present"));
+}
+
+#[test]
+fn review_control_existing_lookup_apis_must_not_escape_inventory() {
+    let ast=syn::parse_file(r#"fn p(h:&Host){h.binding("missingBinding");(h.capture)("missingCapture");(h.capture)("this.method");}"#).unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(scan.refs.contains_key("global missingBinding"));
+    assert!(scan.refs.contains_key("global missingCapture"));
+    assert!(!scan.refs.contains_key("global this.method"));
+}
+#[test]
+fn review_control_capture_dispatch_is_not_an_intrinsic_registration() {
+    let ast=syn::parse_file(r#"fn capture(name:&str){match name{"super"=>value,_=>error}} fn p(h:&Host){(h.intrinsic)("super",args);}"#).unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(scan.refs.contains_key("intrinsic super"));
+    assert!(!scan.intrinsics.contains("super"));
+}
+#[test]
+fn review_control_test_impl_cannot_supply_a_production_registration() {
+    let ast=syn::parse_file(r#"fn p(h:&Host){h.global("missing");} #[cfg(test)] impl Host{fn install(g:&Js){g.define("missing",value);}}"#).unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(scan.refs.contains_key("global missing"));
+    assert!(!scan.globals.contains("missing"));
+}
+
+#[test]
+fn source_constant_wrapper_reads_its_class_instead_of_a_free_global() {
+    let ast=syn::parse_file(r#"fn constant(h:&Host,k:&str){let c=h.imported("Class")?;h.get(&c,k)} fn p(h:&Host){constant(h,"TIMEOUT")?;}"#).unwrap();
+    let mut d = Discover {
+        known: BTreeMap::new(),
+        found: BTreeMap::new(),
+    };
+    d.visit_file(&ast);
+    let mut scan = Scan {
+        binding: true,
+        wrappers: d.found,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(scan.refs.contains_key("global Class"));
+    assert!(!scan.refs.contains_key("global TIMEOUT"));
+}
+
+#[test]
+fn shared_library_members_added_to_global_aliases_are_bindings() {
+    let ast=syn::parse_file(r#"fn install(g:&Js){if let Ok(clock)=g.get("virtualClock"){define_on(&clock,"getCurrentTime",value);}if let Ok(ctor)=g.get("BigNumber"){for (key,order) in [("minimum",less)]{define_on(&ctor,key,value);}}let lodash=object;for (key,f) in [("flatten",flatten)]{define_on(&lodash,key,f);}g.define("lodash",lodash);}"#).unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    for key in [
+        "virtualClock.getCurrentTime",
+        "BigNumber.minimum",
+        "lodash.flatten",
+    ] {
+        assert!(scan.globals.contains(key), "{key}");
+    }
+}
+
+#[test]
+fn review_control_two_argument_socket_capture_reads_receiver_fields() {
+    let ast = syn::parse_file(r#"fn body(h:&Host){ (h.capture)("publicWebsocket", "listenOHLCV"); h.capture("actualGlobal"); }"#).unwrap();
+    let mut scan = Scan::default();
+    scan.visit_file(&ast);
+    assert!(!scan.refs.contains_key("global publicWebsocket"));
+    assert!(scan.refs.contains_key("global actualGlobal"));
+    scan.wrappers.insert("call".into(), ("capture".into(), 1));
+    scan.visit_file(&syn::parse_file(r#"fn p(h:&Host){call(h,"missingGlobal",vec![]);}"#).unwrap());
+    assert!(scan.refs.contains_key("global missingGlobal"));
+}
+
+#[test]
+fn review_control_public_lighter_module_bindings_are_checked() {
+    let ast = syn::parse_file(r#"fn body(h:&Host){ h.capture("missingPublicImport"); }"#).unwrap();
+    let mut scan = Scan {
+        capture_mode: "explicit-imports".into(),
+        ..Scan::default()
+    };
+    scan.tables.insert(
+        "MODULE_BINDINGS".into(),
+        BTreeSet::from(["missingPublicImport".into()]),
+    );
+    scan.visit_file(&ast);
+    assert!(scan.refs.contains_key("global missingPublicImport"));
 }

@@ -72,11 +72,6 @@
   "safe-cex-venue-hyperliquid": [
     "global DEFAULT_BUILDER_FEE_RATE",
     "global DEFAULT_BUILDER_FEE_TENTHS_BPS",
-    "global HIP3_DEX_DISCOVERY_TIMEOUT_MS",
-    "global HIP3_MARKETS_LOAD_TIMEOUT_CAP_MS",
-    "global HIP3_MARKETS_LOAD_TIMEOUT_MS",
-    "global HIP3_PER_DEX_LOAD_BUDGET_MS",
-    "global SPOT_MARKETS_LOAD_TIMEOUT_MS",
     "global TEALSTREET_BUILDER_FEE",
     "global collapseHyperliquidOrderHistory",
     "global deriveHyperliquidClosedPositions",
@@ -106,7 +101,6 @@
   "safe-cex-venue-kraken": [],
   "safe-cex-venue-kucoin": [],
   "safe-cex-venue-lighter": [
-    "global Number.parseInt",
     "global isLighterPartnerAttributionApprovalMissingRejection",
     "global isLighterPartnerAttributionTierRejection"
   ],
@@ -115,7 +109,6 @@
     "global isMexcControlChannel"
   ],
   "safe-cex-venue-okx": [
-    "global virtualClock.getCurrentTime",
     "intrinsic add",
     "intrinsic is-array",
     "intrinsic string"
@@ -124,9 +117,7 @@
   "safe-cex-venue-paradex": [
     "global Object.getOwnPropertyNames"
   ],
-  "safe-cex-venue-phemex": [
-    "global virtualClock.getCurrentTime"
-  ],
+  "safe-cex-venue-phemex": [],
   "safe-cex-venue-polymarket": [],
   "safe-cex-venue-txflow": [],
   "safe-cex-venue-weex": [],
