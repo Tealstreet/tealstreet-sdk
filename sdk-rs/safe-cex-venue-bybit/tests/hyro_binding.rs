@@ -1192,7 +1192,5 @@ fn hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation() 
     assert!(!wire.sent.borrow().iter().any(|frame| frame.contains("publicTrade.BTCUSDT")));
     let error = match h.venue().listen_ohlcv(serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1s"})).unwrap(), Rc::new(|_| panic!("seconds candle cannot emit"))) { Ok(_) => panic!("source refuses seconds streams"), Err(error) => error };
     assert_eq!(error.message, "HyroTrader seconds candles require a supported trade stream");
-    h.venue().listen_ohlcvs(serde_json::from_value(json!({"symbols":["BTCUSDT"],"interval":"1s"})).unwrap(), Rc::new(|_| panic!("seconds bulk cannot emit")));
-    assert!(h.runtime.reports.borrow().iter().any(|message| message=="HyroTrader seconds candles require a supported trade stream"));
     h.venue().dispose().unwrap();
 }

@@ -25,6 +25,7 @@ struct Subscription {
     parser: MessageHandler,
     trades: MessageHandler,
     primary: bool,
+    trade_derived: bool,
     spot: bool,
     active: Cell<bool>,
     retry: RefCell<Option<OwnedOperation>>,
@@ -58,7 +59,7 @@ impl Subscription {
                         .parent
                         .upgrade()
                         .is_some_and(|parent| !parent.options().public_data_only.unwrap_or(false));
-                if trade_derived {
+                if self.trade_derived && trade_derived {
                     append(&socket, &self.secondary, self.trades.clone());
                     self.send(&socket, "subscribe", &self.secondary)?;
                     self.retained
@@ -87,7 +88,7 @@ impl Subscription {
             return Ok(());
         };
         let primary_empty = remove(&socket, &self.topic, &self.parser);
-        let secondary_empty = remove(&socket, &self.secondary, &self.trades);
+        let secondary_empty = self.trade_derived && remove(&socket, &self.secondary, &self.trades);
         if primary_empty {
             self.retained.borrow_mut().shift_remove(&self.topic);
             if let Some(recovery) = &self.recovery {
@@ -241,6 +242,7 @@ pub(crate) fn listen_ohlcv(
         parser,
         trades,
         primary,
+        trade_derived: parent.name != ExchangeName::Hyrotrader,
         spot,
         active: Cell::new(true),
         retry: RefCell::new(None),

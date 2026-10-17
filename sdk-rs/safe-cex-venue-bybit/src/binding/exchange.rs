@@ -110,6 +110,9 @@ impl BybitExchange {
         options: safe_cex_types::OHLCVOptions,
         callback: Rc<dyn Fn(safe_cex_types::Candle)>,
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        if self.base.name == ExchangeName::Hyrotrader {
+            self.rt().this.call_method("validateCandleInterval", vec![js(&options.interval)?]).map_err(err)?;
+        }
         use safe_cex_exchange::socket_lifecycle::SocketSlot;
         let websocket = |property: &str| {
             let slot = match property {
@@ -176,6 +179,9 @@ impl BybitExchange {
         options: safe_cex_types::OHLCVSOptions,
         callback: Rc<dyn Fn(safe_cex_exchange::exchange::SubscribedCandle)>,
     ) -> Result<(), ExchangeError> {
+        if self.base.name == ExchangeName::Hyrotrader {
+            self.rt().this.call_method("validateCandleInterval", vec![js(&options.interval)?]).map_err(err)?;
+        }
         use safe_cex_exchange::socket_lifecycle::SocketSlot;
         let websocket = |property: &str| {
             let slot = match property {

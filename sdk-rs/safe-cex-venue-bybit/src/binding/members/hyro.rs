@@ -360,7 +360,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     Ok(())
 }
 
-async fn place_orders(_rt: &Rt, owner: Js, orders: Js, key_fn: Js) -> Result<Js, Thrown> {
+async fn place_orders(rt: &Rt, owner: Js, orders: Js, key_fn: Js) -> Result<Js, Thrown> {
     owner.call_method("assertCallerClientOrderIds", vec![orders.clone()])?;
     let validate = owner.clone();
     orders.call_method(
@@ -380,7 +380,7 @@ async fn place_orders(_rt: &Rt, owner: Js, orders: Js, key_fn: Js) -> Result<Js,
         pending.call_method("set", vec![key.clone(), current.clone()])?;
     }
     let body = current.clone();
-    let runtime = _rt.clone();
+    let runtime = rt.clone();
     let running = runtime.spawn(Box::pin(async move {
         while safe_cex_exchange::js_runtime::ops::less_than(
             &body.get("index")?,
