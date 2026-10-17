@@ -119,3 +119,68 @@ fn real_algo_frame_skips_unmapped_status_and_keeps_later_rows() {
     );
     s.h.venue().dispose().unwrap();
 }
+
+#[test]
+fn real_algo_frame_keeps_open_order_with_unmapped_plan_type() {
+    let s = Scene::connect();
+    s.send(
+        "orders-algo",
+        json!([
+            algo("algo-unknown-plan", "live", "normal_plan"),
+            algo("algo-known-plan", "live", "profit_plan")
+        ]),
+    );
+    let orders = s.h.store.orders();
+    assert_eq!(
+        orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        ["algo-unknown-plan", "algo-known-plan"],
+        "unmapped plan type must remain in Store and not abort later rows"
+    );
+    let unknown = serde_json::to_value(&orders[0]).unwrap();
+    assert!(
+        unknown.get("type").is_none(),
+        "source undefined type must omit on JSON projection"
+    );
+    assert_eq!(unknown["status"], "open");
+    drop(orders);
+    s.h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_rest_orders_keep_unmapped_status_and_plan_type() {
+    let h = harness(ExchangeName::Bitget, options(), |http| {
+        script(http);
+        http.routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/api/v2/mix/order/orders-pending");
+        http.ok(
+            "GET",
+            "/api/v2/mix/order/orders-pending",
+            json!({"entrustedList":[
+            algo("rest-unmapped", "executing", "normal_plan"),
+            algo("rest-known", "live", "profit_plan")
+        ], "endId":null}),
+        );
+    });
+    let orders = h
+        .drive(h.venue().fetch_orders(None))
+        .expect("one unmapped row must not reject the REST page");
+    assert_eq!(
+        orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        ["rest-unmapped", "rest-known"]
+    );
+    let unknown = serde_json::to_value(&orders[0]).unwrap();
+    assert!(
+        unknown.get("status").is_none(),
+        "source undefined status must omit on JSON projection"
+    );
+    assert!(
+        unknown.get("type").is_none(),
+        "source undefined type must omit on JSON projection"
+    );
+    assert_eq!(
+        serde_json::to_value(&orders[1]).unwrap()["type"],
+        "take_profit"
+    );
+    h.venue().dispose().unwrap();
+}

@@ -233,14 +233,6 @@ pub fn handle_algo_orders_topic<H: PrivateTopicsHost>(
     while let Some(raw) = h.next(&mut iter)? {
         let status = h.call("getRawOrderStatus", vec![raw.clone()])?;
         let mapped = h.status_lookup(&status)?;
-        // TS reads the mapped order only for these statuses (terminal fills all map to closed),
-        // so an unmapped algo status writes nothing and the frame continues to the refetch.
-        if !["open", "canceled", "closed"]
-            .iter()
-            .any(|status| is(h, &mapped, status))
-        {
-            continue;
-        }
         let payload = h.spread(&raw)?;
         h.define(
             &payload,
