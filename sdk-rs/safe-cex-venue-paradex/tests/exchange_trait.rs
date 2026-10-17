@@ -960,15 +960,27 @@ fn constructed_orders_use_host_local_timezone(private: bool) {
             })
         })
         .collect();
-    let (venue, runtime, store, _) = support::fixture_with(private_options(), |wire| {
-        private_script(wire);
-        if !private {
-            wire.responses
-                .borrow_mut()
-                .insert("/orders".into(), json!({"results":rows}));
-        }
-    });
+    let conversions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = conversions.clone();
+    let (venue, runtime, store, _) = support::fixture_with_timezone(
+        private_options(),
+        |wire| {
+            private_script(wire);
+            if !private {
+                wire.responses
+                    .borrow_mut()
+                    .insert("/orders".into(), json!({"results":rows}));
+            }
+        },
+        // The embedding host supplies its local-to-UTC policy, matching the
+        // fixed UTC-7 profile selected for the independent Node witness.
+        std::rc::Rc::new(move |wall_time| {
+            captured.borrow_mut().push(wall_time);
+            wall_time + 7.0 * 60.0 * 60.0 * 1000.0
+        }),
+    );
     drive(&runtime, venue.start()).unwrap();
+    let startup_conversions = conversions.borrow().len();
     if private {
         for _ in 0..8 {
             runtime.pump();
@@ -998,6 +1010,19 @@ fn constructed_orders_use_host_local_timezone(private: bool) {
                 order.id
             );
         }
+    }
+    if private {
+        assert!(
+            conversions.borrow().is_empty(),
+            "Date.now bypasses timezone conversion"
+        );
+    } else {
+        assert!(startup_conversions > 0, "startup maps the local date");
+        assert_eq!(
+            &*conversions.borrow(),
+            &vec![expected[1]; startup_conversions + 1],
+            "only the local date converts, one more time during the explicit REST read"
+        );
     }
     let stored = store.orders();
     assert_eq!(stored.len(), dates.len());

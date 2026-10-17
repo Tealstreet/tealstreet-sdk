@@ -211,7 +211,10 @@ market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
 with no venue REST or private/public venue sockets in public-only mode.
 
 
-Paradex's native constructor supplies shared runtime HTTP and gateway inputs.
+Paradex's native constructor supplies shared runtime HTTP and gateway inputs,
+and explicitly selects a UTC date realm through its required
+`local_wall_time_to_utc` dependency. Other embeddings provide their host timezone
+conversion for offset-less local order timestamps.
 Its loopback test observes distinct market precision axes and source read purity.
 Hosted remoteSigner remains an explicit refusal until SDK signing is bound.
 
