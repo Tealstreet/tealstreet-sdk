@@ -313,11 +313,9 @@ impl JsHttpHost for Http {
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime.now.set(runtime.now.get() + self.advance_ms.get());
         }
-        // Signing reads the real synced clock; advance that boundary too.
-        if self.advance_ms.get() > 0.0 {
-            std::thread::sleep(std::time::Duration::from_secs_f64(
-                self.advance_ms.get() / 1000.0,
-            ));
+        if self.advance_ms.get() != 0.0 {
+            let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+            clock.sync_from_server_time(clock.get_current_time_ms() + self.advance_ms.get());
         }
         let response = {
             let mut routes = self.routes.borrow_mut();
