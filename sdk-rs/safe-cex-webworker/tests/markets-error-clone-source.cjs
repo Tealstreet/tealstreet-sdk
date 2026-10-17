@@ -24,3 +24,27 @@ assert.equal(after.stack,before.stack);
 const record={name:before.name,message:before.message};
 assert(!isNativeError(structuredClone(record)),'MARKETS-ERROR JSON record cannot replace Error identity');
 console.log('MARKETS-ERROR actual timeout: native Error before/after structured clone, original stack retained, custom name reset PASS');
+for (const rejectAt of ['create', 'post']) {
+  const failure = new TypeError(`${rejectAt} rejected`);
+  const scheduled = [], errors = [], scope = {exports:{}};
+  const NativeError = class extends Error {constructor(message){if(rejectAt==='create')throw failure; super(message);}};
+  vm.runInNewContext(js, {module:scope,exports:scope.exports,require(name){throw Error(name);},Error:NativeError,
+    console:{error(message){errors.push(message);}},setTimeout(callback,delay){scheduled.push({callback,delay});return scheduled.length;},clearTimeout(){}});
+  const exchange={name:'bybit',store:{markets:[]}};
+  const blocked=new scope.exports.BaseHandler('account','bybit',exchange,{postMessage(){throw failure;}},{},{});
+  const payload={op:'subscribeOHLCV',data:{symbol:'BTC',interval:'1m',subId:'s'}};
+  blocked.bufferUntilMarketsLoaded(payload);
+  const deadline=scheduled.find(timer=>timer.delay===30000);
+  assert.throws(()=>deadline.callback(),error=>error===failure,'MARKETS-ERROR original creation/post failure escapes');
+  assert.equal(errors.length,1,'MARKETS-ERROR console precedes Error construction/post');
+  assert.equal(blocked._pendingUntilMarkets.length,1,'MARKETS-ERROR failure retains pending');
+  assert.equal(blocked._lastPendingTimeoutReportAt,null,'MARKETS-ERROR failure does not commit cooldown');
+  assert.notEqual(blocked._pendingTimeout,null,'MARKETS-ERROR fired deadline remains registered on throw');
+  blocked.bufferUntilMarketsLoaded(payload);
+  assert.equal(blocked._pendingUntilMarkets.length,2);
+  assert.equal(scheduled.filter(timer=>timer.delay===30000).length,1,'MARKETS-ERROR no replacement deadline after throw');
+  blocked.dispose();
+  assert.equal(blocked._pendingTimeout,null);
+  assert.equal(blocked._pendingUntilMarkets.length,0);
+}
+console.log('MARKETS-ERROR actual source creation/post throws: original failure, pending/deadline retained, no replacement timer PASS');

@@ -33,7 +33,13 @@ Market-load buffering uses separate 500ms self-rescheduling checks and a 30s
 deadline. Timeout reports are cooled down for five minutes and contain only
 bounded telemetry; loaded markets reset the episode. Timer guards are created
 before spawn, release only their own slots, and never retain the handler.
-The JSON post callback carries error name/message rather than a JS Error object.
+Timeout Error construction and post are required fallible host capabilities.
+WorkerErrorPost keeps the Error opaque; its Wasm binding creates a real Error at
+the report point and posts it without JSON conversion. Structured clone retains
+the stack and Error identity while resetting the custom name. Creation/post
+failure reports through the runtime without committing cooldown or clearing pending.
+The concrete Wasm host witness uses examples/worker_error_host.rs, wasm-bindgen
+and tests/worker-error-host.cjs; it does not claim browser startup composition.
 
 Sentry worker errors read only nonempty string message/name/stack properties;
 plain structured-clone objects work, primitive rejections use the supplied

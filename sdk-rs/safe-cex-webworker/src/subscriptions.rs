@@ -1,3 +1,4 @@
+use crate::error_post::WorkerErrorPost;
 use crate::{
     handler::BaseHandler,
     order_book_post::{OrderBookPost, OrderBookUpdateError, OrderBookWorkerPost},
@@ -198,23 +199,15 @@ impl OrderBookSubscriptionsHandler {
         exchange: Rc<dyn Exchange>,
         post: OrderBookPost,
         orderbook_tick_delay: f64,
+        error_post: WorkerErrorPost,
     ) -> Rc<Self> {
         Rc::new_cyclic(|weak: &Weak<Self>| {
             let replay = weak.clone();
-            let regular = post.worker.clone();
-            let runtime = exchange.base().runtime.clone();
             Self {
                 base: BaseHandler::new(
                     exchange.clone(),
                     "OrderBookSubscriptionsHandler".into(),
-                    Rc::new(move |payload| {
-                        if let Err(error) = regular(payload) {
-                            runtime.report_exception(
-                                &error,
-                                &json!({"method":"bufferUntilMarketsLoaded"}),
-                            );
-                        }
-                    }),
+                    error_post,
                     Rc::new(move |payload| {
                         if let Some(handler) = replay.upgrade() {
                             if let Err(error) = handler.handle(payload) {
@@ -398,14 +391,18 @@ pub struct OHLCVSubscriptionsHandler {
     subs: RefCell<IndexMap<String, Rc<SymbolIntervalSub>>>,
 }
 impl OHLCVSubscriptionsHandler {
-    pub fn new(exchange: Rc<dyn Exchange>, post: Rc<dyn Fn(StoreWorkerPayload)>) -> Rc<Self> {
+    pub fn new(
+        exchange: Rc<dyn Exchange>,
+        post: Rc<dyn Fn(StoreWorkerPayload)>,
+        error_post: WorkerErrorPost,
+    ) -> Rc<Self> {
         Rc::new_cyclic(|weak: &Weak<Self>| {
             let replay = weak.clone();
             Self {
                 base: BaseHandler::new(
                     exchange.clone(),
                     "OHLCVSubscriptionsHandler".into(),
-                    post.clone(),
+                    error_post,
                     Rc::new(move |payload| {
                         if let Some(handler) = replay.upgrade() {
                             if let Err(error) = handler.handle(payload) {

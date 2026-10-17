@@ -1,3 +1,4 @@
+use crate::error_post::WorkerErrorPost;
 use crate::{
     handler::BaseHandler,
     payload::{StoreWorkerOp, StoreWorkerPayload},
@@ -57,7 +58,11 @@ fn encode<T: Serialize>(result: T) -> Result<Option<Value>, ExchangeError> {
         .map_err(|e| ExchangeError::new(e.to_string()))
 }
 impl CallMethodHandler {
-    pub fn new(exchange: Rc<dyn Exchange>, post: Rc<dyn Fn(StoreWorkerPayload)>) -> Rc<Self> {
+    pub fn new(
+        exchange: Rc<dyn Exchange>,
+        post: Rc<dyn Fn(StoreWorkerPayload)>,
+        error_post: WorkerErrorPost,
+    ) -> Rc<Self> {
         let venue = exchange.clone();
         let throttler = ThrottleManager::new(
             exchange.base().runtime.clone(),
@@ -80,7 +85,7 @@ impl CallMethodHandler {
         let base = BaseHandler::new(
             exchange.clone(),
             "CallMethodHandler".into(),
-            post.clone(),
+            error_post,
             Rc::new(|_| {}),
         );
         Rc::new(Self {

@@ -26,42 +26,36 @@ fn object(entries: &[(&str, JsValue)]) -> Result<JsValue, ExchangeError> {
         row.push(value);
         rows.push(&row);
     }
-    Object::from_entries(&rows).map(JsValue::from).map_err(failure)
+    Object::from_entries(&rows)
+        .map(JsValue::from)
+        .map_err(failure)
 }
 fn metadata(value: &serde_json::Value) -> Result<JsValue, ExchangeError> {
     let json = serde_json::to_string(value).map_err(|e| ExchangeError::new(e.to_string()))?;
     js_sys::JSON::parse(&json).map_err(failure)
 }
-impl WorkerErrorPost {
-    pub fn for_browser(post: BrowserErrorPost) -> Self {
-        Self::new(
-            Rc::new(|name, message| {
-                let error = Error::new(message);
-                error.set_name(name);
-                Ok(WorkerErrorHandle::new(error))
-            }),
-            Rc::new(move |report| {
-                let native = report.error.downcast_ref::<Error>().ok_or_else(|| {
-                    ExchangeError::new("Worker Error belongs to a different post host")
-                })?;
-                let sentry = object(&[
-                    ("error", native.clone().into()),
-                    ("tags", metadata(&report.tags)?),
-                    ("extra", metadata(&report.extra)?),
-                ])?;
-                let options = object(&[
-                    ("sendToSentry", JsValue::TRUE),
-                    ("sentryData", sentry),
-                ])?;
-                let data = Array::new();
-                data.push(&JsValue::from_str(&report.message));
-                data.push(&options);
-                let payload = object(&[
-                    ("op", JsValue::from_str("error")),
-                    ("data", data.into()),
-                ])?;
-                post(&payload)
-            }),
-        )
-    }
+pub(super) fn create(post: BrowserErrorPost) -> WorkerErrorPost {
+    WorkerErrorPost::new(
+        Rc::new(|name, message| {
+            let error = Error::new(message);
+            error.set_name(name);
+            Ok(WorkerErrorHandle::new(error))
+        }),
+        Rc::new(move |report| {
+            let native = report.error.downcast_ref::<Error>().ok_or_else(|| {
+                ExchangeError::new("Worker Error belongs to a different post host")
+            })?;
+            let sentry = object(&[
+                ("error", native.clone().into()),
+                ("tags", metadata(&report.tags)?),
+                ("extra", metadata(&report.extra)?),
+            ])?;
+            let options = object(&[("sendToSentry", JsValue::TRUE), ("sentryData", sentry)])?;
+            let data = Array::new();
+            data.push(&JsValue::from_str(&report.message));
+            data.push(&options);
+            let payload = object(&[("op", JsValue::from_str("error")), ("data", data.into())])?;
+            post(&payload)
+        }),
+    )
 }

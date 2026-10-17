@@ -22,8 +22,7 @@ pub struct WorkerErrorReport {
     pub tags: Value,
     pub extra: Value,
 }
-pub type CreateWorkerError =
-    Rc<dyn Fn(&str, &str) -> Result<WorkerErrorHandle, ExchangeError>>;
+pub type CreateWorkerError = Rc<dyn Fn(&str, &str) -> Result<WorkerErrorHandle, ExchangeError>>;
 pub type SendWorkerError = Rc<dyn Fn(WorkerErrorReport) -> Result<(), ExchangeError>>;
 #[derive(Clone)]
 pub struct WorkerErrorPost {
@@ -31,6 +30,10 @@ pub struct WorkerErrorPost {
     send: SendWorkerError,
 }
 impl WorkerErrorPost {
+    #[cfg(target_arch = "wasm32")]
+    pub fn for_browser(post: BrowserErrorPost) -> Self {
+        browser::create(post)
+    }
     pub fn new(create: CreateWorkerError, send: SendWorkerError) -> Self {
         Self { create, send }
     }
