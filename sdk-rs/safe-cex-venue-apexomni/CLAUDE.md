@@ -348,11 +348,13 @@ remain required; these selected contracts do not replace them.
 Run the selected test and `scripts/accepted-map-record-controls.py` serially from
 sdk-rs with its pinned toolchain and one Cargo job. Each control removes only one
 owner's object guard, requires the named compiled complete-array admission
-failure, restores all source bytes exactly and reruns all 26 native tests.
+failure, restores all source bytes exactly and reruns all 26 native tests. `scripts/accepted-map-record-controls-test.py` checks exact-span
+isolation for similarly named owners and wrapped calls without compiling or
+mutating production.
 `scripts/accepted-map-record-contracts.mjs` performs fresh native/default compiler
 inventory and actual runtime probes for the selected 26 owners; it separately
 inspects every actual nonblanket companion implementation and the exact returned
 owner identity. New traits/conversions/inherent APIs must refuse. Other records,
 functions, aliases, receiver policies, feature and wasm behavior remain separate
-accepted-set obligations. Follow accepted-set/MAP-ONLY-INGRESS.md and
+accepted-set obligations. Follow ../safe-cex-parity/accepted-set/MAP-ONLY-INGRESS.md and
 MANIFEST-SPEC#numeric-ingress-defect rather than adding a new primitive.

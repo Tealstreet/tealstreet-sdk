@@ -820,3 +820,48 @@ and adding none. Its temporary exemption input selects only the existing owned
 rows; the original full-exemption invocation reported unrelated foreign names
 outside the selected invention scope and is excluded. These parser checks reuse
 the maintained binary after unchanged Rust/Cargo/lock/config inputs were verified.
+
+
+`scripts/accepted-map-record-controls.py` completed all **26 isolated compiled
+controls**. Each removes only its exact owner's object wrapper, requires Cargo
+exit101 and its named failure containing the exact complete valid literal array,
+then restores all three original source files byte-for-byte and passes all26
+native tests. The final exact-source check and all26 native tests pass again.
+No sibling mutation is installed during any owner's control. Initial preflights
+refused rustfmt-wrapped calls and the CurrencyObject suffix inside
+PerpetualCurrencyObject; both happened before mutation and are excluded from
+negative evidence. The corrected anchors require the exact owner boundary and
+allow only formatting whitespace/trailing-comma spelling.
+
+Master `87c99c175c` integrates as `8edda0a135` without conflicts, retaining all
+master contract/policy shards, including merged #365. The actual Apex source,
+fixtures, production runner and independently authored observations
+are byte-identical to the checkpoint that completed the controls and production
+run. The 26 genuinely new Apex rows remain the only additions to their shard;
+no flat file, exemption or previously removed row is restored.
+
+
+Independent readiness review found a P2 in the maintenance controller: global
+byte replacement discarded the regex's owner boundary. The completed v3 run
+used unique old byte sequences for every owner, so each executed mutation was
+isolated. The controller now replaces only its exact matched span. A focused
+same-format CurrencyObject/PerpetualCurrencyObject fixture fails with the former
+global replacement and passes after the span fix; all three Python tests pass,
+including wrapped-call and missing/ambiguous-owner refusal cases. For all 26
+actual production owners, the fixed span selector's entire mutant bytes equal
+the mutant bytes executed in v3. Sources are unchanged; no hypothetical collision
+is counted as a native guard failure. Importing the controller for its pure test
+now performs no source write or Cargo invocation.
+
+Final integration readiness: full scoped ApexOmni tests pass **215 / zero failed /
+zero ignored**, across 13 target receipts including docs and all maintained live
+TypeScript oracles. Separate host and wasm32 all-target Clippy pass with warnings
+denied (12.30s and 37.04s). Fresh post-integration production passes **26 actual
+runtime results / zero classifications / zero failed owners** on the reviewed
+394-case production corpus; private companion checks run again. Frozen install,
+workspace format, global structural **7459 rows / 17214 public items** and scoped
+invention **287 Apex public items** with the same 82 existing exemptions all pass.
+CodeRabbit's manual review returned a rate limit; it did not execute a completed
+review. The other 103 originally censused owners, aliases, receiver policies,
+local functions, construction, features and wasm behavior remain independent
+obligations. No whole-venue completion is claimed.
