@@ -1,3 +1,7 @@
+Every concrete mapOrder caller uses the shared synchronized VirtualClock: REST
+reads, private order frames, accepted placements and cancel-replace replies. The
+real binding clock regression checks all four; fetch throttle clocks stay Date.now.
+
 # BingX venue port
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bingx/CLAUDE.md).
