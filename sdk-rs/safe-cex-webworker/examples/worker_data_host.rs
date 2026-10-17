@@ -119,7 +119,8 @@ pub fn post_worker_error_getter_data(post: js_sys::Function) -> Result<u32, JsVa
     }));
     let errors = ["Error", "TypeError", "SyntaxError", "RangeError"]
         .into_iter()
-        .map(|name| {
+        .enumerate()
+        .map(|(index, name)| {
             let error = Thrown::error(name, "getter must stay unread").value;
             let count = reads.clone();
             error.define_accessor(
@@ -130,6 +131,27 @@ pub fn post_worker_error_getter_data(post: js_sys::Function) -> Result<u32, JsVa
                 })),
                 None,
             );
+            if index == 1 {
+                let count = reads.clone();
+                error.define_accessor(
+                    "cause",
+                    Some(Rc::new(move |_| {
+                        count.set(count.get() + 1);
+                        Err(Thrown::type_error("accessor Error cause was read"))
+                    })),
+                    None,
+                );
+            } else if index == 2 {
+                error
+                    .define(
+                        "cause",
+                        Js::object(vec![
+                            ("reason", Js::str("linked")),
+                            ("value", Js::Number(f64::INFINITY)),
+                        ]),
+                    )
+                    .unwrap();
+            }
             error
                 .define(
                     "custom",

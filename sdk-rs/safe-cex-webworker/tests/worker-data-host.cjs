@@ -19,9 +19,11 @@ assert(received[0].data.set instanceof Set);assert(received[0].data.set.has(clon
 assert.throws(()=>wasm.post_worker_data(()=>{throw new TypeError('post rejected');}),/post rejected/);
 console.log('WORKER-DATA actual WASM materialization + native structuredClone: numeric bits, undefined, UTF16, proto property, aliases/cycles, Map/Set and host failure PASS');
 const constructors=[Error,TypeError,SyntaxError,RangeError];
-const expectedErrors=constructors.map(Constructor=>{
+const expectedErrors=constructors.map((Constructor,index)=>{
  const error=new Constructor('getter must stay unread');
  Object.defineProperty(error,'code',{enumerable:true,get(){throw new Error('source custom Error getter was read');}});
+ if(index===1) Object.defineProperty(error,'cause',{enumerable:true,get(){throw new Error('source Error cause getter was read');}});
+ if(index===2) error.cause={reason:'linked',value:Infinity};
  error.custom=()=>{};
  return structuredClone(error);
 });
@@ -34,6 +36,7 @@ for(let index=0;index<constructors.length;index++) {
  for(const value of [actual,cloned]) {
   assert(value instanceof constructors[index], 'WORKER-ERROR preserves standard subtype');
   assert.equal(value.name,expected.name);assert.equal(value.message,expected.message);
+  assert.equal(Object.hasOwn(value,'cause'),Object.hasOwn(expected,'cause'));assert.deepEqual(value.cause,expected.cause);
   assert(!Object.hasOwn(value,'code'), 'WORKER-ERROR custom code is dropped');
   assert(!Object.hasOwn(value,'custom'), 'WORKER-ERROR uncloneable custom value is ignored');
  }
@@ -45,7 +48,7 @@ wasm.post_worker_error_data(value => { event=value; eventClone=structuredClone(v
 const nativeError=event.data[1].sentryData.error, clonedError=eventClone.data[1].sentryData.error;
 assert(nativeError instanceof Error, 'WORKER-EVENT native Error identity before post');
 assert.equal(nativeError.name,'AxiosError'); assert.equal(nativeError.message,'retained event error');
-assert.equal(nativeError.code,Infinity); assert.equal(nativeError.stack,'original event stack\n    at source-event');
+assert(!Object.hasOwn(nativeError,'code')); assert.equal(nativeError.stack,'original event stack\n    at source-event');
 assert(clonedError instanceof Error, 'WORKER-EVENT Error survives structured clone');
 assert.equal(clonedError.name,'Error'); assert.equal(clonedError.message,nativeError.message);
 assert.equal(clonedError.stack,nativeError.stack); assert(!Object.hasOwn(clonedError,'code'));
