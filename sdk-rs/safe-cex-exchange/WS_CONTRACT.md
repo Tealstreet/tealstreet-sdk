@@ -103,3 +103,7 @@ the socket context. Each slot retains one native handle, separate from its
 assignable source field value. Replacement identities prevent stale handles from
 cancelling newer work. Source close cleanup therefore stops heartbeat and
 receive work even when the venue does not delegate to the base close handler.
+
+An offline-to-online transition runs each registered socket’s offline recovery.
+That path clears native retry backoff, failure pauses and close/reconnect counters,
+then runs a pending reconnect immediately. Repeated online notifications do nothing.
