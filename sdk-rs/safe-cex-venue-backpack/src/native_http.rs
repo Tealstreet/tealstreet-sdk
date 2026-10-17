@@ -48,7 +48,7 @@ impl Client {
             let mut attempt = 0;
             let (response, config, req) = loop {
                 let limits = client.rate_limits.borrow().clone();
-                for limit in limits {
+                for limit in limits.into_iter().rev() {
                     limit
                         .acquire()
                         .await

@@ -279,7 +279,7 @@ impl Client {
             let mut signature_retried = false;
             loop {
                 let limits = lane.rate_limits.borrow().clone();
-                for limit in limits {
+                for limit in limits.into_iter().rev() {
                     limit
                         .acquire()
                         .await
