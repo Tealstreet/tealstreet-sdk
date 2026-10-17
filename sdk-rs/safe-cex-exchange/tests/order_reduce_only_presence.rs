@@ -63,6 +63,9 @@ fn reduce_only_native_presence_and_store_updates_match_actual_source() {
             let decoded: Order = to_typed(&row(2., expected)).expect(
                 "native Order must admit absent and own undefined reduceOnly without defaulting",
             );
+            let prepared: safe_cex_types::PreparedOrderOpts = to_typed(&row(2., expected))
+                .expect("internal prepared amendments retain the same strict presence carrier");
+            assert_eq!(state(&from_typed(&prepared).unwrap()), expected);
             assert_eq!(
                 state(&from_typed(&decoded).unwrap()),
                 expected,

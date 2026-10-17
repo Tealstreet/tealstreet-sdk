@@ -169,7 +169,7 @@ pub fn down_size_reduce_order<T: Borrow<PlaceOrderOpts> + BorrowMut<PlaceOrderOp
                 o.status,
                 safe_cex_types::ModelField::Value(OrderStatus::Open | OrderStatus::Creating)
             )
-            && (position.position_mode != Some(PositionMode::Hedged) || o.reduce_only)
+            && (position.position_mode != Some(PositionMode::Hedged) || o.reduce_only == true)
             && ((order.side == OrderSide::Buy && o.price.to_number() >= price)
                 || (order.side == OrderSide::Sell && o.price.to_number() <= price))
     }) {
