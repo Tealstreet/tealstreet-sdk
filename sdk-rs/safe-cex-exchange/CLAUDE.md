@@ -1312,3 +1312,12 @@ Its native record codec preserves absent, own undefined and concrete intervals,
 including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
+
+Singular JS Store order/position/market mutators read the selector's `id` and
+compare it strictly with native string IDs. Non-string IDs and bare primitives
+do not identify those rows; nullish selectors and throwing getters propagate
+when the source actually reads them. Empty order/position arrays retain their
+findIndex short circuit. Ticker mutation follows its distinct object-key lookup
+with property-key coercion. `tests/js_store_id_matching.rs` compares132 actual
+maintained Store outcomes through DefaultStore's production facade. Bulk order
+lookup and the adaptive multi-position index are separate paths.
