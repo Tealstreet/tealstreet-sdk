@@ -96,6 +96,14 @@ already-gone `-2011` response; cancellation still logs completion.
 `tests/exchange_trait.rs` covers both HTTP-success and HTTP-error envelopes through
 the constructed venue, signer, transport and event emitter.
 
+`fetchPositions` consumes raw `positionRisk` rows, matching the source's field
+access and parseFloat coercions instead of requiring the declared 17-field DTO.
+Sparse unused fields, boolean metadata and numeric leverage remain valid in both
+V1 and V3. Missing notional remains NaN; raw info retains the original keys and
+values through the shared numeric and owned-snapshot boundaries.
+`tests/exchange_trait.rs::sparse_position_risk_rows_use_source_coercion_in_v1_and_v3`
+exercises the constructed binding, signed clients and placeholder leverage.
+
 The private socket inherits the shared primary-private reopen resync policy,
 matching its TypeScript class. Do not opt out merely because the native host has
 `enable_reconnecting = false`: the shared open listener still refreshes private
