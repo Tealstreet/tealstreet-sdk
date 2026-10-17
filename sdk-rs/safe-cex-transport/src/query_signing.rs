@@ -1,6 +1,7 @@
 //! Opt-in native query wire DTOs; legacy signer APIs keep Value parameters.
 use crate::query::{deserialize_query_wire, query_wire_omitted, serialize_query_wire};
 use indexmap::IndexMap;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{ExchangeName, QueryValue};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,8 +18,11 @@ pub struct SigningConfig {
         serialize_with = "serialize_query_wire"
     )]
     pub params: Option<QueryValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    #[serde(
+        skip_serializing_if = "crate::native_data::omitted",
+        serialize_with = "crate::native_data::serialize_optional"
+    )]
+    pub data: Option<Input>,
     pub headers: IndexMap<String, String>,
 }
 #[derive(Serialize)]
@@ -38,8 +42,11 @@ pub struct SignedConfig {
         serialize_with = "serialize_query_wire"
     )]
     pub params: Option<QueryValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    #[serde(
+        skip_serializing_if = "crate::native_data::omitted",
+        serialize_with = "crate::native_data::serialize_optional"
+    )]
+    pub data: Option<Input>,
     pub headers: IndexMap<String, String>,
 }
 #[derive(Default, Serialize)]
@@ -60,8 +67,8 @@ struct WireSigningConfig {
     #[serde(default, deserialize_with = "deserialize_query_wire")]
     params: Option<QueryValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(default, deserialize_with = "present_json")]
-    data: Option<Value>,
+    #[serde(default, deserialize_with = "present_input")]
+    data: Option<Input>,
     headers: IndexMap<String, String>,
 }
 impl<'de> Deserialize<'de> for SigningConfig {
@@ -92,8 +99,8 @@ struct WireSignedConfig {
     url: Option<String>,
     #[serde(default, deserialize_with = "deserialize_query_wire")]
     params: Option<QueryValue>,
-    #[serde(default, deserialize_with = "present_json")]
-    data: Option<Value>,
+    #[serde(default, deserialize_with = "present_input")]
+    data: Option<Input>,
     headers: IndexMap<String, String>,
 }
 impl<'de> Deserialize<'de> for SignedConfig {
@@ -120,4 +127,10 @@ fn present_json<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Value>, D::Error> {
     Value::deserialize(deserializer).map(Some)
+}
+
+fn present_input<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Input>, D::Error> {
+    Input::deserialize(deserializer).map(Some)
 }
