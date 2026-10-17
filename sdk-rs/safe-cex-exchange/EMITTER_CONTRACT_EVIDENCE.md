@@ -65,10 +65,11 @@ the retained account boundary; it does not stand in for a full-package gate.
 
 
 Raw error reporting carries `ExchangeErrorInput::Raw(Js)` directly through the
-production facade. Five native regressions cover original Error/message identity,
+production facade. Seven native regressions cover original Error/message identity,
 unread code getters, UTF-16, console-before-coercion, primitive formatting and own
-undefined metadata. The first two compile and fail on the prior implementation.
-`tests/raw-error-source.cjs` executes thirty worker/main profiles from the maintained
+undefined metadata and actual-source accessor read order. The first two and the
+accessor-order regression compile and fail before their repairs.
+`tests/raw-error-source.cjs` executes thirty-four worker/main profiles from the maintained
 reporter and formatter. `core_error_reporting` retains its four typed/source checks;
 its finite observer mirrors the oracle's explicit Error name/message replacer.
 
