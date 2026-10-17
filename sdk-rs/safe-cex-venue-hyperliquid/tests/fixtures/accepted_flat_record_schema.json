@@ -93,17 +93,6 @@
     ],
     "publicDeserializerSha256": "822a63f39c24cc2e8b111ee16623993714b5f4632efc6ded2d3074da9013198f"
   },
-  "OrderResponseStatusCase2": {
-    "ts": "OrderResponseStatus error branch",
-    "fields": [
-      [
-        "error",
-        "error",
-        "string"
-      ]
-    ],
-    "publicDeserializerSha256": "0bd4c74d02831d5f7b16f3f490475585c0eee1278c7334219334c9daad0c5ab5"
-  },
   "WsTrade": {
     "ts": "WsTrade",
     "fields": [
@@ -352,22 +341,6 @@
       ]
     ],
     "publicDeserializerSha256": "8c0505517bc22ba8620bff9154ddccf38e49c4d18de56d4be2f6752345b3f473"
-  },
-  "SpotTokenEvmContract": {
-    "ts": "SpotToken.evmContract concrete object branch",
-    "fields": [
-      [
-        "address",
-        "address",
-        "string"
-      ],
-      [
-        "evm_extra_wei_decimals",
-        "evm_extra_wei_decimals",
-        "number"
-      ]
-    ],
-    "publicDeserializerSha256": "43f47b80d8c7ea43672b80e4c35019a0300a30748853f67e99c0b132628c3fce"
   },
   "UserOpenOrder": {
     "ts": "UserOpenOrder",

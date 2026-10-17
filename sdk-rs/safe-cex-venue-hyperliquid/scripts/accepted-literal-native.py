@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Run the selected literal cohort's contract expressions and restore its fixture.
 
-Default: original four order literals; --cohort=statuses: two waiting statuses.
+The three retained order literal owners.
 
 This supplies direct native evidence only. The ordinary accepted-set runner owns
 compiler discovery, trait probes, local scopes, dependencies and target coverage.
 """
-import argparse
 import json
 import os
 from pathlib import Path
@@ -14,11 +13,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 CRATE = ROOT / "safe-cex-venue-hyperliquid"
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--cohort", choices=["orders", "statuses"], default="orders")
-args = parser.parse_args()
-IDENTS = (["Tif", "Tpsl", "Grouping", "ScheduleCancelActionType"] if args.cohort == "orders"
-          else ["OrderResponseStatusCase3", "OrderResponseStatusCase4"])
+IDENTS = ["Tif", "Tpsl", "Grouping"]
 ROWS = json.loads((ROOT / "safe-cex-parity/accepted-set/contracts/safe-cex-venue-hyperliquid.json").read_text())
 FIXTURE = CRATE / "tests/__accepted_literal_observations.rs"
 assert not FIXTURE.exists(), "refuse to replace an existing fixture"

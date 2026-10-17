@@ -892,3 +892,5 @@ fn loaded_missing_position_is_fetched_once_and_cached_for_formatting() {
         "true"
     );
 }
+
+include!("support/private_binding_topics.rs");

@@ -1027,7 +1027,8 @@ fn okx_family_constructs_through_the_registry_and_reads_its_markets() {
             .lock()
             .unwrap()
             .iter()
-            .any(|u| u == "/api/v5/public/instruments"),
+            // fetchMarkets supplies params: {instType}; the HTTP host puts them in the URL.
+            .any(|u| u == "/api/v5/public/instruments?instType=SWAP"),
         "REGISTRY okx fetchMarkets reached the scripted wire"
     );
 }

@@ -2701,9 +2701,9 @@
         "await",
         "await"
       ],
-      "producer_sha256": "0daa4a3ec3b6604b9523c2d680e8f1c2b43f58077687019d13fffb4fbb97730c",
+      "producer_sha256": "83988742cbde1334fcca1a524e2e69ede703c26e72518faf8e37eb077f0751fc",
       "classification": "no-owned-latch",
-      "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement. Reviewed callable adapter dispatch: awaits the selected source adapter Promise instead of host send, after the same throttle. No new reservation, RefCell borrow or independent retry/task registry is introduced."
+      "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement. Reviewed callable adapter dispatch: awaits the selected source adapter Promise instead of host send, after the same throttle. No new reservation, RefCell borrow or independent retry/task registry is introduced. Reviewed configured response transforms: synchronous transforms run after the adapter await and before status handling, adding no future, reservation or borrow across an await."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::js_remote_signer",
@@ -2722,9 +2722,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "61374ff945a2efa34769dd0250f4407506f6883502772d697671095d8f4791eb",
+      "producer_sha256": "64772fd8567f69e68a60fb54dd75d977a5748773b23ad0a6800310fa554d37ba",
       "classification": "no-owned-latch",
-      "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send."
+      "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send. Reviewed response interceptor ownership: synchronous outcome/error handlers retain only Weak<BaseExchange>; existing request authorization and its asynchronous boundaries are unchanged."
     },
     {
       "owner": "src/js_runtime/sockets.rs::create_websocket",

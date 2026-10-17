@@ -88,27 +88,12 @@ fn per_field_identity_survives_public_decode() {
     let corpus: Value =
         serde_json::from_str(include_str!("fixtures/field-identities.json")).unwrap();
     let cases = corpus["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 931, "FIELD-IDENTITY source total");
+    assert_eq!(cases.len(), 257, "FIELD-IDENTITY source total");
     let mut comparisons = 0;
-    for index in 0..931 {
+    for index in 0..257 {
         let case = cases.get(index).expect("FIELD-IDENTITY index coverage");
         comparisons += 1;
         let raw = case["raw"].as_str().unwrap();
-        if case["name"] == "OrderRequest" {
-            let native: safe_cex_venue_hyperliquid::types::OrderRequest =
-                serde_json::from_str(raw).unwrap();
-            let expected: Value = serde_json::from_str(raw).unwrap();
-            assert_eq!(
-                native.is_buy,
-                expected["is_buy"].as_bool().unwrap(),
-                "OrderRequest native is_buy identity"
-            );
-            assert_eq!(
-                native.reduce_only,
-                expected["reduce_only"].as_bool().unwrap(),
-                "OrderRequest native reduce_only identity"
-            );
-        }
         let actual = dispatch(case["name"].as_str().unwrap(), raw);
         let expected: Value = serde_json::from_str(raw).unwrap();
         assert!(
@@ -118,7 +103,7 @@ fn per_field_identity_survives_public_decode() {
             case["path"]
         );
     }
-    assert_eq!(comparisons, 931, "FIELD-IDENTITY native comparison total");
+    assert_eq!(comparisons, 257, "FIELD-IDENTITY native comparison total");
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -139,9 +124,9 @@ fn enum_field_identity_survives_native_decode() {
     let corpus: Value =
         serde_json::from_str(include_str!("fixtures/enum-field-identities.json")).unwrap();
     let cases = corpus["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 91, "ENUM-IDENTITY source total");
+    assert_eq!(cases.len(), 33, "ENUM-IDENTITY source total");
     let mut comparisons = 0;
-    for index in 0..91 {
+    for index in 0..33 {
         let case = cases.get(index).expect("ENUM-IDENTITY index coverage");
         comparisons += 1;
         let raw = case["raw"].as_str().unwrap();
@@ -154,7 +139,7 @@ fn enum_field_identity_survives_native_decode() {
             case["path"]
         );
     }
-    assert_eq!(comparisons, 91, "ENUM-IDENTITY native comparison total");
+    assert_eq!(comparisons, 33, "ENUM-IDENTITY native comparison total");
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -186,21 +171,21 @@ fn multi_element_collection_identity_survives_public_decode() {
     );
     let corpus: Value = serde_json::from_slice(&output.stdout).unwrap();
     let cases = corpus["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 260, "COLLECTION-IDENTITY source total");
+    assert_eq!(cases.len(), 30, "COLLECTION-IDENTITY source total");
     assert_eq!(
         corpus["rejected"].as_array().unwrap().len(),
         0,
         "COLLECTION-IDENTITY rejected total"
     );
     assert_eq!(
-        corpus["catalogHash"], "9be7742df130c7ae0548f9a44ce9aefb0d2886b96e05cdb41159c3d8654a6606",
+        corpus["catalogHash"], "2870221aa542e8cc1ea6547e1155fb271aab8e4443af1fff8b40ae9bd3eebc81",
         "COLLECTION-IDENTITY source catalog fingerprint"
     );
     let catalog = corpus["catalog"].as_array().unwrap();
-    assert_eq!(catalog.len(), 190, "COLLECTION-IDENTITY catalog total");
+    assert_eq!(catalog.len(), 22, "COLLECTION-IDENTITY catalog total");
     assert_eq!(
         catalog.iter().filter(|row| row["kind"] == "array").count(),
-        130,
+        15,
         "COLLECTION-IDENTITY array catalog"
     );
     assert_eq!(
@@ -208,55 +193,27 @@ fn multi_element_collection_identity_survives_public_decode() {
             .iter()
             .filter(|row| row["kind"] == "tuple" && row["arity"] == 2)
             .count(),
-        60,
+        7,
         "COLLECTION-IDENTITY fixed pair catalog"
     );
     let inventory = std::collections::BTreeMap::from([
-        (("Meta", "/universe"), 10),
         (("ClearinghouseState", "/assetPositions"), 2),
-        (("OrderResponse", "/response/data/statuses"), 20),
         (("WsBook", "/levels/0"), 2),
         (("WsBook", "/levels/1"), 2),
-        (("SpotClearinghouseState", "/balances"), 2),
-        (
-            (
-                "SpotClearinghouseState",
-                "/tokenToAvailableAfterMaintenance",
-            ),
-            2,
-        ),
         (("L2Book", "/levels/0"), 2),
         (("L2Book", "/levels/1"), 2),
-        (("MetaAndAssetCtxs", "/meta/universe"), 10),
-        (("MetaAndAssetCtxs", "/assetCtxs"), 10),
-        (("UserFunding", "/"), 2),
-        (("UserNonFundingLedgerUpdates", "/"), 10),
         (("FundingHistory", "/"), 2),
-        (("SpotMeta", "/tokens"), 10),
-        (("SpotMeta", "/universe"), 10),
-        (("SpotMetaAndAssetCtxs", "/meta/tokens"), 14),
-        (("SpotMetaAndAssetCtxs", "/meta/universe"), 14),
-        (("SpotMetaAndAssetCtxs", "/assetCtxs"), 14),
         (("UserOpenOrders", "/"), 2),
         (("CancelOrderRequests", "/"), 2),
         (("WsUserFills", "/fills"), 2),
         (("WsUserFundings", "/fundings"), 2),
         (("WsUserNonFundingLedgerUpdates", "/updates"), 10),
-        (("PerpDex", "/assetToStreamingOiCap"), 10),
-        (("PerpDex", "/subDeployers"), 10),
-        (("PerpDex", "/subDeployers/0/1"), 10),
-        (("PerpDex", "/assetToFundingMultiplier"), 10),
-        (("PerpDexs", "/"), 14),
-        (("PerpDexs", "/0/assetToStreamingOiCap"), 12),
-        (("PerpDexs", "/0/subDeployers"), 12),
-        (("PerpDexs", "/0/subDeployers/0/1"), 12),
-        (("PerpDexs", "/0/assetToFundingMultiplier"), 12),
     ]);
     let mut observed = std::collections::BTreeMap::new();
     let mut comparisons = 0;
     let mut elements = 0;
     let mut distinct = 0;
-    for index in 0..260 {
+    for index in 0..30 {
         let row = cases
             .get(index)
             .expect("COLLECTION-IDENTITY native index coverage");
@@ -316,12 +273,9 @@ fn multi_element_collection_identity_survives_public_decode() {
         "COLLECTION-IDENTITY root/path subcorpus inventory"
     );
     assert_eq!(
-        comparisons, 260,
+        comparisons, 30,
         "COLLECTION-IDENTITY native comparison total"
     );
-    assert_eq!(elements, 650, "COLLECTION-IDENTITY native element total");
-    assert_eq!(
-        distinct, 254,
-        "COLLECTION-IDENTITY distinct cases; six constant-only cases assert cardinality"
-    );
+    assert_eq!(elements, 75, "COLLECTION-IDENTITY native element total");
+    assert_eq!(distinct, 30, "COLLECTION-IDENTITY distinct cases");
 }

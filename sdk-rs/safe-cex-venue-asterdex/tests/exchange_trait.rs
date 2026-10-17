@@ -44,6 +44,100 @@ fn script(wire: &support::Wire) {
     responses.insert("/fapi/v1/trades".into(),json!([{"id":4,"price":"101","qty":"0.03","quoteQty":"3.03","time":1700000000000u64,"isBuyerMaker":true}]));
 }
 
+#[test]
+fn sparse_position_risk_rows_use_source_coercion_in_v1_and_v3() {
+    for v3 in [false, true] {
+        let options = if v3 {
+            let secret = format!("{:064x}", 1);
+            let wallet =
+                safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&secret).unwrap();
+            json!({"key":wallet.address().to_checksum(None),"secret":secret,
+                "applicationId":"0x1111111111111111111111111111111111111111"})
+        } else {
+            json!({"key":"fixture-key","secret":"fixture-secret"})
+        };
+        let (venue, rt, _, wire) = support::fixture(options);
+        script(&wire);
+        wire.responses.borrow_mut().insert(
+            "/fapi/v1/positionSide/dual".into(),
+            json!({"dualSidePosition":true}),
+        );
+        if v3 {
+            let mapped = wire
+                .responses
+                .borrow()
+                .iter()
+                .map(|(path, value)| {
+                    (
+                        path.replace("/v1/", "/v3/")
+                            .replace("/v4/account", "/v3/account"),
+                        value.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            wire.responses.borrow_mut().extend(mapped);
+        }
+        drive(&rt, venue.start()).unwrap();
+        let path = if v3 {
+            "/fapi/v3/positionRisk"
+        } else {
+            "/fapi/v1/positionRisk"
+        };
+        let sparse = json!({"symbol":"BTCUSDT","positionAmt":"2","entryPrice":"99",
+            "unRealizedProfit":"6","leverage":20.0,"positionSide":"LONG",
+            "isAutoAddMargin":false,"extraVenueField":{"retained":true}});
+        wire.responses
+            .borrow_mut()
+            .insert(path.into(), json!([sparse.clone()]));
+        let positions = drive(&rt, venue.fetch_positions(None))
+            .expect("sparse positionRisk must reach the real position mapper");
+        assert_eq!(positions.len(), 2);
+        let long = positions
+            .iter()
+            .find(|p| p.side == PositionSide::Long)
+            .unwrap();
+        assert_eq!(long.contracts, 2.0);
+        assert_eq!(long.entry_price, 99.0);
+        assert!(
+            long.notional.is_nan(),
+            "missing notional keeps parseFloat(undefined)"
+        );
+        assert_eq!(long.leverage, 20.0);
+        assert_eq!(long.liquidation_price, 0.0);
+        assert_eq!(
+            long.info.as_ref(),
+            Some(&sparse),
+            "raw fields stay untouched"
+        );
+        let short = positions
+            .iter()
+            .find(|p| p.side == PositionSide::Short)
+            .unwrap();
+        assert_eq!(short.contracts, 0.0);
+        assert_eq!(
+            short.leverage, 20.0,
+            "numeric leverage reaches the placeholder"
+        );
+
+        // Flat and filtered rows still contribute leverage before the amount filter.
+        wire.responses.borrow_mut().insert(
+            path.into(),
+            json!([
+                {"symbol":"BTCUSDT","positionAmt":0,"leverage":7,"isAutoAddMargin":false},
+                {"symbol":"OTHER","positionAmt":"1","leverage":3}
+            ]),
+        );
+        let positions = drive(&rt, venue.fetch_positions(Some(vec!["BTCUSDT".into()]))).unwrap();
+        assert_eq!(positions.len(), 2);
+        assert!(
+            positions
+                .iter()
+                .all(|p| p.contracts == 0.0 && p.leverage == 7.0)
+        );
+        venue.dispose().unwrap();
+    }
+}
+
 fn request_path(request: &RestRequest) -> &str {
     request.url.split('?').next().unwrap()
 }
@@ -88,6 +182,64 @@ fn sent(wire: &support::Wire, method: &str, path: &str) -> bool {
 }
 fn take(wire: &support::Wire) {
     wire.requests.borrow_mut().clear();
+}
+
+fn cancel_already_gone(status: u16) {
+    let (venue, rt, _, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    script(&wire);
+    let orders = drive(&rt, venue.fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    let errors = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let capture = errors.clone();
+    venue.base().on(
+        "error",
+        Rc::new(move |_, args| {
+            capture.borrow_mut().push(args.clone());
+            Ok(())
+        }),
+    );
+    wire.responses.borrow_mut().insert(
+        "/fapi/v1/order".into(),
+        json!({"code":-2011,"msg":"Unknown order sent."}),
+    );
+    wire.statuses
+        .borrow_mut()
+        .insert("/fapi/v1/order".into(), status);
+    take(&wire);
+    drive(&rt, venue.cancel_orders(orders)).unwrap();
+    assert!(
+        errors.borrow().is_empty(),
+        "already-gone cancel must not emit an error: {:?}",
+        errors.borrow()
+    );
+    assert!(
+        rt.console
+            .borrow()
+            .iter()
+            .any(|line| line.contains("was already gone"))
+    );
+    let requests = wire.requests.borrow();
+    let cancel = requests
+        .iter()
+        .find(|r| r.method.eq_ignore_ascii_case("DELETE"))
+        .unwrap();
+    assert_eq!(
+        cancel
+            .config_extensions
+            .get("__suppressAsterUnknownOrderError"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
+fn already_gone_cancel_suppresses_success_response_errors() {
+    cancel_already_gone(200);
+}
+
+#[test]
+fn already_gone_cancel_suppresses_http_response_errors() {
+    cancel_already_gone(400);
 }
 
 #[test]
@@ -552,4 +704,201 @@ fn v1_signature_rejection_resends_once_from_unsigned_parameters() {
             venue.dispose().unwrap();
         }
     }
+}
+
+#[test]
+fn private_reopen_refreshes_orders_missed_during_disconnect() {
+    let (venue, rt, store, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    assert_eq!(store.orders()[0].id, "9001");
+    let private = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/fixture-listen-key"))
+        .expect("production private socket")
+        .1
+        .clone();
+    let mut changed = wire.responses.borrow()["/fapi/v1/openOrders"][0].clone();
+    changed["orderId"] = json!(777);
+    changed["clientOrderId"] = json!("after-reopen");
+    wire.responses
+        .borrow_mut()
+        .insert("/fapi/v1/openOrders".into(), json!([changed]));
+    let before = wire
+        .requests
+        .borrow()
+        .iter()
+        .filter(|r| request_path(r) == "/fapi/v1/openOrders")
+        .count();
+    let dials = rt.urls.borrow().len();
+    private.closed.set(true);
+    private
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Close {
+            code: Some(1006),
+            reason: "connection lost".into(),
+        });
+    for _ in 0..60 {
+        rt.now.set(rt.now.get() + 100.0);
+        rt.pump();
+    }
+    assert!(
+        rt.urls.borrow().len() > dials,
+        "native private socket redialed"
+    );
+    let after = wire
+        .requests
+        .borrow()
+        .iter()
+        .filter(|r| request_path(r) == "/fapi/v1/openOrders")
+        .count();
+    assert!(
+        after > before,
+        "private reopen must perform the source snapshot refresh"
+    );
+    let rows = store.orders();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].id, "777",
+        "snapshot replaces orders missed during disconnect"
+    );
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    drop(rows);
+    venue.dispose().unwrap();
+}
+
+fn stream_fixture() -> (
+    Rc<safe_cex_venue_asterdex::native_exchange::AsterDEXExchange>,
+    Rc<support::Runtime>,
+    Rc<safe_cex_store::store::DefaultStore>,
+    std::sync::Arc<support::Wire>,
+) {
+    let (venue, rt, store, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    (venue, rt, store, wire)
+}
+fn deliver_private(rt: &support::Runtime, frame: Value) {
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(frame.to_string()),
+        ));
+    for _ in 0..8 {
+        rt.pump();
+    }
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+}
+fn order_frame(id: u64) -> Value {
+    json!({"e":"ORDER_TRADE_UPDATE","o":{"i":id,"s":"BTCUSDT","S":"BUY","o":"LIMIT","X":"NEW","p":"95","sp":"0","q":"3","z":"0","R":false,"cp":false}})
+}
+#[test]
+fn production_private_order_frame_updates_store() {
+    let (venue, rt, store, _) = stream_fixture();
+    deliver_private(&rt, order_frame(9050));
+    let rows = store.orders();
+    let order = rows
+        .iter()
+        .find(|o| o.id == "9050")
+        .expect("private order in real Store");
+    assert_eq!(order.symbol, "BTCUSDT");
+    assert_eq!(
+        (order.price, order.amount, order.filled, order.remaining),
+        (95.0, 3.0, 0.0, 3.0)
+    );
+    drop(rows);
+    venue.dispose().unwrap();
+}
+#[test]
+fn production_private_fill_frame_updates_store_and_emits_fill() {
+    let (venue, rt, store, _) = stream_fixture();
+    let fills = Rc::new(std::cell::RefCell::new(vec![]));
+    let saved = fills.clone();
+    venue.base().on(
+        "fill",
+        Rc::new(move |_, data| {
+            saved.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    deliver_private(&rt, order_frame(9051));
+    let mut frame = order_frame(9051);
+    frame["o"]["X"] = json!("PARTIALLY_FILLED");
+    frame["o"]["z"] = json!("0.25");
+    frame["o"]["l"] = json!("0.25");
+    frame["o"]["L"] = json!("96");
+    frame["o"]["ap"] = json!("96");
+    deliver_private(&rt, frame);
+    let rows = store.orders();
+    let order = rows.iter().find(|o| o.id == "9051").unwrap();
+    assert_eq!((order.filled, order.remaining), (0.25, 2.75));
+    let fills = fills.borrow();
+    assert_eq!(fills.len(), 1);
+    let fill = &fills[0];
+    assert_eq!(fill["id"], "9051");
+    assert_eq!(fill["orderId"], "9051");
+    assert_eq!(fill["symbol"], "BTCUSDT");
+    assert_eq!(fill["side"], "buy");
+    assert_eq!(fill["price"].as_f64(), Some(96.0));
+    assert_eq!(fill["amount"].as_f64(), Some(0.25));
+    drop(rows);
+    venue.dispose().unwrap();
+}
+#[test]
+fn production_private_positions_frame_updates_store() {
+    let (venue, rt, store, _) = stream_fixture();
+    deliver_private(
+        &rt,
+        json!({"e":"ACCOUNT_UPDATE","E":1700000001000u64,"a":{"P":[{"s":"BTCUSDT","pa":"3","ep":"97","up":"8","ps":"BOTH","mt":"cross","iw":"0"}]}}),
+    );
+    let rows = store.positions();
+    let position = rows
+        .iter()
+        .find(|p| p.symbol == "BTCUSDT" && p.side == PositionSide::Long)
+        .unwrap();
+    assert_eq!(
+        (
+            position.contracts,
+            position.entry_price,
+            position.unrealized_pnl
+        ),
+        (3.0, 97.0, 8.0)
+    );
+    drop(rows);
+    venue.dispose().unwrap();
+}
+#[test]
+fn production_private_balance_frame_updates_store() {
+    let (venue, rt, store, _) = stream_fixture();
+    deliver_private(
+        &rt,
+        json!({"e":"ACCOUNT_UPDATE","E":1700000001000u64,"a":{"B":[{"a":"USDT","wb":"125","cw":"110"}],"P":[]}}),
+    );
+    let balance = store.balance();
+    assert_eq!(
+        (balance.total, balance.free, balance.used),
+        (125.0, 110.0, 15.0)
+    );
+    drop(balance);
+    venue.dispose().unwrap();
 }

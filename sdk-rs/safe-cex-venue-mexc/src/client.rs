@@ -3,10 +3,7 @@ use crate::{
     api::*,
     types::{BASE_URL, RECV_WINDOW},
 };
-use safe_cex_exchange::{
-    http::{HttpClient, HttpClientOptions, safe_cex_axios_create},
-    runtime::ExchangeRuntime,
-};
+use safe_cex_exchange::http::{HttpClient, HttpClientOptions, safe_cex_axios_create};
 use safe_cex_num::{JsJsonValue, js_number_string, js_string, js_truthy};
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, TransportError,
@@ -80,7 +77,7 @@ struct MexcAttempt {
     client: HttpClient,
     options: ExchangeOptions,
     remote: bool,
-    runtime: Rc<dyn ExchangeRuntime>,
+    current_time_ms: Rc<dyn Fn() -> f64>,
 }
 impl RestAdapter for MexcAttempt {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -102,7 +99,7 @@ impl RestAdapter for MexcAttempt {
                 && !self.options.key.is_empty()
                 && !self.options.secret.is_empty()
             {
-                let time = js_number_string(self.runtime.now_ms());
+                let time = js_number_string((self.current_time_ms)());
                 let is_get = request.method.eq_ignore_ascii_case("GET");
                 let body = if is_get {
                     String::new()
@@ -327,9 +324,9 @@ pub fn create_api(
     mut host: HttpClientOptions,
     registry: &TransportRegistry,
     clock: Rc<dyn RateLimitClock>,
+    current_time_ms: Rc<dyn Fn() -> f64>,
 ) -> Result<impl RestAdapter + use<>, TransportError> {
     let options = host.options.clone();
-    let runtime = host.runtime.clone();
     let remote = host.signer.is_some();
     let network = if options.testnet == Some(true) {
         "testnet"
@@ -364,7 +361,7 @@ pub fn create_api(
             client,
             options,
             remote,
-            runtime,
+            current_time_ms,
         },
         clock,
     })
