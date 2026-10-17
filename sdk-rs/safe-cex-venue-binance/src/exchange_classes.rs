@@ -1756,16 +1756,26 @@ impl ExchangeState {
         };
         let mut markets = Vec::new();
         for (index, row) in rows.iter().enumerate() {
-            let invalid = [("base", row.base.as_ref()), ("quote", row.quote.as_ref())]
-                .into_iter()
-                .filter(|(_, value)| value.and_then(Value::as_str).is_none())
-                .map(|(field, value)| {
-                    format!(
-                        "{field}={}",
-                        value.map_or_else(|| "undefined".into(), Value::to_string)
-                    )
-                })
-                .collect::<Vec<_>>();
+            let mut invalid = [
+                ("base", row.base.as_ref()),
+                ("quote", row.quote.as_ref()),
+                ("symbol", row.symbol.as_ref()),
+            ]
+            .into_iter()
+            .filter(|(_, value)| value.and_then(Value::as_str).is_none())
+            .map(|(field, value)| {
+                format!(
+                    "{field}={}: expected string",
+                    value.map_or_else(|| "undefined".into(), Value::to_string)
+                )
+            })
+            .collect::<Vec<_>>();
+            if safe_cex_num::numeric_ingress::js_value_as_f64(&row.leverage_max).is_none() {
+                invalid.push(format!(
+                    "limits.leverage.max={}: expected number",
+                    row.leverage_max
+                ));
+            }
             if !invalid.is_empty() {
                 let symbol = row
                     .symbol
@@ -1774,7 +1784,7 @@ impl ExchangeState {
                 emit_json(
                     &self.base,
                     &json!(format!(
-                        "Refused Binance market row {index} symbol={symbol}: {}: expected string",
+                        "Refused Binance market row {index} symbol={symbol}: {}",
                         invalid.join(", ")
                     )),
                 )

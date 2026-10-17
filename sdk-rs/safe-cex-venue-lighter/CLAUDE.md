@@ -417,3 +417,6 @@ calling the live owner helper; source oracles cover identity, numeric bits and U
 The TransactionClient JS decoder treats null trigger/expiry fields as absent and
 maps unknown order-type/time-in-force values to the source limit/GTC defaults.
 The real SDK/crypto regression compares 31 exact preimages and computed defaults.
+Nonce retry classification reads the original error's code and message directly.
+Both String conversions precede the final OR, so matching codes still observe
+message coercion failures. Unread surrogate fields and cycles stay untouched.
