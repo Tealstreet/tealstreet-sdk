@@ -717,6 +717,11 @@ linear/inverse context order, source combined-category sort/limit rules, inclusi
 windows and repeated IDs. The mapper stays native until the typed public output;
 its ordinary lookup tables retain actual Object.prototype members.
 
+Spot's missing-market intrinsic constructs the source message before the caller
+wraps it in Error. Real placement witnesses cover ordinary limit and full-position
+SL/TP routes. The REST/private-frame unknown stopOrderType witness retains all
+three unlisted stop kinds as own Undefined through the ModelField Store bridge.
+
 Spot trailing-order placement retains the source `Ticker <symbol> not found`
 error when market or ticker data is missing. The SessionHost intrinsic builds
 the source template in UTF-16 before the existing Error construction. The real
@@ -809,11 +814,6 @@ reports its identity and field values, while valid siblings survive fetch/refres
 This intentionally differs from TS retaining malformed string fields. Fee joins compare primitive symbol values strictly; distinct
 JSON objects/arrays never match by contents. Source numeric/property errors retain
 priority over typed row refusals.
-
-Spot's missing-market intrinsic constructs the source message before the caller
-wraps it in Error. Real placement witnesses cover ordinary limit and full-position
-SL/TP routes. The REST/private-frame unknown stopOrderType witness retains all
-three unlisted stop kinds as own Undefined through the ModelField Store bridge.
 
 Primary/demo single-order routing rechecks truthiness after price/trigger rounding.
 A conditional trigger rounded to zero rejects before placement; a zero-rounded
