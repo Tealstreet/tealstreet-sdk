@@ -915,3 +915,65 @@ fn offline_recovery_requests_account_reload_for_source_owned_sockets() {
         "disposed accounts do not request another reload"
     );
 }
+
+#[test]
+fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_transport::socket::SocketFrame;
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let private = h.runtime.sockets.borrow()[1].1.clone();
+    private
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"type":"pong"}).to_string(),
+        )));
+    h.runtime.pump();
+    let core = h.venue().base().get_socket(SocketSlot::Private).unwrap();
+    assert_eq!(
+        core.last_message_timestamp(),
+        Some(h.runtime.now.get()),
+        "real private pong starts the native watchdog"
+    );
+    core.handle_pong_event(3217).unwrap();
+    h.runtime.pump();
+    private.closed.set(true);
+    private.events.borrow_mut().push_back(WsEvent::Close {
+        code: Some(1008),
+        reason: "rate limit exceeded".into(),
+    });
+    h.runtime.pump();
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|line| line.contains("closed (code 1008")),
+        "real source close handler ran"
+    );
+    h.runtime.completed_sleeps.borrow_mut().clear();
+    h.runtime.advance(5000.0);
+    let completed = h.runtime.completed_sleeps.borrow();
+    assert!(
+        !completed.contains(&3217),
+        "source close must cancel the actual native ping deadline: {completed:?}"
+    );
+    assert!(
+        !completed.contains(&1000),
+        "source close must cancel the actual native receive deadline: {completed:?}"
+    );
+    assert_eq!(
+        h.runtime.sockets.borrow().len(),
+        2,
+        "source rate-limit backoff owns the next dial"
+    );
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    drop(completed);
+    h.venue().dispose().unwrap();
+}

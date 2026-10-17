@@ -1,4 +1,4 @@
-use crate::{Candle, Market, OrderBook, Ticker, Timeframe};
+use crate::{AnyTimeframe, Candle, Market, OrderBook, Ticker, Timeframe};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -58,7 +58,7 @@ pub struct GatewayMessage {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
-    pub interval: Option<Timeframe>,
+    pub interval: Option<AnyTimeframe>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -204,8 +204,9 @@ impl GatewayMarketUpdate {
 // Private wire companions keep serde metadata without exposing permissive decoders.
 mod strict_codecs {
     use super::{
-        Candle, CandleChannel, DataTag, GatewayChannel, GatewayMessageType, GatewayTickerData,
-        Market, MarketChannel, OrderBook, OrderbookChannel, TickerChannel, Timeframe, present,
+        AnyTimeframe, Candle, CandleChannel, DataTag, GatewayChannel, GatewayMessageType,
+        GatewayTickerData, Market, MarketChannel, OrderBook, OrderbookChannel, TickerChannel,
+        Timeframe, present,
     };
     #[cfg(test)]
     use super::{
@@ -282,7 +283,7 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none",
             deserialize_with = "present"
         )]
-        interval: Option<Timeframe>,
+        interval: Option<AnyTimeframe>,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
