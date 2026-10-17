@@ -25,7 +25,7 @@ struct ResponseTransform {
 fn transform_response(response: &mut RestResponse) {
     response.body = response.body.clone().transform(|data| match data {
         safe_cex_types::retained_json::RetainedJsonInput::Text(text) => {
-            safe_cex_transport::how::big_int_as_string_json_parse(&String::from_utf16_lossy(&text))
+            safe_cex_transport::how::big_int_as_string_json_parse_utf16(&text)
         }
         data => data,
     });
