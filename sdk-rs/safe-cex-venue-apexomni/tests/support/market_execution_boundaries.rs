@@ -183,9 +183,10 @@ fn market_filter_errors_precede_typed_output_admission() {
         let source_requests: Vec<_> = source_operations.into_iter().filter(|operation| {
             !matches!(operation, J::Array(fields) if fields.first() == Some(&s("store:zk")))
         }).collect();
+        let typed_refusal = matches!(row["label"].as_str(), Some("nonboolean" | "numeric-id"));
         native::native_eq(
             &J::Array(host.operations.borrow().iter().filter(|operation| {
-                !matches!(operation,J::Array(values) if values.first()==Some(&s("log")))
+                !typed_refusal || !matches!(operation,J::Array(values) if values.first()==Some(&s("log")))
             }).cloned().collect()),
             &J::Array(source_requests),
             &format!("{label} native request sequence"),
