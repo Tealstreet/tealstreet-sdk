@@ -1,0 +1,22 @@
+{
+  "safe-cex-venue-binance/src/private_event_value.rs::LOCAL_FUNCTION:text_in": {
+    "category": "non-decoder",
+    "reason": "Inside EventValue::text: JavaScript String/array-join coercion over existing native runtime values, with cycle tracking, nullish array slots and explicit UTF-8 refusal. It produces scalar text, not a decoded record or accepted wire shape.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe-cex-venue-binance/src/private_event_value.rs::LOCAL_FUNCTION:attach": {
+    "category": "non-decoder",
+    "reason": "Inside in_current_realm: recursively installs the already selected prototype reference on an existing EventValue graph. It keeps every existing value and performs no raw parsing, field admission or typed model construction.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe-cex-venue-binance/src/private_rest.rs::LOCAL_FUNCTION:digits": {
+    "category": "non-decoder",
+    "reason": "Inside subtract: selects arithmetic decimal precision from an existing EventValue using its toString behavior and after_decimal. Its numeric result controls arithmetic; it constructs no typed wire/domain owner.",
+    "sourceSha256": "20c5e2a069862f657ba924e8e3f20d39020c6c52964a554377045f8bd4eb4a0b"
+  },
+  "safe-cex-venue-binance/src/private_rest.rs::LOCAL_FUNCTION:values": {
+    "category": "non-decoder",
+    "reason": "Inside concat: implements spread-style iteration of an existing native array or string into runtime EventValues, with a TypeError for non-iterables. This is collection/runtime coercion, not response schema admission.",
+    "sourceSha256": "20c5e2a069862f657ba924e8e3f20d39020c6c52964a554377045f8bd4eb4a0b"
+  }
+}

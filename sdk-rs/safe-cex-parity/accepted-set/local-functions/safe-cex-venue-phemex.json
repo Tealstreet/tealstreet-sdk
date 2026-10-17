@@ -1,0 +1,7 @@
+{
+  "safe-cex-venue-phemex/src/binding/methods.rs::LOCAL_FUNCTION:str_table": {
+    "category": "non-decoder",
+    "reason": "Inside table: materializes the compiled constant string-pair tables as native Js objects. Its input is typed static configuration, not raw caller/wire data.",
+    "sourceSha256": "52ff861bdc8a5bfc3828ceda0255af3b71044aeee48ad498f8cf143c405894a8"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "safe-cex-venue-orderly/src/binding/primitives.rs::LOCAL_FUNCTION:copy": {
+    "category": "non-decoder",
+    "reason": "Inside deep_clone: copies existing VM arrays/objects while retaining prototype links, holes, cycles and repeated-reference identity through the seen table. It is runtime graph cloning and does not admit or validate wire shapes.",
+    "sourceSha256": "1973e8daedafede777d15bc5a426a2a2b7bbc79ce250f3e308246037ed8ab982"
+  },
+  "safe-cex-venue-orderly/src/binding/primitives.rs::LOCAL_FUNCTION:present": {
+    "category": "non-decoder",
+    "reason": "Inside the in-operator primitive: searches own/native prototype properties and returns presence. It reads existing Js objects without decoding a response or constructing a typed owner.",
+    "sourceSha256": "1973e8daedafede777d15bc5a426a2a2b7bbc79ce250f3e308246037ed8ab982"
+  }
+}
