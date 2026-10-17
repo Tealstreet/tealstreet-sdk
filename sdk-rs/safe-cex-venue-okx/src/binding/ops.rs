@@ -302,8 +302,11 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
         }),
         // p-iteration starts every async callback before awaiting the group.
         parallel_map: Rc::new(move |_, v, f| {
-            let started = items(&v).map(|xs| xs.into_iter().map(|x| rt.spawn(f(x))).collect());
-            Box::pin(async move { all(started?).await })
+            let started = items(&v).map(|xs| {
+                let values = xs.into_iter().map(|x| rt.spawn(f(x))).collect();
+                Js::Promise(all(&rt.exchange_runtime(), values))
+            });
+            Box::pin(async move { await_js(started?).await })
         }),
         some: Rc::new(|v, f| {
             for x in items(&v)? {
