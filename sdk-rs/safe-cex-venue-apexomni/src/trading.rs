@@ -51,7 +51,7 @@ fn from_order(order: &Order) -> PreparedOrderOpts {
         trigger_price: None,
         stop_loss: None,
         take_profit: None,
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: None,
         trigger_type: None,
         tp_trigger_type: None,

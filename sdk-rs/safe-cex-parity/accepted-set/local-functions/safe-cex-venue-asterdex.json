@@ -3,19 +3,19 @@
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_venue_asterdex::exchange_helpers::balance_from_account_response",
     "reason": "Inside balance_from_account_response: reads one account field with JS truthiness and String coercion then parseFloat, defaulting to 0. Raw JSON to f64; its runtime owner's probes exercise it.",
-    "sourceSha256": "19d18e4e2d686c0b6ef6bfe0387f324abc9750a737b5e6d89def4b29a8fe3a1d"
+    "sourceSha256": "56536c8748d32df3a5aaf0b892ba9e7b3b4356db878ab7b45fedf6aa54d9e69b"
   },
   "safe-cex-venue-asterdex/src/exchange_helpers.rs::LOCAL_FUNCTION:collect": {
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_venue_asterdex::exchange_helpers::collect_open_interest_from_payload",
     "reason": "Inside collect_open_interest_from_payload: reads symbol and JS-number openInterest from one raw item and inserts finite values. Raw JSON admission; its runtime owner's probes exercise it.",
-    "sourceSha256": "19d18e4e2d686c0b6ef6bfe0387f324abc9750a737b5e6d89def4b29a8fe3a1d"
+    "sourceSha256": "56536c8748d32df3a5aaf0b892ba9e7b3b4356db878ab7b45fedf6aa54d9e69b"
   },
   "safe-cex-venue-asterdex/src/exchange_helpers.rs::LOCAL_FUNCTION:levels": {
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_venue_asterdex::exchange_helpers::transform_order_book",
     "reason": "Inside transform_order_book: parseFloat of raw price/amount strings into sorted OrderBookOrders with running totals. Raw text to typed levels; its runtime owner's probes exercise it.",
-    "sourceSha256": "19d18e4e2d686c0b6ef6bfe0387f324abc9750a737b5e6d89def4b29a8fe3a1d"
+    "sourceSha256": "56536c8748d32df3a5aaf0b892ba9e7b3b4356db878ab7b45fedf6aa54d9e69b"
   },
   "safe-cex-venue-asterdex/src/ws_helpers.rs::LOCAL_FUNCTION:parse_levels": {
     "category": "decoder-helper",

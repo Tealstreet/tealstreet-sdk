@@ -64,7 +64,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::read_number"
 status = "ported"
-note = "Uses shared fallible Number(any) for each key in source order, retaining missing versus null-to-zero and allowZero behavior. Returns the first finite accepted value and propagates earlier coercion failure; maintained live TS corpus includes prototype-key probes."
+note = "Reads native JS properties in source key order and applies shared Number coercion, including inherited fields and original getter/coercion throws. Falsy sources return undefined; the first finite accepted value short-circuits later fields."
 
 [[symbol]]
 ts = "decimalsFromScale"
@@ -112,7 +112,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::resolve_lighter_cancel_targets"
 status = "ported"
-note = "Preserves input order and duplicates, shared radix-10 parseInt, skips nonfinite IDs and unknown symbols including inherited prototype names whose absent id parses to NaN."
+note = "Calls native flatMap and reads only order.symbol, the selected market.id, then order.id after a finite radix-10 parse. Keeps duplicates, native orderId identity and UTF16; unknown/invalid markets skip the id read. Production realm sparse-input/getter regression compares maintained TS outputs; no whole Order or Market decoder is involved."
 
 [[symbol]]
 ts = "clampDecimals"
@@ -128,7 +128,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::get_lighter_amount_decimals"
 status = "ported"
-note = "Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured native arithmetic profiles (darwin-arm64 contraction, Linux-x64 separate operations), not a universal engine claim."
+note = "Native JS property reads visit info aliases first and read only the selected precision field on fallback; no whole Market decode. Sparse production globals and unused/used getter regressions compare maintained TS. Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured native arithmetic profiles (darwin-arm64 contraction, Linux-x64 separate operations), not a universal engine claim."
 
 [[symbol]]
 ts = "getLighterPriceDecimals"
@@ -136,15 +136,15 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::get_lighter_price_decimals"
 status = "ported"
-note = "Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured native arithmetic profiles (darwin-arm64 contraction, Linux-x64 separate operations), not a universal engine claim."
+note = "Native JS property reads visit info aliases first and read only the selected precision field on fallback; no whole Market decode. Sparse production globals and unused/used getter regressions compare maintained TS. Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured native arithmetic profiles (darwin-arm64 contraction, Linux-x64 separate operations), not a universal engine claim."
 
 [[symbol]]
 ts = "normalizeNonNegativeNumber"
 kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::normalize_non_negative_number"
-status = "divergent"
-note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Shared JS coercions preserve errors, whitespace and binary64 parsing; live oracle pins malformed and missing inputs."
+status = "ported"
+note = "Native JS nullish/String/parseFloat coercion preserves original getters, throws and UTF16 inputs. Nonfinite and negative results become zero; signed zero survives. The maintained source scalar and Unicode corpora execute the native boundary."
 
 [[symbol]]
 ts = "LighterOrderMinimums"
@@ -160,7 +160,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::get_lighter_order_minimums"
 status = "ported"
-note = "Shared JS coercions preserve errors, whitespace and binary64 parsing; live oracle pins malformed and missing inputs."
+note = "Reads only native market.info and the lazy snake/camel aliases. Base coercion precedes quote reads; shared JS String/parseFloat handles missing/nullish/nonfinite inputs. Production globals accept sparse records without whole Market decoding."
 
 [[symbol]]
 ts = "toLighterScaledInt"
