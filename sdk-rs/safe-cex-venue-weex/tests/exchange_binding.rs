@@ -1740,8 +1740,7 @@ fn market_closed_refusal_does_not_replace_source_coercion_failure() {
     );
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .as_str()
+        String::from_utf16(errors.borrow()[0].as_str().unwrap().as_ref())
             .unwrap()
             .contains("Cannot convert object to primitive value")
     );

@@ -596,9 +596,13 @@ impl Host for Harness {
             }
             "request-owned" => api::request(self, owner, args[0].clone(), args[1].clone()),
             "current" => api::is_current(self, owner, captures),
-            "order" | "connect" | "close" | "ping" | "message" | "timeout" => {
-                api::dispatch(self, owner, code, captures, args)
-            }
+            "order" | "connect" | "close" | "ping" | "message" | "timeout" => api::dispatch(
+                self,
+                owner,
+                api::Callback::from_name(code).expect("source callback selector"),
+                captures,
+                args,
+            ),
             "promise-resolve" | "promise-reject" => {
                 let Node::Promise(state) = captures[0].as_ref() else {
                     panic!()
@@ -755,11 +759,6 @@ impl Host for Harness {
                 self.set(owner, "lastReceived", number(88.0))?;
                 Ok(undef())
             }
-            "base-dispose" => {
-                self.rec(code, &args)?;
-                self.set(owner, "isDisposed", boolean(true))?;
-                Ok(undef())
-            }
             "base-reconnect" => {
                 self.rec("reconnect", &args)?;
                 Ok(undef())
@@ -798,16 +797,12 @@ impl Host for Harness {
             }
         })
     }
-    fn intrinsic(&self, name: &str, args: Vec<Raw>) -> Result<Raw, Raw> {
+    fn intrinsic(&self, name: &str, _args: Vec<Raw>) -> Result<Raw, Raw> {
         Ok(match name {
             "new Map" => Rc::new(Node::Map(RefCell::new(vec![]))),
             "null" => null(),
             "JSON" => tagged("JSON", vec![]),
             "virtualClock" => tagged("clock", vec![]),
-            "super.dispose" => {
-                self.apply(func(args[0].clone(), "base-dispose", vec![]), vec![])?;
-                undef()
-            }
             _ => panic!("intrinsic {name}"),
         })
     }
@@ -942,7 +937,7 @@ fn hyro_private_session_source_parity() {
     let cases: Value = serde_json::from_slice(&output.stdout).expect("UTF16 observer receipts");
     assert_eq!(
         cases.as_array().unwrap().len(),
-        442,
+        439,
         "independent source case floor"
     );
     let mut supplemental = Vec::new();
@@ -1065,7 +1060,7 @@ fn hyro_private_session_source_parity() {
                         json!({"ok":true,"version":atom(&version),"complete":atom(&complete),"resync":atom(&resync)}),
                     )
                 }
-                "reset" | "dispose" => {
+                "reset" => {
                     h.set(&owner, "ready", boolean(true))?;
                     h.set(
                         &owner,
@@ -1082,24 +1077,13 @@ fn hyro_private_session_source_parity() {
                         raw("b"),
                         h.pending("b", "subscribe"),
                     );
-                    let result = if kind == "reset" {
-                        api::reset_session(&h, &owner)
-                    } else {
-                        api::dispose(&h, &owner)
-                    };
+                    let result = api::reset_session(&h, &owner);
                     if failure == "none" {
                         assert_eq!(
                             atom(&get(&owner, "ready")),
                             json!(false),
                             "reset_native_ready_false"
                         );
-                        if kind == "dispose" {
-                            assert_eq!(
-                                atom(&get(&owner, "isDisposed")),
-                                json!(true),
-                                "dispose_native_base_effect"
-                            );
-                        }
                         assert_eq!(
                             h.settlements.borrow().len(),
                             if profile == "live-add" { 3 } else { 2 },
