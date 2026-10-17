@@ -516,3 +516,9 @@ the previous owned info on every frame. The native `private_classes` growth and
 current-field regressions use the real socket and Store;
 `SAFE_CEX_TYPESCRIPT_PATH=<typescript> node scripts/pm-position-info.mjs` observes
 the maintained TS handler with the actual TS Store across sixteen changing frames.
+
+
+Concrete market reads apply the approved strict-asset row policy after complete
+source REST projection. Non-string base/quote rows emit their symbol, field and
+value through the existing error path; valid siblings remain available to typed
+fetch and Store refresh. Raw REST helpers retain their source-owned values.
