@@ -240,3 +240,85 @@ fn native_nonfinite_placement_amounts_are_visibly_refused_before_http() {
         }
     }
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitunix");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 80);
+    let (venue, rt, store, _) = support::fixture();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            tickers: Some(ticker_coercion::seed("bitunix")),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    rt.dial.set(true);
+    venue
+        .base()
+        .get_socket(SocketSlot::Public)
+        .unwrap()
+        .connect_and_subscribe(false)
+        .unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    let primary = rt.dialed.borrow().first().unwrap().1.clone();
+    venue
+        .base()
+        .get_socket(SocketSlot::PublicSecondary)
+        .unwrap()
+        .connect_and_subscribe(false)
+        .unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    let secondary = rt.dialed.borrow().get(1).unwrap().1.clone();
+    assert!(!Rc::ptr_eq(&primary, &secondary));
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("bitunix")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if case["channel"] == "price" {
+            &secondary
+        } else {
+            &primary
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            for _ in 0..8 {
+                rt.pump();
+            }
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+    }
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    assert!(
+        !rt.console
+            .borrow()
+            .iter()
+            .any(|(level, _)| level == "error"),
+        "{:?}",
+        rt.console.borrow()
+    );
+    venue.dispose().unwrap();
+}
