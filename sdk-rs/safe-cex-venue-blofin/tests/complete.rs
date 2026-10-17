@@ -108,7 +108,7 @@ fn native(r: &Runtime, s: &BlofinPrivateWebsocket<Socket>, e: &Value) {
             )
         }
         for (n, k) in [
-            (o.price, "price"),
+            (o.price.to_number(), "price"),
             (o.amount, "amount"),
             (o.filled, "filled"),
             (o.remaining, "remaining"),

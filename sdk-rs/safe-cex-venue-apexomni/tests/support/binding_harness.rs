@@ -31,7 +31,10 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub report_names: RefCell<Vec<String>>,
     pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
+    pub console: RefCell<Vec<String>>,
+    pub hold_dials: Cell<bool>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -94,7 +97,9 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console(&self, _: &str, message: &str) {
+        self.console.borrow_mut().push(message.into());
+    }
     fn unique_id(&self) -> String {
         "00000000-0000-4000-8000-000000000000".into()
     }
@@ -105,6 +110,7 @@ impl ExchangeRuntime for Runtime {
         0.5
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
+        self.report_names.borrow_mut().push(error.name.clone());
         self.reports.borrow_mut().push(error.message.clone());
     }
     fn report_raw_exception(&self, error: &Value, _: &Value) {
@@ -166,6 +172,9 @@ impl WsRuntime for Runtime {
         _: WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+        if self.hold_dials.get() {
+            return Box::pin(std::future::pending());
+        }
         let socket = Rc::new(Socket::default());
         socket.events.borrow_mut().push_back(WsEvent::Open);
         self.sockets.borrow_mut().push((url, socket.clone()));

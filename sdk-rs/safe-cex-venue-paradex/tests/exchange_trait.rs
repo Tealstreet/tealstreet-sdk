@@ -640,12 +640,12 @@ fn amendment_precision_keeps_amount_execution_and_trigger_axes_distinct() {
     .unwrap();
     let mut stop = reconciled_order();
     stop.id = "native-stop".into();
-    stop.r#type = safe_cex_types::OrderType::StopLoss;
+    stop.r#type = (safe_cex_types::OrderType::StopLoss).into();
     stop.reduce_only = true;
-    stop.price = 99.37;
-    stop.info = Some(
+    stop.price = (99.37).into();
+    stop.info = (Some(
         json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}),
-    );
+    )).into();
     drive(
         &runtime,
         venue.update_order(typed(
@@ -897,6 +897,156 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
 }
 
 #[test]
+fn constructed_rest_orders_use_host_local_timezone() {
+    constructed_orders_use_host_local_timezone(false);
+}
+
+#[test]
+fn constructed_private_order_timestamps_keep_raw_clock() {
+    constructed_orders_use_host_local_timezone(true);
+}
+
+fn constructed_orders_use_host_local_timezone(private: bool) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::process::Command;
+
+    let name = if private {
+        "constructed_private_order_timestamps_keep_raw_clock"
+    } else {
+        "constructed_rest_orders_use_host_local_timezone"
+    };
+    // Isolate the process timezone, without changing the parallel test runner's
+    // environment. The source's new Date(created_at).getTime() runs in Node
+    // under the same fixed UTC-7 host profile as the constructed exchange.
+    if std::env::var("PARADEX_LOCAL_DATE_CHILD").as_deref() != Ok(name) {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env("TZ", "Etc/GMT+7")
+            .env("PARADEX_LOCAL_DATE_CHILD", name)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "non-UTC constructed exchange child failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let dates = ["2026-07-20T00:00:00", "2026-07-20T00:00:00Z", "2026-07-20"];
+    let output = Command::new("node")
+        .args([
+            "-e",
+            "console.log(JSON.stringify(JSON.parse(process.argv[1]).map(v => new Date(v).getTime())))",
+            &serde_json::to_string(&dates).unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let mut expected: Vec<f64> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected.len(), dates.len());
+    assert_eq!(expected[0] - expected[1], 7.0 * 60.0 * 60.0 * 1000.0);
+    assert_eq!(expected[1], expected[2], "ISO date-only remains UTC");
+    let rows: Vec<_> = dates
+        .iter()
+        .enumerate()
+        .map(|(i, date)| {
+            json!({
+                "id":format!("local-date-{i}"), "market":"BTC-USD-PERP",
+                "side":"BUY", "type":"LIMIT", "status":"OPEN", "price":"101.5",
+                "size":"0.006", "remaining_size":"0.003", "created_at":date,
+                "reduce_only":false
+            })
+        })
+        .collect();
+    let conversions = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = conversions.clone();
+    let (venue, runtime, store, _) = support::fixture_with_timezone(
+        private_options(),
+        |wire| {
+            private_script(wire);
+            if !private {
+                wire.responses
+                    .borrow_mut()
+                    .insert("/orders".into(), json!({"results":rows}));
+            }
+        },
+        // The embedding host supplies its local-to-UTC policy, matching the
+        // fixed UTC-7 profile selected for the independent Node witness.
+        std::rc::Rc::new(move |wall_time| {
+            captured.borrow_mut().push(wall_time);
+            wall_time + 7.0 * 60.0 * 60.0 * 1000.0
+        }),
+    );
+    drive(&runtime, venue.start()).unwrap();
+    let startup_conversions = conversions.borrow().len();
+    if private {
+        for _ in 0..8 {
+            runtime.pump();
+        }
+        let socket = runtime.sockets.borrow()[1].1.clone();
+        // Private updates use Date.now(), independently of created_at.
+        expected.fill(runtime.now.get());
+        for row in &rows {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    json!({"jsonrpc":"2.0", "method":"subscription",
+                    "params":{"channel":"orders.ALL","data":row}})
+                    .to_string(),
+                )));
+            runtime.pump();
+        }
+    } else {
+        let orders = drive(&runtime, venue.fetch_orders(None)).unwrap();
+        assert_eq!(orders.len(), dates.len());
+        for (order, expected) in orders.iter().zip(&expected) {
+            assert_eq!(
+                order.last_update.to_bits(),
+                expected.to_bits(),
+                "REST {}",
+                order.id
+            );
+        }
+    }
+    if private {
+        assert!(
+            conversions.borrow().is_empty(),
+            "Date.now bypasses timezone conversion"
+        );
+    } else {
+        assert!(startup_conversions > 0, "startup maps the local date");
+        assert_eq!(
+            &*conversions.borrow(),
+            &vec![expected[1]; startup_conversions + 1],
+            "only the local date converts, one more time during the explicit REST read"
+        );
+    }
+    let stored = store.orders();
+    assert_eq!(stored.len(), dates.len());
+    for (index, expected) in expected.iter().enumerate() {
+        let order = stored
+            .iter()
+            .find(|o| o.id == format!("local-date-{index}"))
+            .unwrap();
+        assert_eq!(
+            order.last_update.to_bits(),
+            expected.to_bits(),
+            "Store {}",
+            order.id
+        );
+    }
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
 fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
     let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
     drive(&runtime, venue.start()).unwrap();
@@ -962,4 +1112,311 @@ fn venue_wide_cancellations_propagate_http_errors() {
         );
         assert!(store.orders().is_empty());
     }
+}
+
+fn trait_history_script(wire: &support::Wire) {
+    private_script(wire);
+    let mut responses = wire.responses.borrow_mut();
+    responses.insert(
+        "/fills".into(),
+        json!({"results":[
+            {"id":"open-fill","order_id":"open-order","market":"BTC-USD-PERP","side":"BUY",
+             "price":"100","size":"2","fill_size":"2","created_at":1699999900000.0,
+             "fee":"0.1","fee_currency":"USD","realized_pnl":"0","liquidity":"MAKER"},
+            {"id":"close-fill","order_id":"close-order","market":"BTC-USD-PERP","side":"SELL",
+             "price":"110","size":"2","fill_size":"2","created_at":1700000000000.0,
+             "fee":"0.1","fee_currency":"USD","realized_pnl":"20","liquidity":"TAKER"}
+        ]}),
+    );
+    responses.insert(
+        "/orders-history".into(),
+        json!({"results":[
+            {"id":"closed-history","market":"BTC-USD-PERP","side":"BUY","type":"LIMIT",
+             "status":"CLOSED","size":"2","remaining_size":"0","price":"99",
+             "avg_fill_price":"100","created_at":1699999900000.0,"last_updated_at":1700000000000.0}
+        ]}),
+    );
+}
+
+#[test]
+fn real_trait_history_fills_reach_authenticated_rows() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), trait_history_script);
+    drive(&runtime, venue.start()).unwrap();
+    let rows = drive(
+        &runtime,
+        venue.fetch_historical_fills(typed(json!({
+            "symbol":"BTC-USD-PERP","from":1699999800000.0,"to":1700000100000.0,"limit":25
+        }))),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 2, "real historical fill row cardinality");
+    assert_eq!(rows[0].id.as_deref(), Some("close-fill"));
+    assert_eq!(rows[0].timestamp, 1700000000.0);
+    assert_eq!(rows[0].realized_pnl, Some(20.0));
+    assert_eq!(rows[1].price, 100.0);
+    let requests = wire.requests.borrow();
+    let read = requests
+        .iter()
+        .find(|r| r.url.split('?').next() == Some("/fills"))
+        .unwrap();
+    assert_eq!(trait_request_query(read, "market"), "BTC-USD-PERP");
+    assert_eq!(trait_request_query(read, "end_at"), "1700000100000");
+    drop(requests);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_history_income_reaches_fill_ledger() {
+    let (venue, runtime, _, _) = support::fixture_with(private_options(), trait_history_script);
+    drive(&runtime, venue.start()).unwrap();
+    let rows = drive(
+        &runtime,
+        venue.fetch_income_history(Some(typed(json!({
+            "startTime":1699999800000.0,"endTime":1700000100000.0
+        })))),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 3, "real fill ledger row cardinality");
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.income_type == "REALIZED_PNL")
+            .count(),
+        1
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|r| r.income_type == "REALIZED_PNL")
+            .unwrap()
+            .income,
+        20.0
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|r| r.income_type == "COMMISSION")
+            .map(|r| r.income)
+            .sum::<f64>(),
+        -0.2
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_history_income_range_keeps_source_filter() {
+    let (venue, runtime, _, _) = support::fixture_with(private_options(), trait_history_script);
+    drive(&runtime, venue.start()).unwrap();
+    let rows = drive(
+        &runtime,
+        venue.fetch_income_history_range(
+            1699999800000.0,
+            1700000100000.0,
+            Some("REALIZED_PNL".into()),
+        ),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1, "real filtered ledger row cardinality");
+    assert_eq!(rows[0].income_type, "REALIZED_PNL");
+    assert_eq!(rows[0].income, 20.0);
+    assert_eq!(rows[0].timestamp, 1700000000000.0);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_history_orders_reach_authenticated_rows() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), trait_history_script);
+    drive(&runtime, venue.start()).unwrap();
+    let rows = drive(
+        &runtime,
+        venue.fetch_historical_orders(Some(typed(json!({
+            "symbol":"BTC-USD-PERP","from":1699999800000.0,"to":1700000100000.0,"limit":5
+        })))),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1, "real historical order row cardinality");
+    assert_eq!(rows[0].id, "closed-history");
+    assert_eq!(rows[0].filled, 2.0);
+    assert_eq!(rows[0].average_price, Some(100.0));
+    let requests = wire.requests.borrow();
+    let read = requests
+        .iter()
+        .find(|r| r.url.split('?').next() == Some("/orders-history"))
+        .unwrap();
+    assert_eq!(trait_request_query(read, "start_at"), "1699999800000");
+    drop(requests);
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_history_journal_uses_symbol_scoped_fills() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), trait_history_script);
+    drive(&runtime, venue.start()).unwrap();
+    let rows = drive(
+        &runtime,
+        venue.fetch_historical_positions(safe_cex_exchange::journal::HistoricalPositionOptions {
+            account: "paradex-journal".into(),
+            from: Some(1699999800000.0),
+            to: Some(1700000100000.0),
+        }),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1, "real journal round-trip cardinality");
+    assert_eq!(rows[0]["account"], "paradex-journal");
+    assert_eq!(rows[0]["symbol"], "BTC-USD-PERP");
+    assert_eq!(rows[0]["settleCurrency"], "USD");
+    assert_eq!(rows[0]["realizedPnl"], 20.0);
+    assert_eq!(rows[0]["fees"], 0.2);
+    assert!(wire.requests.borrow().iter().any(|r| {
+        r.url.split('?').next() == Some("/fills")
+            && r.url.split_once('?').is_some_and(|(_, query)| {
+                query.split('&').any(|pair| pair == "market=BTC-USD-PERP")
+            })
+    }));
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_stream_book_delivers_and_cleans_up_socket_listener() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let (venue, runtime, _, _) =
+        support::fixture_with(json!({"key":"","secret":"","publicDataOnly":true}), script);
+    drive(&runtime, venue.start()).unwrap();
+    for _ in 0..16 {
+        runtime.pump();
+    }
+    let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));
+    let sink = seen.clone();
+    let cleanup = venue
+        .listen_order_book(
+            "BTC-USD-PERP".into(),
+            Rc::new(move |row| sink.borrow_mut().push(row)),
+        )
+        .unwrap();
+    let channel = "order_book.BTC-USD-PERP.snapshot@15@100ms";
+    assert!(runtime.sent.borrow().iter().any(|s| {
+        let frame: serde_json::Value = serde_json::from_str(s).unwrap();
+        frame["method"] == "subscribe" && frame["params"]["channel"] == channel
+    }));
+    let socket = runtime.sockets.borrow()[0].1.clone();
+    let frame = json!({"jsonrpc":"2.0","method":"subscription","params":{
+        "channel":channel,"data":{"market":"BTC-USD-PERP","bids":[["101.25","2"]],"asks":[["102.5","3"]]}
+    }}).to_string();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.clone())));
+    for _ in 0..16 {
+        runtime.pump();
+    }
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "runtime errors: {:?}; console: {:?}",
+        runtime.errors.borrow(),
+        runtime.console.borrow()
+    );
+    assert_eq!(seen.borrow()[0].bids[0].price, 101.25);
+    assert_eq!(seen.borrow()[0].asks[0].amount, 3.0);
+    cleanup().unwrap();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame)));
+    runtime.now.set(runtime.now.get() + 1000.0);
+    for _ in 0..16 {
+        runtime.pump();
+    }
+    assert_eq!(seen.borrow().len(), 1, "book cleanup removes callback");
+    assert!(runtime.sent.borrow().iter().any(|s| {
+        let frame: serde_json::Value = serde_json::from_str(s).unwrap();
+        frame["method"] == "unsubscribe" && frame["params"]["channel"] == channel
+    }));
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn real_trait_stream_ohlcv_polls_then_stops_after_cleanup() {
+    use std::{cell::RefCell, rc::Rc};
+    let (venue, runtime, _, wire) = support::fixture_with(
+        json!({"key":"","secret":"","publicDataOnly":true}),
+        |wire| {
+            script(wire);
+            wire.responses.borrow_mut().insert(
+                "/markets/klines".into(),
+                json!({"results":[[1700000000000.0,101,103,100,102,7]]}),
+            );
+        },
+    );
+    drive(&runtime, venue.start()).unwrap();
+    let seen = Rc::new(RefCell::new(Vec::<safe_cex_types::Candle>::new()));
+    let sink = seen.clone();
+    let cleanup = venue
+        .listen_ohlcv(
+            typed(json!({"symbol":"BTC-USD-PERP","interval":"1m"})),
+            Rc::new(move |row| sink.borrow_mut().push(row)),
+        )
+        .unwrap();
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(seen.borrow().len(), 1, "initial real REST candle poll");
+    assert_eq!(seen.borrow()[0].close, 102.0);
+    wire.responses.borrow_mut().insert(
+        "/markets/klines".into(),
+        json!({"results":[[1700000000000.0,101,105,100,104,9]]}),
+    );
+    runtime.now.set(runtime.now.get() + 3000.0);
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(seen.borrow().last().unwrap().close, 104.0);
+    cleanup().unwrap();
+    let reads = wire
+        .requests
+        .borrow()
+        .iter()
+        .filter(|r| r.url.split('?').next() == Some("/markets/klines"))
+        .count();
+    assert!(
+        reads >= 2,
+        "actual initial and follow-up serialized REST reads"
+    );
+    let delivered = seen.borrow().len();
+    wire.responses.borrow_mut().insert(
+        "/markets/klines".into(),
+        json!({"results":[[1700000000000.0,101,107,100,106,11]]}),
+    );
+    runtime.now.set(runtime.now.get() + 3000.0);
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(seen.borrow().len(), delivered, "cleanup stops delivery");
+    assert_eq!(
+        wire.requests
+            .borrow()
+            .iter()
+            .filter(|r| r.url.split('?').next() == Some("/markets/klines"))
+            .count(),
+        reads,
+        "candle cleanup cancels polling"
+    );
+    assert!(
+        runtime.errors.borrow().is_empty(),
+        "{:?}",
+        runtime.errors.borrow()
+    );
+    venue.dispose().unwrap();
+}
+
+fn trait_request_query<'a>(request: &'a safe_cex_transport::RestRequest, key: &str) -> &'a str {
+    request
+        .url
+        .split_once('?')
+        .expect("actual serialized query")
+        .1
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(name, _)| *name == key)
+        .expect("actual query parameter")
+        .1
 }

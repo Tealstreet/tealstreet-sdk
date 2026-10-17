@@ -112,7 +112,6 @@ pub mod inverse_read_surface;
 
 pub mod spot_exchange_reads;
 
-pub mod inverse_socket_bodies;
 pub mod private_snapshot_refresh;
 
 pub mod local_order_reconciliation;
@@ -122,3 +121,10 @@ pub mod primary_startup;
 
 pub mod inverse_symbol;
 pub mod options;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_bybit;
+
+#[cfg(test)]
+#[path = "../tests/support/binding_harness.rs"]
+mod retained_config_binding_harness;

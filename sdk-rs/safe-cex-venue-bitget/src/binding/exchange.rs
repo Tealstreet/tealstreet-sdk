@@ -1,4 +1,7 @@
 //! Production Bitget venue: the assembled class graph behind the typed Exchange trait.
+#[cfg(test)]
+#[path = "iterator_tests.rs"]
+mod iterator_tests;
 use super::{
     globals,
     promise::await_js,
@@ -284,6 +287,10 @@ impl Exchange for BitgetExchange {
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
         let a = args!(js(&options));
         self.invoke("updateOrder", a)
+    }
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        let a = args!(js(&symbol));
+        self.invoke_unit("cancelSymbolOrders", a)
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
         let a = args!(js(&orders));

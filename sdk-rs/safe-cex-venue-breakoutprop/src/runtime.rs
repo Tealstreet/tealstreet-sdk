@@ -11,7 +11,9 @@ use safe_cex_num::{
 };
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::provider::{RestBody, RestRequest};
-use safe_cex_types::{Market, Order, OrderType, PlaceOrderOpts, Ticker};
+use safe_cex_types::{
+    Market, ModelField, Order, OrderSide, OrderType, PlaceOrderOpts, PreparedOrderOpts, Ticker,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{future::poll_fn, rc::Rc, task::Poll};
@@ -43,7 +45,8 @@ pub struct DxPlacePayload {
     pub r#type: &'static str,
     pub instrument: String,
     pub quantity: f64,
-    pub side: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit_price: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,13 +56,14 @@ pub struct DxPlacePayload {
 }
 /// The exact numeric payload before JSON.stringify's nonfinite-to-null boundary.
 pub fn prepare_order(
-    opts: &PlaceOrderOpts,
+    opts: impl Into<PreparedOrderOpts>,
     market: &Market,
     uuid: String,
 ) -> Result<DxPlacePayload, ExchangeError> {
+    let opts = opts.into();
     let quantity = adjust(opts.amount, market.precision.amount);
     let order_type = serde_json::to_value(opts.r#type).expect("order type");
-    let kind = crate::exchange::to_dx_order_type(order_type.as_str().expect("enum string"))
+    let kind = crate::exchange::to_dx_order_type(order_type.as_str().unwrap_or("undefined"))
         .map_err(ExchangeError::new)?;
     let price = opts.price.map(|p| adjust(p, market.precision.price));
     let raw_stop = opts
@@ -85,10 +89,10 @@ pub fn prepare_order(
         r#type: kind,
         instrument: opts.symbol.clone(),
         quantity,
-        side: if opts.side == safe_cex_types::OrderSide::Buy {
-            "BUY"
-        } else {
-            "SELL"
+        side: match opts.side {
+            ModelField::Value(OrderSide::Buy) => Some("BUY"),
+            ModelField::Value(OrderSide::Sell) => Some("SELL"),
+            ModelField::Absent | ModelField::Undefined => None,
         },
         limit_price: if kind == "LIMIT" { price } else { None },
         stop_price: if kind == "STOP" { stop } else { None },
@@ -122,33 +126,24 @@ pub struct OrderUpdate {
     pub price: Option<Option<f64>>,
     pub amount: Option<f64>,
 }
-pub fn prepare_update_order(order: &Order, update: OrderUpdate) -> PlaceOrderOpts {
-    let mut opts = PlaceOrderOpts {
+pub fn prepare_update_order(order: &Order, update: OrderUpdate) -> PreparedOrderOpts {
+    PreparedOrderOpts {
         symbol: order.symbol.clone(),
-        r#type: order.r#type,
-        side: order.side,
-        amount: order.amount,
-        price: Some(order.price),
+        r#type: order.r#type.into_property(),
+        side: order.side.into_property(),
+        amount: update.amount.unwrap_or(order.amount),
+        price: update.price.unwrap_or_else(|| order.price.into_value()),
         trigger_price: None,
-        stop_loss: order.stop_loss,
-        take_profit: order.take_profit,
+        stop_loss: order.stop_loss.into_value(),
+        take_profit: order.take_profit.into_value(),
         reduce_only: Some(order.reduce_only),
-        time_in_force: order.time_in_force,
-        trigger_type: order.trigger_type,
-        tp_trigger_type: order.tp_trigger_type,
-        sl_trigger_type: order.sl_trigger_type,
-        client_order_id: None,
-        max_slippage_pct: None,
-        close: order.close,
-        implied_volatility: None,
-    };
-    if let Some(price) = update.price {
-        opts.price = price;
+        time_in_force: order.time_in_force.into_value(),
+        trigger_type: order.trigger_type.into_value(),
+        tp_trigger_type: order.tp_trigger_type.into_value(),
+        sl_trigger_type: order.sl_trigger_type.into_value(),
+        close: order.close.into_value(),
+        ..Default::default()
     }
-    if let Some(amount) = update.amount {
-        opts.amount = amount;
-    }
-    opts
 }
 impl BreakoutRuntime {
     fn request(&self, request: RestRequest) -> ExchangeFuture<'static, JsNumberInput> {
@@ -250,7 +245,7 @@ impl BreakoutRuntime {
         let ctx = self.clone();
         Box::pin(async move {
             cancel.await?;
-            ctx.place_order(opts).await
+            ctx.place_prepared_order(opts).await
         })
     }
     pub fn place_order(self: &Rc<Self>, opts: PlaceOrderOpts) -> ExchangeFuture<'static, Value> {
@@ -259,6 +254,12 @@ impl BreakoutRuntime {
         if let Err(error) = preflight {
             return Box::pin(async move { Err(error) });
         }
+        self.place_prepared_order(opts.into())
+    }
+    fn place_prepared_order(
+        self: &Rc<Self>,
+        opts: PreparedOrderOpts,
+    ) -> ExchangeFuture<'static, Value> {
         let market = self
             .exchange
             .base

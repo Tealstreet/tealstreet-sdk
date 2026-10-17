@@ -94,7 +94,7 @@ impl ApexApiHost for ApiHost {
         &self,
         config: ApexApiConfiguration,
         options: &ExchangeOptions,
-        _: &Rc<BaseExchange>,
+        base: &Rc<BaseExchange>,
     ) -> Result<(), ExchangeError> {
         let provider = self.scope.runtime.transport();
         let serializer = config.params_serializer;
@@ -115,7 +115,7 @@ impl ApexApiHost for ApiHost {
                 ),
             ]),
             &safe_cex_exchange::js_runtime::value::from_typed(options).map_err(error)?,
-            ExchangeName::Apexomni,
+            base,
         )
         .map_err(error)?;
         self.client
@@ -236,7 +236,7 @@ impl ApexApiHost for ApiHost {
     }
 
     fn now_ms(&self) -> f64 {
-        self.scope.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn legacy_timestamp_ms(&self, now: f64) -> Result<f64, ExchangeError> {
         Ok((safe_cex_num::js_time_clip(now) / 1000.).floor() * 1000.)

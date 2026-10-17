@@ -72,6 +72,11 @@ impl PrivateHost for Rt {
     fn now(&self) -> Result<Js, Thrown> {
         Ok(Js::Number(self.shared.runtime.now_ms()))
     }
+    fn virtual_now(&self) -> Result<Js, Thrown> {
+        Ok(Js::Number(
+            safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+        ))
+    }
     fn parse_message(&self, data: Js) -> Result<Js, Thrown> {
         global_call(self, "bigIntAsStringJsonParse", vec![data])
     }
@@ -106,13 +111,13 @@ impl PrivateHost for Rt {
     fn axios_headers(&self, v: Js) -> Result<Js, Thrown> {
         Ok(v)
     }
-    fn axios_create(&self, config: Js, options: Js, exchange: Js) -> Result<Js, Thrown> {
+    fn axios_create(&self, config: Js, options: Js, _exchange: Js) -> Result<Js, Thrown> {
         client::factory::create(
             self.shared.http.clone(),
             self.shared.runtime.transport().as_ref(),
             config,
             &options,
-            safe_cex_exchange::js_runtime::value::to_typed(&exchange.get("name")?)?,
+            self.base(),
         )
     }
     fn transport(&self, client: Js, options: Js, name: Js, parser: &str) -> Result<(), Thrown> {

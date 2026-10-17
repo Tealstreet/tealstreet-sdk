@@ -17,6 +17,42 @@ pub enum JsJsonValue {
     BigInt(num_bigint::BigInt),
 }
 
+impl From<&safe_cex_types::retained_json::RetainedJsonInput> for JsJsonValue {
+    fn from(value: &safe_cex_types::retained_json::RetainedJsonInput) -> Self {
+        use safe_cex_types::retained_json::RetainedJsonInput as Input;
+        match value {
+            Input::Undefined => Self::Undefined,
+            Input::Null => Self::Null,
+            Input::Bool(value) => Self::Bool(*value),
+            Input::Text(value) => Self::String(value.clone()),
+            Input::Float(value) => Self::Number(*value),
+            Input::Lexeme(value) => Self::Number(value.parse().expect("captured numeric lexeme")),
+            Input::Array(values) => Self::Array(values.iter().map(Self::from).collect()),
+            Input::Object(values) => Self::Object(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), Self::from(value)))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+impl JsJsonValue {
+    /// Boolean conversion before JSON serialization can omit undefined or
+    /// replace nonfinite numbers with null.
+    pub fn truthy(&self) -> bool {
+        match self {
+            Self::Undefined | Self::Null => false,
+            Self::Bool(value) => *value,
+            Self::Number(value) => *value != 0.0 && !value.is_nan(),
+            Self::String(value) => !value.is_empty(),
+            Self::Array(_) | Self::Object(_) => true,
+            Self::BigInt(value) => value != &num_bigint::BigInt::from(0),
+        }
+    }
+}
+
 impl From<Value> for JsJsonValue {
     fn from(value: Value) -> Self {
         match value {

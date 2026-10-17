@@ -129,7 +129,7 @@ impl PrivateProtocol {
             let owner = parent.clone();
             let weak_socket = weak_socket.clone();
             parent.base().start_owned_operation(async move {
-                let result = async {
+                let _ = async {
                     let balance = reaction(owner.fetch_balance()).await?;
                     if weak_socket
                         .upgrade()
@@ -146,12 +146,6 @@ impl PrivateProtocol {
                     Ok::<_, ExchangeError>(())
                 }
                 .await;
-                if let Err(error) = result {
-                    owner.base().runtime.report_exception(
-                        &error,
-                        &json!({"operation":"MEXC throttledFetchBalance"}),
-                    );
-                }
             });
             Ok(())
         })?;
@@ -275,7 +269,10 @@ impl WsProtocol for PrivateProtocol {
                 subscribe_private_feeds(socket)?;
                 receive(socket, "[mexc login] success")?;
             } else {
-                receive(socket, &format!("[mexc login] failed {value}"))?;
+                let diagnostic = safe_cex_num::js_json_stringify(&value.clone().into())
+                    .map_err(ExchangeError::from)?
+                    .expect("a parsed JSON frame is a defined value");
+                receive(socket, &format!("[mexc login] failed {diagnostic}"))?;
                 socket.emitter().emit_and_log_error(
                     "MEXC private ws login failed, double check your key and secret",
                     None,

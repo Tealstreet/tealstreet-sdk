@@ -10,7 +10,7 @@ use std::{
     rc::Rc,
 };
 pub type BuildHttp = Box<
-    dyn FnOnce(
+    dyn Fn(
         api::ClientConfig<ExchangeError>,
         Rc<RefCell<api::Options>>,
     ) -> Result<HttpClient, ExchangeError>,
@@ -157,9 +157,39 @@ impl Client {
         Box::pin(async move { Ok(Native::from_prepared(response.await?.data.clone())) })
     }
 }
+#[derive(Clone)]
+pub struct RoutedClient {
+    primary: Rc<Client>,
+    reader: Rc<Client>,
+}
+impl RoutedClient {
+    pub fn new(primary: Rc<Client>, reader: Rc<Client>) -> Self {
+        Self { primary, reader }
+    }
+    pub fn request(
+        &self,
+        method: &str,
+        url: &str,
+        params: JsJsonValue,
+        data: JsJsonValue,
+    ) -> api::Task<Native, ExchangeError> {
+        let client = if method == "GET" {
+            &self.reader
+        } else {
+            &self.primary
+        };
+        client.request(method, url, params, data)
+    }
+}
+impl std::ops::Deref for RoutedClient {
+    type Target = Rc<Client>;
+    fn deref(&self) -> &Self::Target {
+        &self.primary
+    }
+}
 pub struct Factory {
     pub base: Rc<BaseExchange>,
-    pub build: Option<BuildHttp>,
+    pub build: BuildHttp,
     pub install: InstallTransport,
 }
 impl api::Host for Factory {
@@ -178,11 +208,7 @@ impl api::Host for Factory {
             headers: config.headers,
             serialize: config.serialize.clone(),
         };
-        let build = self
-            .build
-            .take()
-            .ok_or_else(|| ExchangeError::new("Backpack HTTP factory already consumed"))?;
-        let inner = build(shadow, options)?;
+        let inner = (self.build)(shadow, options)?;
         let inner = Rc::new(inner);
         Ok(Rc::new(Client {
             inner: inner.clone(),
@@ -265,7 +291,7 @@ impl api::Host for Factory {
         secret: String,
         window: f64,
     ) -> Result<api::Task<Vec<(String, JsJsonValue)>, ExchangeError>, ExchangeError> {
-        let now = self.base.runtime.now_ms();
+        let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let future = crate::signing::generate_auth_headers(
             instruction,
             &params,

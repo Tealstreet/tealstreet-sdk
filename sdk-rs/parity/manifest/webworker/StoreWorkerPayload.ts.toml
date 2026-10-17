@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/webworker/StoreWorkerPayload.ts"
-rust_files = [ "safe-cex-webworker/src/payload.rs" ]
+rust_files = [ "safe-cex-webworker/src/payload.rs", "safe-cex-webworker/src/data_post.rs" ]
 
 [[symbol]]
 ts = "StoreWorkerIncomingOp"
@@ -38,9 +38,9 @@ note = "Shared strict decoders from 3bbc52657f now reject positional records and
 ts = "StoreWorkerPayload"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-webworker/src/payload.rs::StoreWorkerPayload"
+rs = [ "safe-cex-webworker/src/payload.rs::StoreWorkerPayload", "safe-cex-webworker/src/data_post.rs::WorkerDataPayload", "safe-cex-webworker/src/data_post.rs::WorkerDataPayload::into_message" ]
 status = "divergent"
-note = "CHOSEN: shared numeric-ingress input-depth boundary: Node and the legacy bare decoder accept 140 nested data arrays, while bounded shared capture refuses them; retaining one bounded recursive contract is preferable to a worker-specific unbounded decoder. The numeric FINDING is repaired at public Deserialize with JsNumberInput and strict map decoding. The data field explicitly uses shared js_deserialize_passthrough via present_value plus named passthrough eligibility; absence remains None and explicit null remains Some(Null). Two committed loss witnesses failed unchanged. tests/record_numeric_ingress.rs adds 450 pre-serialization bit comparisons over five envelope/config field paths, ten spellings and nine entry routes, alongside 810 fixture comparisons. Upstream native Value construction loss is not repaired."
+note = "CHOSEN: shared numeric-ingress input-depth boundary: Node and the legacy bare decoder accept 140 nested data arrays, while bounded shared capture refuses them; retaining one bounded recursive contract is preferable to a worker-specific unbounded decoder. The numeric FINDING is repaired at public Deserialize with JsNumberInput and strict map decoding. The data field explicitly uses shared js_deserialize_passthrough via present_value plus named passthrough eligibility; absence remains None and explicit null remains Some(Null). Two committed loss witnesses failed unchanged. tests/record_numeric_ingress.rs adds 450 pre-serialization bit comparisons over five envelope/config field paths, ten spellings and nine entry routes, alongside 810 fixture comparisons. Upstream native Value construction loss is not repaired. Split members `safe-cex-webworker/src/data_post.rs::WorkerDataPayload` and `safe-cex-webworker/src/data_post.rs::WorkerDataPayload::into_message`; native outgoing callMethod and candle DATA envelopes, carrying runtime Js through concrete browser materialization and structured clone. They deliberately have no Serialize implementation. Existing incoming StoreWorkerPayload and other ordinary outgoing payloads keep their current JSON contract; this is not a shared Candle or Store model widening."
 
 [[symbol]]
 ts = "WorkerConfig"

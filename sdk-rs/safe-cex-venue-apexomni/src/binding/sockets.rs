@@ -108,12 +108,12 @@ impl ApexSocketHost for SocketHost {
             .is_ok_and(|c| c.is_connected())
     }
     fn now_ms(&self) -> f64 {
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+    }
+    fn date_now_ms(&self) -> f64 {
         self.owner
             .upgrade()
             .map_or(0., |o| o.scope.runtime.now_ms())
-    }
-    fn date_now_ms(&self) -> f64 {
-        self.now_ms()
     }
     fn monotonic_now_ms(&self) -> f64 {
         self.owner
@@ -250,20 +250,9 @@ impl ApexSocketHost for SocketHost {
             .set("pingAt", Js::Number(at))
             .map_err(error)
     }
-    fn ping_timeout(&self) -> Option<u64> {
-        self.owner()
-            .ok()
-            .and_then(|o| self.socket(&o).get("pingTimeoutId").ok())
-            .and_then(|v| v.as_f64())
-            .map(|v| v as u64)
-    }
-    fn set_ping_timeout(&self, timer: Option<u64>) -> Result<(), ExchangeError> {
-        self.socket(self.owner()?.as_ref())
-            .set(
-                "pingTimeoutId",
-                timer.map_or(Js::Undefined, |v| Js::Number(v as f64)),
-            )
-            .map_err(error)
+    fn schedule_ping(&self, delay_ms: u64) -> Result<(), ExchangeError> {
+        self.owner()?.core(self.private)?.schedule_ping(delay_ms);
+        Ok(())
     }
     fn track_last_received(&self) -> Result<(), ExchangeError> {
         self.call("trackLastReceived", vec![])

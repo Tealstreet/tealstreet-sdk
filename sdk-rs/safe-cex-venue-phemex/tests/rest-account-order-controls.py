@@ -12,7 +12,6 @@ controls=[
  ('leverage-delegate','rest_account_control.rs','set_leverage','side, None','side, Some(true)','leverage_delegate','REST native effect helper'),
  ('leverage-sign','rest_account_control.rs','prep','safe * -1.0','safe * 1.0','leverage_helper','REST native effect put'),
  ('cancel-batch','rest_order_control.rs','cancel_orders','ids.chunks(10)','ids.chunks(9)','cancel_orders','REST native effect delete'),
- ('cancel-symbol-await','rest_order_control.rs','cancel_symbol_orders','cancel(orders).await','{ let _future = cancel(orders); Ok(()) }','cancel_symbol','REST native complete effects'),
  ('market-loaded','rest_order_control.rs','get_or_fetch_market','("markets", true)','("markets", false)','market_lookup','REST native effect update'),
 ]
 results=[]

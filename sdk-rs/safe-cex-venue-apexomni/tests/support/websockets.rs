@@ -34,6 +34,7 @@ struct SocketHost {
     next_timer: Cell<u64>,
     timers: RefCell<BTreeMap<u64, SocketTask>>,
     ping_timer: Cell<Option<u64>>,
+    ping_socket: RefCell<Option<std::rc::Weak<ApexOmniPrivateWebsocket>>>,
     private: bool,
     variant: u64,
     name: String,
@@ -53,6 +54,7 @@ impl SocketHost {
             next_timer: Cell::new(1),
             timers: RefCell::new(BTreeMap::new()),
             ping_timer: Cell::new(None),
+            ping_socket: RefCell::new(None),
             private,
             variant,
             name: name.into(),
@@ -170,11 +172,23 @@ impl ApexSocketHost for SocketHost {
         self.runtime.record("pingAt", vec![n(at)]);
         Ok(())
     }
-    fn ping_timeout(&self) -> Option<u64> {
-        self.ping_timer.get()
-    }
-    fn set_ping_timeout(&self, timer: Option<u64>) -> Result<(), ExchangeError> {
-        self.ping_timer.set(timer);
+    fn schedule_ping(&self, delay_ms: u64) -> Result<(), ExchangeError> {
+        if let Some(timer) = self.ping_timer.get() {
+            self.clear_timeout(timer)?;
+        }
+        let weak = self
+            .ping_socket
+            .borrow()
+            .clone()
+            .expect("private ping receiver");
+        let timer = self.set_timeout(
+            delay_ms,
+            Rc::new(move || {
+                let socket = weak.upgrade().expect("live private socket");
+                Box::pin(async move { socket.ping() })
+            }),
+        )?;
+        self.ping_timer.set(Some(timer));
         Ok(())
     }
     fn track_last_received(&self) -> Result<(), ExchangeError> {
@@ -303,7 +317,7 @@ fn run(privacy: &str, name: &str) {
         if ["positions", "accounts"].contains(&name) {
             let mut p = store.positions()[0].clone();
             p.id = "BTC-USDC:short".into();
-            p.side = PositionSide::Short;
+            p.side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
                 store.as_ref(),
                 StoreUpdate {
@@ -345,6 +359,7 @@ fn run(privacy: &str, name: &str) {
         let mut result = J::Undefined;
         if private {
             let socket = ApexOmniPrivateWebsocket::new(parent.clone(), host.clone()).unwrap();
+            *host.ping_socket.borrow_mut() = Some(Rc::downgrade(&socket));
             if name != "class" {
                 runtime.operations.borrow_mut().clear();
             }
@@ -386,7 +401,14 @@ fn run(privacy: &str, name: &str) {
                         socket.handle_order_topic(&input).unwrap();
                     }
                 }
-                "positions" => socket.handle_position_topic(&input).unwrap(),
+                "positions" => {
+                    if let Err(error) = socket.handle_position_topic(&input) {
+                        result = obj(vec![
+                            ("errorName", s(error.name)),
+                            ("errorMessage", s(error.message)),
+                        ]);
+                    }
+                }
                 "accounts" => socket.handle_ws_accounts_v2_topic(&input).unwrap(),
                 "ordersThrottle" | "positionsThrottle" => {
                     if variant == 1 {
@@ -803,6 +825,7 @@ fn canceled_prefix_effects_precede_later_order_faults() {
         let host = SocketHost::new(runtime.clone(), true, 0, "order-boundaries");
         host.date_offset.set(row["dateOffset"].as_f64().unwrap());
         let socket = ApexOmniPrivateWebsocket::new(parent.clone(), host.clone()).unwrap();
+        *host.ping_socket.borrow_mut() = Some(Rc::downgrade(&socket));
         socket
             .last_connect_time
             .set(row["lastConnect"].as_f64().unwrap());
@@ -840,8 +863,8 @@ fn canceled_prefix_effects_precede_later_order_faults() {
         }
         assert_eq!(
             runtime.now_calls.get(),
-            parent_clocks,
-            "{marker} native parent virtual clocks"
+            0,
+            "{marker} parent virtual clock must not read the raw runtime"
         );
         assert_eq!(
             host.virtual_calls.get(),

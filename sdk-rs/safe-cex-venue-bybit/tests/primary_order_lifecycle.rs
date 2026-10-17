@@ -50,7 +50,7 @@ fn order(actual: &Order, expected: &Value) {
         "PRIMARY native order side"
     );
     for (name, value) in [
-        ("price", actual.price),
+        ("price", actual.price.to_number()),
         ("amount", actual.amount),
         ("filled", actual.filled),
         ("remaining", actual.remaining),
@@ -89,7 +89,7 @@ fn mutate(order: &Rc<RefCell<Order>>, fields: &Value) {
         }
     }
     if let Some(value) = fields.get("price") {
-        order.price = value.as_f64().unwrap();
+        order.price = (value.as_f64().unwrap()).into();
     }
     if let Some(value) = fields.get("filled") {
         order.filled = value.as_f64().unwrap();

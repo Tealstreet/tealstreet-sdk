@@ -1386,7 +1386,11 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             method: method.into(),
             url: url.into(),
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
-            config_extensions: [("grvtCookie".into(), json!("gravity=bridge"))].into(),
+            config_extensions: [(
+                "grvtCookie".into(),
+                safe_cex_types::retained_json::RetainedJsonInput::Text("gravity=bridge".into()),
+            )]
+            .into(),
             ..Default::default()
         };
         settle(
@@ -2968,7 +2972,7 @@ mod http_factory {
                 &provider,
                 config,
                 &opts(json!({"key":"","secret":""})),
-                ExchangeName::Polymarket,
+                &factory_owner(runtime.clone()),
             )
             .unwrap();
             let trace = events.clone();
@@ -3035,7 +3039,7 @@ mod http_factory {
             &DirectTransport,
             opts(json!({"baseURL":"https://venue","timeout":999})),
             &options,
-            ExchangeName::Polymarket,
+            &factory_owner(http.runtime()),
         )
         .unwrap();
         settle(
@@ -3053,7 +3057,7 @@ mod http_factory {
                 &DirectTransport,
                 opts(json!({"baseURL":"https://venue"})),
                 &opts(json!({"key":"","secret":"",flag:true})),
-                ExchangeName::Polymarket,
+                &factory_owner(http.runtime()),
             )
             .unwrap_err();
             assert!(error.message().contains("direct transport is active"));
@@ -3090,7 +3094,7 @@ mod http_factory {
             &provider,
             opts(json!({"baseURL":"https://venue"})),
             &options,
-            ExchangeName::Polymarket,
+            &factory_owner(direct.runtime()),
         )
         .unwrap();
         let variants = [
@@ -3260,7 +3264,7 @@ mod http_factory {
                 ),
             ]),
             &options,
-            ExchangeName::Polymarket,
+            &factory_owner(host.runtime()),
         )
         .unwrap();
         factory::install_transport_adapter(
@@ -3438,13 +3442,25 @@ fn rest_http_host_retains_adapter_config_without_inventing_direct_cookie_headers
     .unwrap();
     let seen = terminal.seen.lock().unwrap();
     assert_eq!(
-        seen[0].config_extensions["grvtCookie"],
+        seen[0].config_extensions["grvtCookie"]
+            .clone()
+            .into_value()
+            .unwrap(),
         json!("rm=true; gravity=session-42"),
         "REST ADAPTER CONFIG lost GRVT cookie before terminal transport"
     );
-    assert_eq!(seen[0].config_extensions["grvtAccountId"], json!("42"));
     assert_eq!(
-        seen[0].config_extensions["customTrace"],
+        seen[0].config_extensions["grvtAccountId"]
+            .clone()
+            .into_value()
+            .unwrap(),
+        json!("42")
+    );
+    assert_eq!(
+        seen[0].config_extensions["customTrace"]
+            .clone()
+            .into_value()
+            .unwrap(),
         json!({"attempt":2.0})
     );
     assert!(
@@ -3646,6 +3662,20 @@ fn virtual_clock_global_preserves_synced_time_without_changing_date_now() {
         actual >= before && actual <= after,
         "JS virtualClock must retain server offset"
     );
+    let before = VIRTUAL_CLOCK.get_current_time();
+    let actual = shared
+        .globals
+        .get("virtualClock")
+        .unwrap()
+        .call_method("getCurrentTime", vec![])
+        .unwrap()
+        .to_number()
+        .unwrap();
+    let after = VIRTUAL_CLOCK.get_current_time();
+    assert!(
+        actual >= before && actual <= after,
+        "dayjs virtualClock must retain server offset"
+    );
     assert_eq!(
         shared
             .globals
@@ -3657,4 +3687,313 @@ fn virtual_clock_global_preserves_synced_time_without_changing_date_now() {
         Some(123.0)
     );
     VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
+}
+
+/// The BaseExchange a safeCexAxiosCreate client reports outcomes and errors to.
+fn factory_owner(
+    runtime: Rc<dyn ExchangeRuntime>,
+) -> Rc<safe_cex_exchange::exchange::BaseExchange> {
+    Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
+        safe_cex_types::ExchangeName::Polymarket,
+        serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        runtime,
+        safe_cex_exchange::exchange::ExchangeSettings::default(),
+    ))
+}
+
+#[test]
+fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_identity() {
+    use safe_cex_exchange::js_runtime::client::factory;
+    use safe_cex_transport::DirectTransport;
+    let runtime = Rc::new(Runtime::default());
+    let owner = factory_owner(runtime.clone());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = factory::create(
+        http,
+        &DirectTransport,
+        Js::object(vec![("baseURL", Js::str("https://venue"))]),
+        &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]),
+        &owner,
+    )
+    .unwrap();
+    for capture in [false, true] {
+        let config = Js::object(vec![("__tealstreetSigningCapture", Js::Bool(capture))]);
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/ok"), config])
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    assert_eq!(owner.store.request_stats().unwrap().ok, 1.0);
+    let error =
+        safe_cex_exchange::js_runtime::value::error_object("AxiosError", "connection refused");
+    error.define("response", Js::Null).unwrap();
+    let original = error.clone();
+    let adapter = Js::function("networkFailure", move |_, args| {
+        error.define("config", arg(&args, 0))?;
+        Err(Thrown::new(error.clone()))
+    });
+    let config = Js::object(vec![("adapter", adapter)]);
+    let rejected = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/network"), config])
+            .unwrap(),
+    )
+    .unwrap_err();
+    assert!(
+        rejected.value.strict_equals(&original),
+        "the same error reaches venue handlers"
+    );
+    assert_eq!(owner.store.request_stats().unwrap().network, 1.0);
+    assert_eq!(owner.store.request_stats().unwrap().other, 0.0);
+}
+
+#[path = "support/js_socket_receive.rs"]
+mod socket_receive;
+
+#[test]
+fn promise_combinators_consume_live_iterables_and_reject_iterator_failures() {
+    use safe_cex_exchange::js_runtime::value::from_json;
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_promise_iterables_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(rows.len(), 18);
+    for row in rows {
+        let (runtime, shared) = scoped_globals();
+        let promise = shared.globals.get("Promise").unwrap();
+        let resolved = |n| promise.call_method("resolve", vec![Js::Number(n)]).unwrap();
+        let map = Js::new_map();
+        let set = Js::new_set();
+        let input = match row["mode"].as_str().unwrap() {
+            "array" => Js::array(vec![resolved(1.0), resolved(2.0)]),
+            "map-values" => {
+                for (key, n) in [("a", 1.0), ("b", 2.0)] {
+                    map.call_method("set", vec![Js::str(key), resolved(n)])
+                        .unwrap();
+                }
+                map.call_method("values", vec![]).unwrap()
+            }
+            "set" => {
+                for n in [1.0, 2.0] {
+                    set.call_method("add", vec![resolved(n)]).unwrap();
+                }
+                set
+            }
+            "string" => Js::str("a😀"),
+            "map-entries" => {
+                for (key, n) in [("a", 1.0), ("b", 2.0)] {
+                    map.call_method("set", vec![Js::str(key), Js::Number(n)])
+                        .unwrap();
+                }
+                map
+            }
+            "empty" => set,
+            "rejected-set" => {
+                set.call_method("add", vec![resolved(1.0)]).unwrap();
+                set.call_method(
+                    "add",
+                    vec![
+                        promise
+                            .call_method("reject", vec![Js::str("sentinel")])
+                            .unwrap(),
+                    ],
+                )
+                .unwrap();
+                set
+            }
+            "noniterable" => Js::object(vec![]),
+            "next-throw" => {
+                let iterator = map.call_method("values", vec![]).unwrap();
+                iterator
+                    .define(
+                        "next",
+                        Js::function("next", |_, _| {
+                            Err(Thrown::error("RangeError", "iterator sentinel"))
+                        }),
+                    )
+                    .unwrap();
+                iterator
+            }
+            _ => unreachable!(),
+        };
+        let method = row["method"].as_str().unwrap();
+        let result = promise
+            .call_method(method, vec![input])
+            .expect("iterator failures reject a Promise, not the call");
+        assert!(
+            matches!(result, Js::Promise(_)),
+            "combinator returns Promise"
+        );
+        let actual = match settle(&runtime, result) {
+            Ok(value) => json!({"fulfilled":to_json(&value).unwrap()}),
+            Err(error) if error.value.is_string() => {
+                json!({"rejected":to_json(&error.value).unwrap()})
+            }
+            Err(error) => {
+                let error = error.to_exchange_error();
+                if error.name == "RangeError" {
+                    json!({"rejected":{"name":error.name,"message":error.message}})
+                } else {
+                    json!({"rejected":{"name":error.name}})
+                }
+            }
+        };
+        let expected = if row.get("fulfilled").is_some() {
+            json!({"fulfilled":row["fulfilled"]})
+        } else {
+            json!({"rejected":row["rejected"]})
+        };
+        assert_eq!(
+            actual,
+            to_json(&from_json(&expected)).unwrap(),
+            "Promise iterable source result: {row}"
+        );
+    }
+}
+
+#[test]
+fn promise_combinators_keep_pending_values_and_native_identity() {
+    for method in ["all", "allSettled"] {
+        let (runtime, shared) = scoped_globals();
+        let rt: Rc<dyn ExchangeRuntime> = runtime.clone();
+        let pending = Promise::pending(&rt);
+        let marker = Js::object(vec![]);
+        let nan = f64::from_bits(0x7ff8_0000_0000_0042);
+        let map = Js::new_map();
+        for (key, value) in [
+            ("pending", Js::Promise(pending.clone())),
+            ("negative-zero", Js::Number(-0.0)),
+            ("nan", Js::Number(nan)),
+        ] {
+            map.call_method("set", vec![Js::str(key), value]).unwrap();
+        }
+        let iterator = map.call_method("values", vec![]).unwrap();
+        let returned = shared
+            .globals
+            .get("Promise")
+            .unwrap()
+            .call_method(method, vec![iterator.clone()])
+            .unwrap();
+        assert!(
+            iterator
+                .call_method("next", vec![])
+                .unwrap()
+                .get("done")
+                .unwrap()
+                .truthy(),
+            "combinator consumes the iterator synchronously"
+        );
+        let Js::Promise(ref aggregate) = returned else {
+            panic!("expected Promise")
+        };
+        assert!(
+            aggregate.result().is_none(),
+            "Promise combinator waits for iterable member"
+        );
+        pending.settle(Ok(marker.clone()));
+        let result = settle(&runtime, returned).unwrap();
+        let values = result.array_values().unwrap();
+        assert_eq!(values.len(), 3);
+        let value = |i: usize| {
+            if method == "allSettled" {
+                values[i].get("value").unwrap()
+            } else {
+                values[i].clone()
+            }
+        };
+        assert!(value(0).same_reference(&marker));
+        assert_eq!(
+            value(1).to_number().unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert_eq!(value(2).to_number().unwrap().to_bits(), nan.to_bits());
+    }
+}
+
+#[test]
+fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_config() {
+    use safe_cex_exchange::js_runtime::value::from_retained_input;
+    for url in ["/ok", "/down"] {
+        let runtime = Rc::new(Runtime::default());
+        let terminal = std::sync::Arc::new(Terminal::default());
+        let xhr = client::create(
+            client::rest_http_host(runtime.clone(), terminal.clone()),
+            Js::object(vec![]),
+        );
+        let data = Js::object(vec![
+            ("missing", Js::Undefined),
+            ("nan", Js::Number(f64::from_bits(0x7ff8000000000042))),
+            ("infinity", Js::Number(f64::INFINITY)),
+            ("negativeZero", Js::Number(-0.0)),
+            (
+                "array",
+                Js::array(vec![Js::Undefined, Js::Number(f64::NEG_INFINITY)]),
+            ),
+        ]);
+        let result = settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![
+                    Js::str(url),
+                    Js::object(vec![("nativeData", data), ("ownUndefined", Js::Undefined)]),
+                ],
+            )
+            .unwrap(),
+        );
+        let effective = match result {
+            Ok(response) => response.get("config").unwrap(),
+            Err(error) => error.value.get("config").unwrap(),
+        };
+        let seen = terminal.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "one actual terminal attempt");
+        assert!(matches!(
+            seen[0].config_extensions.get("ownUndefined"),
+            Some(safe_cex_types::retained_json::RetainedJsonInput::Undefined)
+        ));
+        assert!(effective.has_own("ownUndefined"));
+        assert!(effective.get("ownUndefined").unwrap().is_undefined());
+        for native in [
+            from_retained_input(seen[0].config_extensions["nativeData"].clone()),
+            effective.get("nativeData").unwrap(),
+        ] {
+            assert!(native.has_own("missing"));
+            assert!(native.get("missing").unwrap().is_undefined());
+            assert_eq!(
+                native.get("nan").unwrap().as_f64().unwrap().to_bits(),
+                0x7ff8000000000042
+            );
+            assert_eq!(
+                native.get("infinity").unwrap().as_f64(),
+                Some(f64::INFINITY)
+            );
+            assert_eq!(
+                native
+                    .get("negativeZero")
+                    .unwrap()
+                    .as_f64()
+                    .unwrap()
+                    .to_bits(),
+                (-0.0_f64).to_bits()
+            );
+            let array = native.get("array").unwrap();
+            assert!(array.get("0").unwrap().is_undefined());
+            assert_eq!(array.get("1").unwrap().as_f64(), Some(f64::NEG_INFINITY));
+        }
+    }
 }

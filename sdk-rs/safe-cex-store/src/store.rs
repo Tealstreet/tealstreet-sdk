@@ -285,7 +285,7 @@ impl StoreState {
         let mut changed = false;
         for order in &mut self.orders {
             if ids.contains(&order.id.as_str()) {
-                order.status = status;
+                order.status = (status).into();
                 changed = true;
             }
         }
@@ -474,21 +474,60 @@ fn empty_request_counts() -> RequestOutcomeCounts {
         other: 0.0,
     }
 }
-fn terminal(status: OrderStatus) -> bool {
-    matches!(status, OrderStatus::Closed | OrderStatus::Canceled)
+fn terminal(status: impl Into<safe_cex_types::ModelField<OrderStatus>>) -> bool {
+    let status = status.into();
+    matches!(
+        status,
+        safe_cex_types::ModelField::Value(OrderStatus::Closed | OrderStatus::Canceled)
+    )
 }
 fn merge_order(target: &mut Order, incoming: Order) {
     let old = std::mem::replace(target, incoming);
-    target.parent_id = target.parent_id.take().or(old.parent_id);
-    target.close = target.close.take().or(old.close);
-    target.info = target.info.take().or(old.info);
-    target.time_in_force = target.time_in_force.take().or(old.time_in_force);
-    target.trigger_type = target.trigger_type.take().or(old.trigger_type);
-    target.tp_trigger_type = target.tp_trigger_type.take().or(old.tp_trigger_type);
-    target.sl_trigger_type = target.sl_trigger_type.take().or(old.sl_trigger_type);
-    target.take_profit = target.take_profit.take().or(old.take_profit);
-    target.stop_loss = target.stop_loss.take().or(old.stop_loss);
-    target.extra = target.extra.take().or(old.extra);
+    if target.parent_id.is_absent() {
+        target.parent_id = old.parent_id;
+    }
+    if target.status.is_absent() {
+        target.status = old.status;
+    }
+    if target.r#type.is_absent() {
+        target.r#type = old.r#type;
+    }
+    if target.side.is_absent() {
+        target.side = old.side;
+    }
+    if target.price.is_absent() {
+        target.price = old.price;
+    }
+    if target.close.is_absent() {
+        target.close = old.close;
+    }
+    if target.info.is_absent() {
+        target.info = old.info;
+    }
+    if target.client_order_id.is_absent() {
+        target.client_order_id = old.client_order_id;
+    }
+    if target.time_in_force.is_absent() {
+        target.time_in_force = old.time_in_force;
+    }
+    if target.trigger_type.is_absent() {
+        target.trigger_type = old.trigger_type;
+    }
+    if target.tp_trigger_type.is_absent() {
+        target.tp_trigger_type = old.tp_trigger_type;
+    }
+    if target.sl_trigger_type.is_absent() {
+        target.sl_trigger_type = old.sl_trigger_type;
+    }
+    if target.take_profit.is_absent() {
+        target.take_profit = old.take_profit;
+    }
+    if target.stop_loss.is_absent() {
+        target.stop_loss = old.stop_loss;
+    }
+    if target.extra.is_absent() {
+        target.extra = old.extra;
+    }
 }
 
 impl StoreState {
@@ -781,7 +820,7 @@ impl StoreState {
     }
     fn update_order_status(&mut self, id: &str, status: OrderStatus) {
         if let Some(index) = self.orders.iter().position(|o| o.id == id) {
-            self.orders[index].status = status;
+            self.orders[index].status = (status).into();
             self.order_update_id += 1.0;
             self.data.update_ids.orders = self.order_update_id;
             self.notify(false);
@@ -887,9 +926,9 @@ impl StoreState {
         position.unrealized_pnl = 0.0;
         position.contracts = 0.0;
         position.liquidation_price = 0.0;
-        position.margin_size = Some(0.0);
-        position.info = None;
-        position.extra = None;
+        position.margin_size = (Some(0.0)).into();
+        position.info = (None).into();
+        position.extra = (None).into();
         position
     }
     fn add_or_update_positions_full(&mut self, positions: Vec<Position>) {

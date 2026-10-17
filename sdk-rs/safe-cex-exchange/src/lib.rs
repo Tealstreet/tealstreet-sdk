@@ -38,6 +38,7 @@ pub use safe_cex_transport::signing::{
 };
 pub use safe_cex_types::ws_auth::{WsAuth, WsAuthRequest, WsAuthResponse};
 
+mod subscribed_candle;
 mod waiters;
 
 mod owned_tasks;

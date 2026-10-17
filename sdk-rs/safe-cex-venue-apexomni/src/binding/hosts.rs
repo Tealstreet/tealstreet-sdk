@@ -341,7 +341,10 @@ impl ApexServices for Host {
             .ok_or_else(|| ExchangeError::new("socket disposed"))?;
         body.throttle_fetch_orders()
     }
-    fn place_orders(&self, orders: Vec<PlaceOrderOpts>) -> ExchangeFuture<'_, Vec<String>> {
+    fn place_orders(
+        &self,
+        orders: Vec<safe_cex_types::PreparedOrderOpts>,
+    ) -> ExchangeFuture<'_, Vec<String>> {
         let venue = self
             .scope
             .sockets
@@ -351,7 +354,15 @@ impl ApexServices for Host {
             .and_then(Weak::upgrade);
         Box::pin(async move {
             let venue = venue.ok_or_else(|| ExchangeError::new("ApexOmni exchange released"))?;
-            self.base().place_orders(venue.as_ref(), orders).await
+            self.base().assert_caller_client_order_ids(&orders)?;
+            let venue = (venue.as_ref() as &dyn std::any::Any)
+                .downcast_ref::<super::exchange::ApexOmniExchange>()
+                .ok_or_else(|| ExchangeError::new("ApexOmni placement receiver changed type"))?;
+            let mut ids = Vec::new();
+            for order in orders {
+                ids.extend(venue.inner.place_order(order).await?);
+            }
+            Ok(ids)
         })
     }
     fn dayjs_value_ms(&self, input: Option<f64>) -> Result<f64, ExchangeError> {
