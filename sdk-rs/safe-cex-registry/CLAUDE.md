@@ -236,6 +236,8 @@ signing requirement on private HTTP even with hosted signing. Private WS stays
 local-only; empty-secret recovery follows the existing approved onOpen contract.
 `native_host_orderly_hosted` covers all six names with valid/empty local secrets.
 
+
+
 The accepted-set registry contracts classify each public alias separately. The
 TickerBatch and MarketBatch Rc/RefCell array handles also implement Deserialize;
 their contracts execute ordered model-field observations and reject forbidden
@@ -246,16 +248,5 @@ module/error owners and JSON error owner intact. These finite identity probes
 and ordinary Serde/conversion checks do not establish future execution, every
 lifetime/type argument, or the behavior of a module/browser/transport host.
 
-The native Hyperliquid JSON-to-query adapter lives at module scope so the accepted-set
-compiler inventory covers it directly. Its finite witnesses inspect QueryValue enum
-outputs for all JSON container/scalar kinds. The installed repeat serializer remains
-covered through the real native HTTP host; this owned Value input excludes undefined
-and nonfinite JSON values.
 
-Ordinary account accepted-set contracts distinguish JSON argument/method admission
-from outbound serialization and event lifecycle helpers. Direct finite probes
-execute error projection, arg<String>, option decoding, callback registration and
-method dispatch on actual registry-created TxFlow accounts. The String selection
-does not classify other DeserializeOwned instantiations. These no-network
-witnesses complement the actual HTTP/Store and stream tests; they do not claim
-every venue override or all option combinations.
+

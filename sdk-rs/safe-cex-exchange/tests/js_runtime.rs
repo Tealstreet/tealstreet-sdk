@@ -3736,3 +3736,172 @@ fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_iden
     assert_eq!(owner.store.request_stats().unwrap().network, 1.0);
     assert_eq!(owner.store.request_stats().unwrap().other, 0.0);
 }
+
+#[test]
+fn promise_combinators_consume_live_iterables_and_reject_iterator_failures() {
+    use safe_cex_exchange::js_runtime::value::from_json;
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_promise_iterables_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(rows.len(), 18);
+    for row in rows {
+        let (runtime, shared) = scoped_globals();
+        let promise = shared.globals.get("Promise").unwrap();
+        let resolved = |n| promise.call_method("resolve", vec![Js::Number(n)]).unwrap();
+        let map = Js::new_map();
+        let set = Js::new_set();
+        let input = match row["mode"].as_str().unwrap() {
+            "array" => Js::array(vec![resolved(1.0), resolved(2.0)]),
+            "map-values" => {
+                for (key, n) in [("a", 1.0), ("b", 2.0)] {
+                    map.call_method("set", vec![Js::str(key), resolved(n)])
+                        .unwrap();
+                }
+                map.call_method("values", vec![]).unwrap()
+            }
+            "set" => {
+                for n in [1.0, 2.0] {
+                    set.call_method("add", vec![resolved(n)]).unwrap();
+                }
+                set
+            }
+            "string" => Js::str("a😀"),
+            "map-entries" => {
+                for (key, n) in [("a", 1.0), ("b", 2.0)] {
+                    map.call_method("set", vec![Js::str(key), Js::Number(n)])
+                        .unwrap();
+                }
+                map
+            }
+            "empty" => set,
+            "rejected-set" => {
+                set.call_method("add", vec![resolved(1.0)]).unwrap();
+                set.call_method(
+                    "add",
+                    vec![
+                        promise
+                            .call_method("reject", vec![Js::str("sentinel")])
+                            .unwrap(),
+                    ],
+                )
+                .unwrap();
+                set
+            }
+            "noniterable" => Js::object(vec![]),
+            "next-throw" => {
+                let iterator = map.call_method("values", vec![]).unwrap();
+                iterator
+                    .define(
+                        "next",
+                        Js::function("next", |_, _| {
+                            Err(Thrown::error("RangeError", "iterator sentinel"))
+                        }),
+                    )
+                    .unwrap();
+                iterator
+            }
+            _ => unreachable!(),
+        };
+        let method = row["method"].as_str().unwrap();
+        let result = promise
+            .call_method(method, vec![input])
+            .expect("iterator failures reject a Promise, not the call");
+        assert!(
+            matches!(result, Js::Promise(_)),
+            "combinator returns Promise"
+        );
+        let actual = match settle(&runtime, result) {
+            Ok(value) => json!({"fulfilled":to_json(&value).unwrap()}),
+            Err(error) if error.value.is_string() => {
+                json!({"rejected":to_json(&error.value).unwrap()})
+            }
+            Err(error) => {
+                let error = error.to_exchange_error();
+                if error.name == "RangeError" {
+                    json!({"rejected":{"name":error.name,"message":error.message}})
+                } else {
+                    json!({"rejected":{"name":error.name}})
+                }
+            }
+        };
+        let expected = if row.get("fulfilled").is_some() {
+            json!({"fulfilled":row["fulfilled"]})
+        } else {
+            json!({"rejected":row["rejected"]})
+        };
+        assert_eq!(
+            actual,
+            to_json(&from_json(&expected)).unwrap(),
+            "Promise iterable source result: {row}"
+        );
+    }
+}
+
+#[test]
+fn promise_combinators_keep_pending_values_and_native_identity() {
+    for method in ["all", "allSettled"] {
+        let (runtime, shared) = scoped_globals();
+        let rt: Rc<dyn ExchangeRuntime> = runtime.clone();
+        let pending = Promise::pending(&rt);
+        let marker = Js::object(vec![]);
+        let nan = f64::from_bits(0x7ff8_0000_0000_0042);
+        let map = Js::new_map();
+        for (key, value) in [
+            ("pending", Js::Promise(pending.clone())),
+            ("negative-zero", Js::Number(-0.0)),
+            ("nan", Js::Number(nan)),
+        ] {
+            map.call_method("set", vec![Js::str(key), value]).unwrap();
+        }
+        let iterator = map.call_method("values", vec![]).unwrap();
+        let returned = shared
+            .globals
+            .get("Promise")
+            .unwrap()
+            .call_method(method, vec![iterator.clone()])
+            .unwrap();
+        assert!(
+            iterator
+                .call_method("next", vec![])
+                .unwrap()
+                .get("done")
+                .unwrap()
+                .truthy(),
+            "combinator consumes the iterator synchronously"
+        );
+        let Js::Promise(ref aggregate) = returned else {
+            panic!("expected Promise")
+        };
+        assert!(
+            aggregate.result().is_none(),
+            "Promise combinator waits for iterable member"
+        );
+        pending.settle(Ok(marker.clone()));
+        let result = settle(&runtime, returned).unwrap();
+        let values = result.array_values().unwrap();
+        assert_eq!(values.len(), 3);
+        let value = |i: usize| {
+            if method == "allSettled" {
+                values[i].get("value").unwrap()
+            } else {
+                values[i].clone()
+            }
+        };
+        assert!(value(0).same_reference(&marker));
+        assert_eq!(
+            value(1).to_number().unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert_eq!(value(2).to_number().unwrap().to_bits(), nan.to_bits());
+    }
+}
