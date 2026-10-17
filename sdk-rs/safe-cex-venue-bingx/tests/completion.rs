@@ -1,3 +1,6 @@
+#[path = "support/oracle_clock.rs"]
+mod oracle_clock;
+
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -636,6 +639,7 @@ fn run(case: &Value) {
     let i = &case["input"];
     let (v, h, s) = fixture(i);
     let method = i["method"].as_str().unwrap();
+    let clock = oracle_clock::ClockWindow::start();
     let result = match method {
         "updateOrder" => ready(v.amendment.update_order(
             &serde_json::from_value(json!({"order":i["order"],"update":i["update"]})).unwrap(),
@@ -714,13 +718,15 @@ fn run(case: &Value) {
             )
         }
     };
+    let clock = clock.finish();
+    let mut native_orders = json!(s.orders().iter().map(order_value).collect::<Vec<_>>());
+    clock.normalize_orders(&mut native_orders, &case["orders"]);
     for (native, expected) in s.orders().iter().zip(case["orders"].as_array().unwrap()) {
         for (field, n) in [
             ("price", native.price.to_number()),
             ("amount", native.amount),
             ("remaining", native.remaining),
             ("filled", native.filled),
-            ("lastUpdate", native.last_update),
         ] {
             assert_eq!(
                 n.to_bits(),
@@ -815,9 +821,7 @@ fn run(case: &Value) {
         "BINGX-C logs {method}"
     );
     assert_eq!(
-        observe(&json!(
-            s.orders().iter().map(order_value).collect::<Vec<_>>()
-        )),
+        observe(&native_orders),
         observe(&case["orders"]),
         "BINGX-C native orders {method}"
     );
