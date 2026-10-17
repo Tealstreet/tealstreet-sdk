@@ -338,6 +338,7 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
                     return Ok(d as usize);
                 }
                 let n = v.to_number()?.trunc();
+                let n = if n.is_nan() { 0.0 } else { n };
                 Ok(if n < 0.0 {
                     (len + n).max(0.0)
                 } else {

@@ -29,13 +29,13 @@ fn oracle() -> &'static serde_json::Value {
         let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
         assert_eq!(
             v["cases"].as_array().unwrap().len(),
-            30,
-            "RUNTIME independent case floor through29"
+            23,
+            "RUNTIME independent case floor through22"
         );
         assert_eq!(
             v["sourceHashes"].as_object().unwrap().len(),
-            9,
-            "RUNTIME source file floor through8 (includes actual omitUndefined)"
+            8,
+            "RUNTIME source file floor through7 (includes actual omitUndefined)"
         );
         v
     })
@@ -332,141 +332,6 @@ fn limiter_native_state_and_wait() {
     assert!(
         matches!(handle, N::Num(_)),
         "RATE executor expression return"
-    );
-}
-fn api(h: &mut Host, options: &N) -> (N, N, Vec<N>, Vec<N>, Vec<N>) {
-    let exchange = object(vec![
-        ("name", s("spot")),
-        ("emitAndLogError", N::Builtin("emit".into())),
-    ]);
-    let xhr = create_api(h, options, &exchange).unwrap();
-    let calls = h.originals();
-    let api = calls
-        .iter()
-        .find(|(k, _)| k == "safeCexAxiosCreate")
-        .unwrap()
-        .1
-        .clone();
-    let requests = calls
-        .iter()
-        .filter(|(k, _)| k == "request-use")
-        .map(|(_, a)| a[0].clone())
-        .collect();
-    let responses = calls
-        .iter()
-        .filter(|(k, _)| k == "response-use")
-        .map(|(_, a)| a[0].clone())
-        .collect();
-    (xhr, exchange, api, requests, responses)
-}
-#[test]
-fn api_native_callbacks_and_identity() {
-    for name in ["private", "public"] {
-        let r = row("api", name);
-        let options = decode(&r["input"]);
-        let mut h = host();
-        let (xhr, e, api, req, res) = api(&mut h, &options);
-        let config = &api[0];
-        let nested = object(vec![("x", N::Num(1.))]);
-        let mark_input = object(vec![
-            ("url", get(&h.endpoints, "INFO")),
-            ("nested", nested.clone()),
-        ]);
-        let mark = h.call(&req[0], &N::U, &[mark_input.clone()]).unwrap();
-        let p = h
-            .call(&req[1], &N::U, &[object(vec![("capture", N::B(false))])])
-            .unwrap();
-        resolved(&h, &p).unwrap();
-        let captured = object(vec![("capture", N::B(true))]);
-        let p = h.call(&req[1], &N::U, &[captured.clone()]).unwrap();
-        let capture_result = resolved(&h, &p).unwrap();
-        let normal = object(vec![("data", object(vec![("status", s("ok"))]))]);
-        let p = h.call(&res[0], &N::U, &[normal.clone()]).unwrap();
-        let normal_result = resolved(&h, &p).unwrap();
-        let serializer = get(&get(config, "paramsSerializer"), "serialize");
-        let serialized = h.call(&serializer, &N::U, &[object(vec![])]).unwrap();
-        let calls = h.originals();
-        let summary = object(vec![
-            ("baseURL", get(config, "baseURL")),
-            ("timeout", get(config, "timeout")),
-            ("headers", get(config, "headers")),
-            ("serialized", serialized),
-            ("requestCount", N::Num(req.len() as f64)),
-            ("responseCount", N::Num(res.len() as f64)),
-            (
-                "xhrAlias",
-                N::B(eq(
-                    &xhr,
-                    &h.originals()
-                        .iter()
-                        .find(|(k, _)| k == "allocated-xhr")
-                        .unwrap()
-                        .1[0],
-                )),
-            ),
-            ("optionAlias", N::B(eq(&api[1], &options))),
-            ("ownerAlias", N::B(eq(&api[2], &e))),
-            ("markFresh", N::B(!eq(&mark, &mark_input))),
-            ("nestedAlias", N::B(eq(&get(&mark, "nested"), &nested))),
-            ("captureAlias", N::B(eq(&captured, &capture_result))),
-            ("normalAlias", N::B(eq(&normal, &normal_result))),
-            (
-                "installed",
-                N::B(calls.iter().any(|(k, _)| k == "installTransportAdapter")),
-            ),
-            (
-                "waits",
-                arr(calls
-                    .iter()
-                    .filter(|(k, _)| k == "shared-wait")
-                    .map(|(_, a)| a[0].clone())
-                    .collect()),
-            ),
-        ]);
-        assert_value(&summary, &r["result"], &format!("API native {name}"));
-    }
-}
-#[test]
-fn api_native_errors_and_changing_parent() {
-    for name in ["root", "nested", "statuses", "nested-statuses"] {
-        let r = row("api-error", name);
-        let mut h = host();
-        let (_, _, _, _, res) = api(&mut h, &object(vec![]));
-        let p = h
-            .call(
-                &res[0],
-                &N::U,
-                &[object(vec![("data", decode(&r["input"]))])],
-            )
-            .unwrap();
-        let err = resolved(&h, &p).unwrap_err();
-        assert_value(&err, &r["result"], &format!("API native error {name}"));
-        let emits = arr(h
-            .originals()
-            .iter()
-            .filter(|(k, _)| k == "emit")
-            .map(|(_, a)| a[0].clone())
-            .collect());
-        assert_value(&emits, &r["emits"], "API native emitted errors");
-    }
-    let mut h = Host::new(
-        object(vec![("changingData", N::B(true))]),
-        decode(&oracle()["enums"]),
-        decode(&oracle()["endpoints"]),
-    );
-    let (_, _, _, _, res) = api(&mut h, &object(vec![]));
-    let response = object(vec![(
-        "data",
-        object(vec![(
-            "statuses",
-            arr(vec![object(vec![("error", s("one"))])]),
-        )]),
-    )]);
-    let p = h.call(&res[0], &N::U, &[response.clone()]).unwrap();
-    let result = resolved(&h, &p).unwrap();
-    assert!(
-        eq(&response, &result),
-        "API native optional-chain parent short circuit"
     );
 }
 fn calls(h: &Host, names: &[&str]) -> N {

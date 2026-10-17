@@ -1388,7 +1388,9 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
             config_extensions: [(
                 "grvtCookie".into(),
-                safe_cex_types::retained_json::RetainedJsonInput::Text("gravity=bridge".into()),
+                safe_cex_types::retained_json::RetainedJsonInput::Text(
+                    "gravity=bridge".encode_utf16().collect(),
+                ),
             )]
             .into(),
             ..Default::default()
@@ -4019,6 +4021,7 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
         );
         let data = Js::object(vec![
             ("missing", Js::Undefined),
+            ("text", Js::utf16(&[116, 112, 32, 0xd800])),
             ("nan", Js::Number(f64::from_bits(0x7ff8000000000042))),
             ("infinity", Js::Number(f64::INFINITY)),
             ("negativeZero", Js::Number(-0.0)),
@@ -4027,6 +4030,8 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
                 Js::array(vec![Js::Undefined, Js::Number(f64::NEG_INFINITY)]),
             ),
         ]);
+        data.define_key(&[0xdfff], Js::utf16(&[0xd800, 120]))
+            .unwrap();
         let result = settle(
             &runtime,
             xhr.call_method(
@@ -4054,6 +4059,24 @@ fn retained_adapter_config_preserves_native_values_at_terminal_and_effective_con
             from_retained_input(seen[0].config_extensions["nativeData"].clone()),
             effective.get("nativeData").unwrap(),
         ] {
+            assert_eq!(
+                native.own_entries().unwrap().len(),
+                7,
+                "all retained members survive"
+            );
+            assert_eq!(
+                native.get("text").unwrap().to_js_string().unwrap().as_ref(),
+                &[116, 112, 32, 0xd800]
+            );
+            assert_eq!(
+                native
+                    .get_property(&Js::utf16(&[0xdfff]))
+                    .unwrap()
+                    .to_js_string()
+                    .unwrap()
+                    .as_ref(),
+                &[0xd800, 120]
+            );
             assert!(native.has_own("missing"));
             assert!(native.get("missing").unwrap().is_undefined());
             assert_eq!(
