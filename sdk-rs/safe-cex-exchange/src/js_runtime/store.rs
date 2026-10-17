@@ -19,6 +19,23 @@ fn id_of(target: &Js) -> Result<String, Thrown> {
     .to_display())
 }
 
+// Source findIndex/Map lookups compare to the native model's string id without coercion.
+fn strict_id_of(target: &Js) -> Result<Option<String>, Thrown> {
+    Ok(match target.get("id")? {
+        Js::String(id) => String::from_utf16(&id).ok(),
+        _ => None,
+    })
+}
+
+// Tickers use a JS object-key lookup, rather than strict id equality.
+fn property_id_of(target: &Js) -> Result<Option<String>, Thrown> {
+    let id = target.get("id")?;
+    if matches!(id, Js::SymbolIterator) {
+        return Ok(None);
+    }
+    Ok(String::from_utf16(&id.to_js_string()?).ok())
+}
+
 fn mutation(e: safe_cex_store::StoreMutationError) -> Thrown {
     Thrown::from(ExchangeError::from(e))
 }
@@ -173,7 +190,13 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updatePosition",
         Rc::new(|st, a| {
-            st.update_position(&id_of(&arg(&a, 0))?, &position_patch(&arg(&a, 1))?)
+            if st.positions().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_position(&id, &position_patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -234,7 +257,13 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateOrder",
         Rc::new(|st, a| {
-            st.update_order(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
+            if st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_order(&id, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -242,9 +271,14 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateOrderStatus",
         Rc::new(|st, a| {
+            if st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
             let status: OrderStatus = to_typed(&arg(&a, 1))?;
-            st.update_order_status(&id_of(&arg(&a, 0))?, status)
-                .map_err(mutation)?;
+            st.update_order_status(&id, status).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -300,7 +334,13 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "removeOrder",
         Rc::new(|st, a| {
-            st.remove_order(&id_of(&arg(&a, 0))?).map_err(mutation)?;
+            if st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.remove_order(&id).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -316,7 +356,10 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateTicker",
         Rc::new(|st, a| {
-            st.update_ticker(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
+            let Some(id) = property_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_ticker(&id, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -324,11 +367,11 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateMarket",
         Rc::new(|st, a| {
-            st.update_market(
-                &id_of(&arg(&a, 0))?,
-                &option_patch::<OptionTerms>(&arg(&a, 1))?,
-            )
-            .map_err(mutation)?;
+            let Some(id) = strict_id_of(&arg(&a, 0))? else {
+                return Ok(Js::Undefined);
+            };
+            st.update_market(&id, &option_patch::<OptionTerms>(&arg(&a, 1))?)
+                .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
