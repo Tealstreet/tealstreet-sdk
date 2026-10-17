@@ -324,7 +324,7 @@ fn assert_order(order: &Order, source: &Value) {
     let reduce = source_field(source, "reduceOnly");
     assert_eq!(reduce["kind"], "boolean");
     assert_eq!(
-        Some(order.reduce_only),
+        order.reduce_only.into_value(),
         reduce["value"].as_bool(),
         "order_native_reduce_only"
     );

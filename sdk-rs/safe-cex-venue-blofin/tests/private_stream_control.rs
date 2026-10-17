@@ -74,7 +74,7 @@ fn order_assert(order: &Order, e: &Value) {
     assert_eq!(order.status, OrderStatus::Open);
     assert_eq!(order.r#type, OrderType::Limit);
     assert_eq!(order.side, OrderSide::Buy);
-    assert!(!order.reduce_only);
+    assert_eq!(order.reduce_only, false);
     for (a, key) in [
         (order.price.to_number(), "price"),
         (order.amount, "amount"),

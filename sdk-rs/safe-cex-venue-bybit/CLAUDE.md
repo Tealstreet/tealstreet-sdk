@@ -814,3 +814,8 @@ Spot's missing-market intrinsic constructs the source message before the caller
 wraps it in Error. Real placement witnesses cover ordinary limit and full-position
 SL/TP routes. The REST/private-frame unknown stopOrderType witness retains all
 three unlisted stop kinds as own Undefined through the ModelField Store bridge.
+
+Submission checks unknown outcome only for one payload carrying a caller client ID.
+The real HTTP regression sends a rejected first split lot with a non-coercible
+error code and verifies later lots still place; a single order without a caller
+ID also skips classification, while a caller-ID control still reaches it.
