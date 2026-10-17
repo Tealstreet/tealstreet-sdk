@@ -200,6 +200,80 @@ fn fetch_positions_e2e() {
     assert_eq!(positions[0].entry_price, 100.0);
     assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 1);
 }
+fn response_array_cases(row: Value) -> Vec<(&'static str, Value, bool)> {
+    let rows = json!([row]);
+    vec![
+        ("array", rows.clone(), true),
+        ("data", json!({"data":rows}), true),
+        ("items", json!({"items":rows}), false),
+        ("list", json!({"list":rows}), false),
+        ("rows", json!({"rows":rows}), false),
+        ("data_items", json!({"data":{"items":rows}}), false),
+        ("data_list", json!({"data":{"list":rows}}), false),
+        ("data_rows", json!({"data":{"rows":rows}}), false),
+    ]
+}
+#[test]
+fn positions_response_array_keys_match_source() {
+    let row = json!({"symbol":"BTCUSDT","positionSide":"LONG","size":"2","openValue":"200","leverage":"20","marginType":"CROSS","updatedTime":1700000000000.0});
+    for (name, payload, accepted) in response_array_cases(row) {
+        let h = harness(options(), |http| {
+            http.ok("GET", endpoint("POSITIONS"), payload);
+            script(http);
+        });
+        seed(&h);
+        let positions = h
+            .drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()])))
+            .unwrap();
+        assert!(!positions.is_empty(), "{name}: retain fake zero positions");
+        assert!(
+            positions
+                .iter()
+                .all(|position| position.symbol == "BTCUSDT")
+        );
+        let open = positions
+            .iter()
+            .filter(|position| position.contracts != 0.0)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            open.len(),
+            usize::from(accepted),
+            "{name}: source array admission"
+        );
+        if accepted {
+            assert_eq!(open[0].contracts, 2.0, "{name}");
+            assert_eq!(open[0].entry_price, 100.0, "{name}");
+        }
+        assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 1, "{name}");
+    }
+}
+#[test]
+fn fills_response_array_keys_match_source() {
+    let row = json!({"symbol":"BTCUSDT","id":"fill-1","orderId":"order-1","side":"BUY","price":"101.5","qty":"2","time":1700000000000.0});
+    for (name, payload, accepted) in response_array_cases(row) {
+        let h = harness(options(), |http| {
+            http.ok("GET", endpoint("USER_TRADES"), payload);
+            script(http);
+        });
+        seed(&h);
+        let fills = h
+            .drive(h.venue().fetch_historical_fills(
+                serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(
+            fills.len(),
+            usize::from(accepted),
+            "{name}: source array admission"
+        );
+        if accepted {
+            assert_eq!(fills[0].id.as_deref(), Some("fill-1"), "{name}");
+            assert_eq!(fills[0].price, 101.5, "{name}");
+            assert_eq!(fills[0].qty, 2.0, "{name}");
+        }
+        assert_eq!(h.http.calls(endpoint("USER_TRADES")).len(), 1, "{name}");
+    }
+}
 #[test]
 fn fetch_orders_e2e() {
     let h = setup();
@@ -250,6 +324,41 @@ fn change_position_mode_e2e() {
     assert!(h.store.options().is_hedged);
 }
 #[test]
+fn rejected_order_leg_keeps_successful_orders_without_error_event() {
+    let h = harness(options(), |http| {
+        http.route(
+            "GET",
+            endpoint("OPEN_ALGO_ORDERS"),
+            400,
+            json!({"msg":"algo endpoint unavailable"}),
+        );
+        script(http);
+    });
+    seed(&h);
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, value: &Value| {
+            captured.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let orders = h
+        .drive(h.venue().fetch_orders(None))
+        .expect("allSettled retains the successful order leg");
+    assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), 1);
+    assert_eq!(h.http.calls(endpoint("OPEN_ALGO_ORDERS")).len(), 1);
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, "native-9");
+    assert!(
+        errors.borrow().is_empty(),
+        "source allSettled must swallow rejected legs, emitted {:?}",
+        errors.borrow()
+    );
+}
+
+#[test]
 fn place_order_e2e() {
     let h = setup();
     let ids = h
@@ -263,6 +372,152 @@ fn place_order_e2e() {
     assert_eq!(body(&calls[0])["symbol"], "BTCUSDT");
     assert_eq!(body(&calls[0])["newClientOrderId"], "synthetic-client-1");
 }
+#[test]
+fn accepted_post_only_placement_updates_the_real_store() {
+    for has_stored_order in [false, true] {
+        let h = harness(options(), |http| {
+            // Queue the accepted response before the generic fallback fixture.
+            http.ok("POST", endpoint("ORDER"), json!({"orderId":"1008"}));
+            script(http);
+        });
+        seed(&h);
+        if has_stored_order {
+            let mut existing = order();
+            existing.id = "1008".into();
+            existing.time_in_force = ModelField::Value(OrderTimeInForce::GoodTillCancel);
+            Store::update(
+                h.store.as_ref(),
+                serde_json::from_value(json!({"orders":[existing]})).unwrap(),
+                false,
+            )
+            .unwrap();
+        }
+        let mut opts = place();
+        opts.time_in_force = Some(OrderTimeInForce::PostOnly);
+        let outcome = h.drive(Box::pin(
+            h.venue().base().place_order(h.exchange.as_ref(), opts),
+        ));
+        let calls = h.http.calls(endpoint("ORDER"));
+        assert_eq!(
+            calls.len(),
+            1,
+            "venue accepted the actual placement before local Store update"
+        );
+        assert_eq!(body(&calls[0])["timeInForce"], "POST_ONLY");
+        let ids = outcome.expect("accepted PostOnly placement must resolve after Store update");
+        assert_eq!(ids, ["1008"]);
+        let stored = h.store.orders();
+        assert_eq!(stored.len(), usize::from(has_stored_order));
+        if has_stored_order {
+            assert_eq!(
+                stored[0].time_in_force,
+                ModelField::Value(OrderTimeInForce::PostOnly)
+            );
+            assert_eq!(stored[0].filled, 0.25, "only patch the source's TIF field");
+        }
+    }
+}
+
+#[test]
+fn accepted_post_only_batch_updates_only_the_matching_store_row() {
+    let h = harness(options(), |http| {
+        http.ok(
+            "POST",
+            endpoint("BATCH_ORDERS"),
+            json!([
+                {"orderId":"1009","clientOrderId":"synthetic-client-2","success":true},
+                {"orderId":"1008","clientOrderId":"synthetic-client-1","success":true}
+            ]),
+        );
+        script(http);
+    });
+    seed(&h);
+    let rows: Vec<_> = ["1008", "1009"]
+        .into_iter()
+        .map(|id| {
+            let mut row = order();
+            row.id = id.into();
+            row.time_in_force = ModelField::Value(OrderTimeInForce::GoodTillCancel);
+            row
+        })
+        .collect();
+    Store::update(
+        h.store.as_ref(),
+        serde_json::from_value(json!({"orders":rows})).unwrap(),
+        false,
+    )
+    .unwrap();
+    let mut post_only = place();
+    post_only.time_in_force = Some(OrderTimeInForce::PostOnly);
+    let mut regular = place();
+    regular.client_order_id = Some("synthetic-client-2".into());
+    let outcome = h.drive(Box::pin(
+        h.venue()
+            .base()
+            .place_orders(h.exchange.as_ref(), vec![post_only, regular]),
+    ));
+    let calls = h.http.calls(endpoint("BATCH_ORDERS"));
+    assert_eq!(calls.len(), 1, "venue accepted both actual batch rows");
+    assert_eq!(body(&calls[0])["batchOrders"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        outcome.expect("accepted PostOnly batch must resolve after Store update"),
+        ["1008", "1009"]
+    );
+    let stored = h.store.orders();
+    assert_eq!(stored.len(), 2);
+    assert_eq!(
+        stored
+            .iter()
+            .find(|o| o.id == "1008")
+            .unwrap()
+            .time_in_force,
+        ModelField::Value(OrderTimeInForce::PostOnly)
+    );
+    assert_eq!(
+        stored
+            .iter()
+            .find(|o| o.id == "1009")
+            .unwrap()
+            .time_in_force,
+        ModelField::Value(OrderTimeInForce::GoodTillCancel)
+    );
+}
+
+#[test]
+fn accepted_tpsl_amendment_updates_the_real_store_price() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let h = setup();
+        h.http.ok(
+            "POST",
+            endpoint("MODIFY_TP_SL_ORDER"),
+            json!({"success":true}),
+        );
+        let mut protective = order();
+        protective.r#type = ModelField::Value(kind);
+        Store::update(
+            h.store.as_ref(),
+            serde_json::from_value(json!({"orders":[protective.clone()]})).unwrap(),
+            false,
+        )
+        .unwrap();
+        let update =
+            serde_json::from_value(json!({"order":protective,"update":{"price":103.5}})).unwrap();
+        let outcome = h.drive(h.venue().update_order(update));
+        let calls = h.http.calls(endpoint("MODIFY_TP_SL_ORDER"));
+        assert_eq!(calls.len(), 1, "venue accepted the actual TP/SL amendment");
+        assert_eq!(body(&calls[0])["triggerPrice"], "103.5");
+        assert_eq!(
+            outcome.expect("accepted TP/SL amendment must resolve after Store update"),
+            ["native-9"]
+        );
+        let stored = h.store.orders();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].price, ModelField::Value(103.5));
+        assert_eq!(stored[0].amount, 2.0);
+        assert_eq!(stored[0].r#type, ModelField::Value(kind));
+    }
+}
+
 #[test]
 fn cancel_orders_e2e() {
     let h = setup();
@@ -703,4 +958,131 @@ fn private_account_frame_refreshes_balance_from_rest() {
     assert_eq!(h.store.balance().total, 150.0);
     assert_eq!(h.store.balance().free, 120.0);
     assert_eq!(h.store.balance().upnl, 3.0);
+}
+
+#[test]
+fn trait_nuke_positions_closes_unseen_positions_and_replaces_snapshot() {
+    let h = harness(options(), |http| {
+        script(http);
+        http.ok("POST", endpoint("CLOSE_POSITIONS"), json!({}));
+        http.ok("GET", endpoint("POSITIONS"), json!([]));
+    });
+    seed(&h);
+    // Consume the initial position page, leaving an empty close-confirmation page.
+    h.drive(h.venue().fetch_positions(None)).unwrap();
+    assert!(h.store.positions().is_empty());
+    expect_ok(h.drive(h.venue().nuke_positions(0)));
+    let calls = h.http.calls(endpoint("CLOSE_POSITIONS"));
+    assert_eq!(
+        calls.len(),
+        1,
+        "close-all reaches positions absent from the local Store"
+    );
+    assert_eq!(body(&calls[0]), json!({}));
+    assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 2);
+    assert!(!h.store.positions().is_empty());
+    assert!(h.store.positions().iter().all(|p| p.contracts == 0.0));
+    assert!(h.http.calls(endpoint("ORDER")).is_empty());
+}
+
+#[test]
+fn trait_nuke_closes_before_cancelling_both_order_families() {
+    let h = harness(options(), |http| {
+        script(http);
+        http.ok("POST", endpoint("CLOSE_POSITIONS"), json!({}));
+    });
+    seed(&h);
+    expect_ok(h.drive(h.venue().nuke(0)));
+    let calls = h.http.calls(endpoint("CLOSE_POSITIONS"));
+    assert_eq!(
+        calls.len(),
+        1,
+        "trait nuke uses the venue close-all endpoint"
+    );
+    let sent = h.http.sent.lock().unwrap();
+    let paths = sent.iter().map(|r| r.url.as_str()).collect::<Vec<_>>();
+    let close = paths
+        .iter()
+        .position(|p| *p == endpoint("CLOSE_POSITIONS"))
+        .unwrap();
+    let positions = paths
+        .iter()
+        .position(|p| *p == endpoint("POSITIONS"))
+        .unwrap();
+    let orders = paths
+        .iter()
+        .position(|p| *p == endpoint("CANCEL_ALL_OPEN_ORDERS"))
+        .unwrap();
+    let algo = paths
+        .iter()
+        .position(|p| *p == endpoint("CANCEL_ALL_ALGO_ORDERS"))
+        .unwrap();
+    assert!(close < positions && positions < orders && positions < algo);
+    drop(sent);
+    assert!(h.http.calls(endpoint("ORDER")).is_empty());
+}
+
+#[test]
+fn private_orders_frame_updates_the_real_store() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let mut row = raw_order();
+    row["orderId"] = json!("socket-order-42");
+    row["price"] = json!("123.5");
+    let socket = h.venue().base().get_private_sockets()[0].clone();
+    socket
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"orders","d":[row]}).to_string(),
+        ))
+        .unwrap();
+    let orders = h.store.orders();
+    let actual = orders.iter().find(|o| o.id == "socket-order-42").unwrap();
+    assert_eq!(actual.price, 123.5);
+    assert_eq!(actual.amount, 2.0);
+    assert_eq!(actual.filled, 0.25);
+    drop(orders);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_positions_frame_updates_the_real_store() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let socket = h.venue().base().get_private_sockets()[0].clone();
+    socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(
+        json!({"e":"positions","d":[{"symbol":"BTCUSDT","positionSide":"LONG","size":"3","openValue":"330","leverage":"20","marginType":"CROSS","updatedTime":1700000000001.0}]}).to_string(),
+    )).unwrap();
+    let positions = h.store.positions();
+    let actual = positions.iter().find(|p| p.contracts == 3.0).unwrap();
+    assert_eq!(actual.symbol, "BTCUSDT");
+    assert_eq!(actual.entry_price, 110.0);
+    drop(positions);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_account_frame_refreshes_balance_in_the_real_store() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    assert_eq!(h.store.balance().total, 150.0);
+    h.http.replace(
+        "GET",
+        endpoint("BALANCE"),
+        json!([{"asset":"USDT","balance":"285","availableBalance":"240","unrealizePnl":"5"}]),
+    );
+    let socket = h.venue().base().get_private_sockets()[0].clone();
+    socket
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"account","d":[]}).to_string(),
+        ))
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(251.0);
+    assert_eq!(h.store.balance().total, 285.0);
+    assert_eq!(h.store.balance().free, 240.0);
+    assert_eq!(h.store.balance().upnl, 5.0);
+    h.venue().dispose().unwrap();
 }

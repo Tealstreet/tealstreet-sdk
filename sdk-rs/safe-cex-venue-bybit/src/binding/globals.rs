@@ -34,6 +34,47 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
             Ok(request)
         }),
     );
+    let income_rt = rt.clone();
+    def(
+        "fetchBybitIncomeHistory",
+        Js::function("fetchBybitIncomeHistory", move |_, args| {
+            let rt = scope_of(&income_rt)?;
+            Ok(crate::ledger_history::fetch_bybit_income_history(
+                std::rc::Rc::new(rt),
+                arg(&args, 0),
+                arg(&args, 1),
+            ))
+        }),
+    );
+    let range_rt = rt.clone();
+    def(
+        "fetchBybitIncomeHistoryRange",
+        Js::function("fetchBybitIncomeHistoryRange", move |_, args| {
+            let rt = scope_of(&range_rt)?;
+            Ok(crate::ledger_history::fetch_bybit_income_history_range(
+                std::rc::Rc::new(rt),
+                arg(&args, 0),
+                arg(&args, 1),
+                arg(&args, 2),
+                arg(&args, 3),
+            ))
+        }),
+    );
+    def(
+        "splitTimeRange",
+        Js::function("splitTimeRange", |_, args| {
+            Ok(Js::array(
+                safe_cex_candle_cache::calendar::split_time_range(
+                    arg(&args, 0).to_number()?,
+                    arg(&args, 1).to_number()?,
+                    arg(&args, 2).to_number()?,
+                )
+                .iter()
+                .map(super::value::from_json)
+                .collect(),
+            ))
+        }),
+    );
     // utils/virtualClock: the one clock the signed clients also read.
     let start_clock = clock.clone();
     let start_rt = rt.clone();
