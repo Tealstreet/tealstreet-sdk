@@ -406,6 +406,15 @@ pub fn harness_as(
     script: impl FnOnce(&Wire),
 ) -> Harness {
     configured_harness(name, options, None, script)
+        .expect("BybitExchange constructs from real options")
+}
+
+pub fn try_harness_as(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    script: impl FnOnce(&Wire),
+) -> Result<Harness, ExchangeError> {
+    configured_harness(name, options, None, script)
 }
 
 pub fn harness_with_external(
@@ -414,6 +423,7 @@ pub fn harness_with_external(
     script: impl FnOnce(&Wire),
 ) -> Harness {
     configured_harness(ExchangeName::Bybit, options, Some(factory), script)
+        .expect("BybitExchange constructs from real options")
 }
 
 #[allow(
@@ -427,7 +437,7 @@ fn configured_harness(
         safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
     >,
     script: impl FnOnce(&Wire),
-) -> Harness {
+) -> Result<Harness, ExchangeError> {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(START_MS);
     let wire = Arc::new(Wire::default());
@@ -451,14 +461,13 @@ fn configured_harness(
             external_public_data,
             relay_enabled: false,
         },
-    )
-    .expect("BybitExchange constructs from real options");
-    Harness {
+    )?;
+    Ok(Harness {
         runtime,
         wire,
         store,
         exchange,
-    }
+    })
 }
 
 impl Harness {
