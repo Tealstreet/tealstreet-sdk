@@ -190,6 +190,17 @@ impl From<safe_cex_num::JsCoercionError> for ExchangeError {
 }
 impl From<safe_cex_transport::RestFailure> for ExchangeError {
     fn from(error: safe_cex_transport::RestFailure) -> Self {
+        if let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            error.transport_error.as_deref()
+            && let Some(cause) = origin
+                .error()
+                .downcast_ref::<crate::js_runtime::value::owned::OwnedCallbackError>()
+        {
+            let mut projected =
+                crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error();
+            projected.origin = Some(ExchangeErrorOrigin::new(error));
+            return projected;
+        }
         let mut projected = Self::new(error.message.clone());
         if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =
             error.transport_error.as_deref()

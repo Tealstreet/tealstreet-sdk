@@ -54,10 +54,13 @@ The boundary retains `NaN`, infinities, negative zero, own `undefined` propertie
 UTF-16 strings. No JSON text API is accepted. Proxy-token callbacks resolve strings.
 The owned tree supports structured data, arrays and BigInts; cycles and functions
 reject visibly. Native builds require Node-API 6 or later.
-Emitter payloads and error codes still use the shared core’s existing JSON models;
-this boundary forwards those models without reconstructing lost values.
+Emitter payloads and error codes retain the shared core’s JS values through owned
+capture. Hosted signer throws and rejected promises preserve name, message and
+code, including own undefined and nonfinite or structured code values.
 `tests/native-account-values.test.mjs` and the Rust `native_account_values`
 target exercise actual signed Binance reads containing nonfinite prices.
+The signer-rejection Node and Rust targets drive failed signing through actual
+Binance accounts and verify that no terminal HTTP request is sent.
 
 Store delivery uses the shared worker payload preparer and leading/trailing
 throttle (250ms times `tuning.dataUpdateThrottleMultiplier`). Startup posts a

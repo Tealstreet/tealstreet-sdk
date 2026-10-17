@@ -4,10 +4,13 @@
 //! slices and signer/token requests reach JS through ThreadsafeFunctions.
 // napi registers exports at load time; the unit-test build has no registration.
 #![cfg_attr(test, allow(dead_code))]
-use crate::native_value::JsData;
+use crate::{
+    native_callback::{Callback, Request},
+    native_value::JsData,
+};
 use napi::{
     Env, Status,
-    bindgen_prelude::{JsObjectValue, Promise, PromiseRaw, ToNapiValue, Unknown},
+    bindgen_prelude::{JsObjectValue, PromiseRaw, ToNapiValue, Unknown},
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use napi_derive::napi;
@@ -26,7 +29,6 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
-type Request = ThreadsafeFunction<JsData, Promise<JsData>, JsData, Status, false>;
 type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false>;
 type Reply<T> = oneshot::Sender<Result<T, NativeValue>>;
 
@@ -183,14 +185,13 @@ fn request(
             return Err(closed_error());
         }
         let mut operation = pin!(async move {
-            let failed = |message: String| host_error(&message);
             let callback = callback.upgrade().ok_or_else(closed_error)?;
             let pending = callback
                 .call_async_catch(payload)
                 .await
-                .map_err(|e| failed(e.to_string()))?;
+                .map_err(|error| host_error(&error.reason))?;
             drop(callback);
-            pending.await.map_err(|e| failed(e.to_string()))
+            pending.await
         });
         let mut closing = pin!(closed.changed());
         poll_fn(|context| {
@@ -323,9 +324,15 @@ pub fn native_account_open<'env>(
     init: NativeAccountInit,
     on_event: Notify,
     on_store: Notify,
-    sign: Option<Request>,
-    proxy_token: Option<Request>,
+    sign: Option<Callback<'env>>,
+    proxy_token: Option<Callback<'env>>,
 ) -> napi::Result<PromiseRaw<'env, u32>> {
+    let sign = sign
+        .map(|callback| crate::native_callback::wrap(env, callback))
+        .transpose()?;
+    let proxy_token = proxy_token
+        .map(|callback| crate::native_callback::wrap(env, callback))
+        .transpose()?;
     settle(env, move |reply| Command::Open {
         init,
         sign,

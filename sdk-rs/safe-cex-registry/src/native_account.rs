@@ -108,6 +108,11 @@ fn error_text(error: &NativeValue) -> String {
         _ => format!("{error:?}"),
     }
 }
+fn callback_error(error: NativeValue) -> TransportError {
+    TransportError::Rejected(safe_cex_transport::provider::TransportErrorOrigin::new(
+        safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError::new(error),
+    ))
+}
 
 impl safe_cex_transport::signing::RemoteSigner for HostSigner {
     fn sign(&self, request: RemoteSignerRequest) -> TransportFuture<'_, RemoteSignerResponse> {
@@ -115,9 +120,7 @@ impl safe_cex_transport::signing::RemoteSigner for HostSigner {
         Box::pin(async move {
             let wire =
                 NativeValue::encode(&request).map_err(|e| TransportError::Host(e.to_string()))?;
-            let response = sign(wire)
-                .await
-                .map_err(|error| TransportError::Host(error_text(&error)))?;
+            let response = sign(wire).await.map_err(callback_error)?;
             match request {
                 RemoteSignerRequest::Http(_) => response.decode().map(RemoteSignerResponse::Http),
                 RemoteSignerRequest::WsAuth { .. } => {
@@ -143,9 +146,7 @@ impl safe_cex_transport::signing::RemoteSigner for HostSigner {
                     "signing request must be an object".into(),
                 ));
             }
-            let response = sign(wire)
-                .await
-                .map_err(|error| TransportError::Host(error_text(&error)))?;
+            let response = sign(wire).await.map_err(callback_error)?;
             response
                 .decode()
                 .map_err(|error| TransportError::Host(error.to_string()))
