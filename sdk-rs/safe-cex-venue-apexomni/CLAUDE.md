@@ -467,3 +467,7 @@ signOrder wrapper cases and initialization; the retained outputs match the
 pre-deletion corpus. Twenty-four fake transaction orchestration cases and one
 hundred withdrawal-only precision cases were retired. Existing native placement,
 private frames, hosted signing, lifecycle, packing and signature proofs remain.
+
+Truthy non-boolean Order.reduceOnly is a maintainer-approved per-row refusal.
+The mapper warns with its field and original value, returning no orders for that
+row so valid surrounding REST/private rows continue; it never coerces the flag.

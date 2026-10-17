@@ -125,7 +125,24 @@ pub fn fetch_markets<F: Future<Output = Result<Value, ExchangeError>>>(
                 .ok_or_else(|| error("TypeError", "response.data.r.map is not a function"))?;
             let markets = rows
                 .iter()
-                .map(project_instrument)
+                .enumerate()
+                .map(|(index, inst)| {
+                    project_instrument(inst).map(|result| {
+                        result.map_err(|cause| {
+                            let field = |key| {
+                                inst.get(key)
+                                    .map_or_else(|| "undefined".into(), Value::to_string)
+                            };
+                            format!(
+                                "Refused GRVT market row {index} id={}: base={} quote={}: {}",
+                                field("i"),
+                                field("b"),
+                                field("q"),
+                                cause.message
+                            )
+                        })
+                    })
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             log(
                 &format!("Fetched {} GRVT markets", markets.len()),
@@ -135,7 +152,16 @@ pub fn fetch_markets<F: Future<Output = Result<Value, ExchangeError>>>(
         }
         .await;
         match source_result {
-            Ok(markets) => markets.into_iter().collect(),
+            Ok(markets) => {
+                let mut accepted = Vec::with_capacity(markets.len());
+                for market in markets {
+                    match market {
+                        Ok(market) => accepted.push(market),
+                        Err(message) => log(&message, LogSeverity::Warning)?,
+                    }
+                }
+                Ok(accepted)
+            }
             Err(cause) => {
                 log(
                     &format!("Error fetching markets: {}", cause.js_error_string()),

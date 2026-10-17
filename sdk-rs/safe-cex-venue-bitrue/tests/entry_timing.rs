@@ -68,7 +68,11 @@ fn native_entry_phases_match_actual_typescript() {
     let calls = Cell::new(0);
     let polls = Cell::new(0);
     let before = store.balance_handle();
-    let future = account_reads::fetch_balance(&store, || Ok(request(&calls, &polls, None)));
+    let future = account_reads::fetch_balance(
+        &store,
+        || Ok(request(&calls, &polls, None)),
+        |warning| panic!("unexpected refusal: {warning}"),
+    );
     assert_eq!(calls.get(), 1, "ENTRY-balance");
     assert_eq!(polls.get(), 0, "ENTRY-BALANCE-NO-POLL");
     let balance = ready(future).unwrap();
