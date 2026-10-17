@@ -20,6 +20,12 @@ fn strict_id_of(target: &Js) -> Result<Option<String>, Thrown> {
 // Tickers use a JS object-key lookup, rather than strict id equality.
 fn property_id_of(target: &Js) -> Result<Option<String>, Thrown> {
     let id = target.get("id")?;
+    // ToPropertyKey first uses the string hint, then preserves Symbol keys.
+    let id = if matches!(id, Js::Object(_) | Js::Function(_)) {
+        id.ordinary_to_primitive(["toString", "valueOf"])?
+    } else {
+        id
+    };
     if matches!(id, Js::SymbolIterator) {
         return Ok(None);
     }

@@ -1344,7 +1344,7 @@ JS `updatePositions` keeps the maintained adaptive lookup: strict IDs for a
 single update or stored position, property-key coercion only when both counts
 exceed one. It resolves every selector before patches, preserves unmatched rows
 as `None` in the Store batch, and avoids reading patches for unmatched IDs.
-`tests/js_store_position_batch_ids.rs` compares156 maintained Store cases with
+`tests/js_store_position_batch_ids.rs` compares168 maintained Store cases with
 real DefaultStore, including empty, single, distinct and duplicate-ID states.
 
 The runtime JSON builtin and default encoded-HTTP response parser decode directly

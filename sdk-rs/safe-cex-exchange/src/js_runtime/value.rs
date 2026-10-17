@@ -403,7 +403,7 @@ impl Js {
         }
         self.intrinsic_string()
     }
-    fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
+    pub(super) fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
         for name in names {
             let declared = self.has_property(&utf16(name));
             // None is the value model's implicit stock prototype. An
