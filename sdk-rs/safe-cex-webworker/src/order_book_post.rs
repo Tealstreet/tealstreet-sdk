@@ -1,5 +1,5 @@
 //! Order-book posts retain binary64 until the host structured-clone sink.
-use crate::payload::{StoreWorkerOp, StoreWorkerPayload};
+use crate::payload::StoreWorkerOp;
 use indexmap::IndexMap;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::JsJsonValue;
@@ -121,18 +121,15 @@ impl OrderBookWorkerPost {
         }
     }
 }
-type WorkerPost = Rc<dyn Fn(StoreWorkerPayload) -> Result<(), ExchangeError>>;
 type BookPost = Rc<dyn Fn(OrderBookWorkerPost) -> Result<(), ExchangeError>>;
-/// Both dependencies are mandatory. A book sink must perform structured clone
-/// (or bind host postMessage); JSON encoding cannot implement that dependency.
+/// The mandatory book sink performs structured clone or binds postMessage.
 #[derive(Clone)]
 pub struct OrderBookPost {
-    pub(crate) worker: WorkerPost,
     pub(crate) book: BookPost,
 }
 impl OrderBookPost {
-    pub fn new(worker: WorkerPost, book: BookPost) -> Self {
-        Self { worker, book }
+    pub fn new(book: BookPost) -> Self {
+        Self { book }
     }
 }
 /// Leaf failures keep their original Store variant and subscriber cause.

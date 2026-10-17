@@ -239,8 +239,8 @@ BaseExchange is shared by Rc with external data providers; constructor and API
 oracles retain their original hosts and independent source comparisons.
 
 Create a fresh ProductionHost from BreakoutDependencies for each account. Its
-HTTP host must contain the selected transport; install_transport is a required
-fallible callback invoked at the source tunnel-install point. local_to_utc is
+HTTP host supplies terminal I/O. The shared client factory selects transport
+and records outcomes; the source tunnel-install point installs its adapter. local_to_utc is
 an explicit host policy for offset-less legacy dates. ProductionHost rejects
 reuse for a different live account. No source product enablement is changed.
 
