@@ -551,3 +551,41 @@ fn income_page_and_range_use_bound_post_normalizer_and_shared_pager() {
     assert_eq!(body(&calls[1])["startTime"], 1700000000000.0);
     assert_eq!(body(&calls[1])["incomeType"], "FUNDING_FEE");
 }
+
+#[test]
+fn trait_fetch_leverage_uses_cross_config_instead_of_market_maximum() {
+    let h = setup();
+    let actual = h
+        .drive(h.venue().fetch_leverage_for_symbol("BTCUSDT".into()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        actual.buy_leverage, 20.0,
+        "user leverage comes from the symbol config"
+    );
+    assert_eq!(actual.sell_leverage, 20.0);
+    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert_eq!(h.http.calls(endpoint("SYMBOL_CONFIG")).len(), 1);
+    assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
+}
+
+#[test]
+fn trait_fetch_leverage_retains_distinct_isolated_sides() {
+    let h = harness(options(), |http| {
+        http.ok("GET", endpoint("SYMBOL_CONFIG"), json!([{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedMode":"SEPARATED","crossLeverage":"20","isolatedLongLeverage":"11","isolatedShortLeverage":"13"}]));
+        http.ok(
+            "GET",
+            endpoint("EXCHANGE_INFO"),
+            json!({"symbols":[raw_market()]}),
+        );
+    });
+    seed(&h);
+    let actual = h
+        .drive(h.venue().fetch_leverage_for_symbol("BTCUSDT".into()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(actual.buy_leverage, 11.0);
+    assert_eq!(actual.sell_leverage, 13.0);
+    assert_eq!(h.store.fetched_leverage()["BTCUSDT"], actual);
+    assert!(h.http.calls(endpoint("EXCHANGE_INFO")).is_empty());
+}
