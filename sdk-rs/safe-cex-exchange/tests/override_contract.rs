@@ -516,7 +516,7 @@ fn production_callers_do_not_bypass_exchange_override_hooks() {
             current_handler_fields: BTreeSet::new(),
             aliases: BTreeSet::new(),
             findings: vec![],
-                inventory: vec![],
+            inventory: vec![],
         };
         calls.visit_file(&source);
         let relative = file.strip_prefix(workspace).unwrap().to_string_lossy();
@@ -725,13 +725,31 @@ fn call_edge_inventory_ignores_unrelated_body_edits() {
 fn call_edge_inventory_fails_on_hook_edge_changes() {
     let pinned = edge_multiset("fn run(venue: &V) { venue.dispose(); }");
     for (change, edited) in [
-        ("added hook call", "fn run(venue: &V) { venue.dispose(); venue.fetch_orders(); }"),
-        ("duplicated hook call", "fn run(venue: &V) { venue.dispose(); venue.dispose(); }"),
+        (
+            "added hook call",
+            "fn run(venue: &V) { venue.dispose(); venue.fetch_orders(); }",
+        ),
+        (
+            "duplicated hook call",
+            "fn run(venue: &V) { venue.dispose(); venue.dispose(); }",
+        ),
         ("removed hook call", "fn run(venue: &V) { other(); }"),
-        ("venue switched to base", "fn run(venue: &V) { self.base().dispose(); }"),
-        ("hook renamed", "fn run(venue: &V) { venue.fetch_orders(); }"),
-        ("moved to another function", "fn other(venue: &V) { venue.dispose(); }"),
-        ("captured base reference", "fn run(venue: &V) { let f = BaseExchange::dispose; }"),
+        (
+            "venue switched to base",
+            "fn run(venue: &V) { self.base().dispose(); }",
+        ),
+        (
+            "hook renamed",
+            "fn run(venue: &V) { venue.fetch_orders(); }",
+        ),
+        (
+            "moved to another function",
+            "fn other(venue: &V) { venue.dispose(); }",
+        ),
+        (
+            "captured base reference",
+            "fn run(venue: &V) { let f = BaseExchange::dispose; }",
+        ),
     ] {
         assert_ne!(edge_multiset(edited), pinned, "{change} must change edges");
     }
