@@ -263,7 +263,7 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "fetchOrders",
-                "safe-cex-venue-kucoin/src/order_reads.rs::fetch_orders",
+                "safe-cex-venue-kucoin/src/futures_native_order_reads.rs::fetch_orders",
             ),
             (
                 "reconcileFetchedOrderRemainders",
@@ -271,11 +271,11 @@ fn initialize_futures_exchange<V: Clone, E>(h: &ClassOps<V, E>, receiver: &V) ->
             ),
             (
                 "fetchNormalOrders",
-                "safe-cex-venue-kucoin/src/order_reads.rs::fetch_normal_orders",
+                "safe-cex-venue-kucoin/src/futures_native_order_reads.rs::fetch_normal_orders",
             ),
             (
                 "fetchAlgoOrders",
-                "safe-cex-venue-kucoin/src/order_reads.rs::fetch_algo_orders",
+                "safe-cex-venue-kucoin/src/futures_native_order_reads.rs::fetch_algo_orders",
             ),
             (
                 "fetchOHLCV",

@@ -40131,6 +40131,38 @@
                 }
               ]
             }
+          ],
+          [
+            "refuse",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
           ]
         ],
         "output": {
@@ -40301,6 +40333,42 @@
                 "is_synthetic": true
               }
             }
+          },
+          {
+            "name": "impl FnMut(&str)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
           }
         ],
         "where_predicates": [
@@ -40414,7 +40482,7 @@
         ]
       }
     },
-    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}#[derive(Debug)]struct HostError(String);impl From<safe_cex_num::JsCoercionError> for HostError{fn from(e:safe_cex_num::JsCoercionError)->Self{Self(format!(\"{}:{}\",e.name,e.message))}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let markets=run($type(||{trace.borrow_mut().push(serde_json::json!(\"cached\"));serde_json::from_value(serde_json::json!([{\"id\":\"OLD1/USDT\",\"symbol\":\"OLD1USDT\",\"base\":\"OLD1\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":1,\"price\":0.5},\"limits\":{\"amount\":{\"min\":0,\"max\":50},\"leverage\":{\"min\":1,\"max\":5}}},{\"id\":\"OLD2/USDT\",\"symbol\":\"OLD2USDT\",\"base\":\"OLD2\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":1,\"price\":0.5},\"limits\":{\"amount\":{\"min\":0,\"max\":50},\"leverage\":{\"min\":1,\"max\":5}}}])).unwrap()},|endpoint,config|{trace.borrow_mut().push(serde_json::json!({\"get\":endpoint,\"config\":config}));std::future::ready(if $value[\"transportFail\"]==true{Err(HostError(\"transport\".into()))}else{Ok(Some($value[\"response\"].clone()))})},|error|trace.borrow_mut().push(serde_json::json!({\"report\":error.0}))));let output=markets.into_iter().map(|m|{assert!(m.pretty_symbol.is_none()&&m.contract_size.is_none()&&m.is_expiring.is_none()&&m.is_inverse.is_none()&&m.is_spot.is_none()&&m.is_perpetual.is_none()&&m.is_read_only.is_none()&&m.info.is_none()&&m.taker_fee.is_none()&&m.maker_fee.is_none()&&m.option.is_none()&&m.limits.price.is_none());serde_json::json!({\"id\":m.id,\"symbol\":m.symbol,\"base\":m.base,\"quote\":m.quote,\"active\":m.active,\"numbers\":([m.precision.amount,m.precision.price,m.limits.amount.min,m.limits.amount.max,m.limits.leverage.min,m.limits.leverage.max].map(|n|format!(\"{:016x}\",n.to_bits())))})}).collect::<Vec<_>>();serde_json::json!({\"markets\":output,\"trace\":trace.into_inner()})}",
+    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}#[derive(Debug)]struct HostError(String);impl From<safe_cex_num::JsCoercionError> for HostError{fn from(e:safe_cex_num::JsCoercionError)->Self{Self(format!(\"{}:{}\",e.name,e.message))}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let markets=run($type(||{trace.borrow_mut().push(serde_json::json!(\"cached\"));serde_json::from_value(serde_json::json!([{\"id\":\"OLD1/USDT\",\"symbol\":\"OLD1USDT\",\"base\":\"OLD1\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":1,\"price\":0.5},\"limits\":{\"amount\":{\"min\":0,\"max\":50},\"leverage\":{\"min\":1,\"max\":5}}},{\"id\":\"OLD2/USDT\",\"symbol\":\"OLD2USDT\",\"base\":\"OLD2\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":1,\"price\":0.5},\"limits\":{\"amount\":{\"min\":0,\"max\":50},\"leverage\":{\"min\":1,\"max\":5}}}])).unwrap()},|endpoint,config|{trace.borrow_mut().push(serde_json::json!({\"get\":endpoint,\"config\":config}));std::future::ready(if $value[\"transportFail\"]==true{Err(HostError(\"transport\".into()))}else{Ok(Some($value[\"response\"].clone()))})},|error|trace.borrow_mut().push(serde_json::json!({\"report\":error.0})),|message|trace.borrow_mut().push(serde_json::json!({\"refuse\":message}))));let output=markets.into_iter().map(|m|{assert!(m.pretty_symbol.is_none()&&m.contract_size.is_none()&&m.is_expiring.is_none()&&m.is_inverse.is_none()&&m.is_spot.is_none()&&m.is_perpetual.is_none()&&m.is_read_only.is_none()&&m.info.is_none()&&m.taker_fee.is_none()&&m.maker_fee.is_none()&&m.option.is_none()&&m.limits.price.is_none());serde_json::json!({\"id\":m.id,\"symbol\":m.symbol,\"base\":m.base,\"quote\":m.quote,\"active\":m.active,\"numbers\":([m.precision.amount,m.precision.price,m.limits.amount.min,m.limits.amount.max,m.limits.leverage.min,m.limits.leverage.max].map(|n|format!(\"{:016x}\",n.to_bits())))})}).collect::<Vec<_>>();serde_json::json!({\"markets\":output,\"trace\":trace.into_inner()})}",
     "cases": [
       {
         "input": {
@@ -40613,9 +40681,344 @@
             "cached"
           ]
         }
+      },
+      {
+        "input": {
+          "response": {
+            "data": [
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": false,
+                "symbol": "BADUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "CLOSED",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USD",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": false,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "ETH",
+                "symbol": "ETHUSDT",
+                "basePrecision": 0,
+                "quotePrecision": 1,
+                "maxLimitOrderVolume": 77
+              }
+            ]
+          }
+        },
+        "output": {
+          "markets": [
+            {
+              "id": "BTC/USDT",
+              "symbol": "BTCUSDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3f50624dd2f1a9fc",
+                "3f847ae147ae147b",
+                "0000000000000000",
+                "405f600000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            },
+            {
+              "id": "ETH/USDT",
+              "symbol": "ETHUSDT",
+              "base": "ETH",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fb999999999999a",
+                "0000000000000000",
+                "4053400000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/trading_pairs",
+              "config": {}
+            },
+            {
+              "refuse": "Refused Bitunix market row 1 symbol=\"BADUSDT\": base=false: expected string"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "data": [
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BAD",
+                "symbol": false,
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "CLOSED",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USD",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": false,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "ETH",
+                "symbol": "ETHUSDT",
+                "basePrecision": 0,
+                "quotePrecision": 1,
+                "maxLimitOrderVolume": 77
+              }
+            ]
+          }
+        },
+        "output": {
+          "markets": [
+            {
+              "id": "BTC/USDT",
+              "symbol": "BTCUSDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3f50624dd2f1a9fc",
+                "3f847ae147ae147b",
+                "0000000000000000",
+                "405f600000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            },
+            {
+              "id": "ETH/USDT",
+              "symbol": "ETHUSDT",
+              "base": "ETH",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fb999999999999a",
+                "0000000000000000",
+                "4053400000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/trading_pairs",
+              "config": {}
+            },
+            {
+              "refuse": "Refused Bitunix market row 1: symbol=false: expected string"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "data": [
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BAD",
+                "symbol": "BADUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": {
+                  "toString": null
+                }
+              },
+              {
+                "symbolStatus": "CLOSED",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USD",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": false,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "ETH",
+                "symbol": "ETHUSDT",
+                "basePrecision": 0,
+                "quotePrecision": 1,
+                "maxLimitOrderVolume": 77
+              }
+            ]
+          }
+        },
+        "output": {
+          "markets": [
+            {
+              "id": "BTC/USDT",
+              "symbol": "BTCUSDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3f50624dd2f1a9fc",
+                "3f847ae147ae147b",
+                "0000000000000000",
+                "405f600000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            },
+            {
+              "id": "ETH/USDT",
+              "symbol": "ETHUSDT",
+              "base": "ETH",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fb999999999999a",
+                "0000000000000000",
+                "4053400000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/trading_pairs",
+              "config": {}
+            },
+            {
+              "refuse": "Refused Bitunix market row 1 symbol=\"BADUSDT\": limits.amount.max={\"toString\":null}: Cannot convert object to primitive value"
+            }
+          ]
+        }
       }
     ],
-    "evidence": "Actual native market reads execute bounded ready GET callbacks. Two distinct complete Market outputs retain native precision/limit bits and each optional-field absence, while closed, wrong-quote and unsupported rows are independently excluded. Exact empty request configuration and report-before-cached fallback and complete nonempty cached vectors are observed; arbitrary host objects and transport scheduling remain out of scope."
+    "evidence": "Actual native market reads execute bounded ready GET callbacks. Two distinct complete Market outputs retain native precision/limit bits and each optional-field absence, while closed, wrong-quote and unsupported rows are independently excluded. Exact empty request configuration and report-before-cached fallback and complete nonempty cached vectors are observed; arbitrary host objects and transport scheduling remain out of scope. Approved strict-asset policy: an eligible non-string base is reported through a separate refusal callback and omitted without losing valid siblings; the mixed-row case checks the original field/value warning and both complete native Market outputs. Source/transport errors retain report-before-cached behavior. All strict Market fields: two further mixed-row cases directly observe malformed symbol and failed maximum coercion being omitted with field/value reports, preserving both complete fresh native outputs."
   },
   "safe_cex_venue_bitunix::rest_reads::fetch_tickers": {
     "category": "decoder",

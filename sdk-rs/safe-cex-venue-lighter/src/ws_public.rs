@@ -1,4 +1,5 @@
-//! Pure helpers from the Lighter public websocket implementation.
+//! Helpers from the Lighter public websocket implementation.
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 
 // ts: normalizeLighterFundingRate
 pub fn normalize_lighter_funding_rate(funding_rate_percent_per_hour: f64) -> f64 {
@@ -10,88 +11,95 @@ pub fn normalize_lighter_funding_rate(funding_rate_percent_per_hour: f64) -> f64
     eight_hour_percent / 100.0
 }
 
-/// Borrowed fields of the source helper's inline response object.
-#[derive(Debug, PartialEq)]
-pub struct LighterRestOrderBookLevels<'a> {
-    pub bids: &'a [serde_json::Value],
-    pub asks: &'a [serde_json::Value],
+fn optional_path(payload: &Js, path: &[&str]) -> Result<Js, Thrown> {
+    let mut value = payload.clone();
+    for key in path {
+        value = if value.is_nullish() {
+            Js::Undefined
+        } else {
+            value.get(key)?
+        };
+    }
+    Ok(value)
 }
 
 // ts: LighterPublicWebsocket.parseRestOrderBookLevels
-pub fn parse_rest_order_book_levels(
-    payload: Option<&serde_json::Value>,
-) -> Option<LighterRestOrderBookLevels<'_>> {
-    use serde_json::Value;
-    let payload = payload?;
-    let data = payload.get("data");
-    let result = payload.get("result");
-    let candidate = [
-        payload.get("order_book"),
-        data.and_then(|v| v.get("order_book")),
-        result.and_then(|v| v.get("order_book")),
-        payload.get("orderbook"),
-        data.and_then(|v| v.get("orderbook")),
-        result.and_then(|v| v.get("orderbook")),
-        data,
-        result,
-        Some(payload),
-    ]
-    .into_iter()
-    .flatten()
-    .find(|value| !value.is_null())?;
-    let candidate = candidate.as_object()?;
-    let bids = candidate
-        .get("bids")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    let asks = candidate
-        .get("asks")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or(&[]);
-    if bids.is_empty() && asks.is_empty() {
-        None
+pub fn parse_rest_order_book_levels(payload: Option<&Js>) -> Result<Js, Thrown> {
+    let payload = payload.unwrap_or(&Js::Undefined);
+    let mut candidate = Js::Undefined;
+    for path in [
+        &["order_book"][..],
+        &["data", "order_book"],
+        &["result", "order_book"],
+        &["orderbook"],
+        &["data", "orderbook"],
+        &["result", "orderbook"],
+        &["data"],
+        &["result"],
+        &[],
+    ] {
+        candidate = optional_path(payload, path)?;
+        if !candidate.is_nullish() {
+            break;
+        }
+    }
+    if !candidate.truthy() || candidate.type_of() != "object" {
+        return Ok(Js::Undefined);
+    }
+    let bids = if candidate.get("bids")?.is_array() {
+        candidate.get("bids")?
     } else {
-        Some(LighterRestOrderBookLevels { bids, asks })
+        Js::array(vec![])
+    };
+    let asks = if candidate.get("asks")?.is_array() {
+        candidate.get("asks")?
+    } else {
+        Js::array(vec![])
+    };
+    if !bids.get("length")?.truthy() && !asks.get("length")?.truthy() {
+        Ok(Js::Undefined)
+    } else {
+        Ok(Js::object(vec![("bids", bids), ("asks", asks)]))
     }
 }
 
 // ts: LighterPublicWebsocket.parseRestTickerItems
-pub fn parse_rest_ticker_items(payload: Option<&serde_json::Value>) -> Vec<&serde_json::Value> {
-    use serde_json::Value;
-    let Some(payload) = payload else {
-        return Vec::new();
-    };
-    let data = payload.get("data");
-    let result = payload.get("result");
+pub fn parse_rest_ticker_items(payload: Option<&Js>) -> Result<Js, Thrown> {
+    let payload = payload.unwrap_or(&Js::Undefined);
     let candidates = [
-        payload.get("order_book_stats"),
-        data.and_then(|v| v.get("order_book_stats")),
-        result.and_then(|v| v.get("order_book_stats")),
-        payload.get("tickers"),
-        data.and_then(|v| v.get("tickers")),
-        result.and_then(|v| v.get("tickers")),
-        payload.get("market_stats"),
-        data.and_then(|v| v.get("market_stats")),
-        result.and_then(|v| v.get("market_stats")),
-        data,
-        result,
-        Some(payload),
-    ];
-    for candidate in candidates.into_iter().flatten() {
-        match candidate {
-            Value::Array(values) if !values.is_empty() => return values.iter().collect(),
-            Value::Object(values) if !values.is_empty() => {
-                return safe_cex_num::js_own_keys(values.keys().map(String::as_str))
-                    .into_iter()
-                    .filter_map(|key| values.get(key))
-                    .collect();
+        &["order_book_stats"][..],
+        &["data", "order_book_stats"],
+        &["result", "order_book_stats"],
+        &["tickers"],
+        &["data", "tickers"],
+        &["result", "tickers"],
+        &["market_stats"],
+        &["data", "market_stats"],
+        &["result", "market_stats"],
+        &["data"],
+        &["result"],
+        &[],
+    ]
+    .into_iter()
+    .map(|path| optional_path(payload, path))
+    .collect::<Result<Vec<_>, _>>()?;
+    for candidate in candidates {
+        if candidate.is_array() {
+            if candidate.get("length")?.to_number()? > 0. {
+                return Ok(candidate);
             }
-            _ => {}
+        } else if candidate.truthy() && candidate.type_of() == "object" {
+            let values = candidate
+                .own_entries()?
+                .into_iter()
+                .map(|(_, value)| value)
+                .collect::<Vec<_>>();
+            if !values.is_empty() {
+                return Ok(Js::array(values));
+            }
         }
     }
-    Vec::new()
+    Ok(Js::array(vec![]))
 }
 
 // ts: LighterPublicWebsocket.shouldEnforcePongMissReconnect
