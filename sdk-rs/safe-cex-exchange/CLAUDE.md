@@ -1516,3 +1516,8 @@ shared-runtime value; already-JSON readers use explicit `from_json` at that boun
 The reporter retains lazy reads, native formatted messages and worker error identity.
 Optional message/extra-data and main-thread exception-host ABIs retain their stated
 UTF-8/JSON profiles; `EMITTER_CONTRACT_EVIDENCE.md` records the scoped witnesses.
+
+GetIterator rejects missing or non-callable iterator methods with the shared V8
+non-iterable diagnostic, before invoking input coercion hooks. Nullish inputs use
+that diagnostic as well. `tests/js_iterator_errors.rs` compares 30 live Node
+Promise.all/allSettled errors through NativeRuntime and the shared iterator API.
