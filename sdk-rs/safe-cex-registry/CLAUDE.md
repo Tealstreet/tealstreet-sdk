@@ -248,3 +248,10 @@ module/error owners and JSON error owner intact. These finite identity probes
 and ordinary Serde/conversion checks do not establish future execution, every
 lifetime/type argument, or the behavior of a module/browser/transport host.
 
+
+Provider accepted-set controller contracts execute actual production methods with
+scripted socket/source I/O. The gateway constructor retains literal settings;
+order-book registration and returned cleanup emit subscribe/unsubscribe frames
+and retire the actual observer. In-process delegation retains the exact symbol,
+Rc callback identity and source cleanup. These finite host observations do not
+replace the incoming gateway decoder or snapshot/lifecycle tests.
