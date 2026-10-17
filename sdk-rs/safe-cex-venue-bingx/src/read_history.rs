@@ -189,7 +189,7 @@ impl BingxReadHistory {
             if let Some(mut order) = map_order(
                 raw,
                 &self.reads.base.store.orders(),
-                self.reads.base.runtime.now_ms(),
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )? {
                 if order.r#type == OrderType::StopLoss {
                     let mark = self
