@@ -200,6 +200,80 @@ fn fetch_positions_e2e() {
     assert_eq!(positions[0].entry_price, 100.0);
     assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 1);
 }
+fn response_array_cases(row: Value) -> Vec<(&'static str, Value, bool)> {
+    let rows = json!([row]);
+    vec![
+        ("array", rows.clone(), true),
+        ("data", json!({"data":rows}), true),
+        ("items", json!({"items":rows}), false),
+        ("list", json!({"list":rows}), false),
+        ("rows", json!({"rows":rows}), false),
+        ("data_items", json!({"data":{"items":rows}}), false),
+        ("data_list", json!({"data":{"list":rows}}), false),
+        ("data_rows", json!({"data":{"rows":rows}}), false),
+    ]
+}
+#[test]
+fn positions_response_array_keys_match_source() {
+    let row = json!({"symbol":"BTCUSDT","positionSide":"LONG","size":"2","openValue":"200","leverage":"20","marginType":"CROSS","updatedTime":1700000000000.0});
+    for (name, payload, accepted) in response_array_cases(row) {
+        let h = harness(options(), |http| {
+            http.ok("GET", endpoint("POSITIONS"), payload);
+            script(http);
+        });
+        seed(&h);
+        let positions = h
+            .drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()])))
+            .unwrap();
+        assert!(!positions.is_empty(), "{name}: retain fake zero positions");
+        assert!(
+            positions
+                .iter()
+                .all(|position| position.symbol == "BTCUSDT")
+        );
+        let open = positions
+            .iter()
+            .filter(|position| position.contracts != 0.0)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            open.len(),
+            usize::from(accepted),
+            "{name}: source array admission"
+        );
+        if accepted {
+            assert_eq!(open[0].contracts, 2.0, "{name}");
+            assert_eq!(open[0].entry_price, 100.0, "{name}");
+        }
+        assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 1, "{name}");
+    }
+}
+#[test]
+fn fills_response_array_keys_match_source() {
+    let row = json!({"symbol":"BTCUSDT","id":"fill-1","orderId":"order-1","side":"BUY","price":"101.5","qty":"2","time":1700000000000.0});
+    for (name, payload, accepted) in response_array_cases(row) {
+        let h = harness(options(), |http| {
+            http.ok("GET", endpoint("USER_TRADES"), payload);
+            script(http);
+        });
+        seed(&h);
+        let fills = h
+            .drive(h.venue().fetch_historical_fills(
+                serde_json::from_value(json!({"symbol":"BTCUSDT"})).unwrap(),
+            ))
+            .unwrap();
+        assert_eq!(
+            fills.len(),
+            usize::from(accepted),
+            "{name}: source array admission"
+        );
+        if accepted {
+            assert_eq!(fills[0].id.as_deref(), Some("fill-1"), "{name}");
+            assert_eq!(fills[0].price, 101.5, "{name}");
+            assert_eq!(fills[0].qty, 2.0, "{name}");
+        }
+        assert_eq!(h.http.calls(endpoint("USER_TRADES")).len(), 1, "{name}");
+    }
+}
 #[test]
 fn fetch_orders_e2e() {
     let h = setup();
