@@ -24,7 +24,7 @@ fn selector(tag: &str) -> Js {
                 Js::function("toString", |_, _| Ok(Js::SymbolIterator)),
             )]),
         )]),
-        "surrogate_id" => Js::object(vec![("id", Js::String(vec![0xd800]))]),
+        "surrogate_id" => Js::object(vec![("id", Js::String(vec![0xd800].into()))]),
         "object_id" => Js::object(vec![(
             "id",
             Js::object(vec![(
