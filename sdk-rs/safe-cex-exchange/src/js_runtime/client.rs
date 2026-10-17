@@ -779,9 +779,19 @@ fn rest_request_data(
     let mut params = config.get("params")?;
     // Axios: a configured paramsSerializer (function or `{ serialize }`) owns the query.
     let serialize = js_params_serializer(config)?;
-    if serialize_query && serialize.is_callable() && !params.is_nullish() {
-        let query = serialize.call(Js::Undefined, vec![params])?;
-        let query = String::from_utf16_lossy(&query.to_js_string()?);
+    if serialize_query && !params.is_nullish() {
+        let query = if serialize.is_callable() {
+            let query = serialize.call(Js::Undefined, vec![params])?;
+            String::from_utf16_lossy(&query.to_js_string()?)
+        } else {
+            safe_cex_transport::query::axios_default_query(&super::value::to_js_json(&params)?)
+                .map_err(|error| match error {
+                    safe_cex_transport::TransportError::JavaScript(error) => {
+                        Thrown::error(error.name, error.message)
+                    }
+                    error => Thrown::error("AxiosError", &error.to_string()),
+                })?
+        };
         if !query.is_empty() {
             if let Some(hash) = url.find('#') {
                 url.truncate(hash);
