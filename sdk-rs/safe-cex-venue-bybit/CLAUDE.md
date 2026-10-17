@@ -783,3 +783,10 @@ income/range and closed PnL for primary/demo/inverse, historical orders for
 primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
 order history. `history_capability_binding` exercises the actual capability calls
 and signed HTTP; direct trait coverage alone does not witness this dispatch path.
+
+HyroTrader inherits all three option-read methods but its optionsEnabled override
+always returns false. Route those trait and dynamic calls through the inherited
+receiver so they preserve the source options-disabled Error before HTTP, including
+when the account option-market flag is true. hyro_binding compares all six paths
+with maintained Bybit methods and the actual Hyro guard; spot/inverse family
+routing remains independently defined.
