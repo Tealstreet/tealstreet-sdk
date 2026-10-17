@@ -1,3 +1,7 @@
+Private-position freshness timestamps read the shared virtualClock, matching the
+REST request-start clock. The synced-clock private_binding_frames regression feeds
+an actual position frame and reconciles an older signed REST reply through Store.
+
 The concrete order and position mapper callbacks read the shared VirtualClock.
 `tests/native_clock.rs` checks synchronized timestamps through signed REST reads
 for Classic, USDC, inverse and both UTA routes; inverse positions already used it.
@@ -374,3 +378,7 @@ and frozen oracle, then requires exact restored passes. Run it exclusively.
 All three representation controls compile and fail named tests in both the
 constructed binding and frozen oracle; each exact restoration passes both.
 The actual TypeScript order oracle also passes without changing its fixture.
+
+The imported response-key helper preserves primitive `in` errors before account
+mapping and searches inherited native keys in original/snake/camel order. The
+signed-response and constructed-host regressions pin refusal timing and shadowing.
