@@ -229,10 +229,23 @@ impl Client {
                 calls: Cell::new(0),
             };
             let signature_retry = Cell::new(flags.signature_retry);
+            // axios-retry merges the request namespace over its default. Keep
+            // the comparison numeric: fractional budgets admit the next integer
+            // retry count, and a clock/response reentry keeps the consumed count.
+            let retries = request
+                .config_extensions
+                .get("axios-retry")
+                .and_then(|state| state.get("retries"));
+            let retries = match retries {
+                Some(value) => safe_cex_num::js_number(Some(value)).map_err(|error| {
+                    RestFailure::pre_transmit(error.to_string(), request.clone())
+                })?,
+                None => 3.0,
+            };
             let receipt = retry_bybit(
                 request,
                 &attempt,
-                3_usize.saturating_sub(flags.retries_consumed),
+                retries - flags.retries_consumed as f64,
                 &signature_retry,
                 client.retry_clock.as_ref(),
             )
@@ -551,7 +564,7 @@ fn raw_response_unavailable(data: &Value) -> Result<bool, safe_cex_num::JsCoerci
 fn retry_bybit<'a>(
     request: RestRequest,
     adapter: &'a dyn RestAdapter,
-    retries: usize,
+    retries: f64,
     signature_retry: &'a Cell<bool>,
     clock: &'a dyn RateLimitClock,
 ) -> RestFuture<'a, RestExecution> {
@@ -563,13 +576,13 @@ fn retry_bybit<'a>(
     );
     let mut request = request;
     Box::pin(async move {
-        for attempt in 0..=retries {
+        for attempt in 0_usize.. {
             let started = clock.now_ms();
             let result = adapter.execute_with_receipt(request.clone()).await;
             let Err(error) = &result else {
                 return result;
             };
-            if attempt == retries {
+            if (attempt as f64).partial_cmp(&retries) != Some(std::cmp::Ordering::Less) {
                 return result;
             }
             let network = error.is_retryable_network()

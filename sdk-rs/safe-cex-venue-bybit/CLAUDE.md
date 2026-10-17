@@ -615,3 +615,22 @@ hosted constructions before its restored native-host tests pass. Both runners
 bound Cargo subprocesses and print their private log directories. History,
 candle/book and recovery class wiring retain their separate pending rows;
 these construction and trading witnesses do not claim their completion.
+
+
+Per-request `axios-retry.retries` now crosses the retained receiver's typed HTTP
+adapter into `api_factory`. The factory defaults to three retries, compares the
+integer retry count against the request's numeric budget, and retains consumed
+retries across clock reentry. Fractional budgets follow Axios's comparison rather
+than integer truncation. Resolved signature envelopes still use the separate
+one-shot response-interceptor resend, including when the rejection-retry budget
+is zero; preserve this source distinction.
+
+`native_request_retry_override_retains_source_budget` checks six independently
+specified request profiles against the maintained API with real Axios and
+axios-retry, plus two native clock-reentry profiles. The private adapter witness
+checks zero and omitted namespaces. `scripts/request-retry-controls.py` restores
+the fixed budget and dropped namespace independently; each must compile and fail
+its named runtime assertion, then exact restored bytes must pass. Its subprocesses
+have timeouts and private temporary logs. This evidence covers JSON-shaped retry
+configuration; it does not claim executable per-request retry callbacks or the
+source's arbitrary live Axios configuration objects.
