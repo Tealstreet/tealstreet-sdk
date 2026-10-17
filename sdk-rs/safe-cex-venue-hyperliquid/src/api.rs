@@ -224,12 +224,8 @@ impl ApiClient {
             url: url.into(),
             base_url: Some(base_url.into()),
             body: Some(RestBody::Untransformed(body.clone())),
-            timeout_ms: self
-                .options
-                .extra
-                .as_ref()
-                .and_then(|e| e.recv_window)
-                .map(|n| n as i64),
+            // safeCexAxiosCreate overrides factory recvWindow config before retries.
+            timeout_ms: Some(20_000),
             ..Default::default()
         };
         request.headers.insert(

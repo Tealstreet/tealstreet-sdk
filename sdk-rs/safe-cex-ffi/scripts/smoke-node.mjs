@@ -18,3 +18,4 @@ execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-fact
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-factory-routing.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-callback-lifetime.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-errors.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-hyperliquid-timeout.test.mjs')], { stdio: 'inherit' });

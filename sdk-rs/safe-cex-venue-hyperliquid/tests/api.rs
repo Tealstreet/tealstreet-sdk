@@ -934,7 +934,7 @@ fn signed_action_order_is_exactly_the_sent_action_order() {
         normalize(sent["signature"].clone())
     );
     assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].timeout_ms, Some(5000));
+    assert_eq!(requests[0].timeout_ms, Some(20_000));
     assert_eq!(
         requests[0].headers["Content-Type"],
         "application/json, charset=utf-8"

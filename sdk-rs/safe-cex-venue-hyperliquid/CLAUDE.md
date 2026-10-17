@@ -367,3 +367,9 @@ Registry `native_host_hyperliquid_clock` performs a real signed leverage update,
 checks the transmitted action/signature, and requires its nonce to reflect a
 90-second server correction. The binding schedule-cancel fixture uses a deadline
 relative to that synced clock; the fractional Date nonce regression stays raw.
+
+ApiClient.build_request uses the effective safeCexAxiosCreate timeout of20_000ms
+before read-retry classification. extra.recvWindow remains account configuration;
+it must not become a per-request timeout override. The native registry timeout
+witness verifies terminal deadlines and signed HTTP; the Node info-read witness
+requires a delayed real response to arrive before method acknowledgement.
