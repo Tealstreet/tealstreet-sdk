@@ -441,6 +441,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "cancelOrders", |rt, a| {
         members::cancel::cancel_orders(rt, arg(&a, 0))
     });
+    method(&this, rt, "cancelSymbolOrders", |rt, a| {
+        members::cancel::cancel_symbol_orders(rt, arg(&a, 0), arg(&a, 1))
+    });
     method(
         &this,
         rt,

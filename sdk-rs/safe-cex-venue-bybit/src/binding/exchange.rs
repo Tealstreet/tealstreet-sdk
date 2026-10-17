@@ -520,6 +520,9 @@ impl Exchange for BybitExchange {
         let a = args!(js(&orders));
         self.invoke_unit("cancelOrders", a)
     }
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        self.invoke_unit("cancelSymbolOrders", args!(js(&symbol)))
+    }
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         not_implemented()
     }
