@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 mod binding_runtime;
 use binding_runtime::*;
-use safe_cex_exchange::runtime::ExchangeError;
+use safe_cex_exchange::{js_runtime::value::to_typed, runtime::ExchangeError};
 use safe_cex_store::Store;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -287,9 +287,11 @@ fn historical_fill_logs(h: &Harness) -> std::rc::Rc<std::cell::RefCell<Vec<Value
     h.venue().base().on_args(
         "log",
         std::rc::Rc::new(move |_, args| {
+            let message = to_typed::<String>(&args[0])?;
+            let severity = to_typed::<String>(&args[1])?;
             captured
                 .borrow_mut()
-                .push(json!({"message":args[0],"severity":args[1]}));
+                .push(json!({"message":message,"severity":severity}));
             Ok(())
         }),
     );
