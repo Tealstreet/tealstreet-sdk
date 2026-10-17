@@ -286,7 +286,7 @@ note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forw
 ts = "BybitSpotExchange.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book"]
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book" ]
 status = "ported"
 note = "Rust rename: safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book preserves source socket selection; safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book wires the real public subscription. All four families have compiled master-fail socket regressions and live snapshot/delta, retry, reconnect and cleanup witnesses."
 
