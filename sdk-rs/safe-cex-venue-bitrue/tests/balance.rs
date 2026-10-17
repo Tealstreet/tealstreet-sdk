@@ -63,7 +63,10 @@ fn balance_matches_actual_typescript() {
         let input = row["raw"]
             .as_str()
             .map(|s| js_from_str::<OpaqueValue>(s).unwrap().value);
-        let actual = match parse_balance(input.as_ref(), &stored) {
+        let mut warnings = Vec::new();
+        let actual = match parse_balance(input.as_ref(), &stored, |warning| {
+            warnings.push(warning.to_owned())
+        }) {
             Err(e) => json!({"type":"error","name":e.name,"message":e.message}),
             Ok(b) => {
                 json!({"type":"balance","stored":std::ptr::eq(b.as_ref(),&*stored),"fields":fields(&b),"currencies":b.currencies.as_ref().map(|c|c.iter().map(|(k,v)|json!([k,fields(v.as_balance().unwrap())])).collect::<Vec<_>>()),"info":b.info.as_ref().map(native)})
@@ -78,11 +81,19 @@ fn balance_matches_actual_typescript() {
     for row in capture["refusals"].as_array().unwrap() {
         let input = js_from_str::<OpaqueValue>(row["raw"].as_str().unwrap()).unwrap();
         assert_eq!(row["result"]["type"], "balance");
-        let error = parse_balance(Some(&input.value), &stored).unwrap_err();
+        let mut warnings = Vec::new();
+        let balance = parse_balance(Some(&input.value), &stored, |warning| {
+            warnings.push(warning.to_owned())
+        })
+        .unwrap();
         assert_eq!(
-            error.message, "Bitrue balance upnl is outside shared numeric Balance",
-            "balance chosen output refusal"
+            (balance.total, balance.free, balance.used, balance.upnl),
+            (0., 0., 0., 0.)
         );
+        assert!(balance.currencies.as_ref().unwrap().is_empty());
+        assert_eq!(balance.info.as_ref(), Some(&input.value));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Balance.upnl"));
     }
     for key in ["utf8Raw", "depthRaw"] {
         assert!(

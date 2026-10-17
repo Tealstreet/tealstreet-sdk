@@ -33,11 +33,6 @@
   "safe-cex-venue-txflow": [],
   "safe-cex-venue-weex": [],
   "safe-cex-venue-woo": [
-    "call",
-    "freeze",
-    "hasOwn",
-    "is",
-    "isSafeInteger",
     "pop"
   ]
 }

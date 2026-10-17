@@ -1096,7 +1096,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper"
 status = "divergent"
-note = "CHOSEN: optional undefined category/coin/symbol properties become omitted native request-map keys, and first-poll Futures replace eager promises; plain JSON response records exclude executable properties. Native body still refreshes all positions and optional symbol positions before checking direct retMsg, logs partial success without throwing, and propagates the original callback error/batch allocation. Constructor wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper."
+note = "CHOSEN: optional undefined category/coin/symbol properties become omitted native request-map keys, and first-poll Futures replace eager promises; plain JSON response records exclude executable properties. Native body still refreshes all positions and optional symbol positions before checking direct retMsg, logs partial success without throwing, and propagates the original callback error/batch allocation. Production binding now passes the fetched native batch directly through the generic carrier to Store, preserving NaN/infinities/signed zero instead of JSON projection. Real primary/demo control-switch regressions cover both publication paths. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper."
 
 [[symbol]]
 ts = "BybitExchange.changeMarginType"
@@ -1104,7 +1104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_margin_type"
 status = "divergent"
-note = "CHOSEN: MarginType setter and host operations are explicit callbacks on plain retained JSON records; executable reason coercion/prototypes and eager promise timing are outside this boundary. Native body preserves short-circuit status/code checks, truthy reason-message filtering and joined-message precedence, ignores symbol, sets margin type before awaiting positions, and does not refresh on rejected status. Full class construction remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_margin_type."
+note = "CHOSEN: MarginType setter and host operations are explicit callbacks on plain retained JSON records; executable reason coercion/prototypes and eager promise timing are outside this boundary. Native body preserves short-circuit status/code checks, truthy reason-message filtering and joined-message precedence, ignores symbol, sets margin type before awaiting positions, and does not refresh on rejected status. Production binding passes the native fetched batch directly to Store after setting margin type; actual primary/demo HTTP regressions retain NaN/infinities/signed zero. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_margin_type."
 
 [[symbol]]
 ts = "BybitExchange.mapPosition"

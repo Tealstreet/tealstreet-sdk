@@ -73,23 +73,26 @@ fn emit_account_error(
 
 // A falsy response retains the current Store object after await. Holding a
 // Store-wide Ref would prevent unrelated writes and balance replacement.
-pub fn fetch_balance<'a, F, Fut>(
+pub fn fetch_balance<'a, F, Fut, W>(
     store: &'a dyn safe_cex_store::Store,
     fetch_account: F,
+    mut warn: W,
 ) -> impl Future<Output = Result<std::sync::Arc<safe_cex_types::Balance>, ExchangeError>> + 'a
 where
     F: FnOnce() -> Result<Fut, ExchangeError> + 'a,
+    W: FnMut(&str) + 'a,
     Fut: Future<Output = Result<Option<Value>, ExchangeError>> + 'a,
 {
     let request = fetch_account();
     async move {
         let data = request?.await?;
         let stored = store.balance_handle();
-        let parsed = crate::balance::parse_balance(data.as_ref(), &stored).map_err(|error| {
-            let mut result = ExchangeError::new(error.message);
-            result.name = error.name.into();
-            result
-        })?;
+        let parsed =
+            crate::balance::parse_balance(data.as_ref(), &stored, &mut warn).map_err(|error| {
+                let mut result = ExchangeError::new(error.message);
+                result.name = error.name.into();
+                result
+            })?;
         Ok(match parsed {
             std::borrow::Cow::Owned(balance) => std::sync::Arc::new(balance),
             std::borrow::Cow::Borrowed(_) => stored,

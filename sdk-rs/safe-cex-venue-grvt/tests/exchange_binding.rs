@@ -807,3 +807,103 @@ fn private_receive_watchdog_obeys_grvt_idle_thresholds() {
     );
     assert!(private.closed.get());
 }
+
+fn mixed_market_rows() -> Vec<Value> {
+    let first = instrument();
+    let mut bad = instrument();
+    bad["i"] = json!("BROKEN_USDT_Perp");
+    bad["b"] = json!({"unexpected":"asset"});
+    let mut last = instrument();
+    last["i"] = json!("ETH_USDT_Perp");
+    last["b"] = json!("ETH");
+    vec![first, bad, last]
+}
+
+#[test]
+fn market_fetch_refuses_only_bad_asset_rows_and_reports_field_values() {
+    for (field, value) in [
+        ("b", Some(json!({"unexpected":"asset"}))),
+        ("q", Some(json!(false))),
+        ("b", Some(Value::Null)),
+        ("q", Some(json!(17))),
+        ("q", None),
+    ] {
+        let h = setup();
+        let mut rows = mixed_market_rows();
+        rows[1]["b"] = json!("BROKEN");
+        if let Some(value) = &value {
+            rows[1][field] = value.clone();
+        } else {
+            rows[1].as_object_mut().unwrap().remove(field);
+        }
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/lite/v1/all_instruments");
+        h.http
+            .route("POST", "/lite/v1/all_instruments", 200., json!({"r":rows}));
+        let markets = h
+            .drive(h.venue().fetch_markets())
+            .expect("one bad asset field must not reject valid markets");
+        assert_eq!(
+            markets.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["BTC_USDT_Perp", "ETH_USDT_Perp"]
+        );
+        assert_eq!(markets[0].base, "BTC");
+        assert_eq!(markets[1].base, "ETH");
+        let logs = h.runtime.logs.borrow();
+        let report = logs
+            .iter()
+            .find(|line| line.contains("Refused GRVT market row"))
+            .expect("row refusal must be visible");
+        assert!(report.contains("BROKEN_USDT_Perp"), "{report}");
+        assert!(
+            report.contains(if field == "b" { "base=" } else { "quote=" }),
+            "{report}"
+        );
+        let reported_value = value
+            .as_ref()
+            .map_or_else(|| "undefined".into(), Value::to_string);
+        assert!(report.contains(&reported_value), "{report}");
+        assert_eq!(
+            logs.iter()
+                .filter(|line| line.contains("Refused GRVT market row"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn market_refresh_commits_good_rows_around_a_refused_asset_row() {
+    let h = setup();
+    loaded(&h);
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/lite/v1/all_instruments");
+    h.http.route(
+        "POST",
+        "/lite/v1/all_instruments",
+        200.,
+        json!({"r":mixed_market_rows()}),
+    );
+    let changes = h
+        .drive(h.venue().refresh_markets())
+        .expect("refresh keeps valid market metadata despite one refused row");
+    assert_eq!(changes.added.len(), 1);
+    assert_eq!(changes.added[0].id, "ETH_USDT_Perp");
+    assert!(changes.removed.is_empty());
+    let markets = h.store.markets();
+    assert_eq!(
+        markets.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["BTC_USDT_Perp", "ETH_USDT_Perp"]
+    );
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|line| line.contains("Refused GRVT market row"))
+    );
+}
