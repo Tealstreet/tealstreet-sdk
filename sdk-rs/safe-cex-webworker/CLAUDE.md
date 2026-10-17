@@ -24,6 +24,9 @@ CallMethod results and OHLCV DATA posts use required WorkerDataPost with existin
 runtime Js, alongside separate native book and Error capabilities. DATA envelopes
 have no Serialize implementation; browser materialization retains native numbers
 and own undefined before postMessage. No default or JSON adapter is supplied.
+Native Error DATA retains its intrinsic prototype and hidden message/stack/cause
+properties before post, including UTF-16 message units. The real Wasm witness
+compares TypeError descriptors and structured clone with the host JS engine.
 
 The CLI executor is injected and owns its emitted handled results; the handler
 never manufactures success from a resolved void future. Missing/rejected executors

@@ -913,7 +913,13 @@ fn dispose_sets_source_flag_without_removing_inherited_listeners() {
         h.venue().base().is_disposed(),
         "source assignment reaches shared state"
     );
-    h.venue().base().emit("update", json!({})).unwrap();
+    h.venue()
+        .base()
+        .emit(
+            "update",
+            safe_cex_exchange::js_runtime::value::from_json(&json!({})),
+        )
+        .unwrap();
     assert_eq!(
         observed.get(),
         1,
