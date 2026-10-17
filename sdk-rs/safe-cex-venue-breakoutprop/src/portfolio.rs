@@ -60,6 +60,9 @@ pub fn format_open_positions(
         let rows = rows.array_values().ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.positions.map is not a function")
         })?;
+        let raw_portfolio = raw["portfolios"].get(0)
+            .or_else(|| raw["portfolios"].get("0"))
+            .expect("native portfolio zero has a retained counterpart");
         let mut positions = Vec::with_capacity(rows.len());
         for (index, position) in rows.iter().enumerate() {
             let side_key = to_typed::<String>(&Js::String(position.get("side")?.to_js_string()?))?;
@@ -120,7 +123,7 @@ pub fn format_open_positions(
                 position_mode: (Some(PositionMode::OneWay)).into(),
                 margin_type: (Some(MarginType::Cross)).into(),
                 last_update: (Some(last_update)).into(),
-                info: (Some(raw["portfolios"][0]["positions"][index].clone())).into(),
+                info: (Some(raw_portfolio["positions"][index].clone())).into(),
                 realized_pnl: (None).into(),
                 extra: (None).into(),
                 option: (None).into(),
@@ -281,6 +284,9 @@ pub fn format_orders(
         let rows = rows.array_values().ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.orders.map is not a function")
         })?;
+        let raw_portfolio = raw["portfolios"].get(0)
+            .or_else(|| raw["portfolios"].get("0"))
+            .expect("native portfolio zero has a retained counterpart");
         let mut orders = Vec::with_capacity(rows.len());
         // Stage closed-output refusals until later source errors have had their turn.
         for (index, order) in rows.iter().enumerate() {
@@ -358,7 +364,7 @@ pub fn format_orders(
                     filled: to_typed(&leg.get("filledQuantity")?)?,
                     remaining: to_typed(&leg.get("remainingQuantity")?)?,
                     reduce_only: leg.get("positionEffect")?.strict_equals(&Js::str("CLOSE")),
-                    info: (Some(raw["portfolios"][0]["orders"][index].clone())).into(),
+                    info: (Some(raw_portfolio["orders"][index].clone())).into(),
                     time_in_force: (Some(OrderTimeInForce::GoodTillCancel)).into(),
                     last_update,
                     parent_id: (None).into(),

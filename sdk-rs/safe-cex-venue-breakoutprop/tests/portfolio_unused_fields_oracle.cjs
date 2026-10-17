@@ -14,13 +14,14 @@ for(const method of ['formatBalance','formatOpenPositions','formatPositions','fo
   }
 }
 for(const method of ['formatBalance','formatOpenPositions','formatPositions','formatOrders']) {
-  const variants=[['missing-portfolios',{}],['null-portfolio',{portfolios:[null]}]];
+  const variants=[['missing-portfolios',{}],['null-portfolio',{portfolios:[null]}],['string-portfolios',{portfolios:'x'}]];
   for(const [name,input] of [['null-position',{positions:[null]}],['null-balance',{balances:[null]}],['null-order',{orders:[null]}]]) {
     const data=structuredClone(row);Object.assign(data.portfolios[0],input);variants.push([name,data]);
   }
   for(const value of [0,1700000000123,null,true,[],{toString:null}]) {
     const data=structuredClone(row);data.portfolios[0].positions[0].lastUpdateTime=value;data.portfolios[0].orders[0].transactionTime=value;variants.push(['date-'+JSON.stringify(value),data]);
   }
+  variants.push(['array-like-portfolios',{portfolios:{0:structuredClone(row.portfolios[0])}}]);
   const poison=structuredClone(row);Object.assign(poison.portfolios[0],{account:null,version:{unexpected:true}});
   Object.assign(poison.portfolios[0].balances[0],{account:[],version:false});
   Object.assign(poison.portfolios[0].positions[0],{account:null,positionCode:{toString:null},openTime:[]});

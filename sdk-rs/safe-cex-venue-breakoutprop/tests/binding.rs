@@ -1263,3 +1263,19 @@ fn portfolio_balance_ignores_unused_declaration_fields_and_unread_orders() {
     assert_eq!(balance.info, Some(data));
     f.exchange.dispose().unwrap();
 }
+
+#[test]
+fn portfolio_array_like_root_retains_order_and_position_info() {
+    let f = fixture();
+    let mut data = source_only_portfolio();
+    let portfolio = data["portfolios"][0].clone();
+    data["portfolios"] = json!({"0":portfolio});
+    queue_portfolio(&f, data.clone());
+    let orders = f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].info.value(), Some(&data["portfolios"]["0"]["orders"][0]));
+    queue_portfolio(&f, data.clone());
+    let positions = f.run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()]))).unwrap();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].info.value(), Some(&data["portfolios"]["0"]["positions"][0]));
+}

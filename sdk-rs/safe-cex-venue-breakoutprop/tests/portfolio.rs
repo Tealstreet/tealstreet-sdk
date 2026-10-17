@@ -435,7 +435,7 @@ fn source_only_fields_and_unread_collections_match_typescript() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.as_array().unwrap().len(), 60);
+    assert_eq!(cases.as_array().unwrap().len(), 68);
     for case in cases.as_array().unwrap() {
         let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
         let store = DefaultStore::new();
