@@ -1299,3 +1299,9 @@ truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+The shared JS facade's async snapshot/order/position methods return rejected
+Promises for preparation errors, including errors before their first await.
+Snapshot privacy/disposal guards precede retry-count coercion. The native
+`js_async_facade` target compares return/catch behavior with the maintained TS
+async field bodies executed by Node, preserving original conversion exceptions.
