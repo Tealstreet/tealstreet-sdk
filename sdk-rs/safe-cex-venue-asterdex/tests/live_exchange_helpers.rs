@@ -339,6 +339,43 @@ fn get_account_oracle_rejects_nullish_fallback_mutation() {
 }
 
 #[test]
+fn leverage_brackets_preserves_map_key_identity() {
+    for key in [json!({ "market": "BTCUSDT" }), json!(["BTCUSDT"])] {
+        let response = json!([
+            { "symbol": key, "brackets": [{ "initialLeverage": 125 }] },
+            { "symbol": key, "brackets": [{ "initialLeverage": 75 }] },
+        ]);
+        let (entries, message, severity) = parse_leverage_brackets_response(Ok(&response));
+        assert_eq!(
+            entries,
+            vec![
+                (Some(key.clone()), Some(json!(125))),
+                (Some(key), Some(json!(75))),
+            ],
+            "distinct object/array Map keys must retain both entries"
+        );
+        assert_eq!(message, "Loaded leverage brackets for 2 symbols");
+        assert_eq!(severity.as_str(), "info");
+    }
+
+    let response = json!([
+        { "brackets": [{ "initialLeverage": 125 }] },
+        { "symbol": null, "brackets": [{ "initialLeverage": 100 }] },
+        { "brackets": [{ "initialLeverage": 75 }] },
+        { "symbol": null, "brackets": [{ "initialLeverage": 50 }] },
+    ]);
+    let (entries, _, _) = parse_leverage_brackets_response(Ok(&response));
+    assert_eq!(
+        entries,
+        vec![
+            (None, Some(json!(75))),
+            (Some(Value::Null), Some(json!(50)))
+        ],
+        "undefined and null are separate keys; duplicates overwrite in place"
+    );
+}
+
+#[test]
 #[ignore = "requires live isolated TypeScript oracle"]
 fn leverage_brackets_matches_typescript() {
     let output = std::process::Command::new("node")
