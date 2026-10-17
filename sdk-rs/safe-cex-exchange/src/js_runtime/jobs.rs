@@ -110,6 +110,13 @@ impl Drop for Enter {
         with_current(|current| *current.borrow_mut() = self.0.take());
     }
 }
+struct Draining<'a>(&'a Cell<bool>);
+impl Drop for Draining<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
+
 impl Jobs {
     pub(super) fn poll<F: Future + ?Sized>(
         self: &Rc<Self>,
@@ -200,12 +207,6 @@ impl Jobs {
     pub(super) fn drain(self: &Rc<Self>) {
         if self.draining.replace(true) {
             return;
-        }
-        struct Draining<'a>(&'a Cell<bool>);
-        impl Drop for Draining<'_> {
-            fn drop(&mut self) {
-                self.0.set(false);
-            }
         }
         let _draining = Draining(&self.draining);
         while let Some(job) = self.next(false) {
