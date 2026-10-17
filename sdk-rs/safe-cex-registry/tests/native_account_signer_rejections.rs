@@ -3,6 +3,7 @@ mod support;
 use safe_cex_registry::native_account::{
     NativeAccountSpec, native_account_call, open_native_account,
 };
+use safe_cex_registry::native_value::NativeValue;
 use serde_json::json;
 use std::{cell::RefCell, rc::Rc};
 use tokio::net::TcpListener;
@@ -24,7 +25,7 @@ fn real_native_account_preserves_hosted_signer_rejection_fields() {
             options: json!({"key":"hosted-key","secret":"","overrideProxyUrl":origin}).into(),
             account_name: Some("hosted-account".into()),
             sign: Some(Rc::new(|_| Box::pin(async {
-                Err(json!({"name":"SignerUnavailableError", "message":"Remote signer unavailable", "code":"SIGNER_OFFLINE"}))
+                Err(json!({"name":"SignerUnavailableError", "message":"Remote signer unavailable", "code":"SIGNER_OFFLINE"}).into())
             }))),
             proxy_token: None,
         }).unwrap();
@@ -38,8 +39,11 @@ fn real_native_account_preserves_hosted_signer_rejection_fields() {
             seen.borrow().is_empty(),
             "failed signing must not send HTTP"
         );
-        assert_eq!(error["message"], "Remote signer unavailable");
-        assert_eq!(error["name"], "SignerUnavailableError");
-        assert_eq!(error["code"], "SIGNER_OFFLINE");
+        assert_eq!(
+            error["message"],
+            NativeValue::string("Remote signer unavailable")
+        );
+        assert_eq!(error["name"], NativeValue::string("SignerUnavailableError"));
+        assert_eq!(error["code"], NativeValue::string("SIGNER_OFFLINE"));
     });
 }

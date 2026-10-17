@@ -120,9 +120,7 @@ impl safe_cex_transport::signing::RemoteSigner for HostSigner {
         Box::pin(async move {
             let wire =
                 NativeValue::encode(&request).map_err(|e| TransportError::Host(e.to_string()))?;
-            let response = sign(wire)
-                .await
-                .map_err(|error| callback_error(error.into()))?;
+            let response = sign(wire).await.map_err(callback_error)?;
             match request {
                 RemoteSignerRequest::Http(_) => response.decode().map(RemoteSignerResponse::Http),
                 RemoteSignerRequest::WsAuth { .. } => {
@@ -148,9 +146,7 @@ impl safe_cex_transport::signing::RemoteSigner for HostSigner {
                     "signing request must be an object".into(),
                 ));
             }
-            let response = sign(wire)
-                .await
-                .map_err(|error| callback_error(error.into()))?;
+            let response = sign(wire).await.map_err(callback_error)?;
             response
                 .decode()
                 .map_err(|error| TransportError::Host(error.to_string()))
