@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{Error, Value, value::RawValue};
 use std::fmt;
 const RAW_TOKEN: &str = "$serde_json::private::RawValue";
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RetainedJsonInput {
     /// Native JavaScript undefined; never constructed from JSON input.
     Undefined,
