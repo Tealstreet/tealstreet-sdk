@@ -984,7 +984,7 @@ kind = "method"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Native unknown-outcome classification now short-circuits after the one-payload and caller-client-ID guards, matching source. Four primary/demo actual HTTP controls compiled master-red; a positive caller-ID control retains classifier errors. "
 
 [[symbol]]
 ts = "BybitExchange.placeStopLossOrTakeProfit"
