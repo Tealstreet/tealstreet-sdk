@@ -2,7 +2,7 @@
 mod data_trace;
 #[path = "support/error_post.rs"]
 mod error_post_support;
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use indexmap::IndexMap;
 use runtime::Runtime;
