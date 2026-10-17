@@ -127,3 +127,10 @@ The fresh maintained AST export at merge `47f00ff760186e22e6d6722f5bda9b344d9040
 The four numeric methods use the inspected exhaustive struct/enum macro arms. Primitive/String checks and Option/Vec/JsObjectMap recursion create no task or pending reservation; the two unit enums have no payload operation. They receive immediate classifications with actual producer fingerprints. As with the earlier BroadcastMessage row, invocation fingerprint coverage does not pin the external macro provider against future drift; that existing limitation remains explicit.
 
 The reviewed whole-file guard dependencies now identify exchange.rs as `28a654aee4eb05040aea7c150583ab04bc96833480623c7bf633acf006314bd8` and websocket.rs as `b39f58844b69841b4d577be149fda9ffac135423d235fcd9e0f72ade2498b2be`. Only their two and three dependent guarded rows changed. The sibling order-operations and prior proxy pins remain unchanged. Source review supports these fingerprints; fresh all-features witness execution is a separate gate recorded at its own SHA.
+
+The ModelField cutover changes both cross-trade audit predicates to compare their
+property values, so absent and own undefined read alike. Request collection,
+join ownership, reservations and guards are unchanged. BaseExchange changes only
+prepared input signatures and model enum reads; disposal bodies and task guards
+are unchanged. The maintained AST exporter supplies the two audit producer pins,
+and the BaseExchange guard dependencies retain their whole-file pin after review.

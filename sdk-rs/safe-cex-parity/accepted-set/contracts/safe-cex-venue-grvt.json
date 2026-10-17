@@ -7820,6 +7820,21 @@
         "output": {
           "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
         }
+      },
+      {
+        "input": "{\"ih\":\"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"bd\":3,\"qd\":3}",
+        "output": {
+          "hash": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "base": "4008000000000000",
+          "quote": "4008000000000000",
+          "borrowed": true
+        }
+      },
+      {
+        "input": "{\"ih\":\"0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"bd\":3,\"qd\":3}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
       }
     ]
   },
