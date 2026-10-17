@@ -195,7 +195,9 @@ pub(crate) fn retire_cancelled_orders(rt: &Rt, orders: &Js) -> Result<(), Thrown
     }
     let primary = matches!(
         venue.base.name,
-        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
     );
     let retired_at = if primary { now(rt)? } else { 0. };
     for order in &orders {

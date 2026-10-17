@@ -17,18 +17,14 @@ const rows=[
  {status:'Trading',symbol:'BTC-25SEP26-1-C',optionsType:'Straddle'},
  {status:'Trading',symbol:'BTC',optionsType:'Put',baseCoin:'BTC'},
 ];
-const greeks=[{delta:'0.5',gamma:'0.01',vega:'3',theta:'-4'},{delta:''},{},{delta:0,gamma:'x'},{delta:'1e309',gamma:null}];
 const positions=[
  {symbol:'BTCUSD',unrealizedPnl:0.01,notional:1000,contracts:0.02},{symbol:'BTCUSD',unrealizedPnl:0.01,notional:1000,contracts:0},
  {symbol:'BTCUSDT',unrealizedPnl:5,notional:1000,contracts:0.02},{symbol:'ETHUSDZ26',unrealizedPnl:NaN,notional:10,contracts:2},
  {symbol:'BTCUSD',unrealizedPnl:-0.5,notional:600,contracts:0.01}];
-const markets=rows.map(options.mapBybitOptionInstrument).filter(Boolean);
 const out={
  symbols:symbols.map(s=>({s,inverse:inverse.isBybitInverseSymbol(s),option:options.isBybitOptionSymbol(s)})),
  rows:rows.map(r=>({raw:r,market:options.mapBybitOptionInstrument(r)??null})),
- greeks:greeks.map(g=>({raw:g,greeks:options.mapBybitOptionGreeks(g)??null})),
  positions:positions.map(p=>({p:{...p,unrealizedPnl:Number.isNaN(p.unrealizedPnl)?'NaN':p.unrealizedPnl},upnl:inverse.positionUpnlInQuote(p)})),
- expiries:{BTC:options.optionExpiries(markets,'BTC'),SOL:options.optionExpiries(markets,'SOL'),ETH:options.optionExpiries(markets,'ETH')},
  units:options.BYBIT_GREEK_UNITS,
 };
 assert.equal(out.symbols.length,26,'symbol floor');

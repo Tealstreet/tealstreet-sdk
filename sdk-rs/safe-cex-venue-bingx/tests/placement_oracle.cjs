@@ -4,7 +4,7 @@ const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH),root=path.resolve(__dirna
 function compile(text,file){const r=ts.transpileModule(text,{fileName:file,reportDiagnostics:true,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}});assert(!r.diagnostics.some(d=>d.category===ts.DiagnosticCategory.Error));return r.outputText;}
 function load(file){if(cache.has(file))return cache.get(file);const module={exports:{}};cache.set(file,module.exports);const req=spec=>{
  if(spec.startsWith('@tealstreet/'))return load(path.join(root,'packages',spec.slice('@tealstreet/'.length)+'.ts'));
- if(spec.endsWith('/virtualClock'))return {virtualClock:{getCurrentTimeMs:()=>1234}};
+ if(spec.endsWith('/virtualClock'))return {virtualClock:{getCurrentTimeMs:()=>5678}};
  if(spec.startsWith('.'))return load(path.resolve(path.dirname(file),spec+'.ts'));
  return require(require.resolve(spec,{paths:[path.join(root,'node_modules')]}));
 };vm.runInThisContext(`(function(require,module,exports){${compile(fs.readFileSync(file,'utf8'),file)}\n})`,{filename:file})(req,module,module.exports);cache.set(file,module.exports);return module.exports;}
@@ -22,7 +22,7 @@ const file=path.join(root,'packages/safe-cex/src/exchanges/bingx/bingx.exchange.
 const base=extract(path.join(root,'packages/safe-cex/src/exchanges/base.ts'),'BaseExchange',['resolveCallerClientOrderId','assertCallerClientOrderIds','assertSingleNativeClientOrderId','wouldSplitOrder','assertCallerClientOrderIdUnsplit','rejectPreflight']);
 let uuidValue='',uuidCount=0;
 const members=extract(file,'BingxExchange',[...names,'getOrFetchPositionMode','isLikelyTradfiMarket','buildTradfiOneWayModeError','normalizeOrderPlacementError','mapOrder','clientOrderIdRule','_accountPositionMode']);
-const Placement=vm.runInNewContext(compile(`class Parent{${base}} class Placement extends Parent{${members}} Placement;`,file),{...types,...constants,...deps,...guards,adjust,subtract,inverseObj,omitUndefined,uuid:()=>uuidCount++===0?uuidValue:uuidValue+'-'+uuidCount,virtualClock:{getCurrentTimeMs:()=>1234}},{filename:file});
+const Placement=vm.runInNewContext(compile(`class Parent{${base}} class Placement extends Parent{${members}} Placement;`,file),{...types,...constants,...deps,...guards,adjust,subtract,inverseObj,omitUndefined,uuid:()=>uuidCount++===0?uuidValue:uuidValue+'-'+uuidCount,virtualClock:{getCurrentTimeMs:()=>5678}},{filename:file});
 const market=(id='BTC-USDT',symbol='BTCUSDT')=>({id,symbol,base:id.split('-')[0],quote:'USDT',active:true,precision:{amount:0.25,price:0.25},limits:{amount:{min:0.1,max:5},leverage:{min:1,max:50}}});
 const pos=side=>({id:'BTCUSDT:'+side,symbol:'BTCUSDT',side,entryPrice:100,notional:300,leverage:5,marginType:'cross',positionMode:'hedged',unrealizedPnl:1,contracts:3,liquidationPrice:80});
 const tick={id:'BTC-USDT',symbol:'BTCUSDT',bid:99,ask:101,last:100,mark:100,index:100,percentage:1,fundingRate:0,fundingTime:0,volume:9,quoteVolume:900,openInterest:0};
