@@ -21,12 +21,14 @@ use std::{
 
 pub struct MexcSocketDependencies {
     pub runtime: Rc<dyn WsRuntime>,
+    pub current_time_ms: Rc<dyn Fn() -> f64>,
     pub remote_account_name: Option<String>,
     pub emit_fill: Rc<dyn Fn(crate::ws_private::MexcFillEvent) -> Result<(), ExchangeError>>,
 }
 
 pub(crate) struct PrivateProtocol {
     parent: Weak<MexcExchange>,
+    current_time_ms: Rc<dyn Fn() -> f64>,
     handlers: MexcPrivateHandlers,
     remote_account_name: Option<String>,
     heartbeat: RefCell<Option<OwnedOperation>>,
@@ -38,9 +40,11 @@ impl PrivateProtocol {
         runtime: Rc<dyn WsRuntime>,
         handlers: MexcPrivateHandlers,
         remote_account_name: Option<String>,
+        current_time_ms: Rc<dyn Fn() -> f64>,
     ) -> Rc<BaseWebSocket> {
         let protocol = Rc::new(Self {
             parent: Rc::downgrade(parent),
+            current_time_ms,
             handlers,
             remote_account_name,
             heartbeat: RefCell::default(),
@@ -86,7 +90,7 @@ impl PrivateProtocol {
         };
         let options = parent.base().options();
         let api_key = safe_cex_num::js_trim(&options.key).to_owned();
-        let request_time = safe_cex_num::js_number_string(parent.base().runtime.now_ms());
+        let request_time = safe_cex_num::js_number_string((self.current_time_ms)());
         let signature = parent.login_signature(
             api_key.clone(),
             request_time.clone(),

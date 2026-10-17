@@ -157,7 +157,10 @@ both HTTP clients and BaseExchange availability. Private WS uses its HTTP
 bullet-private token, as in TypeScript. `native_host_kucoin_hosted` verifies
 account and unlimited HTTP plus real private subscriptions without a local secret.
 MEXC shares the hosted account with HTTP, BaseExchange availability and private
-WS login; preserve the private socket account name. `native_host_mexc_hosted`
+WS login; preserve the private socket account name. The same native-host
+`current_time_ms` dependency reads the shared synced VirtualClock for local REST
+signing and both local/hosted WS login. `native_host_mexc_clock` checks the
+90-second server-clock correction on both wire paths. `native_host_mexc_hosted`
 compares actual source success/error/missing-signature outcomes over native HTTP
 and WS.
 
