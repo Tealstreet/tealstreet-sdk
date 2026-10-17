@@ -80,10 +80,10 @@ fn public_start_matches_live_source() {
         let log_store = store.clone();
         let log_base = Rc::downgrade(&base);
         let action = c["action"].as_str().unwrap().to_owned();
-        base.on(
+        base.on_args(
             "log",
             Rc::new(move |_, v| {
-                captured.borrow_mut().push(v.clone());
+                captured.borrow_mut().push(serde_json::json!(v));
                 log_events.borrow_mut().push("log");
                 if action == "loaded" {
                     let mut loaded = Store::loaded(log_store.as_ref()).clone();

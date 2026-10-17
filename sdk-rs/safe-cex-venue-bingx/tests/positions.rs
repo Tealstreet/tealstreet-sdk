@@ -289,7 +289,7 @@ fn fixture(
     base.on(
         "error",
         Rc::new(move |_, v| {
-            events.borrow_mut().push(v[0].as_str().unwrap().into());
+            events.borrow_mut().push(v.as_str().unwrap().into());
             Ok(())
         }),
     );

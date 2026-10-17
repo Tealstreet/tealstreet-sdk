@@ -81,7 +81,7 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
         Rc::new(move |event, payload| {
             assert_eq!(event, "error", "concrete reporter event");
             assert_eq!(
-                payload[0], "Exchange Error: page failure",
+                payload, "Exchange Error: page failure",
                 "concrete reporter message"
             );
             first_count.set(first_count.get() + 1);

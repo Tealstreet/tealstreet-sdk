@@ -126,10 +126,10 @@ async fn exercise(mode: usize) {
     assert!(h.exchange.can_sign(), "MEXC HOSTED typed capability");
     let errors = Rc::new(RefCell::new(vec![]));
     let capture = errors.clone();
-    h.exchange.base().on(
+    h.exchange.base().on_args(
         "error",
         Rc::new(move |_, args| {
-            capture.borrow_mut().push(args.clone());
+            capture.borrow_mut().push(serde_json::json!(args));
             Ok(())
         }),
     );
