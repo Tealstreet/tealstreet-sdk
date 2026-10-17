@@ -1,3 +1,7 @@
+use safe_cex_exchange::js_runtime::{
+    globals::install_builtins,
+    value::{Js, from_json, to_json},
+};
 use safe_cex_venue_lighter::{ws_private as private, ws_public as public};
 use serde_json::Value;
 use std::process::Command;
@@ -32,6 +36,7 @@ fn lighter_ws_state_helpers_match_live_typescript() {
         ("hydration", 212),
         ("flatten", 530),
         ("flattenBoundaries", 12),
+        ("nativeFlatten", 4),
     ] {
         assert_eq!(
             oracle[name].as_array().unwrap().len(),
@@ -119,38 +124,30 @@ fn lighter_ws_state_helpers_match_live_typescript() {
         let payload = case["present"]
             .as_bool()
             .unwrap()
-            .then_some(&case["payload"]);
+            .then(|| from_json(&case["payload"]));
         let include = case["include"].as_bool().unwrap();
-        let flattened = private::flatten_by_market_payload(payload, include);
-        compared_items[0] += flattened.len();
+        let flattened = private::flatten_by_market_payload(payload.as_ref(), include).unwrap();
+        compared_items[0] += flattened.array_values().unwrap().len();
         assert_eq!(
-            flattened.len(),
+            flattened.array_values().unwrap().len(),
             case["expected"].as_array().unwrap().len(),
             "FLATTEN-CARDINALITY native payload count"
         );
         assert_eq!(
-            flattened,
-            case["expected"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .collect::<Vec<_>>(),
+            to_json(&flattened).unwrap(),
+            to_json(&from_json(&case["expected"])).unwrap(),
             "flattenByMarketPayload {case}"
         );
-        let orders = private::flatten_orders_by_market(payload);
-        compared_items[1] += orders.len();
+        let orders = private::flatten_orders_by_market(payload.as_ref()).unwrap();
+        compared_items[1] += orders.array_values().unwrap().len();
         assert_eq!(
-            orders.len(),
+            orders.array_values().unwrap().len(),
             case["orders"].as_array().unwrap().len(),
             "FLATTEN-CARDINALITY native orders count"
         );
         assert_eq!(
-            orders,
-            case["orders"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .collect::<Vec<_>>(),
+            to_json(&orders).unwrap(),
+            to_json(&from_json(&case["orders"])).unwrap(),
             "flattenOrdersByMarket {case}"
         );
     }
@@ -159,44 +156,92 @@ fn lighter_ws_state_helpers_match_live_typescript() {
         [704, 840],
         "FLATTEN-CARDINALITY compared native items"
     );
+    let globals = Js::object(vec![]);
+    install_builtins::<()>(&globals, std::rc::Weak::new());
+    let json = globals.get("JSON").unwrap();
     for case in oracle["flattenBoundaries"].as_array().unwrap() {
-        let units: Vec<u16> = serde_json::from_value(case["inputUnits"].clone()).unwrap();
-        let payload = serde_json::from_str::<Value>(case["inputJson"].as_str().unwrap());
-        if String::from_utf16(&units).is_err() {
-            assert!(
-                payload.is_err(),
-                "flatten shared string ingress must refuse {case}"
-            );
-            let escaped = if units[0] == 0xd800 {
-                "\\ud800"
-            } else {
-                "\\udc00"
-            };
-            assert!(
-                case["expectedJson"].as_str().unwrap().contains(escaped),
-                "flattenByMarketPayload TS retains surrogate {case}"
-            );
-            assert!(
-                case["ordersJson"].as_str().unwrap().contains(escaped),
-                "flattenOrdersByMarket TS retains surrogate {case}"
-            );
-        } else {
-            let payload = payload.unwrap();
-            assert_eq!(
-                serde_json::to_string(&private::flatten_by_market_payload(
+        let payload = json
+            .call_method("parse", vec![Js::str(case["inputJson"].as_str().unwrap())])
+            .unwrap();
+        for (value, expected) in [
+            (
+                private::flatten_by_market_payload(
                     Some(&payload),
-                    case["include"].as_bool().unwrap()
-                ))
+                    case["include"].as_bool().unwrap(),
+                )
                 .unwrap(),
-                case["expectedJson"].as_str().unwrap(),
-                "flattenByMarketPayload Unicode {case}"
-            );
+                "expectedJson",
+            ),
+            (
+                private::flatten_orders_by_market(Some(&payload)).unwrap(),
+                "ordersJson",
+            ),
+        ] {
+            let actual = json
+                .call_method("stringify", vec![value])
+                .unwrap()
+                .to_display();
             assert_eq!(
-                serde_json::to_string(&private::flatten_orders_by_market(Some(&payload))).unwrap(),
-                case["ordersJson"].as_str().unwrap(),
-                "flattenOrdersByMarket Unicode {case}"
+                actual,
+                case[expected].as_str().unwrap(),
+                "native UTF-16 flatten {case}"
             );
         }
+    }
+    for case in oracle["nativeFlatten"].as_array().unwrap() {
+        let row = Js::object(vec![
+            ("price", Js::Number(f64::from_bits(0x7ff8000000000042))),
+            ("amount", Js::Number(f64::INFINITY)),
+            ("zero", Js::Number(-0.0)),
+            ("label", Js::String(vec![0xd800].into())),
+            ("missing", Js::Undefined),
+        ]);
+        row.define("cycle", row.clone()).unwrap();
+        let values = Js::holey_array(vec![
+            None,
+            Some(row.clone()),
+            Some(Js::Undefined),
+            Some(Js::Null),
+        ]);
+        let payload = if case["kind"] == "object" {
+            Js::object(vec![("2", values), ("1", row.clone())])
+        } else {
+            let function = Js::function("input", |_, _| Ok(Js::Undefined));
+            function.define("rows", values).unwrap();
+            function
+        };
+        let flattened =
+            private::flatten_by_market_payload(Some(&payload), case["include"].as_bool().unwrap())
+                .unwrap();
+        let items = flattened.array_values().unwrap();
+        let tags: Vec<_> = items
+            .iter()
+            .map(|value| {
+                if value.same_reference(&row) {
+                    "row"
+                } else if value.is_undefined() {
+                    "undefined"
+                } else if matches!(value, Js::Null) {
+                    "null"
+                } else {
+                    "other"
+                }
+            })
+            .collect();
+        let actual = serde_json::json!({
+            "tags": tags,
+            "dense": flattened.array_items().unwrap().iter().all(Option::is_some),
+            "rowIdentity": items.iter().filter(|value| !value.is_nullish()).all(|value| value.same_reference(&row)),
+            "nanBits":format!("{:016x}",row.get("price").unwrap().as_f64().unwrap().to_bits()),
+            "zeroBits":format!("{:016x}",row.get("zero").unwrap().as_f64().unwrap().to_bits()),
+            "amount":row.get("amount").unwrap().to_display(),
+            "units":row.get("label").unwrap().as_str().unwrap().as_ref(),
+            "ownUndefined":row.has_own("missing") && row.get("missing").unwrap().is_undefined(),
+            "cycle":row.get("cycle").unwrap().same_reference(&row),
+            "ordersLength":private::flatten_orders_by_market(Some(&payload)).unwrap().array_values().unwrap().len(),
+        });
+        assert_eq!(actual, case["expected"], "native flatten values {case}");
+        row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
     }
     for case in oracle["recent"].as_array().unwrap() {
         assert_eq!(

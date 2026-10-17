@@ -485,7 +485,7 @@ pub fn handle_user_event_orders<I: PrivateOrderInfo, E: PrivateOrderEventInput<I
                     chaser_max_attempts: None,
                 }))
                 .into(),
-                reduce_only: false,
+                reduce_only: false.into(),
                 info: (None).into(),
                 last_update: now,
                 close: (None).into(),

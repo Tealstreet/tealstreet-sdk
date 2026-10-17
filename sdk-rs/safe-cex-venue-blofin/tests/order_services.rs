@@ -175,7 +175,7 @@ fn assert_forwarded_order(native: &Order, raw: &Value) {
     );
     assert_eq!(native.filled, 0.0);
     assert_eq!(native.remaining, raw["amount"].as_f64().unwrap());
-    assert!(!native.reduce_only);
+    assert_eq!(native.reduce_only, false);
     assert_eq!(native.last_update, 123.0);
     assert_eq!(native.info.as_ref().unwrap()["witness"], raw["id"]);
 }

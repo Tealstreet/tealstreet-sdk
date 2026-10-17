@@ -208,7 +208,7 @@ fn order(a: &Order, e: &Value) {
     ] {
         num(a, &e[key])
     }
-    assert_eq!(a.reduce_only, e["reduceOnly"]);
+    assert_eq!(a.reduce_only.value().copied(), e["reduceOnly"].as_bool());
     assert!(
         a.parent_id.is_none()
             && a.close.is_none()

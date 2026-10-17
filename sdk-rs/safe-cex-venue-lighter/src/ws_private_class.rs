@@ -888,9 +888,12 @@ pub trait PrivateWebsocketContexts<H> {
     fn readonly_warning_times(&self) -> ReadonlyWarningTimes;
     fn feed(&self) -> Rc<LighterPrivateFeedRuntime<H, AccountValue>>;
     fn stream(&self) -> Rc<LighterPrivateStreamRuntime<H, AccountValue>>;
-    /// Wire-JSON view for the CHOSEN flattenByMarketPayload UTF-8 boundary.
-    fn json_view(&self, payload: &AccountValue) -> SigningResult<Option<serde_json::Value>>;
-    fn json_array(&self, values: Vec<&serde_json::Value>) -> SigningResult<AccountValue>;
+    fn flatten_by_market_payload(
+        &self,
+        payload: &AccountValue,
+        include_single_objects: bool,
+    ) -> SigningResult<AccountValue>;
+    fn empty_array(&self) -> AccountValue;
     fn type_error(&self, message: &str) -> TransactionSigningError;
     fn promise_value(&self, value: NativePromise<AccountValue>) -> AccountValue;
 }
@@ -1250,14 +1253,20 @@ impl PrivateWebsocketMethod {
                     &arg(args, 0),
                 )?
             }
-            Self::FlattenByMarketPayload | Self::FlattenOrdersByMarket => {
-                let payload = contexts.json_view(&arg(args, 0))?;
-                let values = if self == Self::FlattenOrdersByMarket {
-                    ws_private::flatten_orders_by_market(payload.as_ref())
+            Self::FlattenByMarketPayload => {
+                contexts.flatten_by_market_payload(&arg(args, 0), arg(args, 1).truthy())?
+            }
+            Self::FlattenOrdersByMarket => {
+                let payload = arg(args, 0);
+                if !matches!(payload, AccountValue::Object(_)) {
+                    contexts.empty_array()
                 } else {
-                    ws_private::flatten_by_market_payload(payload.as_ref(), arg(args, 1).truthy())
-                };
-                contexts.json_array(values)?
+                    invoke(
+                        socket.as_ref(),
+                        "flattenByMarketPayload",
+                        &[payload, AccountValue::Boolean(true)],
+                    )?
+                }
             }
             Self::ScheduleThrottledTask => {
                 let key = match string_units(&arg(args, 0)) {
@@ -1299,7 +1308,9 @@ impl PrivateWebsocketMethod {
                 ))?
             }
             Self::IsRecentStreamEvent => {
-                let timestamp = number(socket.as_ref(), arg(args, 0))?;
+                let AccountValue::Number(timestamp) = arg(args, 0) else {
+                    return Ok(AccountValue::Boolean(false));
+                };
                 if !timestamp.is_finite() || timestamp <= 0.0 {
                     AccountValue::Boolean(false)
                 } else {

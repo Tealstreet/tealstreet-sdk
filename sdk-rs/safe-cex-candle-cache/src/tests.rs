@@ -1612,6 +1612,130 @@ fn malformed_stored_candle_keeps_valid_siblings_and_fetches_only_its_gap() {
 }
 
 #[test]
+fn malformed_cached_candle_is_a_miss_and_refetches_without_error() {
+    for mode in [
+        CandleCacheBackendReadMode::ReadThrough,
+        CandleCacheBackendReadMode::HydrateOnce,
+    ] {
+        for field in ["timestamp", "open", "high", "low", "close", "volume"] {
+            for invalid in [
+                None,
+                Some(serde_json::Value::Null),
+                Some(serde_json::json!("invalid")),
+                Some(serde_json::json!(false)),
+            ] {
+                let e = Executor::default();
+                let store = Rc::new(Store::default());
+                let backend = Rc::new(KeyValueCandleCacheBackend::new(
+                    store.clone(),
+                    None,
+                    e.runtime(),
+                ));
+                let expected = candle(1_700_004_000_000.);
+                let mut malformed = serde_json::to_value(&expected).unwrap();
+                if let Some(value) = invalid {
+                    malformed[field] = value;
+                } else {
+                    malformed.as_object_mut().unwrap().remove(field);
+                }
+                store.values.borrow_mut().insert(
+                    "tealstreet-candles::malformed::283334".into(),
+                    serde_json::json!({"candles":[malformed],"lastAccessed":0}).to_string(),
+                );
+                let diagnostics = Rc::new(RefCell::new(Vec::new()));
+                let reports = diagnostics.clone();
+                let cache = CandleCache::new(
+                    CandleCacheOptions {
+                        backend: Some(backend.clone()),
+                        backend_read_mode: Some(mode),
+                        chunk_size: Some(100),
+                        on_hydration_error: Some(Rc::new(move |key, error| {
+                            reports.borrow_mut().push((key, error))
+                        })),
+                        ..Default::default()
+                    },
+                    e.runtime(),
+                );
+                let (fetch, calls) = recording(vec![expected.clone()]);
+                let result = e
+                    .run(cache.fetch(request(
+                        "malformed",
+                        "1m",
+                        expected.timestamp,
+                        expected.timestamp,
+                        1.,
+                        expected.timestamp + 120_000.,
+                        fetch.clone(),
+                    )))
+                    .expect(
+                        "CACHE-MALFORMED unsupported cache rows must not fail the candle request",
+                    );
+                assert_eq!(
+                    result,
+                    vec![expected.clone()],
+                    "CACHE-MALFORMED returns the fetched candle for {field}"
+                );
+                assert_eq!(
+                    *calls.borrow(),
+                    vec![FetchOptions {
+                        interval: timeframe("1m"),
+                        from: expected.timestamp,
+                        to: expected.timestamp,
+                        limit: 1.
+                    }],
+                    "CACHE-MALFORMED must refetch exactly the missing slot for {field}"
+                );
+                assert!(
+                    store.reads.get() > 0,
+                    "CACHE-MALFORMED must read the real KV backend"
+                );
+                assert!(
+                    diagnostics.borrow().is_empty(),
+                    "malformed cache content is a miss, not a backend failure"
+                );
+                let reread = e
+                    .run(
+                        backend
+                            .load_chunks(
+                                "malformed".into(),
+                                vec![283334],
+                                CandleCacheChunkAccessOptions {
+                                    chunk_size: 100,
+                                    interval_seconds: 60.,
+                                },
+                            )
+                            .unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    reread[&283334][0],
+                    Some(expected.clone()),
+                    "CACHE-MALFORMED must persist the fetched replacement"
+                );
+                assert_eq!(
+                    e.run(cache.fetch(request(
+                        "malformed",
+                        "1m",
+                        expected.timestamp,
+                        expected.timestamp,
+                        1.,
+                        expected.timestamp + 120_000.,
+                        fetch
+                    )))
+                    .unwrap(),
+                    vec![expected]
+                );
+                assert_eq!(
+                    calls.borrow().len(),
+                    1,
+                    "CACHE-MALFORMED repaired slot must be a cache hit"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn zero_chunk_size_degrades_to_exchange_without_cache_io() {
     let e = Executor::default();
     let store = Rc::new(Store::default());

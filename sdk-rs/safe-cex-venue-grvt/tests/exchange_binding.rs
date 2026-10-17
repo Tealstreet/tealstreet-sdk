@@ -399,6 +399,99 @@ fn update_order_validates_then_cancels_and_replaces() {
         "50100"
     );
 }
+
+#[test]
+fn money_amend_preflight_failure_uses_the_source_error_reporter() {
+    let h = setup();
+    let mut order: Order = serde_json::from_value(json!({
+        "id":"71", "symbol":SYMBOL, "type":"limit", "side":"buy", "status":"open",
+        "price":50000, "amount":0.125, "filled":0, "remaining":0.125,
+        "reduceOnly":false, "lastUpdate":1
+    }))
+    .unwrap();
+    order.time_in_force = ModelField::Undefined;
+    let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let saved = calls.clone();
+    h.venue().base().on_args(
+        "error",
+        std::rc::Rc::new(move |_, args| {
+            saved.borrow_mut().push(args.len());
+            Ok(())
+        }),
+    );
+    let update = serde_json::from_value(json!({"order":order,"update":{"price":50100}})).unwrap();
+    let failure = h.drive(h.venue().update_order(update)).unwrap_err();
+    assert_eq!(
+        failure.message,
+        "Cannot safely update GRVT order 71: missing time-in-force"
+    );
+    assert!(h.http.calls("/lite/v1/cancel_order").is_empty());
+    assert!(h.http.calls("/lite/v1/create_order").is_empty());
+    assert_eq!(
+        *calls.borrow(),
+        vec![2],
+        "GRVT money-path catches must run the source reporter with metadata"
+    );
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|line| { line.starts_with("error: exchange error Update order failed: ") })
+    );
+    assert!(h.runtime.logs.borrow().iter().any(|line| line == "trace: "));
+}
+
+#[test]
+fn money_cancel_failures_use_the_source_error_reporter() {
+    for symbol in [None, Some(SYMBOL)] {
+        let h = setup();
+        let path = "/lite/v1/cancel_all_orders";
+        h.http.routes.borrow_mut().retain(|(_, p, _)| p != path);
+        h.http.route(
+            "POST",
+            path,
+            400.0,
+            json!({"code":17,"message":"cancel denied"}),
+        );
+        let calls = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let saved = calls.clone();
+        h.venue().base().on_args(
+            "error",
+            std::rc::Rc::new(move |_, args| {
+                saved.borrow_mut().push(args.len());
+                Ok(())
+            }),
+        );
+        let result = match symbol {
+            None => h.drive(h.venue().cancel_all_orders()),
+            Some(symbol) => h.drive(h.venue().cancel_symbol_orders(symbol.into())),
+        };
+        assert!(result.is_err());
+        assert_eq!(
+            h.http.calls(path).len(),
+            1,
+            "one real SDK cancellation write"
+        );
+        assert!(!calls.borrow().is_empty());
+        assert!(
+            calls.borrow().iter().all(|count| *count == 2),
+            "GRVT money cancellation reporter must retain metadata: {:?}",
+            calls.borrow()
+        );
+        let prefix = symbol.map_or_else(
+            || "Cancel all failed: ".to_owned(),
+            |symbol| format!("Cancel {symbol} orders failed: "),
+        );
+        assert!(
+            h.runtime
+                .logs
+                .borrow()
+                .iter()
+                .any(|line| { line.starts_with(&format!("error: exchange error {prefix}")) })
+        );
+    }
+}
 #[test]
 fn start_public_only_loads_markets_tickers_and_opens_public_socket() {
     let mut options = options();
@@ -806,4 +899,240 @@ fn private_receive_watchdog_obeys_grvt_idle_thresholds() {
         "GRVT private watchdog reconnects with source warning after 90 seconds"
     );
     assert!(private.closed.get());
+}
+
+fn mixed_market_rows() -> Vec<Value> {
+    let first = instrument();
+    let mut bad = instrument();
+    bad["i"] = json!("BROKEN_USDT_Perp");
+    bad["b"] = json!({"unexpected":"asset"});
+    let mut last = instrument();
+    last["i"] = json!("ETH_USDT_Perp");
+    last["b"] = json!("ETH");
+    vec![first, bad, last]
+}
+
+#[test]
+fn market_fetch_refuses_only_bad_asset_rows_and_reports_field_values() {
+    for (field, value) in [
+        ("b", Some(json!({"unexpected":"asset"}))),
+        ("q", Some(json!(false))),
+        ("b", Some(Value::Null)),
+        ("q", Some(json!(17))),
+        ("q", None),
+    ] {
+        let h = setup();
+        let mut rows = mixed_market_rows();
+        rows[1]["b"] = json!("BROKEN");
+        if let Some(value) = &value {
+            rows[1][field] = value.clone();
+        } else {
+            rows[1].as_object_mut().unwrap().remove(field);
+        }
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/lite/v1/all_instruments");
+        h.http
+            .route("POST", "/lite/v1/all_instruments", 200., json!({"r":rows}));
+        let markets = h
+            .drive(h.venue().fetch_markets())
+            .expect("one bad asset field must not reject valid markets");
+        assert_eq!(
+            markets.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["BTC_USDT_Perp", "ETH_USDT_Perp"]
+        );
+        assert_eq!(markets[0].base, "BTC");
+        assert_eq!(markets[1].base, "ETH");
+        let logs = h.runtime.logs.borrow();
+        let report = logs
+            .iter()
+            .find(|line| line.contains("Refused GRVT market row"))
+            .expect("row refusal must be visible");
+        assert!(report.contains("BROKEN_USDT_Perp"), "{report}");
+        assert!(
+            report.contains(if field == "b" { "base=" } else { "quote=" }),
+            "{report}"
+        );
+        let reported_value = value
+            .as_ref()
+            .map_or_else(|| "undefined".into(), Value::to_string);
+        assert!(report.contains(&reported_value), "{report}");
+        assert_eq!(
+            logs.iter()
+                .filter(|line| line.contains("Refused GRVT market row"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn market_refresh_commits_good_rows_around_a_refused_asset_row() {
+    let h = setup();
+    loaded(&h);
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/lite/v1/all_instruments");
+    h.http.route(
+        "POST",
+        "/lite/v1/all_instruments",
+        200.,
+        json!({"r":mixed_market_rows()}),
+    );
+    let changes = h
+        .drive(h.venue().refresh_markets())
+        .expect("refresh keeps valid market metadata despite one refused row");
+    assert_eq!(changes.added.len(), 1);
+    assert_eq!(changes.added[0].id, "ETH_USDT_Perp");
+    assert!(changes.removed.is_empty());
+    let markets = h.store.markets();
+    assert_eq!(
+        markets.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["BTC_USDT_Perp", "ETH_USDT_Perp"]
+    );
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|line| line.contains("Refused GRVT market row"))
+    );
+}
+
+fn candle_source(file: &str) -> Value {
+    let output = std::process::Command::new("node")
+        .arg(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join(file),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn assert_candle_fields(candle: &Candle, expected: &Value, label: &str) {
+    assert_eq!(expected.as_object().unwrap().len(), 6);
+    for (field, actual) in [
+        ("timestamp", candle.timestamp),
+        ("open", candle.open),
+        ("high", candle.high),
+        ("low", candle.low),
+        ("close", candle.close),
+        ("volume", candle.volume),
+    ] {
+        if expected[field]["nan"] == true {
+            assert!(actual.is_nan(), "{label}: native {field} NaN");
+        } else {
+            assert_eq!(
+                format!("{:016x}", actual.to_bits()),
+                expected[field]["bits"].as_str().unwrap(),
+                "{label}: native {field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rest_candles_keep_source_aliases_time_units_and_distinct_fields() {
+    let source = candle_source("data-reads-source.cjs");
+    let rows = source["candleRows"].as_array().unwrap();
+    assert_eq!(rows.len(), 17);
+    for (name, count) in [
+        ("full", 2),
+        ("lite", 1),
+        ("numeric", 1),
+        ("defaults", 1),
+        ("nan", 1),
+    ] {
+        let case = rows.iter().find(|row| row["name"] == name).unwrap();
+        let h = setup();
+        loaded(&h);
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/lite/v1/kline");
+        h.http.route(
+            "POST",
+            "/lite/v1/kline",
+            200.0,
+            serde_json::from_str(case["raw"].as_str().unwrap()).unwrap(),
+        );
+        let candles = h
+            .drive(
+                h.venue().fetch_ohlcv(
+                    serde_json::from_value(json!({
+                        "symbol":SYMBOL,"interval":"5m","from":11,"to":23,"limit":17
+                    }))
+                    .unwrap(),
+                ),
+            )
+            .unwrap();
+        assert_eq!(candles.len(), count, "REST candle count {name}");
+        assert_eq!(case["result"].as_array().unwrap().len(), count);
+        for (candle, expected) in candles.iter().zip(case["result"].as_array().unwrap()) {
+            assert_candle_fields(candle, expected, name);
+        }
+        let calls = h.http.calls("/lite/v1/kline");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].data,
+            json!({"i":"BTC_USDT_Perp","i1":"CI_5_M","t":"TRADE","st":"11000000","et":"23000000","l":17.0})
+        );
+    }
+}
+
+#[test]
+fn socket_candles_keep_source_aliases_time_units_and_cleanup() {
+    use std::{cell::RefCell, rc::Rc};
+    let source = candle_source("public-feeds-source.cjs");
+    let rows = source["candleListenerRows"].as_array().unwrap();
+    assert_eq!(rows.len(), 12);
+    for name in ["lite", "full", "numeric-time", "zero-fallback", "invalid"] {
+        let case = rows.iter().find(|row| row["name"] == name).unwrap();
+        let mut opts = options();
+        opts.public_data_only = Some(true);
+        let h = harness(ExchangeName::Grvt, opts, script);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let cleanup = h
+            .venue()
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":SYMBOL,"interval":"1m"})).unwrap(),
+                Rc::new(move |c| sink.borrow_mut().push(c)),
+            )
+            .unwrap();
+        let mut feed = case["input"].clone();
+        let field = if feed.get("i").is_some() {
+            "i"
+        } else {
+            "instrument"
+        };
+        feed[field] = json!("BTC_USDT_Perp");
+        let frame = json!({"s":"v1.candle","s1":"BTC_USDT_Perp@CI_1_M-TRADE","f":feed}).to_string();
+        let socket = h.runtime.sockets.borrow()[0].1.clone();
+        socket.events.borrow_mut().push_back(message(frame.clone()));
+        h.runtime.pump();
+        assert_eq!(seen.borrow().len(), 1, "socket candle callback {name}");
+        assert_eq!(case["candles"].as_array().unwrap().len(), 1);
+        assert_candle_fields(&seen.borrow()[0], &case["candles"][0], name);
+        cleanup().unwrap();
+        socket.events.borrow_mut().push_back(message(frame));
+        h.runtime.pump();
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "cleanup suppresses next candle {name}"
+        );
+        h.venue().dispose().unwrap();
+    }
 }

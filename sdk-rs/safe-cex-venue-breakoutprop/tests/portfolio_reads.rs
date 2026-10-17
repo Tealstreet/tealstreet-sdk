@@ -336,6 +336,17 @@ fn inherited_and_utf8_read_boundaries() {
         let method = case["method"].as_str().unwrap();
         let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
         let fetch = || std::future::ready(Ok::<_, String>(Some(input.clone())));
+        if method == "fetchBalance" {
+            let balance = run(fetch_balance(fetch, &store, &|ms| ms, &|_| Ok(()), |e| {
+                e.message
+            }))
+            .unwrap();
+            assert_eq!(
+                (balance.total, balance.used, balance.upnl, balance.free),
+                (131.25, 169.0, 0.0, -37.75)
+            );
+            continue;
+        }
         let error = match method {
             "fetchBalance" => run(fetch_balance(fetch, &store, &|ms| ms, &|_| Ok(()), |e| {
                 e.message
@@ -345,7 +356,7 @@ fn inherited_and_utf8_read_boundaries() {
                 fetch,
                 &store,
                 &|ms| ms,
-                None,
+                Some(&["BTCUSD".into()]),
                 &|_| Ok(()),
                 |e| e.message,
             ))

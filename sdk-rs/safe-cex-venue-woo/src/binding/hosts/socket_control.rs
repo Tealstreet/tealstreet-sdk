@@ -289,6 +289,7 @@ pub(crate) fn define_socket_classes(
         frame: Rc::new(move |receiver: &Js| Frame::over(&frames, receiver)),
         store: Rc::new(move |_: &Js| store.clone()),
         json: Rc::new(|v: &Js| to_json(v).map(Rc::new)),
+        ticker_data: Rc::new(safe_cex_exchange::js_runtime::value::to_retained_input),
         exchange_error: Rc::new(Thrown::from),
     });
     let public = socket_classes::define_public_class(common.clone())?;

@@ -151,3 +151,110 @@ fn unmapped_order_status_keeps_rest_and_private_batches() {
 fn unmapped_order_side_keeps_rest_and_private_batches() {
     unmapped_case("side");
 }
+
+fn malformed_reduce_only_case(private_frame: bool) {
+    for (bad, displayed) in [
+        (json!(17), "Number(17.0)"),
+        (json!("true"), "String(\"true\")"),
+        (json!({}), "Object([])"),
+        (json!([]), "Array([])"),
+    ] {
+        let h = fixture();
+        let rows = |prefix: &str| {
+            let mut before = raw_order();
+            before["id"] = json!(format!("{prefix}-before"));
+            let mut malformed = raw_order();
+            malformed["id"] = json!(format!("{prefix}-bad"));
+            malformed["reduceOnly"] = bad.clone();
+            let mut after = raw_order();
+            after["id"] = json!(format!("{prefix}-after"));
+            json!([before, malformed, after])
+        };
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/v3/open-orders");
+        h.http.ok("GET", "/v3/open-orders", rows("rest"));
+        if !private_frame {
+            let orders = h
+                .drive(h.venue().fetch_orders(None))
+                .expect("one malformed reduceOnly must not reject the REST snapshot");
+            assert_eq!(
+                orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+                ["rest-before", "rest-after"]
+            );
+            assert!(orders.iter().all(|order| order.reduce_only == false));
+            let warnings = h.runtime.console.borrow().clone();
+            assert_eq!(
+                warnings
+                    .iter()
+                    .filter(|line| line.contains("Order.reduceOnly"))
+                    .count(),
+                1
+            );
+            assert!(
+                warnings.iter().any(|line| line.contains(displayed)),
+                "refusal must report the original value: {warnings:?}"
+            );
+            h.venue().dispose().unwrap();
+            continue;
+        }
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        h.runtime.console.borrow_mut().clear();
+        let private = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url.contains("private"))
+            .unwrap()
+            .1
+            .clone();
+        private
+            .events
+            .borrow_mut()
+            .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                safe_cex_transport::socket::SocketFrame::Text(
+                    json!({"topic":"ws_zk_accounts_v3","contents":{"orders":rows("ws")}})
+                        .to_string(),
+                ),
+            ));
+        h.runtime.pump();
+        let orders = h.store.orders();
+        for id in ["ws-before", "ws-after"] {
+            assert!(
+                orders.iter().any(|order| order.id == id),
+                "private row lost {id}"
+            );
+        }
+        assert!(!orders.iter().any(|order| order.id == "ws-bad"));
+        drop(orders);
+        let warnings = h.runtime.console.borrow();
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|line| line.contains("Order.reduceOnly"))
+                .count(),
+            1
+        );
+        assert!(
+            warnings.iter().any(|line| line.contains(displayed)),
+            "private refusal must report field and original value: {warnings:?}"
+        );
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "row refusal must not abort dispatch"
+        );
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn malformed_reduce_only_refuses_only_its_rest_row() {
+    malformed_reduce_only_case(false);
+}
+#[test]
+fn malformed_reduce_only_refuses_only_its_private_row() {
+    malformed_reduce_only_case(true);
+}

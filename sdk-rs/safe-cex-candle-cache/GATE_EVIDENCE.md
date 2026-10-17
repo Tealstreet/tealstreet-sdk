@@ -747,3 +747,24 @@ can select an installed executable. No browser security setting was changed.
 records() previously caught a cursor callback failure and returned before the write transaction completion, leaving already queued deletes free to commit. cursor_failure now aborts a write transaction from both request-error and callback-error paths while the callback is active, before sending the recovered error. Readonly failure continues to preserve its prefix; abort failure is retained in the diagnostic. clear and evictOldChunks own the manifest declarations.
 
 The browser probe now has a separate cursor_rollback_probe: two stored chunks, failure on the second real IDBCursor.continue after deletion begins, then exact original-chunk equality and one report. Removing the abort should allow partial deletion and fail that assertion, but this mutation has NOT been executed. The probe is prepared, compiled and wasm-linted only. No browser launch was retried. LoadedChunks and this new rollback execution coverage remain OPEN, not inferred from the earlier Chrome run and not closed by wasm clippy.
+
+## Malformed persisted Candle residual
+
+The delegated shared-type decision keeps the six numeric Candle fields strict.
+`malformed_cached_candle_is_a_miss_and_refetches_without_error` exercises the real
+KV backend through `CandleCache::fetch`: all six required fields are independently
+missing, null, strings or booleans, in both ReadThrough and HydrateOnce (48 cases).
+It requires a successful exact-slot fetch, no hydration error, persistence of the
+replacement and a subsequent cache hit without another fetch. The existing
+`malformed_stored_candle_keeps_valid_siblings_and_fetches_only_its_gap` separately
+covers healthy siblings and partial-gap fetching.
+
+`scripts/retained-candle-source.cjs` executes the maintained KV and IndexedDB
+methods. TypeScript retains malformed objects and native clone values; the Rust
+typed refusal remains an accepted divergence, not a lossless cache claim. The
+IndexedDB source witness injects transactions and uses native structuredClone;
+it does not execute a browser database. No null-to-NaN substitution is made.
+
+`scripts/malformed-cache-control.py` changes only the real KV Candle-decoder
+failure branch to return an error. It requires compilation and a named request
+failure, restores exact source bytes, then requires all 48 cases to pass.

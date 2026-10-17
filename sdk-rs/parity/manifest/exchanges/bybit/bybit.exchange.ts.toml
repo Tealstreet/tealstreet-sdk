@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/binding/members/options.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs", "safe-cex-venue-bybit/src/binding/members/history.rs", "safe-cex-venue-bybit/src/rest_fills.rs", "safe-cex-venue-bybit/src/primary_fills.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/binding/members/markets.rs", "safe-cex-venue-bybit/src/market_mapping.rs", "safe-cex-venue-bybit/src/binding/members/options.rs", "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs", "safe-cex-venue-bybit/src/binding/members/history.rs", "safe-cex-venue-bybit/src/rest_fills.rs", "safe-cex-venue-bybit/src/primary_fills.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -813,10 +813,10 @@ note = "Body port: eager instruments-info request with category/limit 1000; retr
 [[symbol]]
 ts = "BybitExchange.fetchMarketsHelper"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/binding/members/markets.rs::fetch_markets_helper", "safe-cex-venue-bybit/src/market_mapping.rs::map_market" ]
+status = "divergent"
+note = "Real HTTP witnesses also retain valid siblings around object/boolean/null/numeric/absent symbols; primitive fee equality preserves TS identity for separately decoded objects/arrays. APPROVED strict-field divergence: id/symbol/base/quote remain strings; after source mapping, unrepresentable string rows are visibly reported at Warning and omitted while valid Trading/PreLaunch siblings survive. TS retains malformed string values. Real primary/demo HTTP fetch/refresh regressions cover object, boolean, null, number and absent values, alongside the maintained-source mapper corpus. Source property/coercion errors retain priority over typed string admission. Existing JSON/UTF-8 info boundaries remain outside this claim. Renamed Rust targets: safe-cex-venue-bybit/src/binding/members/markets.rs::fetch_markets_helper; safe-cex-venue-bybit/src/market_mapping.rs::map_market."
 
 [[symbol]]
 ts = "BybitExchange.fetchClosedPositionRows"
@@ -960,7 +960,7 @@ kind = "field-fn"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Single-order adjusted price/trigger truthiness is repaired in binding/members/orders.rs::place_order: four compiled primary/demo master-red real-binding controls, plus raw option-gate payload and NaN-adjusted trigger controls in adjusted_order_binding. This narrow branch repair does not claim the entire pending placement method."
 
 [[symbol]]
 ts = "BybitExchange#assertOptionOrderPlaceable"
@@ -984,7 +984,7 @@ kind = "method"
 layer = ""
 rs = ""
 status = "pending"
-note = ""
+note = "Native unknown-outcome classification now short-circuits after the one-payload and caller-client-ID guards, matching source. Four primary/demo actual HTTP controls compiled master-red; a positive caller-ID control retains classifier errors. "
 
 [[symbol]]
 ts = "BybitExchange.placeStopLossOrTakeProfit"
@@ -1096,7 +1096,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper"
 status = "divergent"
-note = "CHOSEN: optional undefined category/coin/symbol properties become omitted native request-map keys, and first-poll Futures replace eager promises; plain JSON response records exclude executable properties. Native body still refreshes all positions and optional symbol positions before checking direct retMsg, logs partial success without throwing, and propagates the original callback error/batch allocation. Constructor wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper."
+note = "CHOSEN: optional undefined category/coin/symbol properties become omitted native request-map keys, and first-poll Futures replace eager promises; plain JSON response records exclude executable properties. Native body still refreshes all positions and optional symbol positions before checking direct retMsg, logs partial success without throwing, and propagates the original callback error/batch allocation. Production binding now passes the fetched native batch directly through the generic carrier to Store, preserving NaN/infinities/signed zero instead of JSON projection. Real primary/demo control-switch regressions cover both publication paths. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_position_mode_helper."
 
 [[symbol]]
 ts = "BybitExchange.changeMarginType"
@@ -1104,7 +1104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/position_controls.rs::change_margin_type"
 status = "divergent"
-note = "CHOSEN: MarginType setter and host operations are explicit callbacks on plain retained JSON records; executable reason coercion/prototypes and eager promise timing are outside this boundary. Native body preserves short-circuit status/code checks, truthy reason-message filtering and joined-message precedence, ignores symbol, sets margin type before awaiting positions, and does not refresh on rejected status. Full class construction remains pending. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_margin_type."
+note = "CHOSEN: MarginType setter and host operations are explicit callbacks on plain retained JSON records; executable reason coercion/prototypes and eager promise timing are outside this boundary. Native body preserves short-circuit status/code checks, truthy reason-message filtering and joined-message precedence, ignores symbol, sets margin type before awaiting positions, and does not refresh on rejected status. Production binding passes the native fetched batch directly to Store after setting margin type; actual primary/demo HTTP regressions retain NaN/infinities/signed zero. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_margin_type."
 
 [[symbol]]
 ts = "BybitExchange.mapPosition"
