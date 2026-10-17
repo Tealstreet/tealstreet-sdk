@@ -22,39 +22,20 @@ fn method(config: &Js, expression: &str) -> Result<String, String> {
         _ => Ok("GET".into()),
     }
 }
-fn encode(value: &str) -> String {
-    let mut output=String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) { output.push(char::from(byte)); }
-        else { use std::fmt::Write; write!(output,"%{byte:02X}").expect("String write"); }
+fn query(data:&Js,repeat:bool,sorted:bool)->Result<String,String>{
+    let options=Js::object(vec![("arrayFormat",Js::str(if repeat{"repeat"}else{"indices"}))]);
+    if sorted {
+        let collator=safe_cex_num::JsRootCollator::try_new().map_err(|error|error.message.to_owned())?;
+        let sort=Js::function("localeCompare",move |_,args|{
+            let left=safe_cex_exchange::js_runtime::value::arg(&args,0);
+            let right=safe_cex_exchange::js_runtime::value::arg(&args,1);
+            let left=String::from_utf16(&left.to_js_string()?).map_err(|_|safe_cex_exchange::js_runtime::value::Thrown::error("RepresentationError","query key is outside the shared string boundary"))?;
+            let right=String::from_utf16(&right.to_js_string()?).map_err(|_|safe_cex_exchange::js_runtime::value::Thrown::error("RepresentationError","query key is outside the shared string boundary"))?;
+            Ok(Js::Number(match collator.compare(&left,&right){std::cmp::Ordering::Less=>-1.0,std::cmp::Ordering::Equal=>0.0,std::cmp::Ordering::Greater=>1.0}))
+        });
+        options.set("sort",sort).map_err(|error|error.message())?;
     }
-    output
-}
-fn query(data: &Js, repeat: bool, sorted: bool) -> Result<String, String> {
-    fn entries(value: &Js, collator: Option<&safe_cex_num::JsRootCollator>) -> Result<Vec<(String,Js)>,String> {
-        if !matches!(value,Js::Object(_) | Js::Array(_)) { return Ok(Vec::new()); }
-        let mut entries = value.own_entries().map_err(|error|error.message())?.into_iter()
-            .map(|(key,value)| String::from_utf16(&key).map(|key|(key,value)).map_err(|error|error.to_string()))
-            .collect::<Result<Vec<_>,_>>()?;
-        if let Some(collator)=collator { entries.sort_by(|(left,_),(right,_)|collator.compare(left,right)); }
-        Ok(entries)
-    }
-    fn visit(value: &Js, prefix: &str, pairs: &mut Vec<String>, repeat: bool, collator: Option<&safe_cex_num::JsRootCollator>) -> Result<(),String> {
-        match value {
-            Js::Undefined => {},
-            Js::Object(_) | Js::Array(_) => for (key,child) in entries(value,collator)? {
-                let prefix=if repeat && matches!(value,Js::Array(_)) { prefix.into() } else { format!("{prefix}[{key}]") };
-                visit(&child,&prefix,pairs,repeat,collator)?;
-            },
-            Js::Null => pairs.push(format!("{}=",encode(prefix))),
-            other => pairs.push(format!("{}={}",encode(prefix),encode(&string(other)?))),
-        }
-        Ok(())
-    }
-    let collator=sorted.then(safe_cex_num::JsRootCollator::try_new).transpose().map_err(|error|error.message.to_owned())?;
-    let mut pairs=Vec::new();
-    for (key,value) in entries(data,collator.as_ref())? { visit(&value,&key,&mut pairs,repeat,collator.as_ref())?; }
-    Ok(pairs.join("&"))
+    safe_cex_exchange::js_runtime::library::qs_stringify(data,&options).map_err(|error|error.message())
 }
 pub(crate) fn sorted_query(data: &Js, repeat: bool) -> Result<String,String> { query(data,repeat,true) }
 fn proxy_request(config: &Js, url: &str) -> Result<RestRequest,String> {

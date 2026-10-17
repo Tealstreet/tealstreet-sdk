@@ -882,6 +882,9 @@ impl HOWWebSocket {
                     // Custom parsers have an explicit UTF-8 input ABI; native trees do not pass here.
                     let input = String::from_utf16(units).map_err(|error| TransportError::Host(error.to_string()))?;
                     parser(&input).or_else(|_| parse_fallback_data(&input))
+                } else if raw {
+                    let input=String::from_utf16(units).map_err(|error|TransportError::Host(error.to_string()))?;
+                    Ok(big_int_as_string_json_parse(&input))
                 } else {
                     match Input::parse_json(units) {
                         Ok(value) => Ok(value),

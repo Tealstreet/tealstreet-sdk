@@ -3048,7 +3048,16 @@ fn how_lone_surrogate_raw_parser_returns_the_complete_object() {
     let adapter=HowRestAdapter::with_options(host.clone(),CreateAxiosHttpOverWebsocketAdapterOptions{
         region:None,custom_parser:Some(Rc::new(move |text|{parser_calls.set(parser_calls.get()+1);Ok(safe_cex_transport::how::json_parse(text))})),
     }).unwrap();
-    let response=host.run(leaf_error(adapter.execute(request("/surrogate-raw")))).unwrap();
+    let mut call=request("/surrogate-raw");
+    call.body=Some(safe_cex_transport::RestBody::Untransformed(Input::Object(vec![
+        ("nan".encode_utf16().collect(),Input::Float(f64::NAN)),
+        ("missing".encode_utf16().collect(),Input::Undefined),
+        ("zero".encode_utf16().collect(),Input::Float(-0.0)),
+        ("slots".encode_utf16().collect(),Input::Array(vec![Input::Undefined,Input::Float(f64::INFINITY)])),
+    ])));
+    let response=host.run(leaf_error(adapter.execute(call))).unwrap();
+    assert_eq!(source["requestParserCalls"],0);
+    assert_eq!(host.venue.requests.borrow()[0]["arg"]["data"],source["requestWire"],"native request bypasses parser and projects only at final HOW frame");
     assert_eq!(calls.get(),1,"only raw response text invokes custom parser");
     assert_eq!(response.status,403);
     assert_eq!(response.headers.get("X-Quota").map(String::as_str),Some("12"));
