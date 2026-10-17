@@ -611,3 +611,214 @@ fn candlestick_api_reads_and_lighter_api_error() {
     assert_eq!(error.get("code").unwrap().to_display(), "UNKNOWN_ERROR");
     assert!(error.get("details").unwrap().is_undefined());
 }
+
+fn flag_input(label: &str) -> Js {
+    match label {
+        "undefined" => Js::Undefined,
+        "null" => Js::Null,
+        "false" => Js::Bool(false),
+        "true" => Js::Bool(true),
+        "zero" => Js::Number(0.),
+        "one" => Js::Number(1.),
+        "empty" => Js::str(""),
+        "text" => Js::str("yes"),
+        "array" => Js::array(vec![]),
+        "object" => Js::object(vec![]),
+        "nan" => Js::Number(f64::NAN),
+        "infinity" => Js::Number(f64::INFINITY),
+        "negative-zero" => Js::Number(-0.),
+        "big-zero" => big(0),
+        "big-one" => big(1),
+        "symbol" => Js::SymbolIterator,
+        "function" => Js::function("input", |_, _| panic!("flags are never coerced")),
+        _ => panic!("unknown flag input {label}"),
+    }
+}
+fn flag_order(id: i64) -> Js {
+    Js::object(vec![
+        ("orderId", big(id)),
+        ("marketId", Js::Number(1.)),
+        ("isBuy", Js::Bool(true)),
+        ("price", big(100)),
+        ("amount", big(1)),
+        ("orderType", Js::str("limit")),
+    ])
+}
+fn flag_observation(tx: Result<Js, Thrown>, field: &str, input: &Js) -> Value {
+    let tx = match tx {
+        Ok(tx) => tx,
+        Err(error) => return json!({"error":error.message()}),
+    };
+    assert!(!tx.get("signature").unwrap().as_str().unwrap().is_empty());
+    let details = tx.get("orderDetails").unwrap();
+    let raw = details.get(field).unwrap();
+    let nan = matches!(&raw,Js::Number(value) if value.is_nan());
+    let retained =
+        raw.strict_equals(input) || (nan && matches!(input,Js::Number(value) if value.is_nan()));
+    json!({"data":tx.get("data").unwrap().to_display(),
+        "orderType":details.get("orderTypeValue").unwrap().to_display(),
+        "timeInForce":details.get("timeInForceValue").unwrap().to_display(),
+        "retained":retained,"type":raw.type_of(),"negativeZero":matches!(raw,Js::Number(value) if value.to_bits()==(-0_f64).to_bits()),"nan":nan})
+}
+
+#[test]
+fn transaction_client_retains_native_flags_while_signing_their_truthiness() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/signer-flags-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained SDK over real WASM crypto");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["singles"].as_array().unwrap().len(), 51);
+    let w = World::new();
+    let init = w
+        .realm
+        .global("initWasm")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    w.settle(init).unwrap();
+    let crypto = w
+        .realm
+        .global("getCryptoApi")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    let client=w.realm.global("TransactionClient").unwrap().call(Js::Undefined,vec![Js::object(vec![
+        ("chainId",Js::Number(304.)),("accountIndex",big(42)),("apiKeyIndex",Js::Number(3.)),
+        ("privateKey",Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+        ("httpClient",w.client.clone()),("crypto",crypto),
+    ])]).unwrap();
+    w.reply(json!({"code":200,"nonce":7}));
+    let mut singles = vec![];
+    for case in source["singles"].as_array().unwrap() {
+        let field = case["field"].as_str().unwrap();
+        let value = flag_input(case["label"].as_str().unwrap());
+        let params = flag_order(1);
+        params.set(field, value.clone()).unwrap();
+        let tx = w.settle(
+            client
+                .call_method("getCreateOrderTransaction", vec![params])
+                .unwrap(),
+        );
+        singles.push(json!({"field":field,"label":case["label"],"expected":flag_observation(tx,field,&value)}));
+    }
+    let fields = ["isBuy", "postOnly", "reduceOnly"];
+    let values = [flag_input("zero"), flag_input("text"), flag_input("object")];
+    let params: Vec<_> = values
+        .iter()
+        .enumerate()
+        .map(|(i, value)| {
+            let order = flag_order(i as i64 + 2);
+            order.set(fields[i], value.clone()).unwrap();
+            order
+        })
+        .collect();
+    let result = w.settle(
+        client
+            .call_method("getCreateOrderTransactions", vec![Js::array(params)])
+            .unwrap(),
+    );
+    let batch = match result {
+        Ok(txs) => {
+            let txs = txs.array_values().unwrap();
+            assert_eq!(txs.len(), 3);
+            Value::Array(
+                txs.into_iter()
+                    .enumerate()
+                    .map(|(i, tx)| flag_observation(Ok(tx), fields[i], &values[i]))
+                    .collect(),
+            )
+        }
+        Err(error) => json!({"error":error.message()}),
+    };
+    let parent = flag_order(5);
+    let raw_side = flag_input("zero");
+    let raw_reduce = flag_input("object");
+    parent.set("isBuy", raw_side.clone()).unwrap();
+    parent.set("reduceOnly", raw_reduce.clone()).unwrap();
+    let child = flag_order(6);
+    child.set("orderType", Js::str("stop_loss")).unwrap();
+    child.set("amount", big(0)).unwrap();
+    child.set("reduceOnly", Js::Bool(true)).unwrap();
+    let group = w.settle(
+        client
+            .call_method(
+                "getCreateGroupedOrdersTransaction",
+                vec![Js::object(vec![
+                    ("groupingType", Js::Number(1.)),
+                    ("orders", Js::array(vec![parent, child])),
+                ])],
+            )
+            .unwrap(),
+    );
+    let group = match group {
+        Ok(tx) => {
+            let detail = tx
+                .get("groupedOrderDetails")
+                .unwrap()
+                .get("orders")
+                .unwrap()
+                .get("0")
+                .unwrap();
+            json!({"data":tx.get("data").unwrap().to_display(),"isBuyRetained":detail.get("isBuy").unwrap().strict_equals(&raw_side),"reduceOnlyRetained":detail.get("reduceOnly").unwrap().same_reference(&raw_reduce)})
+        }
+        Err(error) => json!({"error":error.message()}),
+    };
+    let mut side_cases = vec![];
+    for (label, grouping, side_a, side_b) in [
+        ("falsey-oto", 1., Js::Number(0.), Js::Bool(false)),
+        ("objects-oto", 1., Js::array(vec![]), Js::array(vec![])),
+        ("falsey-oco", 2., Js::Number(0.), Js::Bool(false)),
+    ] {
+        let a = flag_order(8);
+        let b = flag_order(9);
+        a.set("isBuy", side_a.clone()).unwrap();
+        b.set("isBuy", side_b.clone()).unwrap();
+        a.set("reduceOnly", Js::Bool(true)).unwrap();
+        b.set("reduceOnly", Js::Bool(true)).unwrap();
+        b.set("orderType", Js::str("stop_loss")).unwrap();
+        b.set("amount", big(if grouping == 2. { 1 } else { 0 }))
+            .unwrap();
+        if grouping == 2. {
+            a.set("orderType", Js::str("take_profit")).unwrap();
+        }
+        let result = w.settle(
+            client
+                .call_method(
+                    "getCreateGroupedOrdersTransaction",
+                    vec![Js::object(vec![
+                        ("groupingType", Js::Number(grouping)),
+                        ("orders", Js::array(vec![a, b])),
+                    ])],
+                )
+                .unwrap(),
+        );
+        side_cases.push(match result {
+            Ok(tx) => {
+                let rows = tx
+                    .get("groupedOrderDetails")
+                    .unwrap()
+                    .get("orders")
+                    .unwrap();
+                json!({"label":label,"data":tx.get("data").unwrap().to_display(),
+                    "retained":rows.get("0").unwrap().get("isBuy").unwrap().strict_equals(&side_a)
+                        && rows.get("1").unwrap().get("isBuy").unwrap().strict_equals(&side_b)})
+            }
+            Err(error) => json!({"label":label,"error":error.message()}),
+        });
+    }
+    assert_eq!(side_cases.len(), 3);
+    assert_eq!(w.sent().len(), 1, "actual SDK nonce cache");
+    assert_eq!(
+        json!({"singles":singles,"batch":batch,"group":group,"sideCases":side_cases}),
+        source
+    );
+}
