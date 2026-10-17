@@ -1069,10 +1069,10 @@ note = ""
 [[symbol]]
 ts = "BybitExchange.cancelSymbolOrders"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/cancel.rs::cancel_symbol_orders"
+status = "divergent"
+note = "The production Exchange surface dispatches cancelSymbolOrders through the unlimited client to /v5/order/cancel-all even with an empty Store. Cancellation snapshots retain id/symbol only; non-OK retMsg reports and returns. tests/cancel_all_binding.rs prove-fails on master for all four constructors and passes after the binding and partial-row retirement fixes. Native owned snapshots and callback lifecycle retain the shared profiles at sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/cancel.rs::cancel_symbol_orders."
 
 [[symbol]]
 ts = "BybitExchange.setLeverage"

@@ -4067,3 +4067,30 @@ The subsequent master 7fa2134823 merge preserves #315's per-crate policy shards
 byte-identically and adds no Bybit production or inventory change. All three
 Bybit native construction tests pass again after the MEXC host integration;
 parity and extractor remain green. No removed flat policy file is restored.
+
+## Audit fix: venue-side symbol cancellation (2026-10-17)
+
+Base revision: mirror master `999f0564c2`. Added six production binding tests in
+`tests/cancel_all_binding.rs` before changing production code. Running
+`cargo test -p safe-cex-venue-bybit --test cancel_all_binding -- --nocapture`
+failed all six: four empty-store cases observed zero cancel-all requests;
+cancel-all and rejection tests instead reached an unscripted cancel-batch.
+After wiring the Exchange/receiver override alone, four empty-store cases passed
+and the populated cancel-all case failed with `missing field status`, proving
+the partial-row retirement fault. After accepting the source id/symbol shape,
+all six pass, including all four variants in the retirement/rejection scenarios.
+The code under test is the production constructor, Exchange, retained receiver,
+HTTP client and Store; the external wire, clock and scheduler use the binding harness.
+
+Final scoped validation: with the installed compiler selected by
+SAFE_CEX_TYPESCRIPT_PATH and runtime dependencies by NODE_PATH,
+`cargo test -p safe-cex-venue-bybit -- --include-ignored` passes 223 tests across
+47 reported targets, with zero failures and zero ignored tests. Scoped rustfmt
+and `git diff --check` pass. A first run without the compiler environment stopped
+at the two existing API factory oracles; both pass in the complete run above.
+
+The reviewed override inventory exporter passes and changes 1177 entries to 1178:
+one Bybit receiver cancellation edge is added, with the enclosing receiver body
+fingerprints refreshed. Every non-Bybit entry remains equal to the base revision.
+The inverse manifest now points to cancel_symbol_orders rather than the unrelated
+cancel_orders_helper body.

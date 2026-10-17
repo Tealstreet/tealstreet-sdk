@@ -784,3 +784,48 @@ fn ethereum_sdk_accounts_and_jwt_headers_match_actual_source_sdk() {
         }
     }
 }
+
+#[test]
+fn numeric_created_at_survives_constructed_fetch_orders() {
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), |wire| {
+        private_script(wire);
+        wire.responses.borrow_mut().insert(
+            "/orders".into(),
+            json!({"results":[{
+                "id":"epoch-order", "market":"BTC-USD-PERP", "side":"BUY", "type":"LIMIT",
+                "status":"OPEN", "price":"101.5", "size":"0.006", "remaining_size":"0.003",
+                "created_at":1784505600000i64, "reduce_only":false
+            }]}),
+        );
+    });
+    drive(&runtime, venue.start())
+        .expect("numeric created_at must not abort initial order loading");
+    let orders = drive(&runtime, venue.fetch_orders(None)).expect("numeric created_at REST read");
+    assert_eq!(orders.len(), 1, "retain open row from REST");
+    assert_eq!(orders[0].id, "epoch-order");
+    assert_eq!(
+        orders[0].last_update.to_bits(),
+        1784505600000.0f64.to_bits()
+    );
+    assert_eq!(orders[0].filled.to_bits(), (0.006f64 - 0.003f64).to_bits());
+    assert_eq!(
+        orders[0].info.as_ref().unwrap()["created_at"]
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        1784505600000.0f64.to_bits()
+    );
+    assert!(
+        store.loaded().orders,
+        "startup commits the native order snapshot"
+    );
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders()[0].id, "epoch-order");
+    assert!(
+        wire.requests
+            .borrow()
+            .iter()
+            .any(|request| request.url.ends_with("/orders"))
+    );
+    venue.dispose().unwrap();
+}

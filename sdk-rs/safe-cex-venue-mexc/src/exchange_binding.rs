@@ -870,6 +870,44 @@ impl TaskHost for Host {
     }
 }
 
+// The common for-of front door for arrays, maps, sets and iterator objects.
+fn for_of_js(value: Js, visitor: &mut Iteration<'_, Js, Thrown>) -> Result<(), Thrown> {
+    let iterator = value.iterator()?;
+    let next = iterator.get("next")?;
+    loop {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("iterator result is not an object"));
+        }
+        if step.get("done")?.truthy() {
+            return Ok(());
+        }
+        let completion = visitor(step.get("value")?);
+        if matches!(completion, Ok(false)) {
+            continue;
+        }
+        // A body throw wins over IteratorClose errors. A normal break
+        // propagates return()/getter/shape failures.
+        let close = (|| {
+            let method = iterator.get("return")?;
+            if method.is_nullish() {
+                return Ok(());
+            }
+            let returned = method.call(iterator.clone(), vec![])?;
+            if !returned.is_object() {
+                return Err(Thrown::type_error(
+                    "iterator return result is not an object",
+                ));
+            }
+            Ok(())
+        })();
+        return match completion {
+            Err(error) => Err(error),
+            Ok(_) => close,
+        };
+    }
+}
+
 impl ExchangeRuntimeHost for Host {
     fn exchange(&self) -> Js {
         self.this.get().cloned().unwrap_or(Js::Undefined)
@@ -940,46 +978,24 @@ impl ExchangeRuntimeHost for Host {
         Ok(Pending::of(Box::pin(promise::all(values))))
     }
     fn for_of(&self, value: Js, visitor: &mut Iteration<'_, Js, Thrown>) -> Result<(), Thrown> {
-        match &value {
-            Js::Object(o) if o.class == "MexcSymbolSettings" => {
-                let venue = self.venue()?;
-                let entries: Vec<_> = venue
-                    .symbol_settings
-                    .borrow()
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                for (symbol, config) in entries {
-                    if visitor(Js::array(vec![Js::str(&symbol), config_js(&config)?]))? {
-                        break;
-                    }
+        // This opaque typed settings view has no JS object protocol. Preserve
+        // its existing projection; actual JS values all use GetIterator below.
+        if matches!(&value, Js::Object(object) if object.class == "MexcSymbolSettings") {
+            let venue = self.venue()?;
+            let entries: Vec<_> = venue
+                .symbol_settings
+                .borrow()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            for (symbol, config) in entries {
+                if visitor(Js::array(vec![Js::str(&symbol), config_js(&config)?]))? {
+                    break;
                 }
-                Ok(())
             }
-            Js::Map(entries) => {
-                let snapshot = entries.borrow().clone();
-                for (k, v) in snapshot {
-                    if visitor(Js::array(vec![k, v]))? {
-                        break;
-                    }
-                }
-                Ok(())
-            }
-            Js::Array(_) => {
-                let mut index = 0usize;
-                while index < value.get("length")?.to_number()? as usize {
-                    if visitor(value.get(&index.to_string())?)? {
-                        break;
-                    }
-                    index += 1;
-                }
-                Ok(())
-            }
-            other => Err(Thrown::type_error(&format!(
-                "{} is not iterable",
-                other.to_display()
-            ))),
+            return Ok(());
         }
+        for_of_js(value, visitor)
     }
     // utils/loop.ts: sleep(minInterval), then a zero-delay setTimeout(fn).
     fn schedule_loop(
@@ -1279,4 +1295,95 @@ pub(crate) fn dispose(host: &Host) -> Result<(), ExchangeError> {
 
 pub(crate) fn value<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown> {
     from_typed(value)
+}
+
+#[cfg(test)]
+mod iterator_tests {
+    use super::*;
+
+    #[test]
+    fn mexc_map_iterator_empty_admission() {
+        for method in ["values", "keys", "entries", "map"] {
+            let map = Js::new_map();
+            let input = if method == "map" {
+                map
+            } else {
+                map.call_method(method, vec![]).unwrap()
+            };
+            let mut called = false;
+            let result = for_of_js(input, &mut |_| {
+                called = true;
+                Ok(false)
+            });
+            assert!(
+                result.is_ok(),
+                "mexc_empty_map_iterator_is_iterable {method}: {result:?}"
+            );
+            assert!(!called, "empty iterator must not call its visitor");
+        }
+    }
+
+    #[test]
+    fn mexc_map_iterator_nonempty_admission_and_live_mutation() {
+        for method in ["values", "keys", "entries", "map"] {
+            let map = Js::new_map();
+            map.call_method("set", vec![Js::str("a"), Js::Number(-0.0)])
+                .unwrap();
+            map.call_method("set", vec![Js::str("b"), Js::str("removed")])
+                .unwrap();
+            let live = Js::object(vec![("identity", Js::str("live"))]);
+            let input = if method == "map" {
+                map.clone()
+            } else {
+                map.call_method(method, vec![]).unwrap()
+            };
+            let mut rows = vec![];
+            let result = for_of_js(input, &mut |value| {
+                rows.push(value);
+                if rows.len() == 1 {
+                    map.call_method("delete", vec![Js::str("b")])?;
+                    map.call_method("set", vec![Js::str("c"), live.clone()])?;
+                    map.call_method("set", vec![Js::str("d"), Js::Number(f64::NAN)])?;
+                }
+                Ok(false)
+            });
+            assert!(
+                result.is_ok(),
+                "mexc_nonempty_map_iterator_is_iterable {method}: {result:?}"
+            );
+            assert_eq!(
+                rows.len(),
+                3,
+                "mexc iterator visits additions and skips deletion {method}"
+            );
+            if method == "keys" {
+                for (row, expected) in rows.iter().zip(["a", "c", "d"]) {
+                    assert!(row.strict_equals(&Js::str(expected)));
+                }
+            } else {
+                let values: Vec<_> = rows
+                    .iter()
+                    .map(|row| {
+                        if method == "values" {
+                            row.clone()
+                        } else {
+                            row.get("1").unwrap()
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    values[0].to_number().unwrap().to_bits(),
+                    (-0.0_f64).to_bits()
+                );
+                assert!(
+                    values[1].strict_equals(&live),
+                    "native reference identity survives iteration"
+                );
+                assert!(
+                    values[2].to_number().unwrap().is_nan(),
+                    "native NaN survives iteration"
+                );
+            }
+        }
+    }
 }

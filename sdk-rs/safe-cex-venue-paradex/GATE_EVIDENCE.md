@@ -2750,3 +2750,27 @@ pairs and the root reports. Its MERGE is limited to this signing implementation,
 annotation and evidence, not unrelated integration changes or universal SDK
 parity. A separate doc-only review approved the portable rendering of historical
 tool paths; it ran no Cargo and did not reinterpret historical invocations.
+
+## Numeric REST order creation times
+
+`map_order` now passes retained numeric `created_at` values directly through the
+shared `js_time_clip`; strings retain the existing date parser/timezone hook.
+This matches the actual `new Date(o.created_at).getTime()` source expression.
+The former numeric-date refusal fixture is now an admitted native-field case.
+Twelve additional independently specified raw numeric inputs cover epoch
+milliseconds, fractions, signed zero, both TimeClip edges and overflow.
+
+Before repair, the actual-source mapper target failed
+`order_native_boundary_refusal 115`, and
+`numeric_created_at_survives_constructed_fetch_orders` failed during startup with
+`Paradex order field created_at must be a string`. Both pass after repair. The
+mapper target checks 128 source cases: 89 native Orders and the remaining 39
+explicit representation refusals; every native date bit and retained info value
+is checked. The constructed regression also verifies the loaded Store order and
+subsequent REST read, rather than calling only the standalone mapper.
+
+Scoped mapper and constructed REST regressions, strict host all-target/all-feature
+and Wasm library all-feature Clippy, crate formatting and parity checks pass
+(7,459 rows, 17,214 public Rust items). No shared decoder/type/signing changes are
+included. The separately audited Infinity-signing claim did not reproduce on the
+actual native binding and is excluded from this repair.

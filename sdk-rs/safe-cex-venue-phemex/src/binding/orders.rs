@@ -61,7 +61,7 @@ impl CancellationHost for Host {
         Ok(v.clone())
     }
     fn delete_target(&mut self) -> Result<Js, Thrown> {
-        self.get("xhr")
+        self.get("unlimitedXHR")
     }
     async fn delete(
         &mut self,
@@ -87,22 +87,10 @@ impl CancellationHost for Host {
         )?)
         .await
     }
-    fn flatten(&mut self, replies: Vec<Js>, batch: bool) -> Result<Vec<Js>, Thrown> {
-        let mut out = vec![];
-        for r in replies {
-            let data = r.get("data")?;
-            if batch {
-                let data = data.get("data")?;
-                if data.is_array() {
-                    out.extend(rows(&data)?)
-                } else {
-                    out.push(data)
-                }
-            } else {
-                out.push(data)
-            }
-        }
-        Ok(out)
+    fn flatten(&mut self, replies: Vec<Js>, _batch: bool) -> Result<Vec<Js>, Thrown> {
+        // Source flattens arrays of Axios replies, never the envelope's order
+        // rows. Both cancellation routes validate response.data.code/msg.
+        replies.into_iter().map(|r| r.get("data")).collect()
     }
     fn zero_code(&mut self, r: &Js) -> Result<bool, Thrown> {
         Ok(r.get("code")?.strict_equals(&Js::Number(0.0)))
