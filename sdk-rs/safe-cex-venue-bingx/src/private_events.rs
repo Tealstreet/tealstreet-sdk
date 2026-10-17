@@ -391,7 +391,7 @@ impl BingxPrivateEvents {
             let order = map_order(
                 data,
                 &self.parent.base.store.orders(),
-                self.parent.base.runtime.now_ms(),
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )?;
             if let Some(order) = order
                 && order.status == OrderStatus::Open

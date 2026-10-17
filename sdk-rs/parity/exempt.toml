@@ -2237,10 +2237,6 @@ rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_change_pubkey
 reason = "C3 host ABI: sign_change_pubkey capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
 [[exempt]]
-rs = "safe-cex-venue-bybit/src/journal_fold.rs::BybitPositionContext"
-reason = "Native named shape for BybitPositionAdapterDeps.resolveContext's inline optional result; TypeScript declares no standalone context symbol. The dependency row owns the typed callback boundary; this exemption makes no additional parity claim."
-
-[[exempt]]
 rs = "safe-cex-exchange/src/position_intervals.rs::FundingRow"
 reason = "Native name for attributeFunding's inline funding-array element shape; source declares no standalone type symbol. The mapped attributeFunding row owns its use."
 
@@ -3886,7 +3882,7 @@ reason = "Native value, receiver/callee and JS language-operation binding for ei
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::clock_now"
-reason = "Native value, receiver/callee and JS language-operation binding for eight private-topic bodies; actual helper, not a source symbol. Clone preserves identity, primitives bind JS semantics and host owns launched work. Concrete WebSocket/native binding remains pending; eight source body targets mapped separately."
+reason = "Native virtualClock.getCurrentTimeMs host operation used by mapped markWsPositions, not an independent TS declaration. The concrete binding delegates to the shared clock; private_binding_frames proves a fresh WS snapshot survives older REST reconciliation after native clock synchronization."
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::set_of"
@@ -7384,3 +7380,23 @@ reason = "Shared model presence mutation used by the webworker Order.extra postp
 [[exempt]]
 rs = "safe-cex-num/src/date.rs::js_date_to_iso_string"
 reason = "Shared ECMAScript Date runtime glue with no exported TypeScript SDK declaration: canonical TimeClip plus UTC ISO rendering and RangeError for invalid dates. The existing websocket timestamp formatter delegates to this helper; native candle bounds use the same implementation."
+
+[[exempt]]
+rs = "safe-cex-types/src/retained_json.rs::RetainedJsonInput::parse_json"
+reason = "C3: shared ECMAScript JSON.parse data primitive; one iterative grammar preserves UTF-16 strings/keys and native binary64 numbers for runtime and transport consumers. No standalone TypeScript declaration; typed Value projection remains explicitly fallible."
+
+[[exempt]]
+rs = "safe-cex-types/src/js_coercion.rs::json_quote_utf16"
+reason = "C3: shared ECMAScript JSON string quotation primitive used by the retained writer and runtime JSON.stringify; preserves lone UTF-16 units as escapes. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-types/src/js_coercion.rs::js_own_keys_utf16"
+reason = "C3: UTF-16 key adapter to the existing ECMAScript array-index classifier; native key enumeration keeps integer indices ascending and ordinary names in insertion order. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-num/src/json_stringify.rs::js_retained_json_stringify"
+reason = "C3: direct canonical retained-data ECMAScript JSON.stringify projection; shares quotation, number spelling and index ordering with existing prepared-data rendering without a second owned carrier. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-num/src/json_stringify.rs::js_retained_truthy"
+reason = "C3: ECMAScript Boolean conversion on canonical retained data before wire JSON projection; retains undefined/nonfinite/signed-zero truthiness. No standalone TypeScript declaration."
