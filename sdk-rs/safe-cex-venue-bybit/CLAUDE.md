@@ -670,3 +670,9 @@ families. Primary/Demo tick uses BaseExchange's real remote-signer gate, and omi
 fetchOrders arguments retain the source true default. `private_refresh_binding`
 and the two periodic `exchange_binding` witnesses drive signed HTTP and Store
 publication; the source single-attempt snapshot policy ignores the retry argument.
+
+The Exchange order-book listener now selects the source public socket and installs
+real snapshot/delta subscriptions: depth 200 for Spot and 1000 for derivatives.
+Core-owned retry/resync timers and retained topic maps preserve delayed connection,
+sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
+four families; the maintained source book oracle includes array-like level lists.

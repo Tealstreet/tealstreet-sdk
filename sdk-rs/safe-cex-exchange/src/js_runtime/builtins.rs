@@ -15,13 +15,18 @@ fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
 }
 
-fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+fn require_callback(callback: &Js) -> Result<(), Thrown> {
     if !callback.is_callable() {
         return Err(Thrown::type_error(&format!(
             "{} is not a function",
             callback.to_display()
         )));
     }
+    Ok(())
+}
+
+fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
+    require_callback(callback)?;
     callback.call(Js::Undefined, args)
 }
 
@@ -434,39 +439,24 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
             };
             let mut values: Vec<Js> = cells.borrow().iter().flatten().cloned().collect();
             let holes = cells.borrow().len() - values.len();
-            let mut failure = None;
-            values.sort_by(|x, y| {
-                if failure.is_some() {
-                    return std::cmp::Ordering::Equal;
-                }
-                let order = if x.is_undefined() || y.is_undefined() {
-                    Ok(f64::from(u8::from(x.is_undefined()))
-                        - f64::from(u8::from(y.is_undefined())))
-                } else if f.is_callable() {
-                    f.call(Js::Undefined, vec![x.clone(), y.clone()])
-                        .and_then(|v| v.to_number())
-                } else {
-                    (|| {
-                        Ok(match text(x)?.encode_utf16().cmp(text(y)?.encode_utf16()) {
-                            std::cmp::Ordering::Less => -1.0,
-                            std::cmp::Ordering::Equal => 0.0,
-                            std::cmp::Ordering::Greater => 1.0,
-                        })
-                    })()
-                };
-                match order {
-                    Ok(n) if n < 0.0 => std::cmp::Ordering::Less,
-                    Ok(n) if n > 0.0 => std::cmp::Ordering::Greater,
-                    Ok(_) => std::cmp::Ordering::Equal,
-                    Err(e) => {
-                        failure = Some(e);
-                        std::cmp::Ordering::Equal
-                    }
-                }
-            });
-            if let Some(e) = failure {
-                return Err(e);
+            if !f.is_undefined() && !f.is_callable() {
+                return Err(Thrown::type_error(
+                    "The comparison function must be either a function or undefined",
+                ));
             }
+            super::sorting::stable_sort(&mut values, |x, y| {
+                if x.is_undefined() || y.is_undefined() {
+                    return Ok(x.is_undefined().cmp(&y.is_undefined()));
+                }
+                if f.is_callable() {
+                    let n = f
+                        .call(Js::Undefined, vec![x.clone(), y.clone()])?
+                        .to_number()?;
+                    Ok(n.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal))
+                } else {
+                    Ok(x.to_js_string()?.cmp(&y.to_js_string()?))
+                }
+            })?;
             let mut sorted: Vec<Option<Js>> = values.into_iter().map(Some).collect();
             sorted.extend(std::iter::repeat_n(None, holes));
             *cells.borrow_mut() = sorted;
@@ -604,9 +594,19 @@ fn map_member(this: Js, name: &str) -> Option<Js> {
         }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            let snapshot = m.borrow().clone();
-            for (k, v) in snapshot {
-                callback_call(&f, vec![v, k, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = m
+                    .borrow()
+                    .following(position)
+                    .map(|(at, entry)| (at, entry.clone()));
+                let Some((at, (key, value))) = item else {
+                    break;
+                };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value, key, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),
@@ -674,8 +674,17 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
         }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
-            for v in s.borrow().clone() {
-                callback_call(&f, vec![v.clone(), v, this.clone()])?;
+            require_callback(&f)?;
+            let receiver = arg(&a, 1);
+            let mut position = 0;
+            loop {
+                let item = s
+                    .borrow()
+                    .following(position)
+                    .map(|(at, value)| (at, value.clone()));
+                let Some((at, value)) = item else { break };
+                position = at + 1;
+                f.call(receiver.clone(), vec![value.clone(), value, this.clone()])?;
             }
             Ok(Js::Undefined)
         }),

@@ -286,9 +286,9 @@ note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forw
 ts = "BybitSpotExchange.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book"
+rs = ["safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book"]
 status = "ported"
-note = "Exact synchronous BybitSpotExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include unchanged symbol forwarding, callback invocation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book."
+note = "Rust rename: safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book preserves source socket selection; safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_order_book wires the real public subscription. All four families have compiled master-fail socket regressions and live snapshot/delta, retry, reconnect and cleanup witnesses."
 
 [[symbol]]
 ts = "BybitSpotExchange._hasFullSizedPositionOppositeSide"

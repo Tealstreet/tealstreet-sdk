@@ -460,6 +460,51 @@ fn private_socket_sends_the_challenge_on_open_and_subscribes_after_auth() {
 }
 
 #[test]
+fn private_auth_error_without_message_logs_js_json_stringify_text() {
+    let h = futures(|http| {
+        http.ok(
+            "GET",
+            "/v3/leveragepreferences",
+            json!({"result": "success", "leveragePreferences": []}),
+        );
+        http.ok("GET", "/v3/openorders", open_orders());
+        http.ok("GET", "/v3/openpositions", open_positions());
+        http.ok("GET", "/v3/accounts", accounts());
+    });
+    let logs = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Value>::new()));
+    let sink = logs.clone();
+    h.venue().base().on(
+        "log",
+        std::rc::Rc::new(move |_, value| {
+            sink.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    h.drive(h.venue().start()).expect("start");
+    h.runtime.advance(100.0);
+    let private = h.runtime.sockets.borrow()[1].1.clone();
+    private
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(
+                r#"{"event":"error","message":"","code":1.0,"neg":-0.0,"big":1e16}"#.into(),
+            ),
+        ));
+    for _ in 0..5 {
+        h.runtime.advance(100.0);
+    }
+    let expected = r#"WebSocket authentication error: {"event":"error","message":"","code":1,"neg":0,"big":10000000000000000}"#;
+    assert!(
+        logs.borrow()
+            .iter()
+            .any(|log| log.as_str().is_some_and(|text| text.ends_with(expected))),
+        "auth error text must match JS JSON.stringify: {:?}",
+        logs.borrow()
+    );
+}
+
+#[test]
 fn inherited_base_members_reject_not_implemented() {
     let h = futures(|_| {});
     let msg = |e: safe_cex_exchange::runtime::ExchangeError| e.message;
