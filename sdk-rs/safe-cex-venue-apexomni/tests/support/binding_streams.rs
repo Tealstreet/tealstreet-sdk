@@ -137,9 +137,9 @@ fn unknown_market_private_position_aborts_the_entire_frame() {
             {"symbol":"DELISTED-USDC","side":"LONG","size":"1"}
         ]}
     }).to_string()));
-    let error = result.expect_err("source receiver must throw before committing any rows");
-    assert_eq!(error.name, "TypeError");
-    assert_eq!(error.message, "this.log is not a function");
+    result.expect("socket dispatch reports the listener exception to the host");
+    assert_eq!(*h.runtime.report_names.borrow(), ["TypeError"]);
+    assert_eq!(*h.runtime.reports.borrow(), ["this.log is not a function"]);
     assert_eq!(
         h.store.positions().as_ref(),
         before.as_slice(),

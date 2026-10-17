@@ -439,39 +439,24 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
             };
             let mut values: Vec<Js> = cells.borrow().iter().flatten().cloned().collect();
             let holes = cells.borrow().len() - values.len();
-            let mut failure = None;
-            values.sort_by(|x, y| {
-                if failure.is_some() {
-                    return std::cmp::Ordering::Equal;
-                }
-                let order = if x.is_undefined() || y.is_undefined() {
-                    Ok(f64::from(u8::from(x.is_undefined()))
-                        - f64::from(u8::from(y.is_undefined())))
-                } else if f.is_callable() {
-                    f.call(Js::Undefined, vec![x.clone(), y.clone()])
-                        .and_then(|v| v.to_number())
-                } else {
-                    (|| {
-                        Ok(match text(x)?.encode_utf16().cmp(text(y)?.encode_utf16()) {
-                            std::cmp::Ordering::Less => -1.0,
-                            std::cmp::Ordering::Equal => 0.0,
-                            std::cmp::Ordering::Greater => 1.0,
-                        })
-                    })()
-                };
-                match order {
-                    Ok(n) if n < 0.0 => std::cmp::Ordering::Less,
-                    Ok(n) if n > 0.0 => std::cmp::Ordering::Greater,
-                    Ok(_) => std::cmp::Ordering::Equal,
-                    Err(e) => {
-                        failure = Some(e);
-                        std::cmp::Ordering::Equal
-                    }
-                }
-            });
-            if let Some(e) = failure {
-                return Err(e);
+            if !f.is_undefined() && !f.is_callable() {
+                return Err(Thrown::type_error(
+                    "The comparison function must be either a function or undefined",
+                ));
             }
+            super::sorting::stable_sort(&mut values, |x, y| {
+                if x.is_undefined() || y.is_undefined() {
+                    return Ok(x.is_undefined().cmp(&y.is_undefined()));
+                }
+                if f.is_callable() {
+                    let n = f
+                        .call(Js::Undefined, vec![x.clone(), y.clone()])?
+                        .to_number()?;
+                    Ok(n.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal))
+                } else {
+                    Ok(x.to_js_string()?.cmp(&y.to_js_string()?))
+                }
+            })?;
             let mut sorted: Vec<Option<Js>> = values.into_iter().map(Some).collect();
             sorted.extend(std::iter::repeat_n(None, holes));
             *cells.borrow_mut() = sorted;
