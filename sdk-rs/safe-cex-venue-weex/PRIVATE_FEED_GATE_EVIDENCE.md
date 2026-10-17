@@ -147,3 +147,24 @@ Because compiler/global gate inputs changed, these gates were remeasured at
 | node /Users/sam/.volta/tools/image/yarn/1.22.21/bin/yarn.js parity:extract:check | 0; 7341 symbols, Would update 0 manifests, 0 added, 0 orphaned |
 
 This evidence update changes only this narrative.
+
+## Wave-1 silent refresh correction
+
+This supersedes the historical extra-reporting choice above for all three refresh
+callbacks. The maintained source's empty catches cover synchronous fetch throws,
+awaited rejection and Store-update throws. The native callback now discards those
+failures without a reporting capability; reaction suspension, disposal guard and
+successful Store operations remain. The 63-fixture actual-source corpus and all
+three ready-reaction tests pass unchanged in their source input inventory.
+
+Test-only commit1007787b76 compiles against master and fails through the real
+constructed private account frame: the rejected HTTP balance refresh leaves the
+balance intact but reports `Request failed with status code 400`. Removing the
+reporter makes the same test pass. The complete binding target passes38 tests.
+The updated `refresh-update` production mutation compiles and fails
+`native_refresh_updates::orders_refresh` with101, then exact restoration passes
+all4 private-feed tests with0. This replaces the native-only reporting control;
+the other six historical control bodies are unchanged and were not rerun here.
+
+Measured fixed worktree private_feed.rs SHA256 (before implementation commit):
+`baf20eae4611b66bf87e2a5ab9b4329620446553df4b3865d999942e818b6d33`.
