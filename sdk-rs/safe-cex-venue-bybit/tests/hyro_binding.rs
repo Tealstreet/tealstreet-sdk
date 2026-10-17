@@ -1164,3 +1164,35 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
     assert_eq!(h.store.orders().len(), 2);
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation() {
+    if configured_child("hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation") { return; }
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let (h, private, _) = start_private();
+    ack_private(&h, &private, "auth");
+    ack_private(&h, &private, "subscribe");
+    let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+    let wire = h.runtime.sockets.borrow().iter().find(|(url,_)| url.contains("/public/linear")).unwrap().1.clone();
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    let cleanup = h.venue().listen_ohlcv(serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(), Rc::new(move |candle| sink.borrow_mut().push(candle))).unwrap();
+    assert!(!wire.sent.borrow().iter().any(|frame| frame.contains("publicTrade.BTCUSDT")), "Hyro snapshot streams never subscribe to trade-derived candles");
+    for volume in ["7", "8"] {
+        socket.on_message(&SocketFrame::Text(json!({"topic":"kline.1.BTCUSDT","data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":volume}]}).to_string())).unwrap();
+        socket.on_message(&SocketFrame::Text(json!({"topic":"publicTrade.BTCUSDT","data":[{"T":1700000041000u64,"p":"200","v":"1000","S":"Buy"}]}).to_string())).unwrap();
+    }
+    assert_eq!(seen.borrow().len(), 2);
+    assert_eq!(seen.borrow()[0].volume, 7.);
+    assert_eq!(seen.borrow()[1].volume, 8.);
+    assert_eq!(seen.borrow()[1].close, 103.);
+    cleanup().unwrap();
+    assert!(!wire.sent.borrow().iter().any(|frame| frame.contains("publicTrade.BTCUSDT")));
+    let error = match h.venue().listen_ohlcv(serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1s"})).unwrap(), Rc::new(|_| panic!("seconds candle cannot emit"))) { Ok(_) => panic!("source refuses seconds streams"), Err(error) => error };
+    assert_eq!(error.message, "HyroTrader seconds candles require a supported trade stream");
+    h.venue().listen_ohlcvs(serde_json::from_value(json!({"symbols":["BTCUSDT"],"interval":"1s"})).unwrap(), Rc::new(|_| panic!("seconds bulk cannot emit")));
+    assert!(h.runtime.reports.borrow().iter().any(|message| message=="HyroTrader seconds candles require a supported trade stream"));
+    h.venue().dispose().unwrap();
+}
