@@ -585,26 +585,67 @@ fn trait_cancel_symbol_attempts_algo_after_a_normal_cancel_failure() {
     );
 }
 
+fn private_topic_names() -> [safe_cex_types::ExchangeName; 6] {
+    use safe_cex_types::ExchangeName::*;
+    [Kodiakfi, Mode, Salsadex, TealstreetDex, What, Woofi]
+}
 fn private_frame(
     venue: &safe_cex_venue_orderly::native_exchange::OrderlyExchange,
+    rt: &support::Runtime,
     frame: serde_json::Value,
 ) {
-    venue.base().get_private_sockets()[0]
-        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
-            frame.to_string(),
-        ))
-        .unwrap();
+    assert_eq!(venue.base().get_private_sockets().len(), 1);
+    for _ in 0..16 {
+        rt.pump();
+    }
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("private"))
+        .unwrap()
+        .1
+        .clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(frame.to_string()),
+        ));
+    for _ in 0..16 {
+        rt.pump();
+    }
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+}
+fn acknowledge_private(
+    venue: &safe_cex_venue_orderly::native_exchange::OrderlyExchange,
+    rt: &support::Runtime,
+) {
+    private_frame(venue, rt, json!({"event":"auth","success":true}));
+    for topic in ["executionreport", "algoexecutionreportv2", "position"] {
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .filter_map(|frame| serde_json::from_str::<serde_json::Value>(frame).ok())
+                .any(|frame| frame["event"] == "subscribe" && frame["topic"] == topic)
+        );
+    }
 }
 
-#[test]
-fn private_execution_report_updates_orders_in_the_real_store() {
-    let (venue, rt, store, wire) = support::fixture(
+fn private_execution_report_updates_orders_in_the_real_store_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"executionreport","data":{"orderId":777,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":97.5,"quantity":2,"totalExecutedQuantity":0,"reduceOnly":false}}),
     );
     let orders = store.orders();
@@ -617,13 +658,23 @@ fn private_execution_report_updates_orders_in_the_real_store() {
 }
 
 #[test]
-fn private_partial_execution_updates_store_and_emits_fill() {
+fn private_execution_report_updates_orders_in_the_real_store() {
+    for name in private_topic_names() {
+        private_execution_report_updates_orders_in_the_real_store_for_name(name);
+    }
+}
+
+fn private_partial_execution_updates_store_and_emits_fill_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
     use std::{cell::RefCell, rc::Rc};
-    let (venue, rt, store, wire) = support::fixture(
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     let fills = Rc::new(RefCell::new(vec![]));
     let seen = fills.clone();
     venue.base().on(
@@ -635,6 +686,7 @@ fn private_partial_execution_updates_store_and_emits_fill() {
     );
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"executionreport","data":{"orderId":778,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":101.5,"quantity":2,"totalExecutedQuantity":0.5,"executedPrice":101.5,"executedQuantity":0.5,"reduceOnly":false}}),
     );
     let orders = store.orders();
@@ -659,15 +711,26 @@ fn private_partial_execution_updates_store_and_emits_fill() {
 }
 
 #[test]
-fn private_position_report_updates_store_and_keeps_rest_account_balance() {
-    let (venue, rt, store, wire) = support::fixture(
+fn private_partial_execution_updates_store_and_emits_fill() {
+    for name in private_topic_names() {
+        private_partial_execution_updates_store_and_emits_fill_for_name(name);
+    }
+}
+
+fn private_position_report_updates_store_and_keeps_rest_account_balance_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     assert_eq!(store.balance().total, 100.0);
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"position","data":{"positions":[{"symbol":"PERP_BTC_USDC","position_qty":"3","average_open_price":"100","mark_price":"102","margin_mode":"CROSS","leverage":"20","est_liq_price":"50"}]}}),
     );
     let positions = store.positions();
@@ -683,14 +746,25 @@ fn private_position_report_updates_store_and_keeps_rest_account_balance() {
 }
 
 #[test]
-fn private_algo_execution_report_updates_the_real_store() {
-    let (venue, rt, store, wire) = support::fixture(
+fn private_position_report_updates_store_and_keeps_rest_account_balance() {
+    for name in private_topic_names() {
+        private_position_report_updates_store_and_keeps_rest_account_balance_for_name(name);
+    }
+}
+
+fn private_algo_execution_report_updates_the_real_store_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"algoexecutionreportv2","data":{"algoOrderId":779,"rootAlgoOrderId":779,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","quantity":2,"triggerPrice":108.5,"totalExecutedQuantity":0,"reduceOnly":true}}),
     );
     let orders = store.orders();
@@ -701,6 +775,13 @@ fn private_algo_execution_report_updates_the_real_store() {
     assert_eq!(actual.parent_id.as_deref(), Some("779"));
     drop(orders);
     venue.dispose().unwrap();
+}
+
+#[test]
+fn private_algo_execution_report_updates_the_real_store() {
+    for name in private_topic_names() {
+        private_algo_execution_report_updates_the_real_store_for_name(name);
+    }
 }
 
 #[test]
@@ -786,4 +867,44 @@ fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
         2,
         "failed write did not advance the account leverage cache"
     );
+}
+
+#[test]
+fn private_balance_topic_preserves_rest_owned_account_for_each_subclass() {
+    for name in private_topic_names() {
+        let (venue, rt, store, wire) = support::fixture_for(
+            name,
+            json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+        );
+        script(&wire);
+        drive(&rt, venue.start()).unwrap();
+        acknowledge_private(&venue, &rt);
+        let before = store.balance().clone();
+        let orders = store.orders().to_vec();
+        let positions = store.positions().to_vec();
+        let fills = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let observed = fills.clone();
+        venue.base().on(
+            "fill",
+            std::rc::Rc::new(move |_, _| {
+                observed.set(observed.get() + 1);
+                Ok(())
+            }),
+        );
+        private_frame(
+            &venue,
+            &rt,
+            json!({"topic":"balance","data":{
+            "total_collateral_value":"999999","free_collateral":"888888"}}),
+        );
+        assert_eq!(
+            *store.balance(),
+            before,
+            "source has no private balance handler"
+        );
+        assert_eq!(store.orders().to_vec(), orders);
+        assert_eq!(store.positions().to_vec(), positions);
+        assert_eq!(fills.get(), 0);
+        venue.dispose().unwrap();
+    }
 }
