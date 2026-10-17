@@ -1,7 +1,7 @@
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value_ref, js_value_as_f64};
 use safe_cex_store::{StoreUpdate, store::DefaultStore};
-use safe_cex_types::{Balance, Order, Position};
+use safe_cex_types::{Balance, ModelField, Order, Position};
 use safe_cex_venue_breakoutprop::portfolio::*;
 use serde_json::{Value, json};
 use std::{cell::RefCell, process::Command, sync::LazyLock};
@@ -41,8 +41,21 @@ fn optional(value: &mut Value, name: &str, field: Option<Value>) {
         value[name] = field;
     }
 }
+fn model_field<T>(
+    value: &mut Value,
+    name: &str,
+    field: &ModelField<T>,
+    observe: impl FnOnce(&T) -> Value,
+) {
+    match field {
+        ModelField::Absent => {}
+        ModelField::Undefined => value[name] = json!({"$undefined":true}),
+        ModelField::Value(field) => value[name] = observe(field),
+    }
+}
 fn position(p: &Position) -> Value {
-    let mut v = json!({"id":p.id,"symbol":p.symbol,"side":p.side,"entryPrice":number(p.entry_price),"notional":number(p.notional),"leverage":number(p.leverage),"unrealizedPnl":number(p.unrealized_pnl),"contracts":number(p.contracts),"liquidationPrice":number(p.liquidation_price)});
+    let mut v = json!({"id":p.id,"symbol":p.symbol,"entryPrice":number(p.entry_price),"notional":number(p.notional),"leverage":number(p.leverage),"unrealizedPnl":number(p.unrealized_pnl),"contracts":number(p.contracts),"liquidationPrice":number(p.liquidation_price)});
+    model_field(&mut v, "side", &p.side, |x| json!(x));
     optional(&mut v, "marginType", p.margin_type.map(|x| json!(x)));
     optional(&mut v, "positionMode", p.position_mode.map(|x| json!(x)));
     optional(&mut v, "marginSize", p.margin_size.map(number));
@@ -56,7 +69,11 @@ fn balance(b: &Balance) -> Value {
     v
 }
 fn order(o: &Order) -> Value {
-    let mut v = json!({"id":o.id,"status":o.status,"symbol":o.symbol,"type":o.r#type,"side":o.side,"price":number(o.price),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
+    let mut v = json!({"id":o.id,"symbol":o.symbol,"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":number(o.last_update)});
+    model_field(&mut v, "status", &o.status, |x| json!(x));
+    model_field(&mut v, "type", &o.r#type, |x| json!(x));
+    model_field(&mut v, "side", &o.side, |x| json!(x));
+    model_field(&mut v, "price", &o.price, |x| number(*x));
     optional(&mut v, "info", o.info.as_ref().map(observe));
     optional(&mut v, "timeInForce", o.time_in_force.map(|x| json!(x)));
     v
@@ -166,28 +183,6 @@ fn actual_portfolio_formatters() {
                 assert!(
                     case["expected"][&method].get("ok").is_some(),
                     "source_accepts_missing_unused_field_{method}"
-                );
-            } else if name == "unknown-position-side" && method != "formatOrders" {
-                assert_eq!(
-                    value["error"], "Unrepresentable position side: UNKNOWN",
-                    "closed_position_boundary"
-                );
-                if method == "formatOpenPositions" {
-                    assert_eq!(
-                        case["expected"][&method]["ok"][0]["side"]["$undefined"], true,
-                        "source_undefined_position_side"
-                    );
-                }
-            } else if name.starts_with("unknown-order-") && method == "formatOrders" {
-                let field = name.strip_prefix("unknown-order-").unwrap();
-                assert_eq!(
-                    value["error"],
-                    format!("Unrepresentable order {field}: UNKNOWN"),
-                    "closed_order_boundary"
-                );
-                assert_eq!(
-                    case["expected"][&method]["ok"][0][field]["$undefined"], true,
-                    "source_undefined_order_field"
                 );
             } else {
                 assert_native_cardinality(

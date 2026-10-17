@@ -309,3 +309,41 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     venue.dispose().unwrap();
     assert!(venue.base().is_disposed());
 }
+
+#[test]
+fn amendment_omits_undefined_type_and_side_on_the_signed_wire() {
+    use safe_cex_store::Store;
+    let (concrete, rt, store, wire) = support::fixture();
+    let venue: Rc<dyn Exchange> = concrete;
+    let market = serde_json::from_value(json!({"id":"BTC-USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.1,"price":0.1},"limits":{"amount":{"min":0.1,"max":1000},"leverage":{"min":1,"max":150}},"info":{"lotSize":"0.1"}})).unwrap();
+    Store::update(
+        store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(vec![market]),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    script(&wire, MARGIN_MODE, ok(json!({"marginMode":"cross"})));
+    script(&wire, POSITION_MODE, ok(json!({"positionMode":"net_mode"})));
+    script(
+        &wire,
+        CANCEL,
+        ok(json!([{"orderId":"o1","clientOrderId":"","code":"0","msg":"success"}])),
+    );
+    script(
+        &wire,
+        BATCH,
+        ok(json!([{"orderId":"n1","clientOrderId":"c1","msg":"success","code":"0"}])),
+    );
+    let opts = serde_json::from_value(json!({"order":{"id":"o1","symbol":"BTCUSDT","status":"open","price":100,"amount":2,"filled":0,"remaining":2,"reduceOnly":false,"lastUpdate":1},"update":{"price":101}})).unwrap();
+    assert_eq!(drive(&rt, venue.update_order(opts)).unwrap(), ["n1"]);
+    let requests = wire.requests.borrow();
+    let placed = requests.iter().find(|r| r.url == BATCH).unwrap();
+    let body = placed.body.as_ref().unwrap().untransformed().unwrap();
+    let row = body[0].as_object().unwrap();
+    assert!(!row.contains_key("side") && !row.contains_key("orderType"));
+    drop(requests);
+    venue.dispose().unwrap();
+}

@@ -99,6 +99,17 @@ The balance oracle reuses scalarRaw from utilities_oracle.cjs byte-for-byte,
 executes one Node process, and holds GET settlement while draining cross-realm
 initialization promise adoption. Native fields and completed counts are pinned.
 
+Production `ParadexExchange` now overrides its stream and history trait hooks;
+the constructed member dispatcher calls the existing account REST bodies instead
+of leaving their allocated arrows unbound. Its fills/income/order capabilities
+are branded, and the existing state-operation journal delegate uses the canonical
+shared journal reader with symbol-scoped fills. The native adapter retains wrapped
+income failures as native causes; it does not duplicate reconstruction arithmetic.
+Socket registrations, REST candle polling and cleanup reuse their existing source
+bodies. Book registration and cleanup are split to retain the captured Set safely
+across the native callback lifetime, with no leaked host or second listener state.
+Real regressions are the `real_trait_` cases in `tests/exchange_trait.rs`.
+
 `history_reads.rs` maps fetchIncomeHistoryRange through one fallible callback and
 await. Missing and empty incomeType bypass filtering. Shared owned records do not
 represent JavaScript array/object aliases or own-undefined property reflection.

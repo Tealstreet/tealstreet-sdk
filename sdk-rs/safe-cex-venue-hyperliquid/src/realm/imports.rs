@@ -166,7 +166,7 @@ fn bind_cloid(realm: &Realm) {
     realm.define_hidden(&o, PropKey::str("isValid"), f);
     let shape = rule.is_honorable_shape.clone();
     let f = realm.native("isHonorableShape", 1, move |r, _, a| {
-        let opts: safe_cex_types::PlaceOrderOpts = r.to_typed(&arg(a, 0))?;
+        let opts: safe_cex_types::PreparedOrderOpts = r.to_typed(&arg(a, 0))?;
         Ok(Value::Bool(shape.as_ref().is_none_or(|check| check(&opts))))
     });
     realm.define_hidden(&o, PropKey::str("isHonorableShape"), f);
