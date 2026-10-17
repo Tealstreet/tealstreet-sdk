@@ -6717,34 +6717,6 @@ rs = "safe-cex-venue-hyperliquid/src/core_public_message.rs::CorePublicMessageHo
 reason = "Native primitive/event/object/callee bindings for the mapped core public frame body; full socket class composition remains separate."
 
 [[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotLimiterCallback"
-reason = "Rust carrier for the two anonymous source arrows inside spot waitForToken; captures native waitTime, receiver and original weight. Its execution body maps with waitForToken, and adds no independently named TypeScript export."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost"
-reason = "Rust native-operation binding for the mapped spot limiter bodies; property access, assignment, primitive arithmetic, callback allocation and Promise construction remain explicit host operations, not an extra TypeScript algorithm. Class allocation stays pending."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::number"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::is_undefined"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::binary"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::construct"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs::SpotRateLimiterHost::limiter_callback"
-reason = "Rust native-operation trait member for the mapped spot limiter bodies, with no separately named TypeScript symbol; its primitive/callback/Promise implementation is a host binding and is not claimed ported by this exemption."
-
-[[exempt]]
 rs = "safe-cex-venue-hyperliquid/src/candle_listeners.rs::CandleVenue"
 reason = "Rust selector for the two mapped listener bodies, not an extra TypeScript enum."
 
