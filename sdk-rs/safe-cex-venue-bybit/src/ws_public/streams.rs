@@ -90,7 +90,10 @@ pub(crate) fn listen_order_book(
         let outcome = parsed
             .borrow_mut()
             .apply(frame)
-            .map_err(ExchangeError::new)?;
+            .map_err(|message| ExchangeError {
+                name: "TypeError".into(),
+                ..ExchangeError::new(message)
+            })?;
         match outcome {
             Outcome::Publish => {
                 let book = parsed.borrow().book.clone();

@@ -268,3 +268,24 @@ fn book_frames_read_source_array_like_levels() {
     cleanup().unwrap();
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn malformed_book_levels_preserve_source_type_error() {
+    let (h, socket, symbol) = setup(ExchangeName::Bybit);
+    let cleanup = h
+        .venue()
+        .listen_order_book(symbol.into(), Rc::new(|_| panic!("malformed book")))
+        .unwrap();
+    let error = socket
+        .on_message(&SocketFrame::Text(
+            json!({"topic":format!("orderbook.1000.{symbol}"),"type":"snapshot","data":{"u":1,"a":[null]}}).to_string(),
+        ))
+        .unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    assert_eq!(
+        error.message,
+        "Cannot read properties of null (reading '0')"
+    );
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}
