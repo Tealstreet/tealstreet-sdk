@@ -235,7 +235,7 @@ impl ApexOmniExchange {
             if self.base.is_disposed() {
                 return Ok(());
             }
-            let now = self.base.runtime.now_ms();
+            let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
             if self
                 .last_websocket_positions_update
                 .get()

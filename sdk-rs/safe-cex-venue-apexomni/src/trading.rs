@@ -315,7 +315,8 @@ impl ApexOmniExchange {
                 Some(id) => id.clone(),
                 None => self.new_client_id(&account_id)?,
             };
-            let expiry = self.base.runtime.now_ms() + 30. * 24. * 60. * 60. * 1000.;
+            let expiry = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+                + 30. * 24. * 60. * 60. * 1000.;
             let mut pair = 0.;
             for contract in
                 crate::data::array(get(get(&config, "contractConfig"), "perpetualContract"))

@@ -122,6 +122,7 @@ fn bound_fetch_markets() {
 #[test]
 fn bound_place_order() {
     let h = fixture();
+    let source_clock = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
     let ids = h
         .drive(h.exchange.base().place_order(h.exchange.as_ref(), placed()))
         .unwrap();
@@ -141,6 +142,7 @@ fn bound_place_order() {
     );
     assert_eq!(calls[0].headers["APEX-API-KEY"], "fixture-key");
     let source = std::process::Command::new("node")
+        .env("SAFE_CEX_VIRTUAL_TIME", source_clock.to_string())
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/scripts/binding-signature.cjs"

@@ -10,6 +10,12 @@ fn trading_corpus() -> &'static Value {
         let o = Command::new("node")
             .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/trading.cjs"))
             .env("SAFE_CEX_RUST_ARCH", std::env::consts::ARCH)
+            .env(
+                "SAFE_CEX_VIRTUAL_TIME",
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK
+                    .get_current_time_ms()
+                    .to_string(),
+            )
             .output()
             .unwrap();
         assert!(

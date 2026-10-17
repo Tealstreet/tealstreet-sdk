@@ -49,6 +49,25 @@ fn side(value: OrderSide) -> J {
         OrderSide::Sell => "sell",
     })
 }
+thread_local! {
+    static FIXTURE_STAMPS: RefCell<Vec<(f64, f64)>> = const { RefCell::new(Vec::new()) };
+}
+fn source_clock_stamp(value: f64) -> J {
+    let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
+    assert!(
+        (now - 5_000.0..=now).contains(&value),
+        "model timestamp must read the live virtual clock: {value} vs {now}"
+    );
+    // The source oracle freezes its virtual clock; compare its other fields exactly.
+    let source = FIXTURE_STAMPS.with(|stamps| {
+        stamps
+            .borrow()
+            .iter()
+            .find(|(actual, _)| *actual == value)
+            .map(|(_, source)| *source)
+    });
+    n(source.unwrap_or(1700001234567.0))
+}
 fn position(value: &Position) -> J {
     let mut fields = vec![
         ("id", s(&value.id)),
@@ -86,7 +105,7 @@ fn position(value: &Position) -> J {
         fields.push(("info", J::from(v.clone())));
     }
     if let Some(v) = value.last_update {
-        fields.push(("lastUpdate", n(v)));
+        fields.push(("lastUpdate", source_clock_stamp(v)));
     }
     obj(fields)
 }
@@ -120,7 +139,7 @@ fn order(value: &Order) -> J {
         ("remaining", n(value.remaining)),
         ("reduceOnly", J::Bool(value.reduce_only)),
         ("info", J::from(value.info.clone().unwrap())),
-        ("lastUpdate", n(value.last_update)),
+        ("lastUpdate", source_clock_stamp(value.last_update)),
     ];
     if let Some(v) = value.time_in_force {
         fields.push((
@@ -893,7 +912,11 @@ fn continuation_position_short_circuit_matches_source() {
                 )
             })
             .expect("APEX-CONT source position exists");
-        assert_eq!(host.now_calls.get(), 1, "APEX-CONT native position clock");
+        assert_eq!(
+            host.now_calls.get(),
+            0,
+            "APEX-CONT virtual clock must not read the raw runtime"
+        );
         native::check_fields(
             &position(&actual),
             &row["result"],
