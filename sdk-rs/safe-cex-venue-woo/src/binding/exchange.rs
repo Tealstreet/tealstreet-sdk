@@ -330,6 +330,18 @@ impl Exchange for WooExchange {
         let a = args!(js(&options));
         self.invoke("fetchHistoricalFills", a)
     }
+    // ts: WOOXExchange.fetchHistoricalPositions reconstructs its order-history axis.
+    fn fetch_historical_positions(
+        &self,
+        options: safe_cex_exchange::journal::HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        let opts = Js::object(vec![
+            ("account", Js::str(&options.account)),
+            ("from", options.from.map_or(Js::Undefined, Js::Number)),
+            ("to", options.to.map_or(Js::Undefined, Js::Number)),
+        ]);
+        self.invoke("fetchHistoricalPositions", vec![opts])
+    }
     fn fetch_historical_orders(
         &self,
         options: Option<OrderHistoryOptions>,

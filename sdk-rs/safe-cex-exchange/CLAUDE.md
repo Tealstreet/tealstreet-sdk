@@ -872,7 +872,13 @@ Factory profiles are copied before the venue interceptor; no global array format
 is assumed. Query JSON diagnostic projection is separate from URL rendering.
 
 Shared journal intervals and fold projection live in position_intervals and
-fold_position_adapter. Reconstruction is path-dependent: seeds remain incomplete,
+fold_position_adapter. PositionInterval's camelCase Serde bridge lets production
+venue bindings pass the canonical interval through native JS values; optional
+fields omit absence and the shared native serializer retains floating-point values.
+Its private remote decoder requires an object and uses the existing numeric ingress
+pipeline; raw number spelling and native nonfinite/signed-zero bits must survive.
+No second interval model or fold implementation is introduced.
+Reconstruction is path-dependent: seeds remain incomplete,
 partial missing reducing PnL refuses a total, and crossing fills split fees by
 size while assigning all realized PnL to the closing interval. Funding includes
 both endpoints and remains unattributed for hedges/incomplete/open intervals.
@@ -1213,8 +1219,26 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+Ordinary numeric conversion of live objects/functions calls `valueOf` before
+`toString`, reading each member only when reached and retaining the original
+receiver and thrown value. String conversion uses the same private primitive
+conversion algorithm with its string-hint ordering. Object results and
+non-callable members advance to the next method; no primitive result throws.
+The production native-host `js_number_coercion` witness compares Node traces,
+negative-zero/NaN results, inheritance, live lookup and conversion failures.
+
 The JS Number `toFixed` builtin delegates to `safe_cex_num::js_to_fixed` after
 ordinary digits coercion. Exact binary ties round away from zero; negative zero,
 nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
 `tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
 Polymarket's concrete binding witness checks the resulting signed order amounts.
+
+The shared `qs.stringify` binding consumes arrayFormat (indices/repeat/comma/
+brackets), callable sort, RFC3986/RFC1738 format and the encode boolean. It
+sorts keys at every object/array level before reading child values and keeps
+undefined omissions. Comparator failures propagate; native sorting does not
+claim V8's comparator call schedule. `tests/js_qs_options.rs` executes the actual
+installed qs package over 96 option/input combinations. The BingX registry
+regression additionally observes final signed GET query ordering through the
+production HTTP client and verifies the signature against the source preimage.
+Other qs options remain outside this imported runtime surface.

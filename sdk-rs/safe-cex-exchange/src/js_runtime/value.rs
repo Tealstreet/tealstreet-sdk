@@ -379,73 +379,78 @@ impl Js {
     /// ToString, with OrdinaryToPrimitive's string hint for live objects.
     pub fn to_js_string(&self) -> Result<Str, Thrown> {
         if matches!(self, Js::Object(_) | Js::Function(_)) {
-            for name in ["toString", "valueOf"] {
-                let declared = self.has_property(&utf16(name));
-                // None is the value model's implicit stock prototype. An
-                // explicit null prototype contributes no inherited methods.
-                let method = if !declared && self.string_prototype_is_null() {
-                    Js::Undefined
-                } else {
-                    self.get(name)?
-                };
-                if name == "toString"
-                    && !declared
-                    && method.is_undefined()
-                    && self.has_implicit_string_prototype()
-                {
-                    return self.intrinsic_string();
-                }
-                if !method.is_callable() {
-                    continue;
-                }
-                let primitive = match &method {
-                    Js::Builtin(reference)
-                        if reference.member()
-                            == safe_cex_num::BuiltinIdentity::Object(
-                                safe_cex_num::ProtoMember::ToString,
-                            ) =>
-                    {
-                        let tag = match self {
-                            Js::Function(_) => "Function",
-                            Js::Object(object) if object.class == "Buffer" => "Uint8Array",
-                            Js::Object(object)
-                                if matches!(
-                                    object.class,
-                                    "Error"
-                                        | "Blob"
-                                        | "ArrayBuffer"
-                                        | "Map Iterator"
-                                        | "Set Iterator"
-                                        | "Array Iterator"
-                                        | "String Iterator"
-                                ) =>
-                            {
-                                object.class
-                            }
-                            Js::Object(_) => "Object",
-                            _ => unreachable!(),
-                        };
-                        Js::str(&format!("[object {tag}]"))
-                    }
-                    Js::Builtin(reference)
-                        if reference.member()
-                            == safe_cex_num::BuiltinIdentity::Object(
-                                safe_cex_num::ProtoMember::ValueOf,
-                            ) =>
-                    {
-                        self.clone()
-                    }
-                    _ => method.call(self.clone(), vec![])?,
-                };
-                if !primitive.is_object() {
-                    return primitive.to_js_string();
-                }
-            }
-            return Err(Thrown::type_error(
-                "Cannot convert object to primitive value",
-            ));
+            return self
+                .ordinary_to_primitive(["toString", "valueOf"])?
+                .to_js_string();
         }
         self.intrinsic_string()
+    }
+    fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
+        for name in names {
+            let declared = self.has_property(&utf16(name));
+            // None is the value model's implicit stock prototype. An
+            // explicit null prototype contributes no inherited methods.
+            let method = if !declared && self.string_prototype_is_null() {
+                Js::Undefined
+            } else {
+                self.get(name)?
+            };
+            if name == "toString"
+                && !declared
+                && method.is_undefined()
+                && self.has_implicit_string_prototype()
+            {
+                return self.intrinsic_string().map(Js::String);
+            }
+            if !method.is_callable() {
+                continue;
+            }
+            let primitive = match &method {
+                Js::Builtin(reference)
+                    if reference.member()
+                        == safe_cex_num::BuiltinIdentity::Object(
+                            safe_cex_num::ProtoMember::ToString,
+                        ) =>
+                {
+                    let tag = match self {
+                        Js::Function(_) => "Function",
+                        Js::Object(object) if object.class == "Buffer" => "Uint8Array",
+                        Js::Object(object)
+                            if matches!(
+                                object.class,
+                                "Error"
+                                    | "Blob"
+                                    | "ArrayBuffer"
+                                    | "Map Iterator"
+                                    | "Set Iterator"
+                                    | "Array Iterator"
+                                    | "String Iterator"
+                            ) =>
+                        {
+                            object.class
+                        }
+                        Js::Object(_) => "Object",
+                        _ => unreachable!(),
+                    };
+                    Js::str(&format!("[object {tag}]"))
+                }
+                Js::Builtin(reference)
+                    if reference.member()
+                        == safe_cex_num::BuiltinIdentity::Object(
+                            safe_cex_num::ProtoMember::ValueOf,
+                        ) =>
+                {
+                    self.clone()
+                }
+                _ => method.call(self.clone(), vec![])?,
+            };
+            if !primitive.is_object() {
+                return Ok(primitive);
+            }
+        }
+        Err(Thrown::type_error(
+            "Cannot convert object to primitive value",
+        ))
     }
     fn has_implicit_string_prototype(&self) -> bool {
         match self {
@@ -570,9 +575,10 @@ impl Js {
             }
             Js::String(s) => string_to_number(&String::from_utf16_lossy(s)),
             Js::Builtin(reference) => string_to_number(&reference.js_string()),
-            Js::Array(_) | Js::Object(_) => {
-                string_to_number(&String::from_utf16_lossy(&self.to_js_string()?))
-            }
+            Js::Object(_) | Js::Function(_) => self
+                .ordinary_to_primitive(["valueOf", "toString"])?
+                .to_number()?,
+            Js::Array(_) => string_to_number(&String::from_utf16_lossy(&self.to_js_string()?)),
             _ => f64::NAN,
         })
     }
