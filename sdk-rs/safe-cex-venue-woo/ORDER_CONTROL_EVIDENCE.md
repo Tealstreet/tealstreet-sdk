@@ -195,3 +195,13 @@ utilities2 pass with the existing live-source oracle still dependency-gated.
 The extractor check reports zero updates. Compiler-only checks of all explicit
 model consumers and their test targets passed before master integration; the
 newly merged Apex false assertion was migrated and its real binding suite passes.
+
+
+Final follow-up: the live type-model oracle also passes (3/3 with include-ignored).
+Actual accepted native decoder probes pass for three model-record owners and five
+ModelField/Prepared owners; the full types inventory records151 Deserialize and70
+alternate-only owners. Native FFI/registry compiles. Strict Clippy passes for all21
+affected production libraries on native and Wasm, plus WOO/BingX all targets on
+both targets. Full parity passes7459 rows/16622 public items; extractor check0.
+Only the five reviewed unchanged nested helpers' containing-file pins were
+refreshed; no unrelated core cancellation/override body pin was changed.
