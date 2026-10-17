@@ -9,16 +9,25 @@ async fn request_rows(
     query: &WooLegacyFillsQuery,
     symbol: Option<String>,
 ) -> Result<Vec<Value>, RestFailure> {
-    let mut values = vec![("limit".into(), RetainedJsonInput::Float(query.limit))];
+    let mut values = vec![(
+        "limit".encode_utf16().collect(),
+        RetainedJsonInput::Float(query.limit),
+    )];
     if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
-        values.push(("symbol".into(), RetainedJsonInput::Text(symbol)));
+        values.push((
+            "symbol".encode_utf16().collect(),
+            RetainedJsonInput::Text(symbol.encode_utf16().collect()),
+        ));
     }
     for (key, value) in [
         ("startTime", query.from_milliseconds),
         ("endTime", query.to_milliseconds),
     ] {
         if let Some(value) = value {
-            values.push((key.into(), RetainedJsonInput::Float(value)));
+            values.push((
+                key.encode_utf16().collect(),
+                RetainedJsonInput::Float(value),
+            ));
         }
     }
     let mut request = RestRequest {
