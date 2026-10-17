@@ -75,6 +75,237 @@ fn complete<T>(rt: &support::Runtime, future: impl Future<Output = T>) -> T {
     panic!("Bitrue binding future did not complete")
 }
 #[test]
+fn symbol_metadata_refresh_fetches_and_commits_the_current_leverage_bracket() {
+    let runtime = Rc::new(support::Runtime::default());
+    let http = Rc::new(Http(
+        runtime.clone(),
+        RefCell::new(vec![]),
+        Cell::new(false),
+    ));
+    let store = Rc::new(DefaultStore::new());
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        store.clone(),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http: http.clone(),
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    let mut markets = complete(&runtime, venue.fetch_markets()).unwrap();
+    markets[0].limits.leverage.max = 31.0;
+    safe_cex_store::Store::update(
+        store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    complete(&runtime, venue.update_symbol_metadata("E-BTC-USDT".into())).unwrap();
+    assert!(
+        http.1
+            .borrow()
+            .iter()
+            .any(|request| request["url"] == "/fapi/v2/leverageBracket"
+                && request["params"]["contractName"] == "E-BTC-USDT"),
+        "metadata refresh must fetch the symbol's current bracket"
+    );
+    assert_eq!(
+        store.markets()[0].limits.leverage.max,
+        17.0,
+        "metadata refresh must commit the returned bracket to the real Store"
+    );
+    venue.dispose().unwrap();
+}
+
+struct PrivateFixture {
+    venue: Rc<BitrueExchange>,
+    runtime: Rc<support::Runtime>,
+    http: Rc<Http>,
+    store: Rc<DefaultStore>,
+    socket: Rc<support::Socket>,
+}
+impl PrivateFixture {
+    fn new() -> Self {
+        let runtime = Rc::new(support::Runtime::default());
+        runtime.now.set(1_700_000_000_000.0);
+        let http = Rc::new(Http(
+            runtime.clone(),
+            RefCell::new(vec![]),
+            Cell::new(false),
+        ));
+        let store = Rc::new(DefaultStore::new());
+        let venue = BitrueExchange::new(
+            ExchangeName::Bitrue,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store.clone(),
+            BitrueDependencies {
+                runtime: runtime.clone(),
+                http: http.clone(),
+                external_public_data: None,
+            },
+        )
+        .unwrap();
+        complete(&runtime, venue.start()).unwrap();
+        runtime.pump();
+        let socket = runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url.contains("listenKey=fixture-listen-key"))
+            .map(|(_, socket)| socket.clone())
+            .expect("real private listen-key connection");
+        assert!(
+            socket
+                .sent
+                .borrow()
+                .iter()
+                .any(|s| s.contains("user_order_update")),
+            "production private subscriptions must run"
+        );
+        Self {
+            venue,
+            runtime,
+            http,
+            store,
+            socket,
+        }
+    }
+    fn frame(&self, frame: Value) {
+        self.socket
+            .events
+            .borrow_mut()
+            .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                safe_cex_transport::socket::SocketFrame::Text(frame.to_string()),
+            ));
+        self.runtime.pump();
+    }
+    fn account_reads(&self) -> usize {
+        self.http
+            .1
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/fapi/v2/account")
+            .count()
+    }
+}
+impl Drop for PrivateFixture {
+    fn drop(&mut self) {
+        self.venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn private_order_frame_commits_to_the_production_store() {
+    let f = PrivateFixture::new();
+    f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":"socket-order","S":"SELL","o":"LIMIT","x":"NEW","X":"NEW","p":"27300","q":"3","z":"1"}}));
+    let orders = f.store.orders();
+    let order = orders
+        .iter()
+        .find(|o| o.id == "socket-order")
+        .expect("private order Store commit");
+    assert_eq!(order.symbol, "E-BTC-USDT");
+    assert_eq!(order.side, safe_cex_types::OrderSide::Sell);
+    assert_eq!(order.price, 27300.0);
+    assert_eq!(order.filled, 1.0);
+    assert_eq!(order.remaining, 2.0);
+}
+
+#[test]
+fn private_trade_frame_emits_incremental_fill_and_commits_order() {
+    let f = PrivateFixture::new();
+    let fills = Rc::new(RefCell::new(vec![]));
+    let capture = fills.clone();
+    f.venue.base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            // The shared JS emitter bridge exposes its argument list here.
+            let args = fill.as_array().expect("JS emitter argument list");
+            assert_eq!(args.len(), 1);
+            capture.borrow_mut().push(args[0].clone());
+            Ok(())
+        }),
+    );
+    f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":"socket-fill","S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","p":"27300","q":"3","z":"1"}}));
+    assert_eq!(
+        *fills.borrow(),
+        vec![
+            json!({"id":"socket-fill","symbol":"E-BTC-USDT","side":"buy","price":27300.0,"amount":1.0})
+        ]
+    );
+    assert_eq!(
+        f.store
+            .orders()
+            .iter()
+            .find(|o| o.id == "socket-fill")
+            .unwrap()
+            .filled,
+        1.0
+    );
+}
+
+#[test]
+fn private_account_frame_refreshes_positions_through_real_rest_binding() {
+    let f = PrivateFixture::new();
+    safe_cex_store::Store::update(
+        f.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            positions: Some(vec![]),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let before = f.account_reads();
+    f.frame(json!({"e":"ACCOUNT_UPDATE","E":1700000001000.0}));
+    f.runtime.advance(350.0);
+    assert!(
+        f.account_reads() > before,
+        "private account frame must trigger the real account read"
+    );
+    let positions = f.store.positions();
+    let position = positions
+        .iter()
+        .find(|p| p.symbol == "E-BTC-USDT")
+        .expect("private position refresh Store commit");
+    assert_eq!(position.contracts, 0.25);
+    assert_eq!(position.entry_price, 27123.0);
+    assert_eq!(position.leverage, 7.0);
+}
+
+#[test]
+fn private_balance_frame_refreshes_balance_through_real_rest_binding() {
+    let f = PrivateFixture::new();
+    safe_cex_store::Store::update(
+        f.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            balance: Some(
+                serde_json::from_value(json!({"total":0,"free":0,"used":0,"upnl":0})).unwrap(),
+            ),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let before = f.account_reads();
+    f.frame(json!({"e":"BALANCE","E":1700000001000.0}));
+    f.runtime.advance(350.0);
+    assert!(
+        f.account_reads() > before,
+        "private balance frame must trigger the real account read"
+    );
+    let balance = f.store.balance();
+    assert_eq!(balance.total, 1234.0);
+    assert_eq!(balance.free, 1000.0);
+    assert_eq!(balance.used, 234.0);
+    assert_eq!(balance.upnl, 3.0);
+}
+
+#[test]
 fn constructs_production_bitrue_and_inherits_source_account_rejection() {
     let runtime = Rc::new(support::Runtime::default());
     let venue = BitrueExchange::new(

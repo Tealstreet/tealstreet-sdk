@@ -101,3 +101,15 @@ trait declarations now pass 31/31 after merging master bc9f062226, which fixes
 the formerly stale GRVT floor. The refreshed Paradex registry witness and
 all-feature/ignored override contract pass 1/1 and 6/6 respectively. Extractor check remains zero
 changed/added/orphaned manifests after the merge.
+
+## Venue-wide cancellation entrypoints
+
+The public Exchange trait now delegates cancelAllOrders and cancelSymbolOrders
+to their existing source body ports (`paradex.exchange.ts:2225–2244`). Each
+constructed empty-Store witness compiles and fails on the old trait default
+(zero DELETE requests instead of one), then passes with its venue override.
+The symbol-scoped wire URL is /orders?market=BTC-USD-PERP; the unscoped URL is
+/orders. Both error paths are exercised with a real shared HTTP 400 response,
+which must propagate through the existing source catch/log/rethrow behavior.
+All 12 constructed tests and both actual-source command tests pass. This adds
+cancellation entrypoint evidence; private frame/fill coverage is separate.

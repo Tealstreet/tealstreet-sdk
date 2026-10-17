@@ -142,10 +142,12 @@ separate pending rows.
 Value construction; preserve unknown raw info keys and numeric ingress. The
 shared owned info copy differs from the source alias, and None differs from its
 own undefined timeInForce property. Observe both boundaries in the oracle.
-Required non-string identity/size fields and unsupported side/prototype enum
-values fail visibly. Numeric created_at values are epoch milliseconds passed
-through shared TimeClip, including truncation, invalid range and positive-zero
-normalization; string dates retain the existing parser and timezone capability.
+Required non-string identity fields and unsupported side/prototype enum values
+fail visibly. Size and remaining_size use the shared String/parseFloat coercion,
+including numeric inputs and NaN from missing or nonnumeric values. created_at
+retains Date conversion: null/false become +0, true becomes 1, missing becomes
+NaN, Numbers use TimeClip, and other JSON data is string-converted then parsed.
+String dates retain the existing parser and timezone capability.
 The constructed REST regression checks startup and Store order loading. Preserve boolean reduce_only priority over flags, trigger display-price
 selection, unclamped filled subtraction and created_at dates. Shared js_date_parse
 requires the host's local-to-UTC capability; the mapper corpus pins UTC only.
@@ -181,3 +183,9 @@ for constructed trait coverage, actual SDK signatures and compiled controls.
 Preserve source fetchPositions balance writes and exchange disposal without base
 cleanup. Only constructed private onOpen uses the approved shared authentication
 recovery contract; direct authenticate keeps the original catch and log behavior.
+
+Native `cancel_all_orders` and `cancel_symbol_orders` call the venue receiver
+methods, whose DELETE /orders behavior also covers orders absent from Store.
+Keep the symbol in the original params.market config so the shared HTTP adapter
+owns query serialization. Both methods preserve the existing catch/log/rethrow
+path; an empty Store must not turn a rejected venue cancellation into success.
