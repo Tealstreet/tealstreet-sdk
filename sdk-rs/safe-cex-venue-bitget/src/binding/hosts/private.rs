@@ -209,7 +209,9 @@ impl PrivateTopicsHost for Rt {
     }
     // ts: virtualClock.getCurrentTimeMs()
     fn clock_now(&self) -> Result<f64, Thrown> {
-        Ok(self.now())
+        self.global("virtualClock")?
+            .call_method("getCurrentTimeMs", vec![])?
+            .to_number()
     }
     fn set_of(&self, values: Js) -> Result<Js, Thrown> {
         self.global("Set")?.call(Js::Undefined, vec![values])
