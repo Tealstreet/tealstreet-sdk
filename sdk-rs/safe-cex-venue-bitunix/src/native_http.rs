@@ -298,14 +298,13 @@ impl Client {
                     "headers": Value::Object(headers.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect()),
                 });
                 let options = json!({"key": lane.options.key, "secret": lane.options.secret});
-                let runtime = client.base.runtime.clone();
-                let nonce_runtime = runtime.clone();
+                let nonce_runtime = client.base.runtime.clone();
                 let signed = sign(
                     &config_view,
                     &options,
                     &mut |p, _, _| query_profile(p),
-                    &mut || Ok(runtime.now_ms()),
-                    &mut || Ok(nonce_runtime.unique_id()),
+                    &mut || Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time()),
+                    &mut || Ok(nonce_runtime.unique_id().replace(['-', '_'], "")),
                 )
                 .map_err(ExchangeError::new)?;
                 if let Some(JsJsonValue::Object(fields)) = signed {

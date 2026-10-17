@@ -10,9 +10,9 @@ use crate::{api::FuturesModule, construction::Venue};
 use safe_cex_exchange::{
     capabilities::{CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding},
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedOrder},
-    journal::JournalFolder,
+    journal::{HistoricalPositionOptions, JournalFolder},
     js_runtime::{client::JsHttpHost, scope::ScopeShared},
-    runtime::{ExchangeError, ExchangeFuture},
+    runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -197,6 +197,37 @@ impl KrakenExchange {
             to_typed(&value).map_err(err)
         })
     }
+    // ts: the member returns its unsubscribe function; payloads reach the typed callback.
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        member: &'static str,
+        first: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let reporter = self.rt.shared.runtime.clone();
+        let listener = Js::function("callback", move |_, a| {
+            let value = a.into_iter().next().unwrap_or(Js::Undefined);
+            match to_typed::<T>(&value) {
+                Ok(typed) => callback(typed),
+                Err(error) => reporter.report_exception(
+                    &error.to_exchange_error(),
+                    &serde_json::json!({"source": "kraken listener payload"}),
+                ),
+            }
+            Ok(Js::Undefined)
+        });
+        let cleanup = self
+            .rt
+            .this
+            .call_method(member, vec![first, listener])
+            .map_err(err)?;
+        Ok(Box::new(move || {
+            if cleanup.is_callable() {
+                cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            }
+            Ok(())
+        }))
+    }
     fn invoke_unit(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
         Box::pin(async move {
@@ -325,5 +356,92 @@ impl Exchange for KrakenExchange {
         }
         let a = args!(js(&options));
         self.invoke("fetchHistoricalFills", a)
+    }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", js(&options)?, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", js(&symbol)?, callback)
+    }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        let a = args!(js(&options));
+        self.invoke("fetchOHLCV", a)
+    }
+    // ts: KrakenExchange.fetchIncomeHistory; Spot inherits the base empty default.
+    fn fetch_income_history(
+        &self,
+        options: Option<IncomeHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        if self.spot() {
+            return Box::pin(async { Ok(vec![]) });
+        }
+        let a = args!(opt_js(options));
+        self.invoke("fetchIncomeHistory", a)
+    }
+    // ts: KrakenExchange.fetchIncomeHistoryRange; Spot inherits the base empty default.
+    fn fetch_income_history_range(
+        &self,
+        start: f64,
+        end: f64,
+        kind: Option<String>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        if self.spot() {
+            return Box::pin(async { Ok(vec![]) });
+        }
+        let a = args!(js(&start), js(&end), opt_js(kind));
+        self.invoke("fetchIncomeHistoryRange", a)
+    }
+    // ts: KrakenExchange.fetchHistoricalPositions folds fills; Spot inherits the base refusal.
+    fn fetch_historical_positions(
+        &self,
+        options: HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        if self.spot() {
+            return Box::pin(async move {
+                Err(ExchangeError::new(format!(
+                    "{}: no journal records path declared. Override fetchHistoricalPositions — fold from fills via foldClosedPositionRecords, or map this venue's reported closed axis.",
+                    self.class_name()
+                )))
+            });
+        }
+        let opts = Js::object(vec![
+            ("account", Js::str(&options.account)),
+            ("from", options.from.map_or(Js::Undefined, Js::Number)),
+            ("to", options.to.map_or(Js::Undefined, Js::Number)),
+        ]);
+        self.invoke("fetchHistoricalPositions", vec![opts])
+    }
+    // ts: KrakenSpotExchange.fetchAndSetOrders ignores symbols and replaces the full set.
+    fn fetch_and_set_orders(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
+        if !self.spot() {
+            return Box::pin(async move { self.base().fetch_and_set_orders(self, symbols).await });
+        }
+        self.invoke("fetchAndSetOrders", vec![])
+    }
+    // ts: KrakenExchange.signWsAuth; Spot inherits the base signer.
+    fn sign_ws_auth<'a>(
+        &'a self,
+        request: &'a safe_cex_crypto::WsAuthRequest,
+    ) -> ExchangeFuture<'a, safe_cex_crypto::WsAuthResponse> {
+        if self.spot() {
+            return Box::pin(async move { Ok(self.base().sign_ws_auth(request)) });
+        }
+        let a = args!(js(request));
+        self.invoke("signWsAuth", a)
+    }
+    fn class_name(&self) -> &'static str {
+        if self.spot() {
+            "KrakenSpotExchange"
+        } else {
+            "KrakenExchange"
+        }
     }
 }
