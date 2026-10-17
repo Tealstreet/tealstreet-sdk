@@ -1226,6 +1226,8 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+`__configureRateLimit` registers a request interceptor at the source registration point. Axios LIFO ordering therefore waits before the earlier signing interceptor, while later request hooks still run before the wait. Each registration owns its window. The queued nonce regression and installed Axios oracle are `tests/js_runtime.rs::rate_limit_dequeues_before_signing_and_keeps_interceptor_registration_order` and `tests/rate-limit-signing-source.cjs`.
+
 JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
 It rejects signs inside radix digits (for example `0x+1`) and preserves the shared
 full-string, whitespace and arbitrary-length binary64 rounding rules. The native
@@ -1344,6 +1346,19 @@ exceed one. It resolves every selector before patches, preserves unmatched rows
 as `None` in the Store batch, and avoids reading patches for unmatched IDs.
 `tests/js_store_position_batch_ids.rs` compares156 maintained Store cases with
 real DefaultStore, including empty, single, distinct and duplicate-ID states.
+
+The runtime JSON builtin and default encoded-HTTP response parser decode directly
+into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
+including lone surrogates; object members use own data-property definition, and
+numbers retain binary64 bits. Both consumers share one private parser. Invalid
+HTTP JSON retains Axios's existing raw-text result, while the builtin throws
+SyntaxError. tests/js_json_parse.rs compares 200 valid/invalid syntax cases and
+all 65,536 escaped units with Node and checks a real loopback HTTP response
+against actual Axios. scripts/json-parse-controls.py restores the original
+builtin parser, raw-unit replacement, and HTTP parser independently; each fault
+must compile, fail its named real-boundary assertion, and pass after exact
+restoration. This does not widen HOW response data or typed Store/model strings;
+JSON reviver behavior and exact engine diagnostic text remain outside this fix.
 
 The JS Axios dispatcher lets installed callable adapters own response settlement,
 as Axios does. HOW fulfills non-2xx and zero-status responses, so their configured
