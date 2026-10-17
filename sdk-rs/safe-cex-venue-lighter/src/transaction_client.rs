@@ -178,13 +178,30 @@ impl TransactionClient {
         self: &Rc<Self>,
         params: CreateGroupedOrdersParams,
     ) -> ObjectPromise<L2CreateGroupedOrdersTxInfo> {
+        let sides = params
+            .orders
+            .iter()
+            .map(|order| order.is_buy)
+            .collect::<Vec<_>>();
+        self.get_create_grouped_orders_with_side_comparison(
+            params,
+            Rc::new(move |a, b| sides[a] == sides[b]),
+        )
+    }
+
+    pub(crate) fn get_create_grouped_orders_with_side_comparison(
+        self: &Rc<Self>,
+        params: CreateGroupedOrdersParams,
+        same_side: Rc<dyn Fn(usize, usize) -> bool>,
+    ) -> ObjectPromise<L2CreateGroupedOrdersTxInfo> {
         self.after_nonce(self.get_next_nonce(false), move |client, nonce| {
             let clock = || client.config.runtime.now_millis();
-            let payload = build_create_grouped_orders_data(
+            let payload = build_grouped_orders_with_side_comparison(
                 &client.context(&clock),
                 client.config.crypto.as_ref(),
                 &params,
                 &nonce,
+                same_side.as_ref(),
             )?;
             let signed = sign_create_order_transaction(
                 client.config.crypto.as_ref(),

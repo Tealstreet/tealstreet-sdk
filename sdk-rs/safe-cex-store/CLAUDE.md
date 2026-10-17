@@ -179,3 +179,8 @@ keeps the source single-versus-indexed lookup threshold and duplicate-ID choice;
 no synthetic ID or filtered batch substitutes for an unmatched selector. Typed
 venue callers supply `Some(id)`. The native facade's168-case maintained Store
 comparison observes selection, duplicate rows and the position update counter.
+
+Order.reduceOnly follows the same ModelField overlay policy: an absent incoming
+property retains the existing value, while own undefined replaces it. The native
+Store facade regression exercises all four presence states across single/bulk
+upsert and updateOrder, alongside the actual TypeScript Store.

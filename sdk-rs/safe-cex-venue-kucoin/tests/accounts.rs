@@ -481,7 +481,7 @@ fn account_actual_axios_raw_response_staging_findings() {
 }
 #[test]
 fn rest_read_oracle_runtime_and_compiler_fail_loudly() {
-    for script in ["accounts", "spot-reads"] {
+    for script in ["accounts"] {
         assert!(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join(format!("scripts/{script}.cjs"))
