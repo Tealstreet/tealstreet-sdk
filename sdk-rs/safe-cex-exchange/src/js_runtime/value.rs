@@ -118,9 +118,10 @@ impl Thrown {
         if !self.value.is_object() {
             return error;
         }
-        let code = self.value.get("code").map(|code| {
-            (self.value.has_own("code") || !code.is_undefined()).then_some(code)
-        });
+        let code = self
+            .value
+            .get("code")
+            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
         match code {
             Ok(code) => error.code = code,
             Err(cause) => return cause.error_fields(),
