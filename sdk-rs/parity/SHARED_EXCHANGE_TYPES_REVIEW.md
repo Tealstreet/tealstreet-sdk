@@ -427,100 +427,107 @@ PreparedOrderOpts copies runtime amendment type/side presence into a dedicated i
 
 ## Historical accepted-shape debt: 89 types owners
 
-The canonical outstanding-defects.json is removal-only. These fingerprints were measured at its historical base, and must not be reinterpreted as production reachability findings. Current public string/map guards already reject the old external-tag/positional-array forms. Native and WASM compiler-owned probes are being measured before annotating the exact current result. No canonical debt row is removed based solely on source inspection.
+The canonical outstanding-defects.json is removal-only. These fingerprints were measured at its historical base, and must not be reinterpreted as production reachability findings. Current public string/map guards already reject the old external-tag/positional-array forms. Both native and WASM compiler-owned probes pass on baseline master f759dc8be2: 212 runtime results and 30 classifications per configuration, with zero failed owners. Every one of these 89 types has an actual runtime receipt in both configurations. The scoped real ratchet rejects the unchanged debt as stale and passes after removal. This PR removes only these 89 rows / 1004 fingerprints; every other crate row remains byte-equivalent as a parsed value. No Rust type/API or decoder changes are needed.
 
 | Owner | Historical fingerprints | Current review |
 |---|---:|---|
-| `safe_cex_types::AnyTimeframe` | 108 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Balance` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::BothPositionSide` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Candle` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ClosedPnlEntry` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::CoinBalance` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::DataProvenance` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::DisplayedMargin` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeAccount` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeAccountConfig` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeAccountConfigBybitSiteId` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeAccountConfigHealthStatus` | 20 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeName` | 188 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsAuth` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsBybitSiteId` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExternalPublicData` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExternalPublicDataVariant0` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExternalPublicDataVariant0Type` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExternalPublicDataVariant1Type` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExtra` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExtraAsterdexApiVersion` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExtraKucoinBroker` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsExtraLighterBuilderFeeMode` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsHyperliquidBuilder` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExchangeOptionsTuning` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Execution` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExecutionPositionSide` | 12 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExecutionsOptions` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ExtendedTimeframe` | 44 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::FetchedLeverage` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::CandleChannel` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::DataTag` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayCandleUpdate` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayChannel` | 28 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayMarketUpdate` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayMessage` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayMessageType` | 32 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayOrderbookUpdate` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayTickerData` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::GatewayTickerUpdate` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::MarketChannel` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::OrderbookChannel` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::gateway::TickerChannel` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::HistoricalOrder` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::HistoricalTrade` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::HistoricalTradeOptions` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::IncomeCategory` | 28 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::IncomeHistoryOptions` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::IncomeRecord` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::MarginType` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Market` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::MarketLimits` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::MarketLimitsAmount` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::MarketLimitsLeverage` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::MarketPrecision` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::MessageHandlerStatsType` | 16 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OHLCVOptions` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OHLCVSOptions` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Order` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderBook` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderBookOrders` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderExtra` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderHistoryOptions` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderRejectReason` | 12 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderRiskProfile` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderSide` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderStatus` | 24 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderStopTriggerType` | 12 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderTimeInForce` | 16 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::OrderType` | 24 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::PlaceOrderOpts` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Position` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::PositionExtra` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::PositionMode` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::PositionSide` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::PublicTrade` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::RequestOutcome` | 20 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::RequestOutcomeCounts` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::SecondsTimeframe` | 16 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::StoreDataLoaded` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::StoreOptions` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::StoreUpdateIds` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Ticker` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::Timeframe` | 48 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::UpdateOrderOpts` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::UpdateOrderOptsUpdate` | 8 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::UpdateOrderOptsUpdateVariant0` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::UpdateOrderOptsUpdateVariant1` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
-| `safe_cex_types::ValidateAccountResult` | 4 | Public string/object front guard present on current master; compiler-owned measurements pending. |
+| `safe_cex_types::AnyTimeframe` | 108 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Balance` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::BothPositionSide` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Candle` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ClosedPnlEntry` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::CoinBalance` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::DataProvenance` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::DisplayedMargin` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeAccount` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeAccountConfig` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeAccountConfigBybitSiteId` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeAccountConfigHealthStatus` | 20 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeName` | 188 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsAuth` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsBybitSiteId` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExternalPublicData` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExternalPublicDataVariant0` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExternalPublicDataVariant0Type` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExternalPublicDataVariant1Type` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExtra` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExtraAsterdexApiVersion` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExtraKucoinBroker` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsExtraLighterBuilderFeeMode` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsHyperliquidBuilder` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExchangeOptionsTuning` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Execution` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExecutionPositionSide` | 12 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExecutionsOptions` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ExtendedTimeframe` | 44 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::FetchedLeverage` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::CandleChannel` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::DataTag` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayCandleUpdate` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayChannel` | 28 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayMarketUpdate` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayMessage` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayMessageType` | 32 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayOrderbookUpdate` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayTickerData` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::GatewayTickerUpdate` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::MarketChannel` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::OrderbookChannel` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::gateway::TickerChannel` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::HistoricalOrder` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::HistoricalTrade` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::HistoricalTradeOptions` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::IncomeCategory` | 28 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::IncomeHistoryOptions` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::IncomeRecord` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::MarginType` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Market` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::MarketLimits` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::MarketLimitsAmount` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::MarketLimitsLeverage` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::MarketPrecision` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::MessageHandlerStatsType` | 16 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OHLCVOptions` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OHLCVSOptions` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Order` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderBook` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderBookOrders` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderExtra` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderHistoryOptions` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderRejectReason` | 12 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderRiskProfile` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderSide` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderStatus` | 24 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderStopTriggerType` | 12 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderTimeInForce` | 16 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::OrderType` | 24 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::PlaceOrderOpts` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Position` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::PositionExtra` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::PositionMode` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::PositionSide` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::PublicTrade` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::RequestOutcome` | 20 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::RequestOutcomeCounts` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::SecondsTimeframe` | 16 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::StoreDataLoaded` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::StoreOptions` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::StoreUpdateIds` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Ticker` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::Timeframe` | 48 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::UpdateOrderOpts` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::UpdateOrderOptsUpdate` | 8 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::UpdateOrderOptsUpdateVariant0` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::UpdateOrderOptsUpdateVariant1` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
+| `safe_cex_types::ValidateAccountResult` | 4 | ALREADY-ON-MASTER `f759dc8be2`: native + WASM runtime receipts have zero failures; stale debt retired in this PR. |
 
 ## Fresh validation
 
-Pending scoped accepted-set measurements; no new production fix or canonical debt retirement claimed yet.
+- `node sdk-rs/safe-cex-parity/scripts/accepted-set.mjs --measure --package=safe-cex-types --jobs=1`: PASS, 151 compiler-confirmed Deserialize types, 70 alternate-only owners, 212 runtime results / 30 classifications, zero failures.
+- Same scoped command with `--target=wasm32-unknown-unknown`: PASS, same owner counts, zero failures.
+- Verified all 89 historical owners have runtime (not classification-only) receipts on both targets. Old types-only debt fails `checkRatchet` with “repaired outstanding defect is still listed”; empty types debt passes with zero failures. This is a ledger correction after existing production fixes, not a new venue algorithm.
+- Types declares no feature matrix; both native and WASM configurations were measured. No workspace suite or broad matrix was run.
+- All 231 exemption declarations remain: 123 exchange and 108 types. Per-entry census is unique; no exemption was deleted to silence a gate.
+- Phase 2 body/transport/signing API implementations remain untouched. Existing mapped FINDINGs and shared representation decisions remain open under their own owners.
+
+Scoped ratchet logs and exact native/WASM receipts are preserved as `/tmp/port-txflow-types-debt-ratchet.log`, `/tmp/port-txflow-types-native-results.json` and `/tmp/port-txflow-types-wasm-results.json` in this worktree session. The maintained accepted-set runner remains the executable authority; these historical receipts are not replacement fixtures.
