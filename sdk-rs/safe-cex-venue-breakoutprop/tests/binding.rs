@@ -1720,8 +1720,7 @@ fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
             let emitted = emitted.borrow();
             assert_eq!(emitted.len(), 1, "one visible refusal {label}");
             assert!(
-                emitted[0][0]
-                    .as_str()
+                String::from_utf16(emitted[0][0].as_str().unwrap().as_ref())
                     .unwrap()
                     .contains(case["result"]["error"].as_str().unwrap()),
                 "visible caller-ID refusal {label}: {emitted:?}"
