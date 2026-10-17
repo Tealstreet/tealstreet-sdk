@@ -45,7 +45,7 @@ impl BitunixVenue {
             Ok(crate::rest_reads::fetch_markets(
                 || me.base.store.markets().to_vec(),
                 read,
-                |e: &Fault| me.trace(&e.0),
+                |e: &Fault| me.runtime.console("error", &e.0.js_error_string()),
             )
             .await)
         })

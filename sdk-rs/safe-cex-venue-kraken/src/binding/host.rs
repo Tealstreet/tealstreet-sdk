@@ -428,7 +428,7 @@ impl ReadHost for Rt {
         Ok(())
     }
     fn now(&self) -> ReadResult<Self, f64> {
-        Ok(self.now())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn read(
         &self,
@@ -645,9 +645,11 @@ impl TradingHost for Rt {
         };
         Ok(safe_cex_num::adjust(value.to_number()?, step))
     }
-    // ts: `uuid()` (v4) from the `uuid` package.
+    // ts: utils/uuid removes the nanoid URL separators.
     fn uuid(&self) -> ReadResult<Self, Vec<u16>> {
-        Ok(units(&self.shared.runtime.unique_id()))
+        Ok(units(
+            &self.shared.runtime.unique_id().replace(['-', '_'], ""),
+        ))
     }
     fn spot_client_id(&self) -> ReadResult<Self, Handle<Self>> {
         let id = (self.shared.extra.spot_ids.borrow_mut())().map_err(Thrown::from)?;

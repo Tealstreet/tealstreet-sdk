@@ -380,3 +380,12 @@ all four tests must pass after each exact restoration. The production gate
 separately inspects complete compiler companion implementations. New traits,
 conversions or inherent APIs require review; private companion syntax alone is
 not proof. Other owners, aliases and receiver refusals remain independent.
+
+REST signing nonces use the shared `VIRTUAL_CLOCK.get_current_time_ms()` for
+both Futures and Spot. The shared JS virtualClock facade reads that same owner;
+Date.now and transport timing keep their runtime clocks. Futures cliOrdId uses
+the source utils/uuid separator removal, independently of Spot's existing
+client-ID generator. `tests/native_clock.rs` checks actual signed Futures/Spot
+requests under a pushed server offset and a different host wall clock;
+`tests/native_identity.rs` checks both nanoid separators in the native cliOrdId.
+The shared Bitunix native audit control runner checks both regressions.
