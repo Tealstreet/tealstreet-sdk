@@ -400,7 +400,7 @@ fn dedicated_single_candle_cleanup_retains_source_pending_retry() {
 
 #[test]
 fn primary_single_candle_silence_recovers_and_cleanup_stops_watchdog() {
-    let (h, socket, symbol) = setup(ExchangeName::Bybit);
+    let (h, _socket, symbol) = setup(ExchangeName::Bybit);
     let cleanup = h
         .venue()
         .listen_ohlcv(
