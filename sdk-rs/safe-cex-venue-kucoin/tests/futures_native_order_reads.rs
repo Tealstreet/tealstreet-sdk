@@ -802,7 +802,7 @@ fn assert_typed_snapshot_boundary() {
     let decoded: Order = serde_json::from_value(input.clone()).unwrap();
     assert_eq!(decoded.id, "same");
     assert_eq!(decoded.symbol, "BTC");
-    assert_eq!(decoded.price.to_bits(), 11f64.to_bits());
+    assert_eq!(decoded.price.to_number().to_bits(), 11f64.to_bits());
     assert_eq!(decoded.remaining.to_bits(), 2.5f64.to_bits());
     assert_eq!(decoded.extra.as_ref().unwrap().remaining_native, Some(10.));
     assert_eq!(decoded.info.as_ref().unwrap()["marker"].as_u64(), Some(71));

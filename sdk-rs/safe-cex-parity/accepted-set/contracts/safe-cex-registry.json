@@ -1,4 +1,901 @@
 {
+  "safe_cex_registry::external_public_data::GatewayListener": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/external_public_data.rs::GatewayListener: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured gateway event callback capability; invokes host effects and reports ExchangeError. It consumes already constructed GatewayEvent values and does not admit raw input.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_registry::external_public_data::GatewayEvent",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::external_public_data::GatewayTimerCallback": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/external_public_data.rs::GatewayTimerCallback: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured gateway timer callback capability, invoked without input and returning an effect result. It has no raw value decoding path.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::in_process_public_data::CandleObserver": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/in_process_public_data.rs::CandleObserver: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Shared observer callback over an already constructed borrowed Candle; it grants notification access, not raw input admission.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Candle",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::in_process_public_data::OrderbookObserver": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/in_process_public_data.rs::OrderbookObserver: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Shared observer callback over an already constructed borrowed OrderBook; it grants notification access, not raw input admission.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::OrderBook",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::in_process_public_data::PublicDataObserver": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/in_process_public_data.rs::PublicDataObserver: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured observer callback receiving an already constructed PublicDataSnapshot. Snapshot production and notifications are separate runtime obligations.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_registry::public_data_host::PublicDataSnapshot",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::module_host::ConstructorFuture": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/module_host.rs::ConstructorFuture: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Pinned local continuation returning an optional callable exchange constructor or the original ModuleError. The reviewed static identity preserves the Option and error owner; polling and construction behavior are separate.",
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "core::option::Option",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "resolved_path": {
+                                                                              "path": "safe_cex_registry::module_host::ExchangeConstructor",
+                                                                              "args": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "dyn_trait": {
+                                                                              "traits": [
+                                                                                {
+                                                                                  "trait": {
+                                                                                    "path": "core::error::Error",
+                                                                                    "args": null
+                                                                                  },
+                                                                                  "generic_params": []
+                                                                                }
+                                                                              ],
+                                                                              "lifetime": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::module_host::ModuleError": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/module_host.rs::ModuleError: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Rc handle preserving original dynamic host Error identity across module loading/export lookup. It is not a string/JSON error decoder.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::error::Error",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::module_host::ModuleFuture": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/module_host.rs::ModuleFuture: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Pinned local module-loading continuation returning an Rc module capability or the original ModuleError. The reviewed static identity preserves both dynamic owners; module loading/polling remains separate.",
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "dyn_trait": {
+                                                                              "traits": [
+                                                                                {
+                                                                                  "trait": {
+                                                                                    "path": "safe_cex_registry::module_host::ExchangeModule",
+                                                                                    "args": null
+                                                                                  },
+                                                                                  "generic_params": []
+                                                                                }
+                                                                              ],
+                                                                              "lifetime": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "alloc::rc::Rc",
+                                                                  "args": {
+                                                                    "angle_bracketed": {
+                                                                      "args": [
+                                                                        {
+                                                                          "type": {
+                                                                            "dyn_trait": {
+                                                                              "traits": [
+                                                                                {
+                                                                                  "trait": {
+                                                                                    "path": "core::error::Error",
+                                                                                    "args": null
+                                                                                  },
+                                                                                  "generic_params": []
+                                                                                }
+                                                                              ],
+                                                                              "lifetime": null
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      ],
+                                                                      "constraints": []
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::module_host::NativeConstructorResult": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/module_host.rs::NativeConstructorResult: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Immediate result containing a Ready optional constructor capability or the original ModuleError. It describes native loader continuation timing, not a raw input parser.",
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::future::ready::Ready",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_registry::module_host::ExchangeConstructor",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::error::Error",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::native_account::JsonFuture": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/native_account.rs::JsonFuture: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Pinned native account continuation returning typed success or an already produced JSON error value. The bool probe establishes only that fixed future identity; JSON account argument decoding is owned by the entrypoints.",
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "serde_json::value::Value",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::native_host::AdapterFactory": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/native_host.rs::AdapterFactory: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured native HTTP adapter factory returning a reusable Arc transport capability or ExchangeError. Factory execution and transport behavior are separate; this callback type performs no raw decoding.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::sync::Arc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "safe_cex_transport::provider::RestAdapter",
+                                                                "args": null
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
   "safe_cex_registry::public_data::get_candle_subscription_key": {
     "api": {
       "kind": "function",
@@ -127,6 +1024,1015 @@
           "",
           ""
         ]
+      }
+    ]
+  },
+  "safe_cex_registry::public_data_host::MarketBatch": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::Market",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "The production MarketBatch is Rc<RefCell<Vec<Market>>>. It retains provider array identity and also exposes the ordinary Serde decoder through Rc/RefCell/Vec. Finite array witnesses retain ordered model fields; forbidden outer shapes, malformed members and missing/wrong typed fields are rejected by both trait and qualified native paths. This does not claim live browser aliases, all model inputs, or source-side runtime validation.",
+    "positive": [
+      [],
+      [
+        {
+          "id": "m1",
+          "symbol": "BTC/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ],
+      [
+        {
+          "id": "m1",
+          "symbol": "BTC/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        },
+        {
+          "id": "m12",
+          "symbol": "ETH/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      0,
+      "batch",
+      {},
+      {
+        "id": "m1",
+        "symbol": "BTC/USDT",
+        "base": "BTC",
+        "quote": "USDT",
+        "active": true,
+        "precision": {
+          "amount": 0.01,
+          "price": 0.1
+        },
+        "limits": {
+          "amount": {
+            "min": 1,
+            "max": 2
+          },
+          "leverage": {
+            "min": 3,
+            "max": 4
+          }
+        }
+      },
+      [
+        null
+      ],
+      [
+        {}
+      ],
+      [
+        {
+          "symbol": "BTC/USDT",
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ],
+      [
+        {
+          "id": "m1",
+          "symbol": false,
+          "base": "BTC",
+          "quote": "USDT",
+          "active": true,
+          "precision": {
+            "amount": 0.01,
+            "price": 0.1
+          },
+          "limits": {
+            "amount": {
+              "min": 1,
+              "max": 2
+            },
+            "leverage": {
+              "min": 3,
+              "max": 4
+            }
+          }
+        }
+      ]
+    ],
+    "entrypoints": [],
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"base\": row.base, \"quote\": row.quote, \"active\": row.active, \"amountPrecisionBits\": row.precision.amount.to_bits().to_string(), \"pricePrecisionBits\": row.precision.price.to_bits().to_string(), \"minAmountBits\": row.limits.amount.min.to_bits().to_string(), \"maxAmountBits\": row.limits.amount.max.to_bits().to_string(), \"minLeverageBits\": row.limits.leverage.min.to_bits().to_string(), \"maxLeverageBits\": row.limits.leverage.max.to_bits().to_string()})).collect()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.01,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 1,
+                  "max": 2
+                },
+                "leverage": {
+                  "min": 3,
+                  "max": 4
+                }
+              }
+            }
+          ],
+          "output": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "pricePrecisionBits": "4591870180066957722",
+              "maxAmountBits": "4611686018427387904",
+              "minAmountBits": "4607182418800017408",
+              "minLeverageBits": "4613937818241073152",
+              "maxLeverageBits": "4616189618054758400",
+              "amountPrecisionBits": "4576918229304087675"
+            }
+          ]
+        },
+        {
+          "input": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.01,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 1,
+                  "max": 2
+                },
+                "leverage": {
+                  "min": 3,
+                  "max": 4
+                }
+              }
+            },
+            {
+              "id": "m12",
+              "symbol": "ETH/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "precision": {
+                "amount": 0.01,
+                "price": 0.1
+              },
+              "limits": {
+                "amount": {
+                  "min": 1,
+                  "max": 2
+                },
+                "leverage": {
+                  "min": 3,
+                  "max": 4
+                }
+              }
+            }
+          ],
+          "output": [
+            {
+              "id": "m1",
+              "symbol": "BTC/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "pricePrecisionBits": "4591870180066957722",
+              "maxAmountBits": "4611686018427387904",
+              "minAmountBits": "4607182418800017408",
+              "minLeverageBits": "4613937818241073152",
+              "maxLeverageBits": "4616189618054758400",
+              "amountPrecisionBits": "4576918229304087675"
+            },
+            {
+              "id": "m12",
+              "symbol": "ETH/USDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "pricePrecisionBits": "4591870180066957722",
+              "maxAmountBits": "4611686018427387904",
+              "minAmountBits": "4607182418800017408",
+              "minLeverageBits": "4613937818241073152",
+              "maxLeverageBits": "4616189618054758400",
+              "amountPrecisionBits": "4576918229304087675"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "safe_cex_registry::public_data_host::PublicDataCleanup": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/public_data_host.rs::PublicDataCleanup: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured fallible provider cleanup callback. Calling it performs cleanup; its type provides no raw input decoder.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::public_data_host::TickerBatch": {
+    "category": "decoder",
+    "shape": "union",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::Ticker",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "The production TickerBatch is Rc<RefCell<Vec<Ticker>>>. It retains provider array identity and also exposes the ordinary Serde decoder through Rc/RefCell/Vec. Finite array witnesses retain ordered model fields; forbidden outer shapes, malformed members and missing/wrong typed fields are rejected by both trait and qualified native paths. This does not claim live browser aliases, all model inputs, or source-side runtime validation.",
+    "positive": [
+      [],
+      [
+        {
+          "id": "t1",
+          "symbol": "BTC/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ],
+      [
+        {
+          "id": "t1",
+          "symbol": "BTC/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        },
+        {
+          "id": "t12",
+          "symbol": "ETH/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      0,
+      "batch",
+      {},
+      {
+        "id": "t1",
+        "symbol": "BTC/USDT",
+        "bid": 1,
+        "ask": 2,
+        "last": 3,
+        "mark": 4,
+        "index": 5,
+        "percentage": 6,
+        "openInterest": 7,
+        "fundingRate": 8,
+        "fundingTime": 9,
+        "volume": 10,
+        "quoteVolume": 11
+      },
+      [
+        null
+      ],
+      [
+        {}
+      ],
+      [
+        {
+          "symbol": "BTC/USDT",
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ],
+      [
+        {
+          "id": "t1",
+          "symbol": false,
+          "bid": 1,
+          "ask": 2,
+          "last": 3,
+          "mark": 4,
+          "index": 5,
+          "percentage": 6,
+          "openInterest": 7,
+          "fundingRate": 8,
+          "fundingTime": 9,
+          "volume": 10,
+          "quoteVolume": 11
+        }
+      ]
+    ],
+    "entrypoints": [],
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).expect(\"valid batch witness\"); let rows = decoded.borrow(); serde_json::Value::Array(rows.iter().map(|row| serde_json::json!({\"id\": row.id, \"symbol\": row.symbol, \"bidBits\": row.bid.to_bits().to_string(), \"askBits\": row.ask.to_bits().to_string(), \"lastBits\": row.last.to_bits().to_string(), \"markBits\": row.mark.to_bits().to_string(), \"indexBits\": row.index.to_bits().to_string(), \"percentageBits\": row.percentage.to_bits().to_string(), \"openInterestBits\": row.open_interest.to_bits().to_string(), \"fundingRateBits\": row.funding_rate.to_bits().to_string(), \"fundingTimeBits\": row.funding_time.to_bits().to_string(), \"volumeBits\": row.volume.to_bits().to_string(), \"quoteVolumeBits\": row.quote_volume.to_bits().to_string()})).collect()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            }
+          ],
+          "output": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "volumeBits": "4621819117588971520",
+              "indexBits": "4617315517961601024",
+              "fundingTimeBits": "4621256167635550208",
+              "askBits": "4611686018427387904",
+              "markBits": "4616189618054758400",
+              "percentageBits": "4618441417868443648",
+              "fundingRateBits": "4620693217682128896",
+              "quoteVolumeBits": "4622382067542392832",
+              "openInterestBits": "4619567317775286272",
+              "lastBits": "4613937818241073152",
+              "bidBits": "4607182418800017408"
+            }
+          ]
+        },
+        {
+          "input": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            },
+            {
+              "id": "t12",
+              "symbol": "ETH/USDT",
+              "bid": 1,
+              "ask": 2,
+              "last": 3,
+              "mark": 4,
+              "index": 5,
+              "percentage": 6,
+              "openInterest": 7,
+              "fundingRate": 8,
+              "fundingTime": 9,
+              "volume": 10,
+              "quoteVolume": 11
+            }
+          ],
+          "output": [
+            {
+              "id": "t1",
+              "symbol": "BTC/USDT",
+              "volumeBits": "4621819117588971520",
+              "indexBits": "4617315517961601024",
+              "fundingTimeBits": "4621256167635550208",
+              "askBits": "4611686018427387904",
+              "markBits": "4616189618054758400",
+              "percentageBits": "4618441417868443648",
+              "fundingRateBits": "4620693217682128896",
+              "quoteVolumeBits": "4622382067542392832",
+              "openInterestBits": "4619567317775286272",
+              "lastBits": "4613937818241073152",
+              "bidBits": "4607182418800017408"
+            },
+            {
+              "id": "t12",
+              "symbol": "ETH/USDT",
+              "volumeBits": "4621819117588971520",
+              "indexBits": "4617315517961601024",
+              "fundingTimeBits": "4621256167635550208",
+              "askBits": "4611686018427387904",
+              "markBits": "4616189618054758400",
+              "percentageBits": "4618441417868443648",
+              "fundingRateBits": "4620693217682128896",
+              "quoteVolumeBits": "4622382067542392832",
+              "openInterestBits": "4619567317775286272",
+              "lastBits": "4613937818241073152",
+              "bidBits": "4607182418800017408"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "safe_cex_registry::rust_venues::BitunixBuild": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/rust_venues.rs::BitunixBuild: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured Bitunix client construction callback consuming typed ExchangeOptions and returning an HttpClient capability or ExchangeError. Options decoding belongs to its callers.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::ExchangeOptions",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::http::HttpClient",
+                                              "args": null
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::rust_venues::BitunixInstall": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/rust_venues.rs::BitunixInstall: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured fallible Bitunix HTTP-client installation callback. It receives an existing client capability and does not decode raw inputs.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::http::HttpClient",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::rust_venues::BlofinHttp": {
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/rust_venues.rs::BlofinHttp: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
+    "reason": "Captured Blofin HTTP adapter factory consuming typed options, base URL and timeout budget and returning an Rc transport capability or a String error. Client construction and transport execution are separate; this callback type performs no raw input decoding.",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::ExchangeOptions",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                },
+                                {
+                                  "primitive": "i64"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "safe_cex_transport::provider::RestAdapter",
+                                                                "args": null
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::string::String",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_registry::native_host::query": {
+    "api": {
+      "kind": "function",
+      "name": "query",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::query_value::QueryValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
+    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
+    "cases": [
+      {
+        "input": null,
+        "output": "Null"
+      },
+      {
+        "input": false,
+        "output": "Bool(false)"
+      },
+      {
+        "input": 2.5,
+        "output": "Number(2.5)"
+      },
+      {
+        "input": "BTC $",
+        "output": "String(\"BTC $\")"
+      },
+      {
+        "input": [
+          true,
+          3,
+          "ETH",
+          null
+        ],
+        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
+      },
+      {
+        "input": {
+          "coin": [
+            "BTC",
+            "ETH"
+          ],
+          "nested": {
+            "enabled": false
+          }
+        },
+        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
       }
     ]
   }

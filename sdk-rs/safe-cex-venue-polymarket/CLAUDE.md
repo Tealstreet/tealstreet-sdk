@@ -17,12 +17,9 @@ pass after restoration. Existing method-body oracles and controls remain in use.
 Measured concrete transport gates and controls are recorded in
 [BINDING_EVIDENCE.md](BINDING_EVIDENCE.md).
 
-FINDING: the shared JS client factory does not yet implement the source
-`safeCexAxiosCreate` proxy/tunnel policy. This binding currently uses the supplied
-HTTP host directly. Default direct-host behavior is exercised; options requesting
-`tealstreetTunnel` or proxy routing must not be represented as verified here.
-The shared-runtime lane owns the generic service. Retain this finding until a
-shared implementation and concrete routing regression replace it.
+The binding uses the shared `safeCexAxiosCreate` factory for proxy selection and
+request outcomes. Registry `native_account_factory_routing` and napi
+`native-account-factory-routing.test.mjs` exercise that production path.
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/polymarket/CLAUDE.md).
 
@@ -243,3 +240,13 @@ before awaiting. A seventh control reinstalls deferred setLeverage logging and
 must fail `spot_warning_native_eager:setLeverage`, then restore to a pass. The
 control floor is seven, ending at eager-prefix. Native future-drop scheduling
 beyond this body is not claimed.
+
+The imported ethers `decodeBase64` native binding reuses the shared Node Buffer
+decoder already used for Kraken WS auth. Supplied L2 secrets retain source
+acceptance of noncanonical trailing bits, ignored characters and incomplete
+quartets. `exchange_binding` compares actual signed balance requests for eight
+secrets against the maintained TS helper with real ethers and independent Node
+crypto. This measures the Node dependency profile, not a new browser-profile claim.
+Private order frames assert Store orders and matched fills; trade frames assert
+fill delivery and authoritative position refresh. The source has no private
+balance topic, so those frames retain the REST account balance until its poll.

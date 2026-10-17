@@ -148,29 +148,21 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             .collect::<Result<Vec<_>, _>>()?;
         rows.push((criteria, index, value));
     }
-    let mut failure = None;
-    rows.sort_by(|(a, ai, _), (b, bi, _)| {
+    super::sorting::stable_sort(&mut rows, |(a, ai, _), (b, bi, _)| {
         for (i, (x, y)) in a.iter().zip(b).enumerate() {
-            match compare_ascending(x, y) {
-                Ok(Ordering::Equal) => continue,
-                Ok(o) => {
-                    return if descending.get(i) == Some(&true) {
-                        o.reverse()
+            match compare_ascending(x, y)? {
+                Ordering::Equal => continue,
+                order => {
+                    return Ok(if descending.get(i) == Some(&true) {
+                        order.reverse()
                     } else {
-                        o
-                    };
-                }
-                Err(e) => {
-                    failure.get_or_insert(e);
-                    return Ordering::Equal;
+                        order
+                    });
                 }
             }
         }
-        ai.cmp(bi)
-    });
-    if let Some(e) = failure {
-        return Err(e);
-    }
+        Ok(ai.cmp(bi))
+    })?;
     Ok(Js::array(rows.into_iter().map(|(_, _, v)| v).collect()))
 }
 
@@ -626,52 +618,135 @@ fn dayjs(ms: f64) -> Js {
     )
 }
 
-/// qs default encoder (RFC 3986 unreserved set kept, UTF-8 percent-encoded).
-fn qs_encode(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(*b as char)
+// The option-bearing qs calls used by venue signers and params serializers.
+struct QsOptions {
+    arrays: String,
+    encode: bool,
+    form: bool,
+    sort: Js,
+}
+impl QsOptions {
+    fn read(value: &Js) -> Result<Self, Thrown> {
+        let get = |key: &str| {
+            if value.is_nullish() {
+                Ok(Js::Undefined)
+            } else {
+                value.get(key)
             }
-            _ => out.push_str(&format!("%{b:02X}")),
+        };
+        let arrays = text(&get("arrayFormat")?)?;
+        let format = get("format")?;
+        if !format.is_undefined() && !matches!(text(&format)?.as_str(), "RFC3986" | "RFC1738") {
+            return Err(Thrown::type_error("Unknown format option provided."));
+        }
+        Ok(Self {
+            arrays,
+            encode: !matches!(get("encode")?, Js::Bool(false)),
+            form: format.strict_equals(&Js::str("RFC1738")),
+            sort: get("sort")?,
+        })
+    }
+    fn encode(&self, value: &str) -> String {
+        if !self.encode {
+            return if self.form {
+                value.replace("%20", "+")
+            } else {
+                value.to_owned()
+            };
+        }
+        let mut output = String::new();
+        for byte in value.bytes() {
+            if byte.is_ascii_alphanumeric()
+                || b"-._~".contains(&byte)
+                || (self.form && b"()".contains(&byte))
+            {
+                output.push(char::from(byte));
+            } else {
+                use std::fmt::Write;
+                write!(output, "%{byte:02X}").expect("writing to String");
+            }
+        }
+        if self.form {
+            output.replace("%20", "+")
+        } else {
+            output
         }
     }
-    out
-}
-
-fn qs_pairs(prefix: &str, value: &Js, out: &mut Vec<String>) -> Result<(), Thrown> {
-    match value {
-        Js::Undefined => {}
-        Js::Null => out.push(format!("{}=", qs_encode(prefix))),
-        Js::Array(_) => {
-            for (i, v) in list(value).iter().enumerate() {
-                qs_pairs(&format!("{prefix}[{i}]"), v, out)?;
+    fn keys(&self, value: &Js) -> Result<Vec<super::value::Str>, Thrown> {
+        let mut keys = value.own_keys();
+        if self.sort.is_callable() {
+            // Stable insertion avoids Rust sort's total-order precondition on JS comparators.
+            // Read values after sorting keys, as qs does.
+            for index in 1..keys.len() {
+                let mut at = index;
+                while at > 0 {
+                    let order = self
+                        .sort
+                        .call(
+                            Js::Undefined,
+                            vec![Js::utf16(&keys[at - 1]), Js::utf16(&keys[at])],
+                        )?
+                        .to_number()?;
+                    if order <= 0.0 || order.is_nan() {
+                        break;
+                    }
+                    keys.swap(at - 1, at);
+                    at -= 1;
+                }
             }
         }
-        Js::Object(_) => {
-            for (k, v) in value.own_entries()? {
-                qs_pairs(
-                    &format!("{prefix}[{}]", String::from_utf16_lossy(&k)),
-                    &v,
-                    out,
-                )?;
+        Ok(keys)
+    }
+}
+fn qs_pairs(
+    prefix: &str,
+    value: &Js,
+    options: &QsOptions,
+    out: &mut Vec<String>,
+) -> Result<(), Thrown> {
+    match value {
+        Js::Undefined => {}
+        Js::Null => out.push(format!("{}=", options.encode(prefix))),
+        Js::Array(_) if options.arrays == "comma" => {
+            if !list(value).is_empty() {
+                out.push(format!(
+                    "{}={}",
+                    options.encode(prefix),
+                    options.encode(&text(value)?)
+                ));
+            }
+        }
+        Js::Array(_) | Js::Object(_) => {
+            for key in options.keys(value)? {
+                let next = if value.is_array() && options.arrays == "repeat" {
+                    prefix.to_owned()
+                } else if value.is_array() && options.arrays == "brackets" {
+                    format!("{prefix}[]")
+                } else {
+                    format!("{prefix}[{}]", String::from_utf16_lossy(&key))
+                };
+                qs_pairs(&next, &value.get_key(&key)?, options, out)?;
             }
         }
         other => out.push(format!(
             "{}={}",
-            qs_encode(prefix),
-            qs_encode(&text(other)?)
+            options.encode(prefix),
+            options.encode(&text(other)?)
         )),
     }
     Ok(())
 }
-
-fn qs_stringify(value: &Js) -> Result<String, Thrown> {
+fn qs_stringify(value: &Js, options: &Js) -> Result<String, Thrown> {
+    let options = QsOptions::read(options)?;
     let mut out = vec![];
-    if matches!(value, Js::Object(_)) {
-        for (k, v) in value.own_entries()? {
-            qs_pairs(&String::from_utf16_lossy(&k), &v, &mut out)?;
+    if matches!(value, Js::Object(_) | Js::Array(_)) {
+        for key in options.keys(value)? {
+            qs_pairs(
+                &String::from_utf16_lossy(&key),
+                &value.get_key(&key)?,
+                &options,
+                &mut out,
+            )?;
         }
     }
     Ok(out.join("&"))
@@ -1216,14 +1291,20 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         define_on(
             &clock,
             "getCurrentTime",
-            scoped("getCurrentTime", |s, _| Ok(dayjs(s.now()))),
+            func("getCurrentTime", |_| {
+                Ok(dayjs(
+                    safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time(),
+                ))
+            }),
         );
     }
     def(
         "qs",
         Js::object(vec![(
             "stringify",
-            func("stringify", |a| Ok(Js::str(&qs_stringify(&arg(&a, 0))?))),
+            func("stringify", |a| {
+                Ok(Js::str(&qs_stringify(&arg(&a, 0), &arg(&a, 1))?))
+            }),
         )]),
     );
     def(
@@ -1513,7 +1594,7 @@ mod tests {
             ("d", Js::Null),
             ("e", Js::str("x y,")),
         ]);
-        let encoded = qs_stringify(&params).unwrap();
+        let encoded = qs_stringify(&params, &Js::Undefined).unwrap();
         assert_eq!(encoded, "a=1&b%5B0%5D=1&b%5B1%5D=2&d=&e=x%20y%2C");
         let decoded = decode_uri_component(&super::super::value::utf16(&encoded)).unwrap();
         assert_eq!(

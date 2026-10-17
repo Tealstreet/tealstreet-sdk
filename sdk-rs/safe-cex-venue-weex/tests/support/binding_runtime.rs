@@ -25,6 +25,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 #[derive(Default)]
 pub struct Runtime {
     pub now: Rc<Cell<f64>>,
+    pub id: RefCell<Option<String>>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
@@ -94,7 +95,10 @@ impl ExchangeRuntime for Runtime {
     }
     fn console(&self, _: &str, _: &str) {}
     fn unique_id(&self) -> String {
-        "00000000-0000-4000-8000-000000000000".into()
+        self.id
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| "00000000-0000-4000-8000-000000000000".into())
     }
     fn is_worker(&self) -> bool {
         false

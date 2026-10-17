@@ -104,7 +104,7 @@ pub async fn get_or_fetch_position_mode<E>(
             .positions()
             .iter()
             .find(|p| p.symbol == symbol)
-            .and_then(|p| p.position_mode)
+            .and_then(|p| (p.position_mode).into_value())
     {
         return Ok(mode);
     }
@@ -141,7 +141,7 @@ pub async fn get_or_fetch_margin_type<E>(
             .positions()
             .iter()
             .find(|p| p.symbol == symbol && p.contracts > 0.0)
-            .and_then(|p| p.margin_type)
+            .and_then(|p| (p.margin_type).into_value())
     {
         return Ok(mode);
     }

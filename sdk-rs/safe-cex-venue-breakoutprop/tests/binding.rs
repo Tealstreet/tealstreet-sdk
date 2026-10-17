@@ -208,7 +208,6 @@ fn fixture() -> Fixture {
         runtime: runtime.clone(),
         http: wire.clone(),
         external_public_data: None,
-        install_transport: Rc::new(|_| Err(ExchangeError::new("fixture has no tunnel transport"))),
         local_to_utc: Rc::new(|value| value),
     });
     let exchange = BreakoutpropExchange::new(
@@ -826,4 +825,169 @@ fn markets_ignore_unused_instrument_fields() {
     let markets = result.unwrap();
     assert_eq!(markets.len(), 1);
     assert_eq!(markets[0].precision.price, 0.25);
+}
+
+fn unknown_enum_portfolio(field: &str) -> Value {
+    let mut data = portfolio();
+    data["portfolios"][0]["orders"] = json!([{
+        "account":"default:A", "version":1, "orderId":7, "orderCode":"unknown-enum",
+        "clientOrderId":"", "actionCode":"NEW", "legCount":1, "type":"LIMIT",
+        "instrument":"BTCUSD", "status":"WORKING", "finalStatus":false,
+        "legs":[{"instrument":"BTCUSD", "positionEffect":"OPEN", "positionCode":"p",
+            "side":"BUY", "price":100, "legRatio":1, "quantity":2,
+            "filledQuantity":0, "remainingQuantity":2, "averagePrice":0}],
+        "side":"BUY", "tif":"GTC", "marginRate":0.05,
+        "issueTime":"2026-01-01T00:00:00Z", "transactionTime":"2026-01-01T00:00:00Z",
+        "executions":[], "cashTransactions":[]
+    }]);
+    if field == "positionSide" {
+        data["portfolios"][0]["positions"] = json!([{
+            "account":"default:A", "version":1, "positionCode":"p", "symbol":"BTCUSD",
+            "quantity":2, "side":"UNKNOWN", "quantityNotional":200,
+            "openTime":"2026-01-01T00:00:00Z", "openPrice":100,
+            "lastUpdateTime":"2026-01-01T00:00:00Z", "marginRate":0.05
+        }]);
+    } else if field == "side" {
+        data["portfolios"][0]["orders"][0]["legs"][0]["side"] = json!("UNKNOWN");
+    } else {
+        data["portfolios"][0]["orders"][0][field] = json!("UNKNOWN");
+    }
+    data
+}
+
+fn assert_unknown_enum_survives_start(field: &str) {
+    let f = fixture();
+    let data = unknown_enum_portfolio(field);
+    // Startup reads the portfolio once, then starts its first polling tick.
+    for _ in 0..2 {
+        f.wire.faults.borrow_mut().push_back((
+            "accounts/default:A/portfolio".into(),
+            200,
+            data.clone(),
+        ));
+    }
+    f.run(f.exchange.start())
+        .expect("unknown enum must not abort production startup");
+    assert!(f.store.loaded().balance && f.store.loaded().positions && f.store.loaded().orders);
+    assert_eq!(f.store.orders().len(), 1, "unknown rows must be retained");
+    let row = if field == "positionSide" {
+        serde_json::to_value(&f.store.positions()[0]).unwrap()
+    } else {
+        serde_json::to_value(&f.store.orders()[0]).unwrap()
+    };
+    let omitted = if field == "positionSide" {
+        "side"
+    } else {
+        field
+    };
+    assert!(
+        !row.as_object().unwrap().contains_key(omitted),
+        "undefined must be omitted, not replaced: {row}"
+    );
+    assert!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "marketdata")
+            .count()
+            >= 2,
+        "unknown portfolio rows must not skip ticker polling"
+    );
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn unknown_order_type_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("type");
+}
+#[test]
+fn unknown_order_status_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("status");
+}
+#[test]
+fn unknown_order_side_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("side");
+}
+#[test]
+fn unknown_position_side_keeps_production_startup_and_polling_alive() {
+    assert_unknown_enum_survives_start("positionSide");
+}
+
+fn fetch_unknown_enum_order(f: &Fixture, field: &str) -> Order {
+    f.fetch_markets();
+    f.wire.faults.borrow_mut().push_back((
+        "accounts/default:A/portfolio".into(),
+        200,
+        unknown_enum_portfolio(field),
+    ));
+    f.run(f.exchange.fetch_orders(None))
+        .expect("unknown enum replacement row must survive real fetch")
+        .remove(0)
+}
+#[test]
+fn unknown_order_side_is_omitted_from_the_production_replacement_payload() {
+    let f = fixture();
+    let order = fetch_unknown_enum_order(&f, "side");
+    let update = serde_json::from_value(json!({"price":102.16})).unwrap();
+    assert_eq!(
+        f.run(f.exchange.update_order(UpdateOrderOpts { order, update }))
+            .unwrap(),
+        vec!["placed"]
+    );
+    let requests = f.wire.requests.borrow();
+    let payload = &requests
+        .iter()
+        .find(|r| r["method"] == "POST" && r["url"] == "accounts/default:A/orders")
+        .unwrap()["data"];
+    assert!(
+        !payload.as_object().unwrap().contains_key("side"),
+        "copied undefined side must stay omitted: {payload}"
+    );
+    assert_eq!(payload["type"], "LIMIT");
+}
+#[test]
+fn unknown_order_type_replacement_reports_undefined_after_cancellation() {
+    let f = fixture();
+    let order = fetch_unknown_enum_order(&f, "type");
+    let update = serde_json::from_value(json!({"price":102.16})).unwrap();
+    let error = f
+        .run(f.exchange.update_order(UpdateOrderOpts { order, update }))
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "Breakout Prop does not support undefined orders"
+    );
+    assert!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .any(|r| r["method"] == "DELETE")
+    );
+    assert!(
+        !f.wire
+            .requests
+            .borrow()
+            .iter()
+            .any(|r| r["method"] == "POST" && r["url"] == "accounts/default:A/orders")
+    );
+}
+
+#[test]
+fn generated_order_code_strips_nanoid_separators() {
+    let f = fixture();
+    f.fetch_markets();
+    *f.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
+    assert_eq!(
+        f.run(f.exchange.base.place_order(f.exchange.as_ref(), opts()))
+            .unwrap(),
+        ["placed"]
+    );
+    let request = f.request("POST", "accounts/default:A/orders");
+    assert_eq!(
+        request["data"]["orderCode"], "tealstreet-AbcDefGhiJklM",
+        "production UUID strips both nanoid separators before prefixing"
+    );
+    assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
 }

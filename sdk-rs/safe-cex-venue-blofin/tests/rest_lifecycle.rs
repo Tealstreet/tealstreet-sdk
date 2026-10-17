@@ -200,7 +200,7 @@ fn order(a: &Order, e: &Value) {
     assert_eq!(a.side, OrderSide::Buy);
     assert_eq!(e["side"], "buy");
     for (a, key) in [
-        (a.price, "price"),
+        (a.price.to_number(), "price"),
         (a.amount, "amount"),
         (a.filled, "filled"),
         (a.remaining, "remaining"),
