@@ -98,7 +98,7 @@ impl Thrown {
             other => other.to_display(),
         }
     }
-    pub fn to_exchange_error(&self) -> ExchangeError {
+    fn error_fields(&self) -> ExchangeError {
         if let Some(native) = &self.native {
             return (**native).clone();
         }
@@ -107,6 +107,24 @@ impl Thrown {
             && let Js::String(name) = name
         {
             error.name = String::from_utf16_lossy(&name);
+        }
+        error
+    }
+    pub fn to_exchange_error(&self) -> ExchangeError {
+        let mut error = self.error_fields();
+        if self.native.is_some() || !self.value.is_object() {
+            return error;
+        }
+        let code = self.value.get("code").and_then(|code| {
+            if code.is_undefined() {
+                Ok(None)
+            } else {
+                to_json(&code).map(Some)
+            }
+        });
+        match code {
+            Ok(code) => error.code = code,
+            Err(cause) => return cause.error_fields(),
         }
         error
     }
