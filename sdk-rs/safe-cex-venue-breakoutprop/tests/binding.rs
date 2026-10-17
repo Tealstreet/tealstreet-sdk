@@ -208,7 +208,6 @@ fn fixture() -> Fixture {
         runtime: runtime.clone(),
         http: wire.clone(),
         external_public_data: None,
-        install_transport: Rc::new(|_| Err(ExchangeError::new("fixture has no tunnel transport"))),
         local_to_utc: Rc::new(|value| value),
     });
     let exchange = BreakoutpropExchange::new(
