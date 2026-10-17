@@ -81,7 +81,6 @@ pub struct WeexPrivateFeedRuntime<H, V, W, T, E> {
     pub assign_timer: fn(&H, WeexRefreshKind, T) -> Result<(), E>,
     pub fetch_refresh: for<'a> fn(&'a H, WeexRefreshKind) -> Result<RefreshFuture<'a, V, E>, E>,
     pub apply_refresh: fn(&H, WeexRefreshKind, V) -> Result<(), E>,
-    pub report_refresh_error: fn(&H, WeexRefreshKind, &E) -> Result<(), E>,
     pub base_dispose: fn(&H) -> Result<(), E>,
 }
 
@@ -396,15 +395,6 @@ pub fn throttled_fetch_balance<H, V, W, T, E>(
     throttle(host, rt, WeexRefreshKind::Balance)
 }
 
-fn report_refresh_failure<H, V, W, T, E>(
-    host: &H,
-    rt: &WeexPrivateFeedRuntime<H, V, W, T, E>,
-    kind: WeexRefreshKind,
-    error: E,
-) -> Result<(), E> {
-    (rt.report_refresh_error)(host, kind, &error)
-}
-
 async fn refresh_reaction<T>(result: T) -> T {
     let mut resumed = false;
     std::future::poll_fn(|cx| {
@@ -427,14 +417,10 @@ pub fn run_refresh_timer<'a, H, V: 'a, W: 'a, T: 'a, E: 'a>(
 ) -> RefreshFuture<'a, (), E> {
     let fetch = match (rt.fetch_refresh)(host, kind) {
         Ok(fetch) => fetch,
-        Err(error) => {
-            return Box::pin(std::future::ready(report_refresh_failure(
-                host, rt, kind, error,
-            )));
-        }
+        Err(_) => return Box::pin(std::future::ready(Ok(()))),
     };
     Box::pin(async move {
-        let result = async {
+        let _: Result<(), E> = async {
             let value = refresh_reaction(fetch.await).await?;
             if !(rt.disposed)(host)? {
                 (rt.apply_refresh)(host, kind, value)?;
@@ -442,10 +428,7 @@ pub fn run_refresh_timer<'a, H, V: 'a, W: 'a, T: 'a, E: 'a>(
             Ok(())
         }
         .await;
-        match result {
-            Ok(()) => Ok(()),
-            Err(error) => report_refresh_failure(host, rt, kind, error),
-        }
+        Ok(())
     })
 }
 

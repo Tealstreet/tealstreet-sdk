@@ -2,7 +2,7 @@ use safe_cex_exchange::{
     external::ExternalPublicData,
     runtime::{ExchangeError, ListenerCleanup},
 };
-use safe_cex_types::{Candle, OHLCVOptions, OrderBook, OrderSide, Timeframe};
+use safe_cex_types::{AnyTimeframe, Candle, OHLCVOptions, OrderBook, OrderSide, Timeframe};
 use safe_cex_venue_bitget::subscriptions::{listen_ohlcv, listen_order_book};
 use std::{
     cell::{Cell, RefCell},
@@ -45,7 +45,7 @@ impl ExternalPublicData for Socket {
         );
         assert_eq!(
             options.interval,
-            Timeframe::M1,
+            AnyTimeframe::Variant1(Timeframe::M1),
             "SUBSCRIPTION native interval"
         );
         assert_eq!(

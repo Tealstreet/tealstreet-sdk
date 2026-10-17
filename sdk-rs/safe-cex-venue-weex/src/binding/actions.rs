@@ -147,7 +147,10 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
             Ok(Box::pin(await_js(pending)))
         },
         update_positions: |h, positions| {
-            h.call("store.addOrUpdatePositions", std::vec![positions])?;
+            h.call(
+                "store.update",
+                std::vec![Js::object(std::vec![("positions", positions)])],
+            )?;
             Ok(())
         },
         new_error: |_, message| Thrown::error("Error", &String::from_utf16_lossy(&message)),

@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-bybit/src/ledger_mapping.rs" ]
 ts = "toNumber"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number"
+rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::to_number"
 status = "divergent"
-note = "Native js_runtime values preserve source nullish/string coercion and numeric bits through the mapper. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number; safe-cex-venue-bybit/src/ledger_mapping.rs::closed_timestamp. Closed-PnL Exchange binding reaches the signed HTTP client for primary, demo and inverse; Spot retains its inherited empty default. The source mapper corpus and compiled master-fail production binding regressions cover mapping, pagination and diagnostics."
+note = "Native js_runtime values preserve source nullish/string coercion and numeric bits through the mapper. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_mapping.rs::to_number; safe-cex-venue-bybit/src/ledger_mapping.rs::closed_timestamp. Closed-PnL Exchange binding reaches the signed HTTP client for primary, demo and inverse; Spot retains its inherited empty default. The source mapper corpus and compiled master-fail production binding regressions cover mapping, pagination and diagnostics."
 
 [[symbol]]
 ts = "toTimestamp"
@@ -16,7 +16,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::closed_timestamp"
 status = "divergent"
-note = "Native js_runtime values preserve source nullish/string coercion and numeric bits through the mapper. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number; safe-cex-venue-bybit/src/ledger_mapping.rs::closed_timestamp. Closed-PnL Exchange binding reaches the signed HTTP client for primary, demo and inverse; Spot retains its inherited empty default. The source mapper corpus and compiled master-fail production binding regressions cover mapping, pagination and diagnostics."
+note = "Native js_runtime values preserve source nullish/string coercion and numeric bits through the mapper. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_mapping.rs::to_number; safe-cex-venue-bybit/src/ledger_mapping.rs::closed_timestamp. Closed-PnL Exchange binding reaches the signed HTTP client for primary, demo and inverse; Spot retains its inherited empty default. The source mapper corpus and compiled master-fail production binding regressions cover mapping, pagination and diagnostics."
 
 [[symbol]]
 ts = "mapBybitClosedPnl"
@@ -24,4 +24,4 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::map_bybit_closed_pnl"
 status = "divergent"
-note = "Native js_runtime values preserve source nullish/string coercion and numeric bits through the mapper. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number; safe-cex-venue-bybit/src/ledger_mapping.rs::closed_timestamp. Closed-PnL Exchange binding reaches the signed HTTP client for primary, demo and inverse; Spot retains its inherited empty default. The source mapper corpus and compiled master-fail production binding regressions cover mapping, pagination and diagnostics."
+note = "Native js_runtime values preserve source nullish/string coercion and numeric bits through the mapper. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_mapping.rs::to_number; safe-cex-venue-bybit/src/ledger_mapping.rs::closed_timestamp. Closed-PnL Exchange binding reaches the signed HTTP client for primary, demo and inverse; Spot retains its inherited empty default. The source mapper corpus and compiled master-fail production binding regressions cover mapping, pagination and diagnostics."
