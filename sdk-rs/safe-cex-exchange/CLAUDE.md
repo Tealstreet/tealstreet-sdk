@@ -1261,3 +1261,12 @@ Scoped js_runtime witnesses cover lazy initialization, bidirectional reads/write
 raw bits, zero reset/reinitialization and a derived watchdog receiver. A real GRVT
 private socket witnesses its 30-second ping / 90-second Warning reconnect behavior;
 all three regressions compile and fail before this bridge/dispatch repair.
+
+Both JS `virtualClock` getters delegate to the shared synced singleton.
+`getCurrentTime` wraps `VirtualClock::get_current_time` in the existing dayjs
+object, retaining date clipping and arithmetic; `getCurrentTimeMs` remains the
+numeric hot path. Source `Date.now()` still reads the runtime wall clock.
+Registry `native_host_phemex_clock` exercises the real dayjs consumer through a
+signed native HTTP request, verifying its HMAC and expiry after a 90-second
+server correction. The core virtual-clock regression checks both getters and
+the independent raw Date clock.
