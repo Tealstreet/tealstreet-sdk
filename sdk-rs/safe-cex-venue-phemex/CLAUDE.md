@@ -193,3 +193,11 @@ non-decoder/typed roles. See safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for t
 scope and commands. This is not full current discovery: post-census binding
 owners, aliases, local scopes, feature combinations and WASM remain explicit
 obligations rather than inheriting the selected contracts.
+
+Order-side and reduceOnly formatting use BaseExchange's
+getOrFetchPositionsForSymbol with a scalar symbol. Stored rows avoid REST;
+missing rows fetch and populate the cache only after loaded.positions is true.
+Before positions load, only order-side raw-mode recovery reads the account,
+and the empty positions result keeps reduceOnly omitted as in the source.
+The production binding tests cover cached placement/cancellation, unloaded
+formatting, and the single cached recovery read after positions load.
