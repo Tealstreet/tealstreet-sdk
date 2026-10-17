@@ -394,6 +394,28 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "fetchIncomeHistoryRange", |rt, a| {
         members::history::fetch_income_history_range(rt, arg(&a, 0), arg(&a, 1), arg(&a, 2))
     });
+    method(&this, rt, "fetchHistoricalFills", |rt, a| {
+        if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot {
+            return Ok(Js::array(vec![]));
+        }
+        crate::rest_fills::fetch_historical_fills(rt, arg(&a, 0))
+    });
+    method(
+        &this,
+        rt,
+        "fetchExecutionsFallbackFromOrderHistory",
+        |rt, a| {
+            let inner = rt.clone();
+            Ok(rt.spawn(Box::pin(async move {
+                crate::rest_fills::fetch_executions_fallback_from_order_history(
+                    &inner,
+                    arg(&a, 0),
+                    arg(&a, 1),
+                )
+                .await
+            })))
+        },
+    );
     method(&this, rt, "fetchHistoricalOrders", |rt, a| {
         members::history::fetch_historical_orders(rt, arg(&a, 0))
     });

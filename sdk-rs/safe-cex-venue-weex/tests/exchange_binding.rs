@@ -1086,3 +1086,47 @@ fn private_account_frame_refreshes_balance_in_the_real_store() {
     assert_eq!(h.store.balance().upnl, 5.0);
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn private_balance_refresh_rejection_is_silent() {
+    let h = harness(options(), |http| {
+        script(http);
+        http.ok(
+            "GET",
+            endpoint("BALANCE"),
+            json!([{"asset":"USDT","balance":"150","availableBalance":"120","unrealizePnl":"3"}]),
+        );
+        http.route(
+            "GET",
+            endpoint("BALANCE"),
+            400,
+            json!({"msg":"balance unavailable"}),
+        );
+    });
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let before = h.http.calls(endpoint("BALANCE")).len();
+    assert_eq!(before, 2);
+    assert!(h.runtime.reports.borrow().is_empty());
+    assert_eq!(h.store.balance().total, 150.0);
+    h.venue().base().get_private_sockets()[0]
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"account","d":[{"equity":"999"}]}).to_string(),
+        ))
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(250.0);
+    h.runtime.pump();
+    assert_eq!(h.http.calls(endpoint("BALANCE")).len(), before + 1);
+    assert_eq!(
+        h.store.balance().total,
+        150.0,
+        "rejected refresh retains balance"
+    );
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "source catch is silent: {:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}

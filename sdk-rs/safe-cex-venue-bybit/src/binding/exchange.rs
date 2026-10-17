@@ -717,6 +717,12 @@ impl Exchange for BybitExchange {
         ]);
         self.invoke("fetchHistoricalPositions", vec![opts])
     }
+    fn fetch_historical_fills(
+        &self,
+        options: ExecutionsOptions,
+    ) -> ExchangeFuture<'_, Vec<Execution>> {
+        self.invoke("fetchHistoricalFills", args!(js(&options)))
+    }
     fn fetch_historical_orders(
         &self,
         options: Option<OrderHistoryOptions>,

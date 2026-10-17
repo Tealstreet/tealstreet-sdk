@@ -2585,6 +2585,180 @@
         "chaserAttempts": 1,
         "chaserMaxAttempts": 1
       }
+    },
+    "nativeObservation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"id\":decoded.id,\"amountBits\":decoded.amount.to_bits().to_string(),\"priceBits\":decoded.price.value().map(|value| value.to_bits().to_string()),\"priceAbsent\":decoded.price.is_absent(),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"statusOpen\":matches!(decoded.status,crate::ModelField::Value(crate::OrderStatus::Open))}), Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "nativeFields": [
+        "id",
+        "amountBits",
+        "priceBits",
+        "priceAbsent",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "statusOpen"
+      ],
+      "cases": [
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "left-order",
+              "symbol": "BTCUSD",
+              "amount": 7,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "left-order",
+            "priceAbsent": true,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "statusOpen": false,
+            "amountBits": "4619567317775286272",
+            "priceBits": null
+          }
+        },
+        {
+          "input": {
+            "id": "right-order",
+            "symbol": "BTCUSD",
+            "amount": 13,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": 31.25,
+            "type": "limit",
+            "side": "buy",
+            "status": "open",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896"
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "right-order",
+              "symbol": "BTCUSD",
+              "amount": 13,
+              "filled": 2,
+              "remaining": 5,
+              "reduceOnly": false,
+              "price": 31.25,
+              "type": "limit",
+              "side": "buy",
+              "status": "open",
+              "lastUpdate": 1700000000000
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "right-order",
+            "priceAbsent": false,
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "statusOpen": true,
+            "amountBits": "4623507967449235456",
+            "priceBits": "4629489310704336896"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "type": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "side": "unknown",
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-order",
+            "symbol": "BTCUSD",
+            "amount": 7,
+            "filled": 2,
+            "remaining": 5,
+            "reduceOnly": false,
+            "price": null,
+            "lastUpdate": 1700000000000
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::OrderBook": {
@@ -2658,6 +2832,147 @@
       "positionSize": 1,
       "orderLineText": "sample",
       "fee": 1
+    },
+    "nativeObservation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"orderPnlBits\":decoded.order_pnl.to_bits().to_string(),\"positionSizeBits\":decoded.position_size.to_bits().to_string(),\"sideAbsent\":decoded.order_line_pos_side.is_absent(),\"sideShort\":matches!(decoded.order_line_pos_side,crate::ModelField::Value(crate::PositionSide::Short)),\"feeBits\":decoded.fee.map(|value| value.to_bits().to_string()),\"text\":decoded.order_line_text}), Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "nativeFields": [
+        "orderPnlBits",
+        "positionSizeBits",
+        "sideAbsent",
+        "sideShort",
+        "feeBits",
+        "text"
+      ],
+      "cases": [
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": true,
+            "sideShort": false,
+            "text": null,
+            "orderPnlBits": "13837309855095848960",
+            "positionSizeBits": "4623507967449235456",
+            "feeBits": null
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "orderPnl": -3,
+              "totalRealizedPnl": 7,
+              "rollingUnrealizedPnl": 11,
+              "positionSize": 13
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": true,
+            "sideShort": false,
+            "text": null,
+            "orderPnlBits": "13837309855095848960",
+            "positionSizeBits": "4623507967449235456",
+            "feeBits": null
+          }
+        },
+        {
+          "input": {
+            "orderPnl": 29,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": -17,
+            "orderLinePosSide": "short",
+            "fee": 0.25,
+            "orderLineText": "right-risk"
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": false,
+            "sideShort": true,
+            "text": "right-risk",
+            "orderPnlBits": "4628855992006737920",
+            "positionSizeBits": "13848850329140985856",
+            "feeBits": "4598175219545276416"
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "orderPnl": 29,
+              "totalRealizedPnl": 7,
+              "rollingUnrealizedPnl": 11,
+              "positionSize": -17,
+              "orderLinePosSide": "short",
+              "fee": 0.25,
+              "orderLineText": "right-risk"
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "sideAbsent": false,
+            "sideShort": true,
+            "text": "right-risk",
+            "orderPnlBits": "4628855992006737920",
+            "positionSizeBits": "13848850329140985856",
+            "feeBits": "4598175219545276416"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13,
+            "orderLinePosSide": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13,
+            "orderLinePosSide": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "orderPnl": -3,
+            "totalRealizedPnl": 7,
+            "rollingUnrealizedPnl": 11,
+            "positionSize": 13,
+            "fee": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::OrderSide": {
@@ -2768,6 +3083,185 @@
         "unrealizedPnlNative": 1
       },
       "lastUpdate": 1
+    },
+    "nativeObservation": {
+      "call": "{ let input = $value.get(\"row\").unwrap_or($value).clone(); let decoded: Result<$type, serde_json::Error> = if $value.get(\"mapAccess\").and_then(serde_json::Value::as_bool) == Some(true) && input.is_object() { <$type as serde::Deserialize>::deserialize(serde::de::value::MapDeserializer::new(input.as_object().unwrap().clone().into_iter())) } else { serde_json::from_value(input) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"id\":decoded.id,\"contractsBits\":decoded.contracts.to_bits().to_string(),\"sideAbsent\":decoded.side.is_absent(),\"sideLong\":matches!(decoded.side,crate::ModelField::Value(crate::PositionSide::Long)),\"marginAbsent\":decoded.margin_type.is_absent(),\"marginCross\":matches!(decoded.margin_type,crate::ModelField::Value(crate::MarginType::Cross)),\"realizedPnlBits\":decoded.realized_pnl.value().map(|value| value.to_bits().to_string()),\"realizedPnlAbsent\":decoded.realized_pnl.is_absent()}), Err(_) => serde_json::json!({\"ok\": false}) } }",
+      "nativeFields": [
+        "id",
+        "contractsBits",
+        "sideAbsent",
+        "sideLong",
+        "marginAbsent",
+        "marginCross",
+        "realizedPnlBits",
+        "realizedPnlAbsent"
+      ],
+      "cases": [
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9
+          },
+          "output": {
+            "ok": true,
+            "id": "left-position",
+            "sideAbsent": true,
+            "sideLong": false,
+            "marginAbsent": true,
+            "marginCross": false,
+            "realizedPnlAbsent": true,
+            "contractsBits": "4611686018427387904",
+            "realizedPnlBits": null
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "left-position",
+              "symbol": "BTCUSD",
+              "entryPrice": 11,
+              "notional": 17,
+              "leverage": 3,
+              "unrealizedPnl": -5,
+              "contracts": 2,
+              "liquidationPrice": 9
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "left-position",
+            "sideAbsent": true,
+            "sideLong": false,
+            "marginAbsent": true,
+            "marginCross": false,
+            "realizedPnlAbsent": true,
+            "contractsBits": "4611686018427387904",
+            "realizedPnlBits": null
+          }
+        },
+        {
+          "input": {
+            "id": "right-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 19,
+            "liquidationPrice": 9,
+            "side": "long",
+            "marginType": "cross",
+            "realizedPnl": -7.5
+          },
+          "output": {
+            "ok": true,
+            "id": "right-position",
+            "sideAbsent": false,
+            "sideLong": true,
+            "marginAbsent": false,
+            "marginCross": true,
+            "realizedPnlAbsent": false,
+            "contractsBits": "4626041242239631360",
+            "realizedPnlBits": "13843502304583483392"
+          }
+        },
+        {
+          "input": {
+            "row": {
+              "id": "right-position",
+              "symbol": "BTCUSD",
+              "entryPrice": 11,
+              "notional": 17,
+              "leverage": 3,
+              "unrealizedPnl": -5,
+              "contracts": 19,
+              "liquidationPrice": 9,
+              "side": "long",
+              "marginType": "cross",
+              "realizedPnl": -7.5
+            },
+            "mapAccess": true
+          },
+          "output": {
+            "ok": true,
+            "id": "right-position",
+            "sideAbsent": false,
+            "sideLong": true,
+            "marginAbsent": false,
+            "marginCross": true,
+            "realizedPnlAbsent": false,
+            "contractsBits": "4626041242239631360",
+            "realizedPnlBits": "13843502304583483392"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9,
+            "side": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9,
+            "marginType": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "id": "left-position",
+            "symbol": "BTCUSD",
+            "entryPrice": 11,
+            "notional": 17,
+            "leverage": 3,
+            "unrealizedPnl": -5,
+            "contracts": 2,
+            "liquidationPrice": 9,
+            "realizedPnl": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_types::PositionExtra": {
