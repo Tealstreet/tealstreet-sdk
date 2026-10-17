@@ -94,7 +94,7 @@
   "safe_cex_venue_bitunix::value_helpers::parse_finite_number": {
     "category": "decoder",
     "evidence": "bitunix.exchange.ts parseFiniteNumber uses nullish/empty fallback then Number plus isFinite; retained JSON/undefined and the shared UTF-8 boundary per parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Native value_helpers::actual_typescript_value_helpers independently compares actual TS and native f64 bits.",
-    "call": "{ match $type($value.get(\"value\"), $value[\"fallback\"].as_f64().unwrap()) { Ok(n) => serde_json::json!({\"bits\": format!(\"{:016x}\", n.to_bits())}), Err(_) => serde_json::json!({\"error\":true}) } }",
+    "call": "{ match $type($value.get(\"value\"), $value[\"fallback\"].as_f64().unwrap()) { Ok(n) => serde_json::json!({\"bits\": format!(\"{:016x}\", n.to_bits())}), Err(error) => serde_json::json!({\"name\":error.name,\"message\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -166,7 +166,8 @@
           "fallback": 7
         },
         "output": {
-          "error": true
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
         }
       }
     ],
@@ -351,7 +352,7 @@
   "safe_cex_venue_bitunix::value_helpers::has_finite_trigger_price": {
     "category": "decoder",
     "evidence": "bitunix.exchange.ts hasFiniteTriggerPrice refuses absent values then applies Number and isFinite. Zero is a finite trigger; retained JSON coercion can throw. Native actual_typescript_value_helpers checks the actual TS body including signed-zero and throw cases.",
-    "call": "{ match $type($value.get(\"value\")) { Ok(b) => serde_json::json!({\"ok\":b}), Err(_) => serde_json::json!({\"error\":true}) } }",
+    "call": "{ match $type($value.get(\"value\")) { Ok(b) => serde_json::json!({\"ok\":b}), Err(error) => serde_json::json!({\"name\":error.name,\"message\":error.message}) } }",
     "cases": [
       {
         "input": {},
@@ -414,7 +415,8 @@
           }
         },
         "output": {
-          "error": true
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
         }
       }
     ],
@@ -489,7 +491,7 @@
   "safe_cex_venue_bitunix::history_numbers::order_to_number": {
     "category": "decoder",
     "evidence": "bitunix.order-history.ts toNumber applies parseFloat(String(value ?? empty)), retaining finite signed zero and falling back to zero for nonfinite values. Retained JSON/UTF-8 boundary; actual_typescript_history_numbers compares independent actual-source results and native bits.",
-    "call": "{ match $type($value.get(\"value\")) { Ok(n) => serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())}), Err(_) => serde_json::json!({\"error\":true}) } }",
+    "call": "{ match $type($value.get(\"value\")) { Ok(n) => serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())}), Err(error) => serde_json::json!({\"name\":error.name,\"message\":error.message}) } }",
     "cases": [
       {
         "input": {},
@@ -546,7 +548,8 @@
           }
         },
         "output": {
-          "error": true
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
         }
       }
     ],

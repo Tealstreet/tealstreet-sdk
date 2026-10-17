@@ -11,6 +11,10 @@ gate executes every generator with `--check`; CI runs all targets with
 `--include-ignored`, including the in-memory derived gate. See DERIVED_PARITY
 for dependency injection, corpus pins, and JSON float-roundtrip requirements.
 
+Order upserts overlay every carried ModelField, including own Undefined, while
+Absent retains the old property. The production Store facade compares all 15
+fields against the live source; numeric retention is checked before JSON output.
+
 The derived live oracle compares object key sets and recursively checks values;
 key iteration order depended on serde_json Map's backing store and is not part
 of these domain results. Array order and exact float-bit comparisons remain
@@ -159,3 +163,11 @@ for nested option numbers and forwards Store.update's fromWorker flag, preservin
 worker market merge behavior. The facade `option_fields` target compares eight
 actual source mutation paths across five numeric profiles; the ordinary production
 Store wiring gate remains required for Store changes.
+
+Position upserts overlay all nine ModelField slots by property presence: an
+Absent incoming field preserves the previous value, while own Undefined clears
+it and Value replaces it. This includes side as well as optional metadata.
+Do not use ModelField::or for this merge: its value-only fallback has a separate
+meaning. The production JS facade's position_model_merge regression compares
+81 outcomes with the maintained TypeScript Store across single, batch and full
+upserts; the shared carrier API remains unchanged.

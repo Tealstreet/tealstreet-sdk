@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "7d6a52cfa924a04942fcf8938a5c162a40ff124f514e5c7690b3e8f18d3ce93f"
+          "sha256": "3b97886efbf4f91c08dfe1fac9a27766e6ba9973f315b9bdf29d29d619eac8b4"
         }
       ],
       "guards": [
@@ -1708,6 +1708,18 @@
       "reason": "Reviewed #533 write! expansion: std::fmt::Write appends percent-encoded bytes to a local String synchronously. No async body, future, host task, shared registration or cancellation latch is created."
     },
     {
+      "owner": "src/js_runtime/globals.rs::install_builtins",
+      "boundaries": [
+        "async-block",
+        "await",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "388f2b7ed83a8f0bbc45539ef6c4ec125e88c1192a7f785d0ef8a98b664b2287",
+      "classification": "no-owned-latch",
+      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits."
+    },
+    {
       "owner": "src/js_runtime/library.rs::install_library",
       "boundaries": [
         "async-block",
@@ -2089,7 +2101,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "7d6a52cfa924a04942fcf8938a5c162a40ff124f514e5c7690b3e8f18d3ce93f"
+          "sha256": "3b97886efbf4f91c08dfe1fac9a27766e6ba9973f315b9bdf29d29d619eac8b4"
         }
       ],
       "guards": [
@@ -2484,7 +2496,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "5eabe32d46de322843fa0f7f87a924f45000ba2b7a21e3bfae2c6254e9d198c2"
+          "sha256": "c9545b569deec0adcafe7cc864e6dd6c088abce04e8a07fbe01d144698b0eb14"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2529,7 +2541,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "5eabe32d46de322843fa0f7f87a924f45000ba2b7a21e3bfae2c6254e9d198c2"
+          "sha256": "c9545b569deec0adcafe7cc864e6dd6c088abce04e8a07fbe01d144698b0eb14"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2633,7 +2645,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "5eabe32d46de322843fa0f7f87a924f45000ba2b7a21e3bfae2c6254e9d198c2"
+          "sha256": "c9545b569deec0adcafe7cc864e6dd6c088abce04e8a07fbe01d144698b0eb14"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2677,7 +2689,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "5eabe32d46de322843fa0f7f87a924f45000ba2b7a21e3bfae2c6254e9d198c2"
+          "sha256": "c9545b569deec0adcafe7cc864e6dd6c088abce04e8a07fbe01d144698b0eb14"
         }
       ],
       "guards": [

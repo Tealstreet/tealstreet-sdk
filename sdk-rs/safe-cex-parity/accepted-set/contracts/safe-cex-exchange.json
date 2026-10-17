@@ -6474,9 +6474,9 @@
       "symbol": "BTCUSDT",
       "interval": "1m"
     },
-    "evidence": "Flattened Candle plus subscription labels: distinct authored prices/volume and exhaustive native interval/side projection, no reserialization.",
+    "evidence": "Native candle fields plus subscription labels. ModelField<AnyTimeframe> retains source month and absent/undefined interval states; the Bybit maintained bulk-member corpus covers all three classes and native codec tests retain presence and numeric bits.",
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(native)=>serde_json::json!({\"ok\":true,\"symbol\":native.symbol,\"intervalOrdinal\":match native.interval {safe_cex_types::Timeframe::M1=>0,safe_cex_types::Timeframe::M3=>1,safe_cex_types::Timeframe::M5=>2,safe_cex_types::Timeframe::M15=>3,safe_cex_types::Timeframe::M30=>4,safe_cex_types::Timeframe::H1=>5,safe_cex_types::Timeframe::H2=>6,safe_cex_types::Timeframe::H4=>7,safe_cex_types::Timeframe::H6=>8,safe_cex_types::Timeframe::H12=>9,safe_cex_types::Timeframe::D1=>10,safe_cex_types::Timeframe::W1=>11},\"timestampBits\":native.candle.timestamp.to_bits().to_string(),\"openBits\":native.candle.open.to_bits().to_string(),\"highBits\":native.candle.high.to_bits().to_string(),\"lowBits\":native.candle.low.to_bits().to_string(),\"closeBits\":native.candle.close.to_bits().to_string(),\"volumeBits\":native.candle.volume.to_bits().to_string(),\"lastSideOrdinal\":native.candle.last_side.map(|side|match side {safe_cex_types::OrderSide::Buy=>0,safe_cex_types::OrderSide::Sell=>1})}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(native)=>serde_json::json!({\"ok\":true,\"symbol\":native.symbol,\"intervalOrdinal\":match native.interval {safe_cex_types::ModelField::Value(safe_cex_types::AnyTimeframe::Variant1(value))=>match value {safe_cex_types::Timeframe::M1=>0,safe_cex_types::Timeframe::M3=>1,safe_cex_types::Timeframe::M5=>2,safe_cex_types::Timeframe::M15=>3,safe_cex_types::Timeframe::M30=>4,safe_cex_types::Timeframe::H1=>5,safe_cex_types::Timeframe::H2=>6,safe_cex_types::Timeframe::H4=>7,safe_cex_types::Timeframe::H6=>8,safe_cex_types::Timeframe::H12=>9,safe_cex_types::Timeframe::D1=>10,safe_cex_types::Timeframe::W1=>11},safe_cex_types::ModelField::Value(safe_cex_types::AnyTimeframe::Variant0(value))=>match value {safe_cex_types::SecondsTimeframe::S1=>12,safe_cex_types::SecondsTimeframe::S5=>13,safe_cex_types::SecondsTimeframe::S15=>14,safe_cex_types::SecondsTimeframe::S30=>15},safe_cex_types::ModelField::Value(safe_cex_types::AnyTimeframe::Variant2(value))=>match value {safe_cex_types::ExtendedTimeframe::H3=>16,safe_cex_types::ExtendedTimeframe::H5=>17,safe_cex_types::ExtendedTimeframe::H7=>18,safe_cex_types::ExtendedTimeframe::H8=>19,safe_cex_types::ExtendedTimeframe::H9=>20,safe_cex_types::ExtendedTimeframe::H10=>21,safe_cex_types::ExtendedTimeframe::H11=>22,safe_cex_types::ExtendedTimeframe::H24=>23,safe_cex_types::ExtendedTimeframe::D2=>24,safe_cex_types::ExtendedTimeframe::D3=>25,safe_cex_types::ExtendedTimeframe::MN1=>26},safe_cex_types::ModelField::Absent=>-1,safe_cex_types::ModelField::Undefined=>-2},\"timestampBits\":native.candle.timestamp.to_bits().to_string(),\"openBits\":native.candle.open.to_bits().to_string(),\"highBits\":native.candle.high.to_bits().to_string(),\"lowBits\":native.candle.low.to_bits().to_string(),\"closeBits\":native.candle.close.to_bits().to_string(),\"volumeBits\":native.candle.volume.to_bits().to_string(),\"lastSideOrdinal\":native.candle.last_side.map(|side|match side {safe_cex_types::OrderSide::Buy=>0,safe_cex_types::OrderSide::Sell=>1})}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "symbol",
         "intervalOrdinal",
@@ -6593,6 +6593,55 @@
           },
           "output": {
             "ok": false
+          }
+        },
+        {
+          "input": {
+            "timestamp": 11,
+            "open": 2,
+            "high": 9,
+            "low": 1,
+            "close": 7,
+            "volume": 13,
+            "lastSide": "buy",
+            "symbol": "BTCUSDT",
+            "interval": "1M"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSDT",
+            "intervalOrdinal": 26,
+            "timestampBits": "4622382067542392832",
+            "openBits": "4611686018427387904",
+            "highBits": "4621256167635550208",
+            "lowBits": "4607182418800017408",
+            "closeBits": "4619567317775286272",
+            "volumeBits": "4623507967449235456",
+            "lastSideOrdinal": 0
+          }
+        },
+        {
+          "input": {
+            "timestamp": 11,
+            "open": 2,
+            "high": 9,
+            "low": 1,
+            "close": 7,
+            "volume": 13,
+            "lastSide": "buy",
+            "symbol": "BTCUSDT"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSDT",
+            "intervalOrdinal": -1,
+            "timestampBits": "4622382067542392832",
+            "openBits": "4611686018427387904",
+            "highBits": "4621256167635550208",
+            "lowBits": "4607182418800017408",
+            "closeBits": "4619567317775286272",
+            "volumeBits": "4623507967449235456",
+            "lastSideOrdinal": 0
           }
         }
       ]

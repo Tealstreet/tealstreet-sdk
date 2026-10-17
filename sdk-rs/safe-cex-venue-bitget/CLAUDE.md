@@ -1,5 +1,16 @@
 # Bitget venue family
 
+The private-topic host consumes the shared iterator protocol instead of indexing
+Map/Set storage. It admits native iterator objects, caches the next method, keeps
+live insertion positions and propagates iterator errors with their original value.
+Private-topic loops close on body errors, preserving that throw over close errors;
+step/value errors do not close.
+The constructed-host `private_host_*` tests reproduce both iterator-object refusal
+and deletion skipping on master. Native references, signed zero, Unicode code
+points and permanent exhaustion stay in the runtime. Maintained wire frames remain
+JSON arrays; iterator-object cases cover the reachable host boundary, not a claimed
+current venue payload. `private_binding_frames` retains the four private topics.
+
 The typed `Exchange::cancel_all_orders` routes to the family's assembled override.
 Classic accounts send venue-wide cancellation even with an empty local order store;
 UTA sweeps venue normal and strategy orders before cancellation; inverse uses each
@@ -345,6 +356,11 @@ The order oracle checks native own-Undefined fields before JSON projection. It
 walks every output and checks native row counts before pairing with source rows:
 1,327 linear cases (1,263 source successes, 78 accepted own-Undefined cases) and
 1,166 inverse cases (1,095 source successes, 100 accepted own-Undefined cases).
+The field-identity supplement adds exactly one independently named successful
+case per family: 1,328/1,264 linear cases/successes and 1,167/1,096 inverse.
+Its own-Undefined counts remain 78 and 100. Each caller selects its expected
+profile explicitly; neither the base nor supplementary count is inferred from
+the generated corpus. Both profiles reject a missing or duplicate identity case.
 Representability checks visit every source row without short-circuiting.
 The actual socket/Store and authenticated REST witnesses additionally distinguish
 missing-side Undefined from absence across all three families, while unsupported
