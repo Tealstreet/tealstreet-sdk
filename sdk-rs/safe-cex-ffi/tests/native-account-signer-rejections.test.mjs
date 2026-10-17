@@ -41,3 +41,20 @@ for (const [label, code] of codes) {
     });
   }
 }
+
+for (const asynchronous of [false, true]) {
+  test(`signer ${asynchronous ? 'rejection' : 'throw'} reports a throwing code getter once`, async t => {
+    const failure = new Error('Remote signer unavailable');
+    Object.defineProperty(failure, 'code', { get() { throw new TypeError('code getter failed'); } });
+    const sign = asynchronous ? async () => { throw failure; } : () => { throw failure; };
+    const id = await native.nativeAccountOpen({ exchange: 'binance', options: {
+      key: 'hosted-key', secret: '', overrideProxyUrl: 'http://127.0.0.1:1',
+    } }, () => {}, () => {}, sign);
+    t.after(() => native.nativeAccountClose(id));
+    await assert.rejects(native.nativeAccountCallMethod(id, 'getAccount', []), error => {
+      assert.equal(error.name, 'TypeError');
+      assert.equal(error.message, 'code getter failed');
+      return true;
+    });
+  });
+}
