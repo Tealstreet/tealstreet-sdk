@@ -904,5 +904,32 @@ invented field or an exemption; its native unit witness still executes all seven
 routes. Native all-target Clippy passes with warnings denied (10.69s).
 Independent draft review checked all22 schemas, all835 native expectations,
 all560 production expectations and exact preservation of master26 contract rows:
-no findings. Semantic controls and final readiness checks are recorded once
-executed; pending commands do not count as proof.
+no findings.
+
+All22 isolated object-guard controls completed: each removed only that owner's
+outer object boundary, compiled, and failed its exact named complete-valid-array
+admission assertion at exit101. Each control restored all three source modules
+byte-for-byte and passed all22 native witnesses; the final restoration repeated
+the exact byte check and all22 tests. No compiler/tooling failure is evidence.
+The shared pure exact-span selector's three isolation regressions also pass.
+
+After merging master `41e20791f8` without conflicts, frozen install and format
+checks pass. The full scoped ApexOmni suite passes **237 / zero failed / zero
+ignored**, with14 target receipts including the maintained live TS oracles.
+Separate host and wasm all-target Clippy runs pass with warnings denied
+(11.55s /25.82s). Final fresh native/default production verification passes
+**22 actual runtime owners / zero classifications / zero failures**, including
+all560 authored production cases and complete actual companion inspection.
+
+The maintained invention gate passes globally (7459 manifest rows /17214 public
+Rust items) and with Apex-only public obligations (287 items), retaining exactly
+the same82 existing Apex exemptions and adding zero. The cached checker is
+reused only after checking its actual Rust/Cargo/lock/config inputs are identical
+to its build; the sole source-directory difference is CLAUDE documentation.
+Every existing master Apex contract is preserved exactly as a JSON value.
+
+CodeRabbit returned a review limit and did not complete a bot review. This
+classifies only the selected22 native/default decoder owners. Other owners,
+undefined-only records, functions, aliases, receiver policies, local helpers,
+construction, feature and wasm accepted behavior remain independent obligations.
+No whole-venue completion is claimed.
