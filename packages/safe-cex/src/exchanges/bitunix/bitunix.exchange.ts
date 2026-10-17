@@ -12,6 +12,7 @@ import uniqBy from 'lodash/uniqBy';
 
 import { parsePrecision } from '@tealstreet/ccxt-compat/src/functions/ccxt_exchange';
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { isTerminalOrder } from '../../store/store.base';
 import {
   Candle,
   ClosedPnlEntry,
@@ -1710,7 +1711,7 @@ export class BitunixExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    return await this.cancelOrders(this.store.orders.filter((o) => o.symbol === symbol));
+    return await this.cancelOrders(this.store.orders.filter((o) => o.symbol === symbol && !isTerminalOrder(o)));
   };
 
   private recreateAttachedTpslParentOrder = async (

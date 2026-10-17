@@ -227,6 +227,12 @@ Key methods exchanges typically override:
 
 Check `Exchange` interface in `base.ts` for the full surface.
 
+Cancel lists selected from `store.orders` (symbol/all cancels, closePosition
+conflict cleanup) skip `store.base.ts:isTerminalOrder` rows: filled and canceled
+orders linger until the next snapshot, and on one OKX reports the batch failed
+(code 2, `51400` on that row) though the live orders cancel. Filter where the
+list is selected, not in `cancelOrders` or `updateOrder`.
+
 `Ticker` keeps derivatives fields (`mark`, `index`, `fundingRate`,
 `fundingTime`, and `openInterest`) required for compatibility. Spot venues and
 venues that do not publish one of those values use `0`; consumers must treat

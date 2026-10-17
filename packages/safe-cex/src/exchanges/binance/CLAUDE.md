@@ -490,8 +490,8 @@ Orders are split into **regular** (limit/market) and **algo** (SL/TP/trailing) c
 **closePosition orders** (`cancelExistingClosePositionOrders()`, `binance.exchange.ts:1194-1233`):
 
 - Binance allows only ONE closePosition order per direction per symbol
-- Before placing a new closePosition order, **fresh orders are fetched from REST** (not from local store, which may be stale due to throttled WebSocket updates)
-- Filters for existing closePosition orders with matching symbol, type, side, and `close === true && !amount`
+- Before placing a new closePosition order, select conflicts from the local store; do not fetch orders from REST per placement.
+- Filters out `isTerminalOrder` rows, then matches symbol, type, side, and `close === true && !amount`.
 - Cancels any conflicting orders before placing the new one
 - If `closePosition` requested but no position exists and no amount specified, throws an error
 
@@ -823,7 +823,7 @@ Binance can return errors with HTTP 200 status codes (negative `code` field). Th
 
 Binance allows only ONE `closePosition` order per direction per symbol.
 Before placing a new closePosition SL/TP, `cancelExistingClosePositionOrders`
-filters **the local store** for conflicting "infinite" (size-less)
+filters **the local store** for nonterminal conflicting "infinite" (size-less)
 closePosition rows and cancels them.
 
 **Do NOT reintroduce a `fetchOrders()` here.** An earlier version of this

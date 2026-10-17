@@ -1,10 +1,10 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {root,load,ts}=require('../../safe-cex-types/scripts/accounts-source.cjs');
 const enums=load(path.join(root,'packages/safe-cex/src/types.ts')),constants=load(path.join(root,'packages/safe-cex/src/exchanges/blofin/blofin.types.ts'));
-const {DefaultStore}=load(path.join(root,'packages/safe-cex/src/store/store.base.ts'));
+const {DefaultStore,isTerminalOrder}=load(path.join(root,'packages/safe-cex/src/store/store.base.ts'));
 const helpers={...load(path.join(root,'packages/safe-cex/src/utils/safe-math.ts')),...load(path.join(root,'packages/safe-cex/src/utils/omitUndefined.ts')),...load(path.join(root,'packages/safe-cex/src/utils/normalizeExecutionPositionSide.ts')),...load(path.join(root,'packages/safe-cex/src/exchanges/blofin/blofin.order-history.ts'))};
 const file=path.join(root,'packages/safe-cex/src/exchanges/blofin/blofin.exchange.ts'),ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true),klass=ast.statements.find(s=>ts.isClassDeclaration(s)&&s.name?.text==='BlofinExchange');
-let active;const context={...enums,...constants,...helpers,BLOFIN_ACTIVE_ORDERS_PAGE_SIZE:100,BLOFIN_MAX_ORDER_PAGES:50,virtualClock:{getCurrentTimeMs:()=>{const now=1000+(++active.clocks);active.trace.push(['clock',now]);return now;}},sleep:async ms=>{active.trace.push(['sleep',ms]);},isKnownNonSwapInstrument:null};
+let active;const context={...enums,...constants,...helpers,isTerminalOrder,BLOFIN_ACTIVE_ORDERS_PAGE_SIZE:100,BLOFIN_MAX_ORDER_PAGES:50,virtualClock:{getCurrentTimeMs:()=>{const now=1000+(++active.clocks);active.trace.push(['clock',now]);return now;}},sleep:async ms=>{active.trace.push(['sleep',ms]);},isKnownNonSwapInstrument:null};
 for(const name of ['BLOFIN_ACTIVE_ORDERS_PAGE_SIZE','BLOFIN_MAX_ORDER_PAGES']){const d=ast.statements.filter(ts.isVariableStatement).flatMap(s=>s.declarationList.declarations).find(d=>d.name.text===name);assert(d&&ts.isNumericLiteral(d.initializer));assert.equal(Number(d.initializer.text),context[name]);}
 const initializer=ast.statements.filter(ts.isVariableStatement).flatMap(s=>s.declarationList.declarations).find(d=>d.name.text==='isKnownNonSwapInstrument');
 const normalized=ast.statements.filter(ts.isVariableStatement).flatMap(s=>s.declarationList.declarations).find(d=>d.name.text==='getNormalizedInstType');

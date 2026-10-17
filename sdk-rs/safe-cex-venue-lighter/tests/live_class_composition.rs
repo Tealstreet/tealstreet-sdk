@@ -1477,7 +1477,7 @@ fn native_class_fields_callbacks_and_live_helpers() {
     assert_eq!(async_count, 3, "independent composed async floor3");
     assert_eq!(
         corpus["pin"],
-        "e3b6e9ed37ceb1031fda29b1a27ee5f41a144d301eccdcaa1095f087fa436d02"
+        "70e61aa83ff16f198d13cd35eb08ecce89b6f4f01f2292a8a098b4ad87e5d6de"
     );
     eprintln!(
         "85 native helper cases; stopped at iteration84; class126fields/92arrows/2prototype/3static census; no wire assertions; full realm GC and engine unproved"

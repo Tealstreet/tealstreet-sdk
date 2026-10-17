@@ -3,6 +3,14 @@ ts = "packages/safe-cex/src/store/store.base.ts"
 rust_files = [ "safe-cex-store/src/model_patch.rs", "safe-cex-store/src/store.rs" ]
 
 [[symbol]]
+ts = "isTerminalOrder"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "PACKED_TICKER_FIELDS"
 kind = "const"
 layer = "adapted"

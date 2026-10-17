@@ -20,6 +20,9 @@ const enums=module(types.statements.filter(n=>ts.isEnumDeclaration(n)&&['OrderTy
 const math=read('utils/safe-math.ts');
 const adjust=module([declaration(math,'POW10_CACHE'),math.statements.find(ts.isForStatement).getText(math),...['pow10','afterDecimal','adjust'].map(n=>declaration(math,n))].join('\n')).adjust;
 const getOKXTriggerPxType=module(declaration(source,'getOKXTriggerPxType')+'\nmodule.exports={getOKXTriggerPxType};',enums).getOKXTriggerPxType;
+const storeBase=read('store/store.base.ts');
+const statuses=module(types.statements.find(n=>ts.isEnumDeclaration(n)&&n.name.text==='OrderStatus').getText(types));
+const isTerminalOrder=module(['TERMINAL_STATUSES','isTerminalOrder'].map(n=>declaration(storeBase,n)).join('\n'),statuses).isTerminalOrder;
 const forEachSeries=require('p-iteration').forEachSeries;
 const chunk=require('lodash/chunk'),partition=require('lodash/partition');
 const pack=v=>{if(v===undefined)return {u:true};if(typeof v==='number'){if(Number.isNaN(v))return {n:'nan'};const b=Buffer.alloc(8);b.writeDoubleBE(v);return {n:b.toString('hex')};}if(Array.isArray(v))return v.map(pack);if(v&&typeof v==='object')return {o:Object.entries(v).map(([k,v])=>[k,pack(v)])};return v;};
@@ -66,7 +69,7 @@ async function fixture(method,c){
  }};
  const fakeMath=Object.create(Math);
  if(c==='callee-reenter')fakeMath.max=(a,b)=>{fakeMath.min=()=>777;market.limits.leverage.max=7;return Math.max(a,b);};
- const context={...enums,ENDPOINTS,adjust,getOKXTriggerPxType,chunk,partition,forEachSeries,Error:TracedError,Math:fakeMath};
+ const context={...enums,ENDPOINTS,adjust,getOKXTriggerPxType,isTerminalOrder,chunk,partition,forEachSeries,Error:TracedError,Math:fakeMath};
  for(const name of Object.values(names)){
   const member=cls.members.find(n=>n.name?.getText(source)===name);assert.ok(member,name);
   receiver[name]=vm.runInNewContext(transpile(`(function(){return (${member.initializer.getText(source)});})`),context).call(receiver);

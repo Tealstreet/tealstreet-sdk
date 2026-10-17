@@ -13,6 +13,7 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { mapSeries } from 'p-iteration';
 
+import { isTerminalOrder } from '../../store/store.base';
 import {
   Balance,
   Candle,
@@ -1868,7 +1869,7 @@ export class BitgetExchange extends BaseExchange {
 
   cancelSymbolOrders = async (symbol: string) => {
     try {
-      const symbolOrders = this.store.orders.filter((o) => o.symbol === symbol);
+      const symbolOrders = this.store.orders.filter((o) => o.symbol === symbol && !isTerminalOrder(o));
       await this.cancelOrders(symbolOrders);
     } catch (err: any) {
       this.emitAndLogError(err?.response?.data?.msg || err?.message);

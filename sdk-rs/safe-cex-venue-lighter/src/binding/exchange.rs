@@ -559,6 +559,7 @@ mod tests {
         "initWasm",
         "isLighterL1Address",
         "isLighterAccountTierEligibleForPartnerAttribution",
+        "isTerminalOrder",
         "isWasmReady",
         "JSON.stringify",
         "LIGHTER_ACCOUNT_LIMITS_CACHE_MS",
@@ -671,5 +672,14 @@ mod tests {
             .filter(|name| realm.global(name).map_or(true, |v| v.is_undefined()))
             .collect();
         assert!(missing.is_empty(), "unbound globals: {missing:?}");
+        let is_terminal = realm.global("isTerminalOrder").unwrap();
+        let terminal = ["open", "closed", "canceled"].map(|status| {
+            let order = Js::object(vec![("status", Js::str(status))]);
+            is_terminal
+                .call(Js::Undefined, vec![order])
+                .unwrap()
+                .truthy()
+        });
+        assert_eq!(terminal, [false, true, true], "isTerminalOrder binding");
     }
 }

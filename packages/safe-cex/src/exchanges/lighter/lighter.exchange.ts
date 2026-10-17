@@ -15,6 +15,7 @@ import { forEachSeries } from 'p-iteration';
 import { CandlestickApi, LighterApiClient, OrderApi } from '@tealstreet/lighter-sdk';
 import { getCryptoApi, initWasm, isWasmReady } from '@tealstreet/poseidon-crypto';
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { isTerminalOrder } from '../../store/store.base';
 import {
   Balance,
   Candle,
@@ -2798,7 +2799,7 @@ export class LighterExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    const orders = this.store.orders.filter((o) => o.symbol === symbol && !isTerminalOrder(o));
     if (orders.length > 0) {
       await this.cancelOrders(orders);
     }

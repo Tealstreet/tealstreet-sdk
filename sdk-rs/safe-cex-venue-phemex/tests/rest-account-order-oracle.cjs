@@ -5,6 +5,9 @@ function execute(relative,imports){const code=ts.transpileModule(fs.readFileSync
 const enums=execute('packages/safe-cex/src/types.ts',{'@tealstreet/logging/src/LogSeverity':execute('packages/logging/src/LogSeverity.ts',{})}),constants=execute('packages/safe-cex/src/exchanges/phemex/phemex.types.ts',{'../../types':enums});
 const key=execute('packages/safe-cex/src/utils/get-key.ts',Object.fromEntries(['camelCase','snakeCase','memoize'].map(n=>['lodash/'+n,require('lodash/'+n)])));
 const lodash=require('lodash'),{mapSeries}=require('p-iteration');
+const storeFile=path.join(root,'packages/safe-cex/src/store/store.base.ts'),storeAst=ts.createSourceFile(storeFile,fs.readFileSync(storeFile,'utf8'),ts.ScriptTarget.ES2022,true);
+const terminal=storeAst.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>['TERMINAL_STATUSES','isTerminalOrder'].includes(d.name.getText(storeAst))));assert.equal(terminal.length,2);
+const isTerminalOrder=vm.runInNewContext(ts.transpileModule(terminal.map(n=>n.getText(storeAst).replace(/^export /,'')).join('\n')+'\nisTerminalOrder;',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{OrderStatus:enums.OrderStatus});
 const file=path.join(root,'packages/safe-cex/src/exchanges/phemex/phemex.exchange.ts'),ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.ES2022,true),cls=ast.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='PhemexExchange');
 const names=['changePositionMode','resolveLeverageContext','changeMarginType','setLeverage','setLeverageHelper','cancelOrders','getOrFetchMarketForSymbol'];
 const body=names.map(name=>{const ms=cls.members.filter(n=>n.name?.getText(ast)===name);assert.equal(ms.length,1);return ms[0].getText(ast);}).join('\n');
@@ -38,7 +41,7 @@ async function run(name,f){const events=[];const transportError=new Error('trans
  Object.defineProperty(owner.store,'loaded',{get:()=>{note('loaded');return {markets:false,custom:7};}});
  class Base{constructor(){Object.assign(this,owner);}}
  const BaseError=Error;const ErrorCtor=class extends BaseError{constructor(value){note('error',value);super(value);}};
- const contextVM={...enums,...constants,Base,Error:ErrorCtor,uniqBy:lodash.uniqBy,groupBy:lodash.groupBy,chunk:lodash.chunk,mapSeries,v:key.v};
+ const contextVM={...enums,...constants,Base,Error:ErrorCtor,uniqBy:lodash.uniqBy,groupBy:lodash.groupBy,chunk:lodash.chunk,mapSeries,v:key.v,isTerminalOrder};
  if(name==='cancelOrders')for(const o of orders)Object.defineProperty(o,'extra',{enumerable:true,get:()=>{note('spread');return 7;}});
  const Klass=vm.runInNewContext(ts.transpileModule('(class Source extends Base{'+body+'})',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,contextVM);sourceInstance=new Klass();
  if(name!=='resolveLeverageContext')sourceInstance.resolveLeverageContext=owner.contextMock;if(name!=='setLeverageHelper')sourceInstance.setLeverageHelper=owner.helperMock;if(name!=='cancelOrders')sourceInstance.cancelOrders=owner.cancelMock;
