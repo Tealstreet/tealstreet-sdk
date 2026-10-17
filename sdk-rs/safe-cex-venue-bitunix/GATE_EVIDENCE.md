@@ -1104,3 +1104,10 @@ override7pass/1live-TS-ignore and binding25pass. Changed production bodies have 
 cancellation/override body pins; the required target passed without a pin edit.
 Manifest rows now map the fallback, string classifier and internal trigger helper
 using the existing retained snapshot/UTF-8 boundaries. No carrier migration.
+
+Final normal-master refresh `c5b55adb18` preserves both distinct append-only test
+and doc additions. All18 scoped native tests (including the inherited80-case
+ticker witness), native/WASM strict all-target lint, inventories6+7+25 with the two
+explicit ignores, parity7459/16587 and extractor0updates pass. The independent
+money-path audit WEEX receipt is57 concrete binding tests +1 original trading
+corpus, all passing. All checks ran serially with Cargo jobs1.

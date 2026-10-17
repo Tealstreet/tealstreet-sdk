@@ -382,7 +382,6 @@ fn attached_amendment_recreates_only_after_matching_refusal_and_successful_cance
     }
 }
 
-
 #[path = "../../parity/test-support/ticker_coercion.rs"]
 mod ticker_coercion;
 
