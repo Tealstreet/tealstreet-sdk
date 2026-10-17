@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Real account-surface fixture: production registry and native HTTP/WS hosts.
 pub use crate::support::run_local as run;
 use crate::support::{Seen, WsPeer, eventually, serve_http, serve_ws};
@@ -11,6 +12,8 @@ use tokio::net::TcpListener;
 pub struct Account {
     pub account: Rc<NativeAccount>,
     pub seen: Rc<RefCell<Vec<Seen>>>,
+    pub peers: Rc<RefCell<Vec<WsPeer>>>,
+    pub received: Rc<RefCell<Vec<String>>>,
 }
 pub fn order() -> Value {
     json!({"orderId":77,"clientOrderId":"original","symbol":"BTCUSDT","side":"BUY","type":"LIMIT",
@@ -60,7 +63,11 @@ pub async fn started() -> Account {
     let peers: Rc<RefCell<Vec<WsPeer>>> = Rc::default();
     let received = Rc::new(RefCell::new(vec![]));
     tokio::task::spawn_local(serve_ws(ws, peers.clone(), received.clone()));
+    let snapshot_peers = peers.clone();
+    let snapshot_received = received.clone();
     tokio::task::spawn_local(async move {
+        let peers = snapshot_peers;
+        let received = snapshot_received;
         eventually("gateway market/ticker subscriptions", || {
             received
                 .borrow()
@@ -91,7 +98,12 @@ pub async fn started() -> Account {
             "externalPublicData":{"type":"websocket","url":gateway,"exchangeId":"binance"}}),
         account_name:None,sign:None,proxy_token:None,
     }).unwrap();
-    let account = Account { account, seen };
+    let account = Account {
+        account,
+        seen,
+        peers,
+        received,
+    };
     account.ok("start", json!([])).await;
     account
 }

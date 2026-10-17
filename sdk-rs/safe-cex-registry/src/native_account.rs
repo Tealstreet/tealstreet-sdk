@@ -7,7 +7,7 @@ use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     exchange::Exchange,
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
-    runtime::{Cleanup, ExchangeError, RemoteSigner},
+    runtime::{Cleanup, ExchangeError, ListenerCleanup, RemoteSigner},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -21,6 +21,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
+    collections::BTreeMap,
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -43,6 +44,32 @@ pub struct NativeAccount {
     exchange: Rc<dyn Exchange>,
     store: Rc<dyn Store>,
     signer: Option<Rc<HostSigner>>,
+    streams: RefCell<BTreeMap<u32, NativeStream>>,
+    next_stream: Cell<u32>,
+}
+
+struct NativeStream {
+    active: Rc<Cell<bool>>,
+    cleanup: Option<ListenerCleanup>,
+}
+impl NativeAccount {
+    fn dispose_streams(&self) -> Result<(), ExchangeError> {
+        let streams = std::mem::take(&mut *self.streams.borrow_mut());
+        // Stop every host callback before invoking any potentially reentrant cleanup.
+        for stream in streams.values() {
+            stream.active.set(false);
+        }
+        let mut first_error = None;
+        for stream in streams.into_values() {
+            if let Some(cleanup) = stream.cleanup
+                && let Err(error) = cleanup()
+                && first_error.is_none()
+            {
+                first_error = Some(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
 }
 
 type AvailabilityListeners = Rc<RefCell<Vec<(u64, Rc<dyn Fn(bool)>)>>>;
@@ -153,6 +180,8 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
         exchange,
         store,
         signer,
+        streams: RefCell::default(),
+        next_stream: Cell::new(1),
     }))
 }
 
@@ -184,6 +213,9 @@ const NATIVE_ACCOUNT_EVENTS: &[&str] = &[
     "grafana-http-request",
     "grafana-http-response",
     "grafana-info",
+    "listenOHLCV",
+    "listenOHLCVs",
+    "listenOrderBook",
 ];
 /// Forwards emitter events and private Store slices until the returned cleanup runs.
 pub fn native_account_watch(
@@ -237,6 +269,53 @@ fn done<T>(result: Result<T, ExchangeError>) -> Result<T, Value> {
     result.map_err(|error| exchange_error(&error))
 }
 
+/// Callback APIs cross the JSON command channel as handles. Each notification
+/// retains the venue callback value alongside its registration ID.
+fn listen(account: &NativeAccount, method: &'static str, args: &[Value]) -> Result<Value, Value> {
+    let id = account.next_stream.get();
+    let next = id
+        .checked_add(1)
+        .ok_or_else(|| host_error("stream handles exhausted"))?;
+    let active = Rc::new(Cell::new(true));
+    let enabled = active.clone();
+    let exchange = Rc::downgrade(&account.exchange);
+    let notify = Rc::new(move |data: Value| {
+        if enabled.get()
+            && let Some(exchange) = exchange.upgrade()
+        {
+            let base = exchange.base();
+            if let Err(error) = base.emit(method, json!({"subscriptionId": id, "data": data})) {
+                base.runtime
+                    .report_exception(&error, &json!({"method": method}));
+            }
+        }
+    });
+    let venue = account.exchange.as_ref();
+    let cleanup = match method {
+        "listenOHLCV" => venue
+            .listen_ohlcv(arg(args, 0)?, Rc::new(move |candle| notify(json!(candle))))
+            .map(Some),
+        "listenOHLCVs" => {
+            venue.listen_ohlcvs(arg(args, 0)?, Rc::new(move |candle| notify(json!(candle))));
+            Ok(None)
+        }
+        "listenOrderBook" => venue
+            .listen_order_book(arg(args, 0)?, Rc::new(move |book| notify(json!(book))))
+            .map(Some),
+        _ => unreachable!("only declared callback methods reach listen"),
+    };
+    let cleanup = cleanup.map_err(|error| {
+        active.set(false);
+        exchange_error(&error)
+    })?;
+    account
+        .streams
+        .borrow_mut()
+        .insert(id, NativeStream { active, cleanup });
+    account.next_stream.set(next);
+    Ok(json!(id))
+}
+
 /// ts: the Exchange methods ExchangeWorker calls, by name; an unknown name rejects.
 pub fn native_account_call(
     account: Rc<NativeAccount>,
@@ -248,7 +327,25 @@ pub fn native_account_call(
         let base = venue.base();
         match method.as_str() {
             "start" => done(venue.start().await).map(|_| Value::Null),
-            "dispose" => done(venue.dispose()).map(|_| Value::Null),
+            "dispose" => {
+                let streams = account.dispose_streams();
+                let disposed = venue.dispose();
+                done(streams.and(disposed)).map(|_| Value::Null)
+            }
+            "listenOHLCV" => listen(&account, "listenOHLCV", &args),
+            "listenOHLCVs" => listen(&account, "listenOHLCVs", &args),
+            "listenOrderBook" => listen(&account, "listenOrderBook", &args),
+            "unlisten" => {
+                let id: u32 = arg(&args, 0)?;
+                let stream = account.streams.borrow_mut().remove(&id);
+                if let Some(stream) = stream {
+                    stream.active.set(false);
+                    if let Some(cleanup) = stream.cleanup {
+                        done(cleanup())?;
+                    }
+                }
+                Ok(Value::Null)
+            }
             "disablePublicWebsockets" => {
                 base.disable_public_websockets();
                 Ok(Value::Null)
