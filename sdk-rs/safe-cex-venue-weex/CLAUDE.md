@@ -557,3 +557,14 @@ WEEX members: close all venue positions, replace the refreshed snapshot, then
 `exchange_binding` proves endpoint reachability from an empty Store and close/refresh/
 cancel order; private order, position and account frames assert actual Store changes
 alongside the retained fill-event witness.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` adds
+96 field-independent cases through the constructed production socket/Store:
+consecutive ticker frames, object/array payloads and finite fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py weex` fault must fail that test and
+pass after exact source restoration.
