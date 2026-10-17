@@ -7376,3 +7376,7 @@ reason = "Internal prepared placement input representation for mapped amendment 
 [[exempt]]
 rs = "safe-cex-types/src/model_field.rs::ModelField::get_or_insert_with"
 reason = "Shared model presence mutation used by the webworker Order.extra postprocessor: reads absent and undefined as undefined, and creates a present value when the source initializes that property. No additional TypeScript symbol or venue policy."
+
+[[exempt]]
+rs = "safe-cex-num/src/date.rs::js_date_to_iso_string"
+reason = "Shared ECMAScript Date runtime glue with no exported TypeScript SDK declaration: canonical TimeClip plus UTC ISO rendering and RangeError for invalid dates. The existing websocket timestamp formatter delegates to this helper; native candle bounds use the same implementation."
