@@ -1576,11 +1576,11 @@ production JavaScript/transport/Store assembly.
 
 ### WEEX reporting and continuation ownership
 
-`fetchOrders`, the three private refresh callbacks and public depth-gap recovery
-choose observable rejection reporting where the maintained source discards
-failures. Silent partial orders or stale private/book state would hide missing
-updates from native callers. The added reporter call, and any failure of a
-fallible reporter, are observable costs; source empty catches are not copied.
+Public depth-gap recovery silently discards snapshot rejections and routed-callback
+throws, matching the maintained empty catch. The initial listenOrderBook snapshot
+retains its distinct source warning. Constructed HTTP/socket coverage observes
+no gap warning, no failed replacement delivery and a subsequent valid update.
+The fetchOrders and private-refresh reporting corrections are separate fixes.
 
 The returned `fetchOrders` and refresh futures own their aggregation/update/report
 continuations. Dropping one can omit those outcomes, even when host-started
