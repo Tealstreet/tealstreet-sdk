@@ -695,6 +695,28 @@ impl Exchange for BybitExchange {
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&options)))
     }
+    fn fetch_historical_positions(
+        &self,
+        options: safe_cex_exchange::journal::HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybitspot | ExchangeName::Bybitinverse
+        ) {
+            return Box::pin(async move {
+                Err(ExchangeError::new(format!(
+                    "{}: no journal records path declared. Override fetchHistoricalPositions — fold from fills via foldClosedPositionRecords, or map this venue's reported closed axis.",
+                    self.class_name()
+                )))
+            });
+        }
+        let opts = Js::object(vec![
+            ("account", Js::str(&options.account)),
+            ("from", options.from.map_or(Js::Undefined, Js::Number)),
+            ("to", options.to.map_or(Js::Undefined, Js::Number)),
+        ]);
+        self.invoke("fetchHistoricalPositions", vec![opts])
+    }
     fn fetch_historical_orders(
         &self,
         options: Option<OrderHistoryOptions>,
