@@ -1,3 +1,34 @@
+# Production emitter argument lists
+
+The Realm BaseExchange facade forwards TinyEmitter arguments through the shared
+BaseExchange::emit_args API. Empty calls retain an empty list, one array remains
+one argument, and separate message/metadata arguments remain separate. The
+existing per-value JSON boundary and native callback error propagation remain.
+
+The production-facade regression constructs the actual Realm superclass over a
+real BaseExchange and observes native on_args listeners. The old bridge compiles
+and fails: empty calls produce [null], and the warning pair produces one nested
+array. The single-array payload and inherited native log already match. After
+the bridge change, all 40 library, 24 production Perpetual binding and 21 Spot
+binding tests pass (85 total). Scoped formatting and strict native all-target
+Clippy pass. Independent review reports no findings; CodeRabbit is rate limited.
+This test scripts only the runtime boundary; the facade, native emitter and JSON conversions are real.
+
+The three existing enclosing-function pins for base_exchange_class are reviewed
+manually. Only b.emit becomes b.emit_args; the existing b.dispose, b.can_sign and
+b.name edges are unchanged. The token hash changes from d0b3260d4e9cb7dc to
+87e8a021dad29e72. No other call-site inventory or shared runtime code is authored
+in this slice. The required shared emitter API is inherited from PR425.
+Initial global parity reported five missing mappings in that shared dependency: emit_args,
+on_args, once_args, ArgsListener and install_exchange_event_bridge. No Hyperliquid
+finding is reported; the shared owner has the exact list. This is not a global
+gate clearance claim. The supported scoped Hyperliquid check passes using the
+unchanged existing exemption subset: 554 rows, 1243 public Rust items, zero
+invention/status findings. After inheriting the shared mapping repair at
+795d8691d6 through PR425 head ee665ced69, ordinary global parity passes with
+7459 rows and 17219 public Rust items, zero findings. The merged source/history
+and emitter slices retain all production test cases independently.
+
 # Production history, listeners and private snapshot dispatch
 
 The production perpetual Exchange now forwards candles, historical fills/orders,
