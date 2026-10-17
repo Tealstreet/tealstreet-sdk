@@ -313,7 +313,7 @@ impl auth::AuthHost for AuthFrame {
         secret: JsString,
         window: f64,
     ) -> Result<Self::SignatureFuture, ExchangeError> {
-        let now = self.owner.parent()?.runtime.now_ms();
+        let now = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let future = crate::signing::generate_ws_auth_signature(
             key,
             secret,
