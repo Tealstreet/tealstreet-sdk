@@ -248,3 +248,12 @@ module/error owners and JSON error owner intact. These finite identity probes
 and ordinary Serde/conversion checks do not establish future execution, every
 lifetime/type argument, or the behavior of a module/browser/transport host.
 
+
+Native gateway accepted-set observations execute the actual gateway host, socket,
+provider adapter and StoreParent logging bridge with scripted scheduler/socket
+I/O. They retain literal dial URLs, event keys, exact outbound text, closed-state
+refusal, subscription cleanup frames and both log arguments. The concrete
+InProcessUnavailable fallback is exercised as an explicit refusal, not deleted
+or treated as an available source registry. Four additional helper contracts
+classify capability capture, event routing, dialing and outbound error reporting;
+these finite observations do not claim incoming JSON parsing.
