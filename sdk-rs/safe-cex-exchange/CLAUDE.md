@@ -1329,3 +1329,16 @@ transforms and fulfilled response interceptors run; default native HTTP response
 still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
 the actual native runtime, factory, transport and HOW protocol against scripted
 socket I/O and compares four statuses with the maintained HOW adapter and Axios.
+
+The runtime JSON builtin and default encoded-HTTP response parser decode directly
+into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
+including lone surrogates; object members use own data-property definition, and
+numbers retain binary64 bits. Both consumers share one private parser. Invalid
+HTTP JSON retains Axios's existing raw-text result, while the builtin throws
+SyntaxError. tests/js_json_parse.rs compares 200 valid/invalid syntax cases and
+all 65,536 escaped units with Node and checks a real loopback HTTP response
+against actual Axios. scripts/json-parse-controls.py restores the original
+builtin parser, raw-unit replacement, and HTTP parser independently; each fault
+must compile, fail its named real-boundary assertion, and pass after exact
+restoration. This does not widen HOW response data or typed Store/model strings;
+JSON reviver behavior and exact engine diagnostic text remain outside this fix.
