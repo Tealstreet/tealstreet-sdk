@@ -1251,7 +1251,7 @@ fn malformed_ticker_fallback(prefix: Value) {
     )
     .unwrap();
     let cached = f.store.tickers().to_vec();
-    let errors = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let errors = Rc::new(RefCell::new(Vec::<Js>::new()));
     let observed = errors.clone();
     f.exchange.base.on(
         "error",
@@ -1268,9 +1268,13 @@ fn malformed_ticker_fallback(prefix: Value) {
     assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'symbol')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'symbol')")
     );
 }
 
@@ -1452,7 +1456,7 @@ fn ticker_reads_defer_scalar_projection_until_source_mapping_completes() {
     );
 }
 
-fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
+fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Js>>> {
     let errors = Rc::new(RefCell::new(Vec::new()));
     let observed = errors.clone();
     f.exchange.base.on(
@@ -1480,9 +1484,13 @@ fn portfolio_orders_defer_projection_until_source_mapping_completes() {
     assert!(rows.is_empty());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'orderCode')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'orderCode')")
     );
 }
 
@@ -1501,9 +1509,13 @@ fn portfolio_positions_defer_projection_until_source_mapping_completes() {
     assert!(rows.is_empty());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'side')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'side')")
     );
 }
 
