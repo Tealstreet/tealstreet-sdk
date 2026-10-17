@@ -259,3 +259,10 @@ private socket frame for both Coinbase variants with an unrelated host clock.
 the source formatOrder object literal. The production transport regression
 observes exact encoded POST bytes for Coinbase and CoinbaseSpot; it drives the
 real class graph, signers, client factory and installed transport adapter.
+
+Concrete order generation, client-ID minting and JWT nonce capabilities use the
+shared source UUID helper (`safe_cex_crypto::uuid::uuid_with_entropy`) with runtime
+entropy: generate nanoid21, then remove both separators. Generic runtime.unique_id
+has a separate host contract. Constructed UUID regressions exercise both variants,
+exact POST client IDs, optimistic parent IDs, mint entropy consumption and signed
+JWT headers; Node-derived Ed25519 public keys verify the actual wire token.
