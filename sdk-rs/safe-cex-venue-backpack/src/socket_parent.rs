@@ -65,7 +65,10 @@ impl WsParent for Parent {
         self.live()?.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.base.emit(event, Value::String(message.into()))
+        self.live()?.base.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.base.sync_socket_health_to_store()

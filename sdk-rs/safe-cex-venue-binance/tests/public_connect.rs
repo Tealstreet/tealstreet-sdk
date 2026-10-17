@@ -329,7 +329,9 @@ fn public_connect_matches_source_through_owned_core() {
         );
         let mut sentinel = ExchangeError::new("fixture market connect");
         sentinel.name = "RangeError".into();
-        sentinel.code = Some(json!("market-code"));
+        sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "market-code"
+        )));
         let market = || {
             runtime.trace.borrow_mut().push(json!(["market"]));
             if case["childFails"] == true {
@@ -354,7 +356,7 @@ fn public_connect_matches_source_through_owned_core() {
             case["optionsReads"],
             "public connect disposed guard precedes options read case{index}"
         );
-        let error=result.err().map(|error|json!({"same":error==sentinel,"name":error.name,"message":error.message,"code":error.code}));
+        let error=result.err().map(|error|json!({"same":error==sentinel,"name":error.name,"message":error.message,"code":observed_error_code(&error.code)}));
         assert_eq!(
             json!({"trace":*runtime.trace.borrow(),"error":error}),
             json!({"trace":case["trace"],"error":case["error"]}),
@@ -472,7 +474,9 @@ fn public_dispose_matches_source_child_before_base() {
         parent.disposed.set(case["disposed"] == true);
         let mut sentinel = ExchangeError::new("fixture market disposal");
         sentinel.name = "RangeError".into();
-        sentinel.code = Some(json!("dispose-code"));
+        sentinel.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "dispose-code"
+        )));
         let attempts = case["attempts"].as_array().unwrap();
         assert_eq!(
             attempts.len(),
@@ -497,7 +501,7 @@ fn public_dispose_matches_source_child_before_base() {
                 dispose_binance_pm_public(&socket, child)
             };
             let error = result.err().map(
-                |e| json!({"same":e==sentinel,"name":e.name,"message":e.message,"code":e.code}),
+                |e| json!({"same":e==sentinel,"name":e.name,"message":e.message,"code":observed_error_code(&e.code)}),
             );
             assert_eq!(
                 json!(error),
@@ -1705,4 +1709,17 @@ fn prototype_scalar_length_matrix_matches_source_after_native_assertions() {
         source, native,
         "source scalar length corpus agrees after all native assertions"
     );
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

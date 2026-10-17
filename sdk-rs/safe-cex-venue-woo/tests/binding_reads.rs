@@ -34,7 +34,7 @@ fn errors(h: &Harness) -> Rc<RefCell<Vec<String>>> {
     h.venue().base().on(
         "error",
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.to_string());
+            sink.borrow_mut().push(data.to_display());
             Ok(())
         }),
     );
