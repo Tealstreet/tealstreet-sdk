@@ -366,7 +366,9 @@ impl Client {
         match result {
             Err(_) => ProbeResult::Failed,
             Ok(execution) => {
-                let Ok(data) = response_data(&execution.receipt.response.body) else { return ProbeResult::Failed; };
+                let Ok(data) = response_data(&execution.receipt.response.body) else {
+                    return ProbeResult::Failed;
+                };
                 if get_bybit_response_meta(&data).is_success {
                     ProbeResult::Mismatch(probe.diagnostic.clone())
                 } else {
@@ -408,7 +410,8 @@ impl Client {
     ) -> Result<Execution, RestFailure> {
         let request = &execution.receipt.config;
         let response = &mut execution.receipt.response;
-        let mut data = response_data(&response.body).map_err(|error|RestFailure::pre_transmit(error.to_string(),request.clone()))?;
+        let mut data = response_data(&response.body)
+            .map_err(|error| RestFailure::pre_transmit(error.to_string(), request.clone()))?;
         let meta = get_bybit_response_meta(&data);
         if !meta.has_explicit_status && response.status >= 400 {
             let blocked = crate::api_request::blocked_by_cdn(&data);
@@ -434,7 +437,11 @@ impl Client {
             body.insert("retCode".into(), Value::from(response.status));
             data = Value::Object(body);
             set_message(&mut data, message);
-            response.body = RestResponseBody::Transformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(data).map_err(|error|RestFailure::pre_transmit(error.to_string(),request.clone()))?);
+            response.body = RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(data).map_err(
+                    |error| RestFailure::pre_transmit(error.to_string(), request.clone()),
+                )?,
+            );
             return Ok(execution);
         }
         if execution.flags.env_probe {
@@ -468,7 +475,12 @@ impl Client {
                 .maybe_prepend_env_mismatch(meta.ret_code, meta.ret_msg.clone(), request)
                 .await?;
             set_message(&mut data, message);
-            response.body = RestResponseBody::Transformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone()).map_err(|error|RestFailure::pre_transmit(error.to_string(),request.clone()))?);
+            response.body = RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(data.clone())
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(error.to_string(), request.clone())
+                    })?,
+            );
         }
         let final_meta = get_bybit_response_meta(&data);
         if safe_cex_num::js_truthy(Some(&data))
@@ -603,7 +615,12 @@ fn retry_bybit<'a>(
             } else {
                 let rejected = !signature_retry.get()
                     && error.response.as_deref().is_some_and(|response| {
-                        response.body.clone().into_data().into_value().is_ok_and(|data|crate::api::is_bybit_sign_rejection(&data))
+                        response
+                            .body
+                            .clone()
+                            .into_data()
+                            .into_value()
+                            .is_ok_and(|data| crate::api::is_bybit_sign_rejection(&data))
                     });
                 if rejected {
                     signature_retry.set(true);

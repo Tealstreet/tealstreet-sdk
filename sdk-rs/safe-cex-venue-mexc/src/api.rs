@@ -58,13 +58,19 @@ pub fn is_mexc_public_endpoint(url: Option<&str>) -> bool {
     })
 }
 
-pub fn normalize_request_data(data: &safe_cex_types::retained_json::RetainedJsonInput) -> Result<String, JsCoercionError> {
+pub fn normalize_request_data(
+    data: &safe_cex_types::retained_json::RetainedJsonInput,
+) -> Result<String, JsCoercionError> {
     match data {
-        safe_cex_types::retained_json::RetainedJsonInput::Undefined | safe_cex_types::retained_json::RetainedJsonInput::Null => Ok(String::new()),
-        safe_cex_types::retained_json::RetainedJsonInput::Text(units) => String::from_utf16(units).map_err(|_|JsCoercionError{name:"RepresentationError",message:"request text is outside the UTF-8 preimage boundary"}),
+        safe_cex_types::retained_json::RetainedJsonInput::Undefined
+        | safe_cex_types::retained_json::RetainedJsonInput::Null => Ok(String::new()),
+        safe_cex_types::retained_json::RetainedJsonInput::Text(units) => String::from_utf16(units)
+            .map_err(|_| JsCoercionError {
+                name: "RepresentationError",
+                message: "request text is outside the UTF-8 preimage boundary",
+            }),
         _ => Ok(safe_cex_num::js_retained_json_stringify(data)?.unwrap_or_default()),
     }
-
 }
 
 // ts: serializeMexcParams. qs's default RFC3986 codec encodes brackets too.

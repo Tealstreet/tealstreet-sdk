@@ -232,7 +232,12 @@ fn server_time_actual_typescript() {
             message: "fixture failure".into(),
             response: Some(Box::new(RestResponse {
                 status: 429,
-                ..response(RestResponseBody::Transformed(json!({"error":"limit"})))
+                ..response(RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"error":"limit"}),
+                    )
+                    .unwrap(),
+                ))
             })),
             request: Box::new(RestRequest {
                 url: "/changed".into(),

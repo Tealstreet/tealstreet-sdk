@@ -499,13 +499,19 @@ impl MexcPublicProtocol {
             safe_cex_transport::socket::SocketFrame::Binary(bytes) => {
                 // MEXC's JS handler calls String(data); Node Buffer conversion
                 // replaces invalid UTF-8, matching from_utf8_lossy here.
-                return Some(safe_cex_transport::how::big_int_as_string_json_parse(
-                    &String::from_utf8_lossy(bytes),
-                ).into_value().ok()?);
+                return Some(
+                    safe_cex_transport::how::big_int_as_string_json_parse(
+                        &String::from_utf8_lossy(bytes),
+                    )
+                    .into_value()
+                    .ok()?,
+                );
             }
             safe_cex_transport::socket::SocketFrame::Close { .. } => return None,
         };
-        safe_cex_transport::how::big_int_as_string_json_parse(text).into_value().ok()
+        safe_cex_transport::how::big_int_as_string_json_parse(text)
+            .into_value()
+            .ok()
     }
 
     fn emit_receive_diagnostics(

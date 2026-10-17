@@ -460,13 +460,19 @@ fn response_cases() -> Vec<Value> {
         response(r#"{"retCode":0,"retMsg":"OK"}"#),
     ]);
     second.owner.base.record_auth_failure();
-    let execution = ready(second.api.execute_with_receipt(RestRequest {
-        method: "post".into(),
-        url: "/private".into(),
-        body: Some(RestBody::Untransformed(json!({"x":1}))),
-        ..Default::default()
-    }))
-    .unwrap();
+    let execution =
+        ready(
+            second.api.execute_with_receipt(RestRequest {
+                method: "post".into(),
+                url: "/private".into(),
+                body: Some(RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"x":1}))
+                        .unwrap(),
+                )),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
     assert_eq!(
         second.wire.requests.borrow().len(),
         2,
@@ -591,7 +597,12 @@ fn retry_config_cases() -> Vec<Value> {
         let signature_error = id == "signature-error-empty-method";
         let first_reply = if signature_error {
             Reply::RejectedMethod {
-                body: RestResponseBody::Transformed(json!({"ret_msg":"error sign!"})),
+                body: RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"ret_msg":"error sign!"}),
+                    )
+                    .unwrap(),
+                ),
                 method: "",
             }
         } else {
@@ -607,7 +618,10 @@ fn retry_config_cases() -> Vec<Value> {
         let mut request = get(url);
         request.method = method.into();
         if method == "post" {
-            request.body = Some(RestBody::Untransformed(json!({"x":1})));
+            request.body = Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"x":1}))
+                    .unwrap(),
+            ));
         }
         let result = ready(f.api.execute_with_receipt(request));
         assert_eq!(
@@ -761,8 +775,14 @@ fn transform_cases() -> Vec<Value> {
         };
         let body = match kind {
             "physical" => RestResponseBody::Encoded(raw.as_bytes().to_vec()),
-            "prior-transformed" => RestResponseBody::Transformed(Value::String(raw)),
-            _ => RestResponseBody::Untransformed(Value::String(raw)),
+            "prior-transformed" => RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(Value::String(raw))
+                    .unwrap(),
+            ),
+            _ => RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(Value::String(raw))
+                    .unwrap(),
+            ),
         };
         let f = fixture(vec![Reply::Response(body)]);
         let traffic = matches!(
@@ -1298,7 +1318,10 @@ fn retry_condition_cases() -> Vec<Value> {
         let body: Value = serde_json::from_str(raw).unwrap();
         let mut request = get("/private");
         request.method = "post".into();
-        request.body = Some(RestBody::Untransformed(json!({"request":true})));
+        request.body = Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"request":true}))
+                .unwrap(),
+        ));
         let f = fixture(vec![
             Reply::Rejected(RestResponseBody::Encoded(raw.as_bytes().to_vec())),
             response(r#"{"retCode":0,"retMsg":"OK"}"#),
@@ -1450,7 +1473,10 @@ fn native_resolved_signature_rejection_resends_once() {
         let f = fixture(replies);
         let mut request = get("/private");
         request.method = "post".into();
-        request.body = Some(RestBody::Untransformed(json!({"request":true})));
+        request.body = Some(RestBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"request":true}))
+                .unwrap(),
+        ));
         let result = ready(f.api.execute_with_receipt(request)).unwrap();
         let requests = f.wire.requests.borrow();
         assert_eq!(
@@ -1521,7 +1547,12 @@ fn native_request_retry_override_retains_source_budget() {
         let mut request = get("/private");
         if !network {
             request.method = "post".into();
-            request.body = Some(RestBody::Untransformed(json!({"request":true})));
+            request.body = Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    json!({"request":true}),
+                )
+                .unwrap(),
+            ));
         }
         request.config_extensions.insert(
             "axios-retry".into(),

@@ -880,7 +880,13 @@ fn mexc_factory_native_utf8_refusal_and_response_projection() {
             "factory native Unicode response status"
         );
         assert!(
-            matches!(response.body, RestResponseBody::Transformed(Value::Null)),
+            matches!(
+                response.body,
+                RestResponseBody::Transformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(Value::Null)
+                        .unwrap()
+                )
+            ),
             "factory native actual lone-surrogate response projects to transformed Null"
         );
         assert_eq!(
@@ -1324,7 +1330,10 @@ fn mexc_signature_rejection_resends_once_with_a_fresh_signature() {
                 method: "post".into(),
                 url: "/private".into(),
                 body: Some(RestBody::Untransformed(
-                    json!({"symbol":"BTC_USDT","vol":1}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"symbol":"BTC_USDT","vol":1}),
+                    )
+                    .unwrap(),
                 )),
                 ..Default::default()
             }

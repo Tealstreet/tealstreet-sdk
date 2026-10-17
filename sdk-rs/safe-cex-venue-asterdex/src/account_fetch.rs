@@ -57,15 +57,35 @@ impl AccountFetch {
         url: String,
         body: Option<Value>,
     ) -> Result<Value, ExchangeError> {
-        let response = adapter.execute(RestRequest { method: method.into(), url, body: body.map(safe_cex_types::retained_json::RetainedJsonInput::from_value).transpose().map_err(|error|ExchangeError::new(error.to_string()))?.map(RestBody::Untransformed), ..Default::default() }).await.map_err(|failure| {
-            // Preserve the available shared REST failure metadata, rather than
-            // inventing a JS Error object identity at the native boundary.
-            let method=failure.request.method.clone(); let url=failure.request.url.clone();
-            let mut error:ExchangeError=failure.into();
-            error.is_axios_error=true;error.method=Some(method);error.url=Some(url);
-            error
-        })?;
-        response.body.transform_axios_response().map_err(|error|ExchangeError::new(error.to_string()))?.json_value().map_err(|error|ExchangeError::new(error.to_string()))
+        let response = adapter
+            .execute(RestRequest {
+                method: method.into(),
+                url,
+                body: body
+                    .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                    .transpose()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?
+                    .map(RestBody::Untransformed),
+                ..Default::default()
+            })
+            .await
+            .map_err(|failure| {
+                // Preserve the available shared REST failure metadata, rather than
+                // inventing a JS Error object identity at the native boundary.
+                let method = failure.request.method.clone();
+                let url = failure.request.url.clone();
+                let mut error: ExchangeError = failure.into();
+                error.is_axios_error = true;
+                error.method = Some(method);
+                error.url = Some(url);
+                error
+            })?;
+        response
+            .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
+            .json_value()
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     fn finish<T>(
         &self,

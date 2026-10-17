@@ -113,9 +113,12 @@ fn api(replies: Vec<Value>) -> (BingxApi, Rc<Venue>) {
 fn signed(request: &RestRequest) -> serde_json::Map<String, Value> {
     match (&request.params, &request.body) {
         (Some(Value::Object(params)), None) => params.clone(),
-        (_, Some(RestBody::Untransformed(Value::String(text)))) => {
-            serde_json::from_str(text).unwrap()
-        }
+        (
+            _,
+            Some(RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::Text(
+                text,
+            ))),
+        ) => serde_json::from_str(&String::from_utf16(text).unwrap()).unwrap(),
         other => panic!("unexpected signed shape {other:?}"),
     }
 }
@@ -131,7 +134,14 @@ fn bingx_resends_one_resolved_signature_rejection_re_signed() {
             method: method.into(),
             url: "/openApi/swap/v2/trade/order".into(),
             params: Some(json!({"symbol":"BTC-USDT"})),
-            body: (method == "POST").then(|| RestBody::Untransformed(json!({"symbol":"BTC-USDT"}))),
+            body: (method == "POST").then(|| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"symbol":"BTC-USDT"}),
+                    )
+                    .unwrap(),
+                )
+            }),
             ..Default::default()
         };
         let (bingx, venue) = api(vec![rejection.clone(), json!({"code":0})]);

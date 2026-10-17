@@ -155,7 +155,10 @@ impl BingxAmendment {
             .send(RestRequest {
                 method: "POST".into(),
                 url: url.into(),
-                body: Some(RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::from_value(body).map_err(|error|ExchangeError::new(error.to_string()))?)),
+                body: Some(RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                        .map_err(|error| ExchangeError::new(error.to_string()))?,
+                )),
                 ..Default::default()
             })
             .await;

@@ -24,7 +24,9 @@ struct ResponseTransform {
 }
 fn transform_response(response: &mut RestResponse) {
     response.body = response.body.clone().transform(|data| match data {
-        safe_cex_types::retained_json::RetainedJsonInput::Text(text) => safe_cex_transport::how::big_int_as_string_json_parse(&String::from_utf16_lossy(&text)),
+        safe_cex_types::retained_json::RetainedJsonInput::Text(text) => {
+            safe_cex_transport::how::big_int_as_string_json_parse(&String::from_utf16_lossy(&text))
+        }
         data => data,
     });
 }
@@ -137,9 +139,17 @@ impl RestAdapter for MexcAttempt {
                 if !body.is_empty() {
                     request.body = Some(match request.body.as_ref() {
                         Some(previous) => previous
-                            .with_signed_data(safe_cex_types::retained_json::RetainedJsonInput::Text(body.encode_utf16().collect()))
+                            .with_signed_data(
+                                safe_cex_types::retained_json::RetainedJsonInput::Text(
+                                    body.encode_utf16().collect(),
+                                ),
+                            )
                             .map_err(|e| RestFailure::from_transport(e, request.clone()))?,
-                        None => RestBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::Text(body.encode_utf16().collect())),
+                        None => RestBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::Text(
+                                body.encode_utf16().collect(),
+                            ),
+                        ),
                     });
                 }
                 let recv = self

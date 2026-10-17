@@ -286,8 +286,9 @@ impl Attempt {
             .transpose()
             .map_err(|e| e.to_string())?;
         // A replayed config carries the body Axios already serialized: sign those bytes.
-        let body = if let Some(safe_cex_types::retained_json::RetainedJsonInput::Text(text)) = body {
-            String::from_utf16(text).map_err(|error|error.to_string())?
+        let body = if let Some(safe_cex_types::retained_json::RetainedJsonInput::Text(text)) = body
+        {
+            String::from_utf16(text).map_err(|error| error.to_string())?
         } else if body.is_some_and(safe_cex_num::js_retained_truthy) {
             safe_cex_num::js_retained_json_stringify(body.unwrap())
                 .map_err(|e| e.to_string())?

@@ -67,7 +67,9 @@ impl ReadTransport for Transport {
             }
             if let Some(body) = request.body {
                 let data = match body {
-                    RestBody::Untransformed(v) => safe_cex_exchange::js_runtime::value::from_retained_input(v),
+                    RestBody::Untransformed(v) => {
+                        safe_cex_exchange::js_runtime::value::from_retained_input(v)
+                    }
                     other => Js::str(&String::from_utf8_lossy(
                         &other
                             .wire_bytes()
@@ -101,7 +103,9 @@ impl ReadTransport for Transport {
                         }
                         let body = config.get("data")?;
                         if !body.is_nullish() {
-                            next.body = Some(RestBody::Untransformed(safe_cex_exchange::js_runtime::value::to_retained_input(&body)?));
+                            next.body = Some(RestBody::Untransformed(
+                                safe_cex_exchange::js_runtime::value::to_retained_input(&body)?,
+                            ));
                         }
                         let next = api.prepare(next).map_err(Thrown::from)?;
                         config.define(
@@ -111,7 +115,9 @@ impl ReadTransport for Transport {
                         config.define(
                             "data",
                             match next.body {
-                                Some(RestBody::Untransformed(v)) => safe_cex_exchange::js_runtime::value::from_retained_input(v),
+                                Some(RestBody::Untransformed(v)) => {
+                                    safe_cex_exchange::js_runtime::value::from_retained_input(v)
+                                }
                                 _ => Js::Undefined,
                             },
                         )?;
@@ -143,7 +149,9 @@ impl ReadTransport for Transport {
                         );
                         if let Some(response) = response {
                             let raw = response.get("data").map_err(error)?;
-                            let data = safe_cex_exchange::js_runtime::value::to_retained_input(&raw).map_err(error)?;
+                            let data =
+                                safe_cex_exchange::js_runtime::value::to_retained_input(&raw)
+                                    .map_err(error)?;
                             failure.response = Some(Box::new(safe_cex_transport::RestResponse {
                                 status: response
                                     .get("status")
@@ -366,7 +374,9 @@ impl ApiHost for Host {
                     status: s as u16,
                     reason: None,
                     headers: Default::default(),
-                    body: safe_cex_transport::RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::Null),
+                    body: safe_cex_transport::RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::Null,
+                    ),
                 })
             });
             Ok(Js::Bool(
@@ -400,7 +410,10 @@ impl ApiHost for Host {
         )
         .map_err(error)
     }
-    fn serialize(&self, params: &safe_cex_types::retained_json::RetainedJsonInput) -> Result<String, ExchangeError> {
+    fn serialize(
+        &self,
+        params: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<String, ExchangeError> {
         self.scope
             .globals
             .get("qs")

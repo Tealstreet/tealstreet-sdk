@@ -148,10 +148,15 @@ pub async fn fetch_legacy_transaction_history_rows(
         match adapter.execute(request.clone()).await {
             Ok(response) => {
                 let data = match response.body.into_data() {
-                    safe_cex_types::retained_json::RetainedJsonInput::Text(text) => safe_cex_types::retained_json::RetainedJsonInput::parse_json(&text).unwrap_or(safe_cex_types::retained_json::RetainedJsonInput::Null),
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(text) => {
+                        safe_cex_types::retained_json::RetainedJsonInput::parse_json(&text)
+                            .unwrap_or(safe_cex_types::retained_json::RetainedJsonInput::Null)
+                    }
                     native => native,
                 };
-                let data=data.into_value().map_err(|error|RestFailure::pre_transmit(error.to_string(),request))?;
+                let data = data
+                    .into_value()
+                    .map_err(|error| RestFailure::pre_transmit(error.to_string(), request))?;
                 let rows = crate::response::parse_transaction_rows_from_response(&data);
                 if !rows.is_empty() {
                     return Ok(rows.to_vec());

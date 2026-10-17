@@ -337,7 +337,12 @@ impl RestAdapter for Adapter {
                     status: 503,
                     reason: None,
                     headers: Default::default(),
-                    body: RestResponseBody::Untransformed(json!({"msg":message})),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"msg":message}),
+                        )
+                        .unwrap(),
+                    ),
                 }));
             }
             if let Some(text) = row["responseBodyText"].as_str() {
@@ -347,8 +352,18 @@ impl RestAdapter for Adapter {
                     headers: Default::default(),
                     body: match self.path {
                         0 => RestResponseBody::Encoded(text.as_bytes().to_vec()),
-                        1 => RestResponseBody::Untransformed(Value::String(text.into())),
-                        _ => RestResponseBody::Transformed(Value::String(text.into())),
+                        1 => RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                Value::String(text.into()),
+                            )
+                            .unwrap(),
+                        ),
+                        _ => RestResponseBody::Transformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                Value::String(text.into()),
+                            )
+                            .unwrap(),
+                        ),
                     },
                 }));
             }

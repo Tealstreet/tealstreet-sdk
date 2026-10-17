@@ -77,7 +77,12 @@ impl Client {
                     req.params = Some(wire(&config.params)?);
                 }
                 if !matches!(&*config.data, JsJsonValue::Undefined) {
-                    req.body = Some(RestBody::Untransformed(safe_cex_exchange::js_runtime::value::to_retained_input(&Native::from_prepared((*config.data).clone())).map_err(|error|error.to_exchange_error())?));
+                    req.body = Some(RestBody::Untransformed(
+                        safe_cex_exchange::js_runtime::value::to_retained_input(
+                            &Native::from_prepared((*config.data).clone()),
+                        )
+                        .map_err(|error| error.to_exchange_error())?,
+                    ));
                 }
                 let executor = client.executor.borrow().clone();
                 let response = executor.execute(req.clone()).await;
@@ -99,7 +104,9 @@ impl Client {
                             .unwrap_or_else(|_| {
                                 Value::String(String::from_utf8_lossy(&bytes).into_owned())
                             }),
-                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v.into_value().map_err(|error|ExchangeError::new(error.to_string()))?,
+                        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v
+                            .into_value()
+                            .map_err(|error| ExchangeError::new(error.to_string()))?,
                     };
                     let response = Rc::new(api::Response {
                         data: data.into(),

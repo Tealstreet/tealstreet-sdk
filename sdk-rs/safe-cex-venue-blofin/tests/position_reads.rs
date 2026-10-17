@@ -196,7 +196,12 @@ impl RestAdapter for Adapter<'_> {
                         status: 503,
                         reason: None,
                         headers: Default::default(),
-                        body: RestResponseBody::Untransformed(json!({"msg":hint})),
+                        body: RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                                json!({"msg":hint}),
+                            )
+                            .unwrap(),
+                        ),
                     }));
                 }
                 return Poll::Ready(Err(err));

@@ -22,7 +22,12 @@ fn signature_predicate_type_error_survives_the_exchange_boundary() {
         status: 401,
         reason: None,
         headers: Default::default(),
-        body: RestResponseBody::Untransformed(json!({"code":{"toString":0}})),
+        body: RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                json!({"code":{"toString":0}}),
+            )
+            .unwrap(),
+        ),
     }));
     let predicate: IsSignatureRejection = Rc::new(is_binance_style_signature_rejection);
     let failure =

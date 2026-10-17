@@ -522,14 +522,19 @@ impl BybitExchange {
         crate::submission::submit_create_orders(
             payloads,
             |payload| async move {
-                let mut request=RestRequest {
-                    method:"post".into(),
-                    url:crate::types::ENDPOINTS["CREATE_ORDER"].as_str().expect("static endpoint").into(),
+                let mut request = RestRequest {
+                    method: "post".into(),
+                    url: crate::types::ENDPOINTS["CREATE_ORDER"]
+                        .as_str()
+                        .expect("static endpoint")
+                        .into(),
                     ..Default::default()
                 };
-                let data=safe_cex_types::retained_json::RetainedJsonInput::from_value(payload)
-                    .map_err(|error|RestFailure::pre_transmit(error.to_string(),request.clone()))?;
-                request.body=Some(RestBody::Untransformed(data));
+                let data = safe_cex_types::retained_json::RetainedJsonInput::from_value(payload)
+                    .map_err(|error| {
+                        RestFailure::pre_transmit(error.to_string(), request.clone())
+                    })?;
+                request.body = Some(RestBody::Untransformed(data));
                 self.xhr().request(request).await
             },
             report_failure,
