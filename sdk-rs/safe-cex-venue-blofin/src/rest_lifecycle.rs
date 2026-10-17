@@ -170,12 +170,6 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                     .filter(|v| js_truthy(Some(v)))
                     .or_else(|| row.get("minSize")),
             )?;
-            // Typed info JSON cannot carry a newly computed NaN/Infinity.
-            if !contract.is_finite() || !lot.is_finite() {
-                return Err(input(
-                    "Nonfinite market info numbers are outside the native JSON model",
-                ));
-            }
             let id = row.get("instId").and_then(Value::as_str).ok_or_else(|| {
                 input(match row.get("instId") {
                     None => "Cannot read properties of undefined (reading 'replace')",
@@ -192,8 +186,8 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                 .and_then(Value::as_str)
                 .ok_or_else(|| input("Market quoteCurrency requires a native String"))?;
             let mut info = row.as_object().expect("filtered object").clone();
-            info.insert("contractValue".into(), json!(contract));
-            info.insert("lotSize".into(), json!(lot));
+            info.insert("contractValue".into(), info_number(contract));
+            info.insert("lotSize".into(), info_number(lot));
             markets.push(Market {
                 id: id.into(),
                 symbol: id.strip_suffix("-SWAP").unwrap_or(id).replace('-', ""),
@@ -237,6 +231,18 @@ pub async fn fetch_markets<E: std::fmt::Display>(
             emit(host, Some(&error_value(&e, false, None)))?;
             Ok(store.markets().to_vec())
         }
+    }
+}
+/// ts: `info` keeps the parsed number. JSON has no NaN/Infinity, so NaN becomes null
+/// (falsy, parses to NaN) and ±Infinity its string (truthy, parses back) for every
+/// Blofin reader of `info.contractValue` / `info.lotSize`.
+fn info_number(value: f64) -> Value {
+    if value.is_nan() {
+        Value::Null
+    } else if value.is_infinite() {
+        json!(if value > 0.0 { "Infinity" } else { "-Infinity" })
+    } else {
+        json!(value)
     }
 }
 fn timeframe(v: Timeframe) -> (&'static str, f64, char) {
