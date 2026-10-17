@@ -62,7 +62,22 @@ twenty native owners must pass before the next mutation starts.
 | STP V0 becomes V1 | STP response parser |
 | Isolated/cross margin type inverted | Margin request builder |
 
-Verification results are pending the native baseline and compiled controls.
+Measured results: actual TS passed all 274 expectations across twenty owners;
+fresh native/default production probes produced twenty runtime receipts, zero
+classification-only receipts and zero failed owners. All ten isolated compiled
+faults failed exactly their named owners (2, 2, 2, then seven single-owner faults).
+All ten exact restores passed all twenty owners. Compiler errors were refused as
+control evidence. Per-run logs and JSON receipts were retained in the local
+`asterdex-projection-controls-8eo4gtpx` directory.
+
+Reproduce with the provisioned TypeScript oracle dependency path and Rust toolchain:
+
+```sh
+node sdk-rs/safe-cex-venue-asterdex/scripts/accepted-projection-contracts.mjs
+python3 sdk-rs/safe-cex-venue-asterdex/scripts/accepted-projection-controls.py
+```
+
+The final refreshed native/parity checks are pending.
 
 The leverage-bracket response helper remains outside this batch: its separate
 key-identity repair is PR #380, and its array-like input behavior needs independent
