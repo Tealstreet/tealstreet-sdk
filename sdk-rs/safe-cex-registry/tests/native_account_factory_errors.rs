@@ -32,7 +32,7 @@ async fn proxied_account(
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange: exchange.into(),
         options: json!({"key":"test-key","secret":"test-secret","passphrase":"test-passphrase","tealstreetProxy":true,"tealstreetTunnel":false,
-            "overrideProxyUrl":origin}),
+            "overrideProxyUrl":origin}).into(),
         account_name: None,
         sign: None,
         proxy_token: Some(Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) }))),
@@ -53,7 +53,9 @@ async fn error_events_for(exchange: &str, reply: Value) -> Vec<Value> {
         &account,
         Rc::new(move |name, data| {
             if name == "error" {
-                recorded.borrow_mut().push(data.clone());
+                recorded
+                    .borrow_mut()
+                    .push(support::boundary_json(data.clone()));
             }
         }),
         Rc::new(|_| {}),

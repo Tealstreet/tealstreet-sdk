@@ -222,3 +222,13 @@ checked directly; later Date errors still propagate. The 152-case pure source
 corpus is unchanged. Its two historical unknown-side refusal labels now have
 positive native ModelField assertions and all-field comparisons, with explicit
 115 mapped / 37 refused / 2 recovered-side floors; prototype refusals remain.
+
+Constructed REST order reads apply the final strict-field policy to id/market:
+finish source numeric/Date work, report the offending field and value, refuse only
+that row and retain good rows. All-refused pages return empty. Source failures
+still reject through the original catch/log path. The binding uses the existing
+generic mapper with optional results; its normalizer and public utility share one
+pipeline, with unchanged identity-only refusal messages. Twelve mixed-page native
+profiles plus all-refused/Date-error regressions execute the real Exchange. A
+separate maintained-method probe pins TS retaining the raw malformed fields;
+this per-row loss is intentional and does not widen shared IDs or assets.
