@@ -142,10 +142,12 @@ separate pending rows.
 Value construction; preserve unknown raw info keys and numeric ingress. The
 shared owned info copy differs from the source alias, and None differs from its
 own undefined timeInForce property. Observe both boundaries in the oracle.
-Required non-string identity/size fields and unsupported side/prototype enum
-values fail visibly. Numeric created_at values are epoch milliseconds passed
-through shared TimeClip, including truncation, invalid range and positive-zero
-normalization; string dates retain the existing parser and timezone capability.
+Required non-string identity fields and unsupported side/prototype enum values
+fail visibly. Size and remaining_size use the shared String/parseFloat coercion,
+including numeric inputs and NaN from missing or nonnumeric values. created_at
+retains Date conversion: null/false become +0, true becomes 1, missing becomes
+NaN, Numbers use TimeClip, and other JSON data is string-converted then parsed.
+String dates retain the existing parser and timezone capability.
 The constructed REST regression checks startup and Store order loading. Preserve boolean reduce_only priority over flags, trigger display-price
 selection, unclamped filled subtraction and created_at dates. Shared js_date_parse
 requires the host's local-to-UTC capability; the mapper corpus pins UTC only.
