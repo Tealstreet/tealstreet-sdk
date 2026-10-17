@@ -253,3 +253,9 @@ The field-identity supplement asserts all seven decoded chunk/Candle numeric fie
 The narrowed monthly chart operations now use the same Date/TimeClip semantics
 as the millisecond helpers. `tests/monthly_behavior.rs` independently covers all
 four operations, including original-year remapping before close-month rollover.
+
+The final shared-type decision retains typed Candle as an accepted cache residual.
+Malformed persisted fields miss and refetch; they must not turn into a request
+error or an invented numeric value. The 48-case native miss/refetch regression,
+source residual witness and compiled error-propagation control are documented in
+GATE_EVIDENCE.md.
