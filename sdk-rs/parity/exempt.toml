@@ -2089,22 +2089,6 @@ rs = "safe-cex-store/src/notification.rs::StoreNotificationError::from_subscribe
 reason = "External Store implementors construct notification-origin failures with their assigned subscriber identity and original callback cause; no standalone TypeScript declaration."
 
 [[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionError"
-reason = "Adapted fallible subscription sender boundary retains shared coercion and injected ExchangeError without flattening; source throws synchronously, no separate TS error declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::active_subscriptions"
-reason = "Owned native inspection of source private activeSubscriptions Set for caller state/effect witnesses; not a new protocol operation."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput"
-reason = "Adapted caller input evaluation boundary for separate source key/envelope stringify reads; prepared JsJsonValue remains supported, general JS getter/toJSON objects are not a native JSON carrier."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput::evaluate"
-reason = "Fallible captured JSON-data read per source stringify evaluation; native adapters expose independent effects without a venue-local serializer or implicit JSON projection."
-
-[[exempt]]
 rs = "safe-cex-types/src/validation_error.rs::AccountValidationError"
 reason = "Shared runtime validation error carrier preserves source non-string JSON values without coercion; static declaration projection is recorded on ValidateAccountResult."
 
