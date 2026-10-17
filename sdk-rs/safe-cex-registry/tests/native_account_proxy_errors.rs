@@ -82,7 +82,7 @@ fn tealstreet_proxy_auth_failure_emits_error() {
         assert!(
             events
                 .iter()
-                .any(|data| data.as_str().is_some_and(|message| message
+                .any(|data| data[0].as_str().is_some_and(|message| message
                     .starts_with("[binance] Tealstreet proxy auth failed (401): ")
                     && message.contains("Invalid JWT"))),
             "{events:?}"
@@ -99,7 +99,7 @@ fn upstream_auth_failure_via_proxy_emits_error() {
         assert!(
             events
                 .iter()
-                .any(|data| data.as_str().is_some_and(|message| message
+                .any(|data| data[0].as_str().is_some_and(|message| message
                     .starts_with("[binance] Upstream exchange auth failed via proxy (401): "))),
             "{events:?}"
         );
@@ -112,7 +112,7 @@ fn proxy_server_error_emits_error() {
         let events = error_events(json!({"__status":502,"body":"bad gateway"})).await;
         assert!(
             events.iter().any(|data| {
-                data.as_str().is_some_and(|message| {
+                data[0].as_str().is_some_and(|message| {
                     message.starts_with("[binance] Proxy server error (502): ")
                 })
             }),

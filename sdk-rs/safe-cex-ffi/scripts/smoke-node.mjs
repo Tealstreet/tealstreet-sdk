@@ -20,3 +20,4 @@ execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-call
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-errors.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-store.test.mjs')], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-values.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-events.test.mjs')], { stdio: 'inherit' });
