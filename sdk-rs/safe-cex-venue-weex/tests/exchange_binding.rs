@@ -53,7 +53,7 @@ fn script(http: &Http) {
         ),
         (
             "BALANCE",
-            json!([{"asset":"USDT","equity":"150","available":"120","unrealizedPnl":"3"}]),
+            json!([{"asset":"USDT","balance":"150","availableBalance":"120","unrealizedPnl":"3"}]),
         ),
         (
             "POSITIONS",
@@ -656,18 +656,15 @@ fn private_positions_frame_updates_the_real_store() {
 
 #[test]
 fn private_account_frame_refreshes_balance_in_the_real_store() {
-    let h = harness(options(), |http| {
-        script(http);
-        http.ok(
-            "GET",
-            endpoint("BALANCE"),
-            json!([{"asset":"USDT","equity":"285","available":"240","unrealizedPnl":"5"}]),
-        );
-    });
-    seed(&h);
+    let h = setup();
     expect_ok(h.drive(h.venue().start()));
     h.runtime.pump();
     assert_eq!(h.store.balance().total, 150.0);
+    h.http.replace(
+        "GET",
+        endpoint("BALANCE"),
+        json!([{"asset":"USDT","balance":"285","availableBalance":"240","unrealizePnl":"5"}]),
+    );
     let socket = h.venue().base().get_private_sockets()[0].clone();
     socket
         .on_message(&safe_cex_transport::socket::SocketFrame::Text(
@@ -678,5 +675,6 @@ fn private_account_frame_refreshes_balance_in_the_real_store() {
     h.runtime.advance(251.0);
     assert_eq!(h.store.balance().total, 285.0);
     assert_eq!(h.store.balance().free, 240.0);
+    assert_eq!(h.store.balance().upnl, 5.0);
     h.venue().dispose().unwrap();
 }
