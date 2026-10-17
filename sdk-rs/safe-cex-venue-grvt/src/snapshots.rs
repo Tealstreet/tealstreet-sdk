@@ -115,7 +115,7 @@ pub fn sync_balance_upnl_from_positions(
             if (old - derived).abs() > 1e-9 {
                 let mut patch = ModelPatch::default();
                 patch.set_number("unrealizedPnl", derived);
-                updates.push((position.id.clone(), patch));
+                updates.push((Some(position.id.clone()), patch));
             }
         } else if position.unrealized_pnl.is_finite() {
             total += position.unrealized_pnl;
