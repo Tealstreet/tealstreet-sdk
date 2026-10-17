@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs", "safe-cex-venue-bybit/src/binding/members/history.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/spot_exchange_reads.rs", "safe-cex-venue-bybit/src/binding/members/ohlcv.rs", "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs", "safe-cex-venue-bybit/src/binding/members/cancel.rs", "safe-cex-venue-bybit/src/binding/members/controls.rs", "safe-cex-venue-bybit/src/binding/members/orders.rs", "safe-cex-venue-bybit/src/binding/members/history.rs", "safe-cex-venue-bybit/src/rest_fills.rs", "safe-cex-venue-bybit/src/primary_fills.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -856,23 +856,23 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/history_mapping.rs::map_order_history_rows_to_executions"
 status = "divergent"
-note = "CHOSEN Shared pure fallback mapper extracted to safe-cex-venue-bybit/src/history_mapping.rs::map_order_history_rows_to_executions, independently checked against linear and inverse sources. CHOSEN typed Execution boundary rejects truthy non-string symbol or commissionAsset values which TypeScript preserves without validation. CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary: valid JSON fee-detail text containing a lone surrogate is refused as a whole at the representation boundary, losing otherwise valid fee siblings; TS parses it and retains their fee sum. A two-sided witness pins this separately from the typed Execution restriction. ts-bug: status filtering uses the source filled substring test and also accepts unfilled. Retains lazy fallible coercion, first-row dedupe and descending timestamp order. Does not claim pagination or REST fallback orchestration."
+note = "CHOSEN Native fallback mapper on the live receiver at safe-cex-venue-bybit/src/history_mapping.rs::map_order_history_rows_to_executions, independently checked against linear and inverse sources. CHOSEN typed Execution boundary rejects truthy non-string symbol or commissionAsset values which TypeScript preserves without validation. CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary: valid JSON fee-detail text containing a lone surrogate is refused as a whole at the representation boundary, losing otherwise valid fee siblings; TS parses it and retains their fee sum. A two-sided witness pins this separately from the typed Execution restriction. ts-bug: status filtering uses the source filled substring test and also accepts unfilled. Retains lazy fallible coercion, first-row dedupe and descending timestamp order. Production receiver/HTTP composition is covered by fill_history_binding; the mapper also retains its maintained source corpus."
 
 [[symbol]]
 ts = "BybitExchange#fetchExecutionsFallbackFromOrderHistory"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/rest_fills.rs::fetch_executions_fallback_from_order_history"
+status = "ported"
+note = "Actual receiver/HTTP order-history recovery preserves query windows, page-local deduplication, descending sort/limit, and throws that discard recovery prefixes. Primary/demo retain short then extended recovery; dedicated inverse retains its single 30-day policy."
 
 [[symbol]]
 ts = "BybitExchange.fetchHistoricalFills"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/rest_fills.rs::fetch_historical_fills"
+status = "ported"
+note = "Exchange dispatches actual primary/demo/inverse receivers through signed execution-history HTTP and native mappers. Preserves five-page cap, raw-row diagnostics, valid primary prefixes after later throws, source limit behavior, and actual order-history recovery; Spot inherits empty history. Compiled fresh-master family regressions and maintained reader source corpus cover production composition."
 
 [[symbol]]
 ts = "BybitExchange.fetchFillsForOrderIds"

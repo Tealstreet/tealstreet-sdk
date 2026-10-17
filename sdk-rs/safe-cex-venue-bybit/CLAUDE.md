@@ -719,3 +719,10 @@ Historical order reads now bind primary/demo to the native mapper and signed
 history client. Dedicated Spot/Inverse keep Base's empty method. Keep ascending
 inclusive windows, category order and first-seen ID deduplication before sorting
 and limits. All three ledger mappers share native numeric coercion.
+
+Historical fills now bind primary/demo and dedicated inverse through their real
+receiver, signed clients and native execution/fallback mappers. Keep the primary
+valid prefix on mapping errors, but discard a failed recovery accumulator. Source
+primary short/extended recovery differs from dedicated inverse single recovery;
+Spot inherits empty history. The full reader source corpus covers requests, results
+and diagnostics; mapper source corpora retain their separate scalar contracts.

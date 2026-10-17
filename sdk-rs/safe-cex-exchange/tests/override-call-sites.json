@@ -6290,6 +6290,13 @@
       {
         "receiver": "path",
         "kind": "reference",
+        "hook": "fetch_historical_fills",
+        "callee": "crate :: rest_fills :: fetch_historical_fills",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
         "hook": "fetch_historical_orders",
         "callee": "members :: history :: fetch_historical_orders",
         "count": 1

@@ -3,6 +3,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import orderBy from 'lodash/orderBy.js';
+import omitBy from 'lodash/omitBy.js';
 import memoize from 'lodash/memoize.js';
 import camelCase from 'lodash/camelCase.js';
 import snakeCase from 'lodash/snakeCase.js';
@@ -30,7 +31,7 @@ for (const name of ['bybit','bybitdemo','bybitinverse']) {
   }).join('\n');
   async function add(opts, executionPages, historyPages=[], publicOnly=false) {
     const calls=[], logs=[];
-    const context=vm.createContext({orderBy,memoize,camelCase,snakeCase,
+    const context=vm.createContext({orderBy,omitBy,memoize,camelCase,snakeCase,
       virtualClock:{getCurrentTimeMs:()=>1700000000000},
       console:{warn:message=>logs.push(`warn: ${message}`)},
     });
@@ -62,6 +63,7 @@ for (const name of ['bybit','bybitdemo','bybitinverse']) {
       return {data:pages.length?pages[Math.min(index,pages.length-1)]:page([])};
     }};
     const result=await owner.fetchHistoricalFills(opts);
+    assert.ok(logs.every(message=>!message.includes("is not defined")), logs.join("\n"));
     cases.push({name,opts,executionPages,historyPages,publicOnly,calls,logs,result});
   }
   await add({symbol:'BTCUSD'},[page([good])]);
@@ -77,7 +79,8 @@ for (const name of ['bybit','bybitdemo','bybitinverse']) {
   await add({symbol:'BTCUSD',limit:-1},[page([good])]);
   await add({symbol:''},[page([good])]);
   await add({symbol:'BTCUSD'},[page([good])],[],true);
+  await add({symbol:'BTCUSD',from:1},[page([])],[page([recovered],'next'),page([null])]);
   await add({symbol:'BTCUSD',from:1,limit:2},[page([])],[page([recovered,{...recovered,orderId:'newer',updatedTime:'1700000001000'}])]);
 }
-assert.equal(cases.length,42,'real reader source-case floor');
+assert.equal(cases.length,45,'real reader source-case floor');
 process.stdout.write(JSON.stringify(cases));

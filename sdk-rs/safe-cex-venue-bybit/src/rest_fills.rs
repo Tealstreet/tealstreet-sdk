@@ -214,11 +214,12 @@ pub(crate) async fn fetch_executions_fallback_from_order_history(
     let from = opts.get("from")?;
     let from = if from.is_nullish() {
         if to.is_undefined() {
-            let lookback = if lookback.is_undefined() {
-                rt.this.get("DEFAULT_EXECUTIONS_LOOKBACK_MS")?
-            } else {
-                lookback
-            };
+            let lookback =
+                if lookback.is_undefined() || venue(rt)?.base.name == ExchangeName::Bybitinverse {
+                    rt.this.get("DEFAULT_EXECUTIONS_LOOKBACK_MS")?
+                } else {
+                    lookback
+                };
             Js::Number(fallback_to.to_number()? - lookback.to_number()?)
         } else {
             Js::Undefined

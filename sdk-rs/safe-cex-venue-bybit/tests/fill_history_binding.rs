@@ -84,6 +84,39 @@ fn fill_history_preserves_a_valid_prefix_when_a_later_row_throws() {
 }
 
 #[test]
+fn fill_history_discards_recovery_prefix_when_a_later_page_throws() {
+    for name in [
+        ExchangeName::Bybit,
+        ExchangeName::Bybitdemo,
+        ExchangeName::Bybitinverse,
+    ] {
+        let h = harness_as(name, options(), |wire| {
+            wire.ok("GET", "/v5/execution/list", json!({"list":[]}));
+            wire.ok(
+                "GET",
+                "/v5/order/history",
+                json!({"list":[{
+                "orderId":"recovered", "orderStatus":"Filled", "symbol":"BTCUSD",
+                "side":"Buy", "cumExecQty":"2", "avgPrice":"100", "updatedTime":"1700000000000"
+            }], "nextPageCursor":"next"}),
+            );
+            wire.ok("GET", "/v5/order/history", json!({"list":[null]}));
+        });
+        let opts = serde_json::from_value(json!({"symbol":"BTCUSD", "from":1})).unwrap();
+        let rows = h.drive(h.venue().fetch_historical_fills(opts)).unwrap();
+        assert!(
+            rows.is_empty(),
+            "failed recovery discards its partial accumulator"
+        );
+        assert_eq!(h.wire.calls("/v5/order/history").len(), 2);
+        assert!(h.runtime.logs.borrow().iter().any(|m| m.starts_with(
+            "warning: Failed order-history fallback fetch executions: Cannot read properties of null"
+        )));
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
 fn fill_history_uses_actual_order_history_recovery_and_fee_detail() {
     for name in [
         ExchangeName::Bybit,
@@ -267,7 +300,7 @@ fn fill_history_routes_and_recovery_follow_live_source() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.len(), 42);
+    assert_eq!(cases.len(), 45);
     for (index, case) in cases.iter().enumerate() {
         let name: ExchangeName = serde_json::from_value(case["name"].clone()).unwrap();
         let mut opts = options();
@@ -323,8 +356,16 @@ fn fill_history_routes_and_recovery_follow_live_source() {
                     (key.clone(), Value::String(value))
                 })
                 .collect();
+            let mut actual_params = actual.params.clone();
+            assert!(
+                actual_params["requestId"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("req-")
+            );
+            actual_params.as_object_mut().unwrap().remove("requestId");
             assert_eq!(
-                actual.params,
+                actual_params,
                 Value::Object(expected),
                 "source query case{index}"
             );
