@@ -142,10 +142,12 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 .truthy())
         },
         has: |_, value, key| Ok(value.has_own(key)),
-        valid_order_id: |value| match value {
-            Js::String(v) => !v.is_empty(),
-            Js::Number(n) => n.is_finite() && *n > 0.0,
-            _ => false,
+        valid_order_id: |value| {
+            let Js::String(units) = value else {
+                return false;
+            };
+            units.first().is_some_and(|unit| (49..=57).contains(unit))
+                && units.iter().all(|unit| (48..=57).contains(unit))
         },
         markets_by_symbol: |h| h.root("store.marketsBySymbol"),
         lookup: |_, map, key| map.get_key(&key.to_js_string()?),

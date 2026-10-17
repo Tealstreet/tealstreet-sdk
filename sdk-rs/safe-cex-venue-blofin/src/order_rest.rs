@@ -564,7 +564,7 @@ fn from_order(order: &Order) -> PreparedOrderOpts {
         trigger_price: None,
         stop_loss: (order.stop_loss).into_value(),
         take_profit: (order.take_profit).into_value(),
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: (order.time_in_force).into_value(),
         trigger_type: (order.trigger_type).into_value(),
         tp_trigger_type: (order.tp_trigger_type).into_value(),
@@ -646,7 +646,7 @@ pub async fn cancel_orders<E: std::fmt::Display>(
     if let Some(order) = preserve {
         let mut replacement = from_order(&order);
         replacement.amount = 0.0;
-        replacement.reduce_only = Some(true);
+        replacement.reduce_only = true.into();
         replacement.time_in_force = None;
         replacement.trigger_type = None;
         replacement.stop_loss = None;
@@ -846,7 +846,7 @@ pub async fn update_order<E: std::fmt::Display>(
         } else {
             order.price.into_value()
         };
-        opts.reduce_only = Some(false);
+        opts.reduce_only = false.into();
         opts.time_in_force = Some(OrderTimeInForce::GoodTillCancel);
         let attached = raw
             .and_then(|r| r.get("attachAlgoOrders"))
@@ -912,7 +912,7 @@ pub async fn update_order<E: std::fmt::Display>(
                 .and_then(|e| e.remaining_native)
                 .unwrap_or(parent.amount);
             opts.price = parent.price.into_value();
-            opts.reduce_only = Some(parent.reduce_only);
+            opts.reduce_only = parent.reduce_only.into_property();
         } else {
             opts.price = None;
             if order.id.ends_with("__take_profit") {

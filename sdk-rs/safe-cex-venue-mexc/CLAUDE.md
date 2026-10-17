@@ -6,8 +6,10 @@ Use the [shared exchange contract](../safe-cex-exchange/CLAUDE.md); variants sta
 REST signing and private WebSocket login take `current_time_ms` from their
 construction dependencies. The native registry passes the same shared
 `VIRTUAL_CLOCK.get_current_time_ms` getter to both; host wall time remains for
-runtime accounting and retry/rate-limit timing. Do not derive authentication
-time from `ExchangeRuntime::now_ms`. The native registry regression
+runtime accounting and retry/rate-limit timing. The same callback drives order
+submit pacing/cooldown, optimistic timestamps, stop-order lookbacks and all
+placement/cancel/rejection shields. Do not derive these source virtual-clock
+reads from `ExchangeRuntime::now_ms`. The native registry regression
 `native_host_mexc_clock` applies a 90-second sync offset and checks both signed
 wire timestamps and HMACs over real loopback HTTP/WebSocket transports.
 
