@@ -5,6 +5,7 @@ pub mod chaser_engine;
 pub mod chaser_manager;
 pub mod command;
 pub mod command_handlers;
+pub mod data_post;
 pub mod dev;
 pub mod displayed_positions;
 pub mod error;

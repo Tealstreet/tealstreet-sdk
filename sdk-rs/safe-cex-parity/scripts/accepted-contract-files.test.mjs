@@ -91,3 +91,24 @@ test('contract shard namespace and complete merge checks reject executed mutatio
     }
   } finally { f.close(); }
 });
+
+test('native contract serialization retains authored nested keys and signed zero', async () => {
+  const { contractJson } = await import('./accepted-contract-files.mjs');
+  const f = fixture();
+  try {
+    const text = String.raw`{"fixture_core::Owner":{"cases":[{"input":{"9":9,"2":2,"x":[{"10":10,"1":1,"text":"escaped \\\" {} [] : ,"}],"zero":-0},"output":null}]}}`;
+    fs.writeFileSync(f.legacy, text);
+    const contract = loadContracts(f.legacy)['fixture_core::Owner'];
+    const input = contract.cases[0].input;
+    const expected = String.raw`{"9":9,"2":2,"x":[{"10":10,"1":1,"text":"escaped \\\" {} [] : ,"}],"zero":-0}`;
+    assert.equal(contractJson(input), expected, 'authored order must survive at every nesting level');
+    assert.equal(contractJson({ generated: input }), `{"generated":${expected}}`, 'generated dispatch wrappers retain authored children');
+    input.extra = false;
+    delete input['9'];
+    const encoded = contractJson(input);
+    assert.ok(encoded.startsWith('{"2":2,"x":['));
+    assert.ok(encoded.endsWith(',"zero":-0,"extra":false}'), 'serialization must observe current fields rather than stale source bytes');
+    fs.writeFileSync(f.legacy, '{"fixture_core::Owner":{"x":1,"\\u0078":2}}');
+    assert.throws(() => loadContracts(f.legacy), /duplicate JSON key: x/);
+  } finally { f.close(); }
+});

@@ -13,7 +13,7 @@ for (const [fileName,names] of [['bitunix.order-history.ts',['toOptionalNumber',
  }
 }
 const bits=n=>{const b=Buffer.alloc(8);b.writeDoubleBE(n);return Number.isNaN(n)?'7ff8000000000000':b.toString('hex');};
-const observe=fn=>{try{const n=fn();return {type:typeof n,...(typeof n==='number'?{bits:bits(n)}:{})};}catch(e){return {error:e.name};}};
+const observe=fn=>{try{const n=fn();return {type:typeof n,...(typeof n==='number'?{bits:bits(n)}:{})};}catch(e){return {error:e.name,message:e.message};}};
 const raws=[null,'null','true','false','0','-0','1.25','-2.75','1e400','-1e400','5e-324','9007199254740993',
  ...['',' ','MARKET','NaN','Infinity','-Infinity','-0','-0.0tail','12.75tail','0x10','1e','1e+','1e-2x','.5foo','+.5','-.5','  2.5 ','\ufeff3.25','\u00854.5','\u20285.5','1_000','0b11','1e309','-1e-999','é','😀'].map(JSON.stringify),
  '[]','[null]','[false]','["2.75"]','[["-0tail"]]','[12.5,2]','{}','{"valueOf":2}','{"toString":1}','{"toString":null}','{"__proto__":null}',

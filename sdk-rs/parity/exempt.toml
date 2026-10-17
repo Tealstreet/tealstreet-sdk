@@ -1565,6 +1565,10 @@ rs = "safe-cex-num/src/json_stringify.rs::JsJsonValue"
 reason = "Shared ECMAScript JSON.stringify input representation preserving undefined and non-finite numbers before serialization; no independent TypeScript source symbol."
 
 [[exempt]]
+rs = "safe-cex-num/src/json_stringify.rs::JsJsonValue::truthy"
+reason = "Shared ECMAScript Boolean conversion for prepared JSON data before JSON.stringify; retains nonfinite-number truthiness at the HOW protocol boundary. No independent TypeScript source symbol."
+
+[[exempt]]
 rs = "safe-cex-num/src/json_stringify.rs::js_json_stringify"
 reason = "Shared ECMAScript JSON.stringify runtime glue for prepared values; no independent TypeScript source symbol."
 
