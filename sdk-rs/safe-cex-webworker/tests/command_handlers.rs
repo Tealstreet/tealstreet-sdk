@@ -1,3 +1,5 @@
+#[path = "support/error_trace.rs"]
+mod error_trace;
 #[path = "support/runtime.rs"]
 mod runtime;
 use indexmap::IndexMap;
@@ -106,7 +108,7 @@ struct Host {
     spawned: RefCell<Vec<ExchangeFuture<'static, ()>>>,
     chasers: RefCell<Vec<Rc<ChaserOrderInstance>>>,
     twaps: RefCell<IndexMap<String, Rc<TwapInstance<Self>>>>,
-    posts: RefCell<Vec<StoreWorkerPayload>>,
+    posts: Rc<RefCell<Vec<StoreWorkerPayload>>>,
     released: Rc<Cell<bool>>,
     post_failure: Cell<bool>,
     replace_state: Cell<bool>,
@@ -186,6 +188,10 @@ impl TwapHost for Host {
     }
 }
 impl CommandHandlerHost for Host {
+    fn worker_error_post(&self) -> safe_cex_webworker::error_post::WorkerErrorPost {
+        let posts = self.posts.clone();
+        error_trace::post(Rc::new(move |payload| posts.borrow_mut().push(payload)))
+    }
     fn post_payload(&self, p: StoreWorkerPayload) -> Result<(), ExchangeError> {
         self.posts.borrow_mut().push(p);
         Ok(())
@@ -245,7 +251,7 @@ impl Host {
             spawned: RefCell::default(),
             chasers: RefCell::default(),
             twaps: RefCell::default(),
-            posts: RefCell::default(),
+            posts: Rc::default(),
             post_failure: Cell::new(false),
             replace_state: Cell::new(false),
             orders: RefCell::default(),
