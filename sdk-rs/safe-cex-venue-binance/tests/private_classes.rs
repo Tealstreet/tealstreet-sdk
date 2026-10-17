@@ -3252,3 +3252,372 @@ fn native_import_default_weight_property_returns_existing_values() {
         "TypeError"
     );
 }
+
+#[cfg(feature = "native")]
+fn production_native_owner(venue: Venue) -> Rc<ExchangeOwner> {
+    let runtime = Rc::new(Runtime::default());
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime,
+        std::sync::Arc::new(IdOnlyAdapter),
+        Rc::new(|_, _| panic!("no external provider is configured")),
+        None,
+    );
+    let name = match venue {
+        Venue::Futures => "binance",
+        Venue::PM => "binancepm",
+        Venue::Spot => "binancespot",
+    };
+    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    safe_cex_store::Store::update(
+        store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.1},"limits":{"amount":{"min":0.1,"max":1},"leverage":{"min":1,"max":100}}})).unwrap()]),
+            tickers: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","bid":99,"ask":101,"last":100,"mark":100,"index":100,"percentage":0,"volume":0,"quoteVolume":0,"fundingRate":0,"fundingTime":0,"openInterest":0})).unwrap()]),
+            positions: Some(vec![serde_json::from_value(json!({"id":"BTCUSDTshort","symbol":"BTCUSDT","side":"short","entryPrice":100,"notional":300,"leverage":10,"unrealizedPnl":0,"contracts":3,"liquidationPrice":200})).unwrap()]),
+            ..Default::default()
+        },
+        false,
+    ).unwrap();
+    ExchangeOwner::new(
+        venue,
+        serde_json::from_value(json!(name)).unwrap(),
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        store,
+        dependencies,
+    )
+    .unwrap()
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_client_ids_fit_every_family_and_payload_path() {
+    use safe_cex_venue_binance::exchange_classes::ExchangeImports;
+    // Exercise the actual production import, not Imports::uuid()'s "fixture".
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        Rc::new(Runtime::default()),
+        std::sync::Arc::new(IdOnlyAdapter),
+        Rc::new(|_, _| panic!("ID generation has no external-data dependency")),
+        None,
+    );
+    let imports: &dyn ExchangeImports = dependencies.imports.as_ref();
+    for _ in 0..128 {
+        let id = imports.uuid();
+        assert!(
+            id.len() <= 21,
+            "production uuid must be stripped nanoid, got {id:?}"
+        );
+        assert!(
+            id.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "source strips both URL-alphabet punctuation characters: {id:?}"
+        );
+    }
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let mint_opts = serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":90}),
+        )
+        .unwrap();
+        let minted = owner
+            .base
+            .mint_client_order_id(&mint_opts)
+            .expect("production rule mint must produce a valid venue ID");
+        assert!(minted.starts_with("x-s3vFFRQp"));
+        assert!(minted.len() <= "x-s3vFFRQp".len() + 21);
+        assert!(
+            minted["x-s3vFFRQp".len()..]
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric())
+        );
+        let check = |row: &EventValue, field: &str, prefixed: bool| {
+            let id = row.read(field).unwrap().text().unwrap();
+            let suffix = if prefixed {
+                id.strip_prefix("x-s3vFFRQp").expect("broker prefix")
+            } else {
+                &id
+            };
+            assert!(
+                suffix.len() <= 21,
+                "native payload suffix is stripped nanoid: {venue:?} {field} {id}"
+            );
+            assert!(suffix.bytes().all(|b| b.is_ascii_alphanumeric()));
+            assert!(
+                id.len() <= if venue == Venue::PM { 32 } else { 36 },
+                "venue ID length: {venue:?} {field} {id}"
+            );
+        };
+        for (kind, amount, attached, count) in [
+            ("limit", 1.0, false, 1),
+            ("market", 3.0, false, 3),
+            ("limit", 3.0, true, 5),
+            ("stop_market", 1.0, false, 1),
+            ("take_profit_market", 1.0, false, 1),
+        ] {
+            let mut options =
+                json!({"symbol":"BTCUSDT","type":kind,"side":"buy","amount":amount,"price":90});
+            if attached {
+                options["stopLoss"] = json!(80);
+                options["takeProfit"] = json!(120);
+            }
+            let result = owner.format_order(EventValue::from_json(options)).unwrap();
+            let (regular, algo) = if venue == Venue::Futures {
+                (
+                    result.read("regular").unwrap(),
+                    result.read("algo").unwrap(),
+                )
+            } else {
+                (result, EventValue::array(vec![]))
+            };
+            assert_eq!(
+                regular.array_values().unwrap().len() + algo.array_values().unwrap().len(),
+                count,
+                "real formatted payload count {venue:?} {kind}"
+            );
+            for row in regular.array_values().unwrap() {
+                check(&row, "newClientOrderId", true);
+            }
+            for row in algo.array_values().unwrap() {
+                check(&row, "clientAlgoId", true);
+            }
+        }
+        let result = owner.format_order(EventValue::from_json(json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":90,"clientOrderId":"caller_kept-123"}))).unwrap();
+        let rows = if venue == Venue::Futures {
+            result.read("regular").unwrap()
+        } else {
+            result
+        };
+        assert_eq!(
+            rows.array_values().unwrap()[0]
+                .read("newClientOrderId")
+                .unwrap()
+                .text()
+                .unwrap(),
+            "caller_kept-123"
+        );
+        if venue != Venue::Spot {
+            let opts = serde_json::from_value(json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"buy","amount":1,"price":90})).unwrap();
+            let rows = owner.format_trailing(&opts).unwrap();
+            assert_eq!(rows.array_values().unwrap().len(), 1);
+            check(
+                &rows.array_values().unwrap()[0],
+                if venue == Venue::PM {
+                    "newClientOrderId"
+                } else {
+                    "clientAlgoId"
+                },
+                venue != Venue::PM,
+            );
+            let rows = owner
+                .format_order(EventValue::from_json(serde_json::to_value(opts).unwrap()))
+                .unwrap();
+            let rows = if venue == Venue::Futures {
+                rows.read("algo").unwrap()
+            } else {
+                rows
+            };
+            assert_eq!(rows.array_values().unwrap().len(), 1);
+            check(
+                &rows.array_values().unwrap()[0],
+                if venue == Venue::PM {
+                    "newClientOrderId"
+                } else {
+                    "clientAlgoId"
+                },
+                venue != Venue::PM,
+            );
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+struct IdOnlyAdapter;
+#[cfg(feature = "native")]
+impl safe_cex_transport::RestAdapter for IdOnlyAdapter {
+    fn execute(
+        &self,
+        _: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        panic!("ID-only production host must perform no HTTP I/O")
+    }
+}
+
+#[cfg(feature = "native")]
+fn native_fill_events(owner: &ExchangeOwner) -> Rc<RefCell<Vec<Value>>> {
+    let events = Rc::new(RefCell::new(vec![]));
+    let saved = events.clone();
+    owner.base.on(
+        "fill",
+        Rc::new(move |_, payload| {
+            saved.borrow_mut().push(payload.clone());
+            Ok(())
+        }),
+    );
+    events
+}
+
+#[cfg(feature = "native")]
+fn native_order_frame(venue: Venue, filled: bool) -> Value {
+    let data = json!({"e":"executionReport","c":"native-client","i":42,"X":if filled {"PARTIALLY_FILLED"}else{"NEW"},"x":if filled {"TRADE"}else{"NEW"},"ot":"LIMIT","o":"LIMIT","s":"BTCUSDT","S":"BUY","p":"91.2","ap":"92.3","sp":"0","q":"3","z":if filled {"0.75"}else{"0"},"l":"0.25","R":false});
+    if venue == Venue::Spot {
+        json!({"subscriptionId":7,"event":data})
+    } else {
+        json!({"e":"ORDER_TRADE_UPDATE","o":data})
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_orders_frames_update_the_real_store() {
+    use safe_cex_types::{OrderSide, OrderStatus, OrderType};
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        owner
+            .private
+            .on_message(string(native_order_frame(venue, false).to_string()))
+            .unwrap();
+        let rows = owner.base.store.orders();
+        assert_eq!(
+            rows.len(),
+            1,
+            "one order through real private binding: {venue:?}"
+        );
+        let order = &rows[0];
+        assert_eq!(
+            order.id,
+            if venue == Venue::Futures {
+                "42"
+            } else {
+                "native-client"
+            }
+        );
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.status, OrderStatus::Open);
+        assert_eq!(order.r#type, OrderType::Limit);
+        assert_eq!(order.side, OrderSide::Buy);
+        assert_eq!(
+            (order.price, order.amount, order.filled, order.remaining),
+            (91.2, 3.0, 0.0, 3.0)
+        );
+        assert!(fills.borrow().is_empty(), "NEW must emit no fill");
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_fill_frames_emit_and_update_the_real_order() {
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        owner
+            .private
+            .on_message(string(native_order_frame(venue, false).to_string()))
+            .unwrap();
+        owner
+            .private
+            .on_message(string(native_order_frame(venue, true).to_string()))
+            .unwrap();
+        let rows = owner.base.store.orders();
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].filled, rows[0].remaining), (0.75, 2.25));
+        assert_eq!(rows[0].status, safe_cex_types::OrderStatus::Open);
+        assert_eq!(
+            *fills.borrow(),
+            [
+                json!({"id":if venue==Venue::Futures {"42"}else{"native-client"},"side":"buy","symbol":"BTCUSDT","price":if venue==Venue::Spot {91.2}else{92.3},"amount":0.25})
+            ],
+            "native emitted fill contents: {venue:?}"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_position_frames_update_the_real_store() {
+    for venue in [Venue::Futures, Venue::PM] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        let frame = json!({"e":"ACCOUNT_UPDATE","a":{"P":[{"s":"BTCUSDT","pa":"2","ep":"110","up":"7","ps":"BOTH"}],"B":[]}});
+        // Native test time starts at 0: the production throttle schedules its
+        // REST repair, allowing this immediate WS mutation to be observed first.
+        owner.private.on_message(string(frame.to_string())).unwrap();
+        let positions = owner.base.store.positions();
+        let p = positions
+            .iter()
+            .find(|p| {
+                p.id == if venue == Venue::Futures {
+                    "BTCUSDT"
+                } else {
+                    "BTCUSDTshort"
+                }
+            })
+            .unwrap();
+        assert_eq!(p.symbol, "BTCUSDT");
+        assert_eq!(p.side, safe_cex_types::PositionSide::Long);
+        assert_eq!(
+            (p.contracts, p.entry_price, p.unrealized_pnl),
+            (2.0, 110.0, 7.0)
+        );
+        assert_eq!(
+            p.notional,
+            if venue == Venue::Futures {
+                227.0
+            } else {
+                220.0
+            }
+        );
+        assert!(fills.borrow().is_empty(), "account frame must emit no fill");
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_balance_frames_follow_each_source_family() {
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let fills = native_fill_events(&owner);
+        let old_balance = owner.base.store.balance().clone();
+        let frame = if venue == Venue::Spot {
+            json!({"subscriptionId":7,"event":{"e":"outboundAccountPosition","B":[{"a":"USDT","f":"8","l":"2"}]}})
+        } else {
+            json!({"e":"ACCOUNT_UPDATE","a":{"P":[],"B":[{"a":"USDT","wb":"10","cw":"8","bc":"0"}]}})
+        };
+        owner.private.on_message(string(frame.to_string())).unwrap();
+        let balance = owner.base.store.balance();
+        if venue == Venue::Spot {
+            assert_eq!(
+                (balance.free, balance.used, balance.total, balance.upnl),
+                (8.0, 2.0, 10.0, 0.0)
+            );
+            let currency = balance
+                .currencies
+                .as_ref()
+                .unwrap()
+                .get("USDT")
+                .unwrap()
+                .as_balance()
+                .expect("Binance supplies a declared Balance row");
+            assert_eq!(
+                (currency.free, currency.used, currency.total),
+                (8.0, 2.0, 10.0)
+            );
+            assert_eq!(
+                owner.base.store.positions().len(),
+                1,
+                "spot account topic does not invent derivative positions"
+            );
+        } else {
+            // Both derivatives source handlers leave B to REST reconciliation.
+            assert_eq!(
+                (balance.free, balance.used, balance.total, balance.upnl),
+                (
+                    old_balance.free,
+                    old_balance.used,
+                    old_balance.total,
+                    old_balance.upnl
+                )
+            );
+        }
+        assert!(owner.base.store.orders().is_empty());
+        assert!(fills.borrow().is_empty(), "balance topic must emit no fill");
+    }
+}

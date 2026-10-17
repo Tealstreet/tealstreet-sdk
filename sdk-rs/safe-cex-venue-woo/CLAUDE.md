@@ -412,13 +412,20 @@ their independent live TypeScript corpora. Its focused runner retains full
 compiler/source preflight and supplies copied-source controls; it does not claim
 whole-package accepted-set clearance.
 
-Live `mapLimitOrder` now returns runtime values in `binding/hosts/order_mapping`.
-The closed `orders::map_limit_order` facade remains separately typed; it no longer
-blocks terminal execution reports on IOC/FOK's undefined type or MARKET's
-undefined price fallback. Three real private-socket/mapper/host regressions emit
-fills and close prior orders; `scripts/terminal-report-control.py` restores the
-old typed binding, requires three compiled named failures, restores exact bytes
-and reruns the stream suite. `scripts/terminal-report-source.cjs` observes the
-actual TypeScript mapper before JSON projection. NEW/PARTIAL insertion and
-snapshot fields still depend on the shared Order domain; this change does not
-widen that domain or silently invent types/prices.
+Live `mapLimitOrder` and `mapAlgoOrder` return runtime values in
+`binding/hosts/order_mapping`; the old typed mapper functions and their
+facade-only tests are removed. The real class preserves own undefined table
+hits, copied amount/reduceOnly/filled values and original parent info aliases.
+Order lookup tables retain their actual shared Object.prototype referents.
+The 103 source records, 36 native numeric-bit witnesses and 12 source timing
+cases now run through production class members. A real HTTP algo read keeps a
+partial STOP plus its two bracket peers instead of discarding all three.
+
+`scripts/algo-order-control.py` compiles a closed-output regression in the live
+mapper, requires named mapper and HTTP failures, restores exact bytes and reruns
+the native suite. `scripts/terminal-report-control.py` separately restores a
+closed-output refusal inside the real limit mapper and verifies the three
+terminal private-frame regressions. Both source scripts execute actual TS bodies.
+NEW/PARTIAL Store insertion and public typed results retain the separate shared
+Order field-domain obligations. This repair makes no shared-type or nonnumeric
+Store insertion claim; it neither coerces copied strings nor drops bad rows.
