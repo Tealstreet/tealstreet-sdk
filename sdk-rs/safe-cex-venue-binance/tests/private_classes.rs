@@ -3316,7 +3316,7 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
     }
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let owner = production_native_owner(venue);
-        let mint_opts = serde_json::from_value(
+        let mint_opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
             json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":90}),
         )
         .unwrap();
@@ -3498,7 +3498,12 @@ fn production_native_private_orders_frames_update_the_real_store() {
         assert_eq!(order.r#type, OrderType::Limit);
         assert_eq!(order.side, OrderSide::Buy);
         assert_eq!(
-            (order.price, order.amount, order.filled, order.remaining),
+            (
+                order.price.to_number(),
+                order.amount,
+                order.filled,
+                order.remaining
+            ),
             (91.2, 3.0, 0.0, 3.0)
         );
         assert!(fills.borrow().is_empty(), "NEW must emit no fill");
@@ -3677,6 +3682,7 @@ fn native_stop_limit_snapshot_case(venue: Venue) {
                 adapter.clone(),
                 Rc::new(|_, _| panic!("no external provider configured")),
                 None,
+                safe_cex_exchange::native::NativeHttpEvents::default(),
             );
             let store = Rc::new(safe_cex_store::store::DefaultStore::new());
             let owner = ExchangeOwner::new(
@@ -3724,7 +3730,7 @@ fn native_stop_limit_snapshot_case(venue: Venue) {
         );
         assert_eq!(
             (
-                orders[0].price,
+                orders[0].price.to_number(),
                 orders[0].amount,
                 orders[0].filled,
                 orders[0].remaining
