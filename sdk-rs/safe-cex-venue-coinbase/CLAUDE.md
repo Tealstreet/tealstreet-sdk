@@ -265,3 +265,11 @@ segment, matching the source regex. Slashes inside either segment are refused
 before local JWT signing or HTTP dispatch; Unicode and interior spaces stay
 accepted. The constructed credential binding witness checks eight actual-source
 profiles through WS signing and rejects an invalid REST key before transport.
+
+Concrete order generation, client-ID minting and JWT nonce capabilities use the
+shared source UUID helper (`safe_cex_crypto::uuid::uuid_with_entropy`) with runtime
+entropy: generate nanoid21, then remove both separators. Generic runtime.unique_id
+has a separate host contract. Constructed UUID regressions exercise both variants,
+exact POST client IDs, optimistic parent IDs, mint entropy consumption and signed
+JWT headers; Node-derived Ed25519 public keys verify the actual wire token.
+

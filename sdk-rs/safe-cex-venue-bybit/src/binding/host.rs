@@ -289,7 +289,16 @@ impl SnapshotHost for Rt {
         match name {
             "null" => Ok(Js::Null),
             "globalThis" => Ok(self.shared.globals.clone()),
-            "Set" => self.global("Set")?.call(Js::Undefined, vec![]),
+            "Set" | "Map" => self.global(name)?.call(Js::Undefined, vec![]),
+            "String" => self.global("String")?.call(Js::Undefined, args),
+            "select:aggregateBybitClosedPnl" => {
+                Ok(Js::function("aggregateBybitClosedPnl", |_, args| {
+                    crate::journal_fold::aggregate_bybit_closed_pnl(
+                        &arg(&args, 0),
+                        &crate::journal_fold::BybitPositionAdapterDeps(arg(&args, 1)),
+                    )
+                }))
+            }
             "select:mapBybitHistoricalOrder" => {
                 Ok(Js::function("mapBybitHistoricalOrder", |_, args| {
                     crate::ledger_mapping::map_bybit_historical_order(&arg(&args, 0))

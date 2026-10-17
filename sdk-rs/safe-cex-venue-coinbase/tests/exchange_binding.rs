@@ -718,6 +718,127 @@ fn portfolios_do_not_require_unobserved_name_or_deleted_fields() {
     }
 }
 
+fn source_uuid_profile() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/uuid-binding.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+fn uuid_entropy(h: &binding_harness::Harness) {
+    // nanoid's raw21 starts with both removable separators, then19 'M'.
+    h.runtime
+        .random_values
+        .borrow_mut()
+        .extend([8.0 / 64.0, 44.0 / 64.0]);
+}
+fn load_uuid_market(h: &binding_harness::Harness) {
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+}
+#[test]
+fn uuid_binding_mints_source_client_ids() {
+    let expected = source_uuid_profile();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        load_uuid_market(&h);
+        uuid_entropy(&h);
+        let before = h.runtime.random_calls.get();
+        assert_eq!(
+            h.venue().base().mint_client_order_id(place()).unwrap(),
+            expected["minted"].as_str().unwrap()
+        );
+        assert_eq!(h.runtime.random_calls.get() - before, 21);
+        assert!(h.runtime.random_values.borrow().is_empty());
+    }
+}
+#[test]
+fn uuid_binding_generated_order_ids_reach_actual_http() {
+    let expected = source_uuid_profile();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), |http| {
+            script(http);
+            http.ok("POST", "/api/v3/brokerage/orders", json!({"success":true,"success_response":{"order_id":"uuid-order","product_id":"BTC-USDC","side":"BUY"}}));
+        });
+        load_uuid_market(&h);
+        uuid_entropy(&h);
+        let mut opts = place();
+        opts.client_order_id = None;
+        let ids = h
+            .drive(Box::pin(
+                h.exchange.base().place_order(h.exchange.as_ref(), opts),
+            ))
+            .unwrap();
+        assert_eq!(ids, ["uuid-order"]);
+        let calls = h.http.calls("/api/v3/brokerage/orders");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].data["client_order_id"], expected["minted"]);
+        assert!(h.runtime.random_values.borrow().is_empty());
+        assert_eq!(
+            h.store.orders()[0].parent_id.as_deref(),
+            expected["minted"].as_str()
+        );
+    }
+}
+#[test]
+fn uuid_binding_jwt_nonce_reaches_actual_signed_http() {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    let expected = source_uuid_profile();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        uuid_entropy(&h);
+        h.drive(h.venue().get_account()).unwrap();
+        let calls = h.http.calls("/api/v3/brokerage/portfolios");
+        assert_eq!(calls.len(), 1);
+        let headers = calls[0].headers.as_object().unwrap();
+        let token = headers
+            .iter()
+            .find(|(k, _)| k.ends_with("Authorization"))
+            .unwrap()
+            .1
+            .as_str()
+            .unwrap()
+            .strip_prefix("Bearer ")
+            .unwrap();
+        let header: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(token.split('.').next().unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(header["nonce"], expected["nonce"]);
+        assert_eq!(header["alg"], "EdDSA");
+        let (payload, signature) = token.rsplit_once('.').unwrap();
+        let public_key: Vec<u8> = serde_json::from_value(expected["publicKey"].clone()).unwrap();
+        assert!(
+            safe_cex_crypto::ed25519::verify(
+                payload.as_bytes(),
+                &public_key,
+                &URL_SAFE_NO_PAD.decode(signature).unwrap()
+            )
+            .unwrap(),
+            "actual JWT is verifiably signed"
+        );
+        assert!(h.runtime.random_values.borrow().is_empty());
+    }
+}
+
 fn source_credential_admission() -> Vec<Value> {
     let output = std::process::Command::new("node")
         .arg(concat!(
