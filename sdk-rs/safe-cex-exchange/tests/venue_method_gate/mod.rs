@@ -72,14 +72,6 @@ fn available_methods(scope: &Scope<()>, catalog: &Catalog) -> BTreeSet<String> {
             "RegExp",
             safe_cex_exchange::js_runtime::regexp::regexp(&[], &[]).unwrap(),
         ),
-        (
-            "Date",
-            scope
-                .global("Date")
-                .unwrap()
-                .call(Js::Undefined, vec![Js::Number(0.)])
-                .unwrap_or(Js::Undefined),
-        ),
         ("Boolean", Js::Bool(true)),
         (
             "Error",
@@ -190,10 +182,10 @@ impl Calls<'_> {
                     .and_then(|n| self.locals.get(&n.to_string()))
                     .cloned()
                 {
-                    // Remove while walking an alias to avoid self-referential syntax cycles.
-                    let saved = std::mem::take(&mut self.locals);
+                    let name = p.path.get_ident().unwrap().to_string();
+                    let saved = self.locals.remove(&name).unwrap();
                     self.invoked(&init);
-                    self.locals = saved;
+                    self.locals.insert(name, saved);
                 }
             }
             Expr::MethodCall(c) if c.method == "get" || c.method == "member" => {
@@ -251,6 +243,21 @@ impl Calls<'_> {
     }
 }
 impl<'a> Visit<'a> for Calls<'_> {
+    fn visit_arm(&mut self, arm: &'a syn::Arm) {
+        if !skip(&arm.attrs) {
+            visit::visit_arm(self, arm);
+        }
+    }
+    fn visit_file(&mut self, file: &'a syn::File) {
+        if !skip(&file.attrs) {
+            visit::visit_file(self, file);
+        }
+    }
+    fn visit_item_const(&mut self, item: &'a syn::ItemConst) {
+        if !skip(&item.attrs) {
+            visit::visit_item_const(self, item);
+        }
+    }
     fn visit_item_mod(&mut self, item: &'a syn::ItemMod) {
         if !skip(&item.attrs) {
             visit::visit_item_mod(self, item);
@@ -529,4 +536,46 @@ fn method_catalog_cannot_hide_a_gap_by_removing_a_recognized_name() {
     );
     let empty_family = BTreeMap::from([("Array".into(), BTreeSet::new())]);
     assert!(std::panic::catch_unwind(|| assert_catalog_expands(&empty_family, &before)).is_err());
+}
+
+#[test]
+fn review_control_method_alias_chains_remain_visible_and_cycles_terminate() {
+    let ast = syn::parse_file(
+        r#"
+        fn aliases(row:&Js) { let first=row.get("pop")?; let second=first; second.call(this,args); }
+        fn cycle(row:&Js) { let first=second; let second=first; second.call(this,args); }
+    "#,
+    )
+    .unwrap();
+    let catalog = BTreeSet::from(["pop".to_owned()]);
+    let wrappers = Wrappers::new();
+    let mut calls = Calls::new(&catalog, &wrappers, &wrappers);
+    calls.visit_file(&ast);
+    assert!(
+        calls
+            .found
+            .get("pop")
+            .is_some_and(|sites| sites.contains("::aliases")),
+        "two-hop method alias remains visible"
+    );
+}
+
+#[test]
+fn review_control_test_only_match_arms_do_not_add_method_references() {
+    let ast = syn::parse_file(
+        r#"fn body(h:&Host) {match state {
+        #[cfg(test)] true=>h.call_method("reverse",args),
+        false=>h.call_method("pop",args),
+    }}"#,
+    )
+    .unwrap();
+    let catalog = BTreeSet::from(["pop".to_owned(), "reverse".to_owned()]);
+    let wrappers = Wrappers::new();
+    let mut calls = Calls::new(&catalog, &wrappers, &wrappers);
+    calls.visit_file(&ast);
+    assert!(calls.found.contains_key("pop"));
+    assert!(
+        !calls.found.contains_key("reverse"),
+        "test-only arm cannot add a production method"
+    );
 }

@@ -99,11 +99,7 @@
     "global bigIntAsStringJsonParse",
     "global isMexcControlChannel"
   ],
-  "safe-cex-venue-okx": [
-    "intrinsic add",
-    "intrinsic is-array",
-    "intrinsic string"
-  ],
+  "safe-cex-venue-okx": [],
   "safe-cex-venue-orderly": [],
   "safe-cex-venue-paradex": [
     "global Object.getOwnPropertyNames"

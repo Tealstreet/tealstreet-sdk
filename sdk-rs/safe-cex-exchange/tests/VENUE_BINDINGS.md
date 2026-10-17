@@ -13,9 +13,9 @@ fails. A fixed name left in the baseline also fails: the owning venue PR must
 remove it. CI compares the baseline with the fetched PR base and rejects growth,
 even if a PR adds the same missing name to both code and baseline.
 
-`venue-binding-master-evidence.json` retains the initial master source evidence
-at `999f0564c2`; it is an audit artifact, not an acceptance list. Browser-guarded
-and unreachable error branches are included as static leads, not asserted bugs.
+The initial master inventory at `999f0564c2` was reported to the venue lanes.
+Browser-guarded and unreachable error branches are included as static leads,
+not asserted bugs. Inventory reports stay outside the repository.
 The Paradex intrinsic dispatcher delegates unknown names to its registered
 globals, so its `parseFloat` is bound. Lighter's private class constants and
 `super.dispose` resolve through their production receiver/superclass tables.
@@ -59,3 +59,14 @@ a callable with the same name on another builtin family can mask a missing
 receiver-specific method. It does not prove semantics, dynamic keys or runtime
 reachability. Shared method fixes still require Node/source verification and
 production-runtime regressions; add new lookup idioms and controls to this gate.
+
+`python3 sdk-rs/safe-cex-exchange/tests/venue_method_gate/controls.py` runs two
+compiled production faults sequentially: remove Array `push`, then remove the
+shared Math registration. Each must fail its named inventory assertion, restore
+exact source bytes and pass again. Logs default to a temporary directory.
+Run it without concurrent source readers or compilers in this worktree.
+
+Negative syntax controls exclude function debug names/callback results,
+test-only constants, match arms and inner file cfg, multi-hop alias loss and tuple-helper
+shadowing across lexical blocks. Tuple-pair helpers are recognized from their
+actual closure bodies rather than their names.

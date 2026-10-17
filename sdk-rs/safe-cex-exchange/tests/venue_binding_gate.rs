@@ -101,6 +101,7 @@ struct Scan {
     binding: bool,
     function: String,
     aliases: BTreeSet<String>,
+    pair_helpers: BTreeMap<String, usize>,
     members: BTreeMap<String, BTreeSet<String>>,
     locals: BTreeMap<String, BTreeSet<String>>,
     wrappers: BTreeMap<String, (String, usize)>,
@@ -338,7 +339,7 @@ impl Scan {
                         }
                     }
                     if let Some(value) = args.get(i + 1) {
-                        for member in object_keys(value) {
+                        for member in object_keys(value, &self.pair_helpers) {
                             self.globals.insert(format!("{name}.{member}"));
                         }
                     }
@@ -347,9 +348,14 @@ impl Scan {
         }
     }
 }
-fn object_keys(e: &Expr) -> BTreeSet<String> {
-    struct Keys(BTreeSet<String>);
-    impl<'a> Visit<'a> for Keys {
+fn object_keys(e: &Expr, pairs: &BTreeMap<String, usize>) -> BTreeSet<String> {
+    struct Keys<'p>(BTreeSet<String>, &'p BTreeMap<String, usize>);
+    impl<'a> Visit<'a> for Keys<'_> {
+        fn visit_arm(&mut self, arm: &'a syn::Arm) {
+            if !skip(&arm.attrs) {
+                visit::visit_arm(self, arm);
+            }
+        }
         fn visit_expr_array(&mut self, n: &'a syn::ExprArray) {
             for item in &n.elems {
                 if let Some(k) = literal(item) {
@@ -359,13 +365,20 @@ fn object_keys(e: &Expr) -> BTreeSet<String> {
                 }
             }
         }
-        fn visit_expr_call(&mut self, n: &'a syn::ExprCall) {
-            if let Some(k) = n.args.first().and_then(literal) {
-                if n.args.len() == 2 {
-                    self.0.insert(k);
+        fn visit_expr_closure(&mut self, _: &'a syn::ExprClosure) {}
+        fn visit_expr_call(&mut self, call: &'a syn::ExprCall) {
+            if let Expr::Path(path) = call.func.as_ref() {
+                if let Some(index) = path
+                    .path
+                    .get_ident()
+                    .and_then(|n| self.1.get(&n.to_string()))
+                {
+                    if let Some(key) = call.args.get(*index).and_then(literal) {
+                        self.0.insert(key);
+                    }
                 }
             }
-            visit::visit_expr_call(self, n);
+            visit::visit_expr_call(self, call);
         }
         fn visit_expr_tuple(&mut self, t: &'a syn::ExprTuple) {
             if t.elems.len() >= 2 {
@@ -382,11 +395,31 @@ fn object_keys(e: &Expr) -> BTreeSet<String> {
             }
         }
     }
-    let mut k = Keys(BTreeSet::new());
+    let mut k = Keys(BTreeSet::new(), pairs);
     k.visit_expr(e);
     k.0
 }
 impl<'a> Visit<'a> for Scan {
+    fn visit_arm(&mut self, arm: &'a syn::Arm) {
+        if !skip(&arm.attrs) {
+            visit::visit_arm(self, arm);
+        }
+    }
+    fn visit_block(&mut self, block: &'a syn::Block) {
+        let pairs = self.pair_helpers.clone();
+        visit::visit_block(self, block);
+        self.pair_helpers = pairs;
+    }
+    fn visit_file(&mut self, file: &'a syn::File) {
+        if !skip(&file.attrs) {
+            visit::visit_file(self, file);
+        }
+    }
+    fn visit_item_const(&mut self, item: &'a syn::ItemConst) {
+        if !skip(&item.attrs) {
+            visit::visit_item_const(self, item);
+        }
+    }
     fn visit_expr_let(&mut self, n: &'a syn::ExprLet) {
         if let (syn::Pat::TupleStruct(p), Expr::MethodCall(c)) = (&*n.pat, &*n.expr) {
             if c.method == "get"
@@ -410,6 +443,37 @@ impl<'a> Visit<'a> for Scan {
         }
     }
     fn visit_local(&mut self, n: &'a syn::Local) {
+        let helper_pattern = match &n.pat {
+            syn::Pat::Type(typed) => typed.pat.as_ref(),
+            pattern => pattern,
+        };
+        if let (syn::Pat::Ident(name), Some(init)) = (helper_pattern, &n.init) {
+            self.pair_helpers.remove(&name.ident.to_string());
+            if let Expr::Closure(closure) = init.expr.as_ref() {
+                let body = match closure.body.as_ref() {
+                    Expr::Block(block) => block.block.stmts.last().and_then(|stmt| match stmt {
+                        syn::Stmt::Expr(expr, _) => Some(expr),
+                        _ => None,
+                    }),
+                    expr => Some(expr),
+                };
+                if let Some(Expr::Tuple(tuple)) = body {
+                    if let Some(Expr::Path(key)) = tuple.elems.first() {
+                        for (index, input) in closure.inputs.iter().enumerate() {
+                            let input = match input {
+                                syn::Pat::Type(typed) => typed.pat.as_ref(),
+                                input => input,
+                            };
+                            if let syn::Pat::Ident(param) = input {
+                                if key.path.is_ident(&param.ident) {
+                                    self.pair_helpers.insert(name.ident.to_string(), index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if self.binding {
             if let syn::Pat::Ident(p) = &n.pat {
                 if let Some(init) = &n.init {
@@ -438,9 +502,11 @@ impl<'a> Visit<'a> for Scan {
                 self.members
                     .entry(p.ident.to_string())
                     .or_default()
-                    .extend(object_keys(&init.expr));
-                self.locals
-                    .insert(p.ident.to_string(), object_keys(&init.expr));
+                    .extend(object_keys(&init.expr, &self.pair_helpers));
+                self.locals.insert(
+                    p.ident.to_string(),
+                    object_keys(&init.expr, &self.pair_helpers),
+                );
             }
         }
         if self.binding {
@@ -474,14 +540,18 @@ impl<'a> Visit<'a> for Scan {
     fn visit_item_fn(&mut self, n: &'a syn::ItemFn) {
         if !skip(&n.attrs) {
             let old = std::mem::replace(&mut self.function, n.sig.ident.to_string());
+            let pairs = std::mem::take(&mut self.pair_helpers);
             visit::visit_item_fn(self, n);
+            self.pair_helpers = pairs;
             self.function = old;
         }
     }
     fn visit_impl_item_fn(&mut self, n: &'a syn::ImplItemFn) {
         if !skip(&n.attrs) {
             let old = std::mem::replace(&mut self.function, n.sig.ident.to_string());
+            let pairs = std::mem::take(&mut self.pair_helpers);
             visit::visit_impl_item_fn(self, n);
+            self.pair_helpers = pairs;
             self.function = old;
         }
     }
@@ -528,6 +598,9 @@ impl<'a> Visit<'a> for Scan {
             )
         {
             for arm in &n.arms {
+                if skip(&arm.attrs) {
+                    continue;
+                }
                 let mut s = Strings::default();
                 s.visit_pat(&arm.pat);
                 if capture_dispatch {
@@ -566,7 +639,8 @@ impl<'a> Visit<'a> for Scan {
             .iter()
             .any(|p| body.contains(p))
             {
-                self.globals.extend(object_keys(&n.expr));
+                self.globals
+                    .extend(object_keys(&n.expr, &self.pair_helpers));
                 if let Expr::Call(c) = &*n.expr {
                     let k = c.func.to_token_stream().to_string();
                     if let Some(v) = self.tables.get(&k) {
@@ -580,6 +654,11 @@ impl<'a> Visit<'a> for Scan {
         }
         struct Targets(BTreeSet<String>);
         impl<'a> Visit<'a> for Targets {
+            fn visit_arm(&mut self, arm: &'a syn::Arm) {
+                if !skip(&arm.attrs) {
+                    visit::visit_arm(self, arm);
+                }
+            }
             fn visit_expr_method_call(&mut self, n: &'a syn::ExprMethodCall) {
                 if n.method == "define" {
                     self.0
@@ -605,7 +684,7 @@ impl<'a> Visit<'a> for Scan {
         }
         let mut targets = Targets(BTreeSet::new());
         targets.visit_block(&n.body);
-        let keys = object_keys(&n.expr);
+        let keys = object_keys(&n.expr, &self.pair_helpers);
         for receiver in targets.0 {
             self.members
                 .entry(receiver.clone())
@@ -707,6 +786,11 @@ impl Discover {
             }
         }
         impl<'a> Visit<'a> for Calls<'_> {
+            fn visit_arm(&mut self, arm: &'a syn::Arm) {
+                if !skip(&arm.attrs) {
+                    visit::visit_arm(self, arm);
+                }
+            }
             fn visit_expr_method_call(&mut self, n: &'a syn::ExprMethodCall) {
                 self.call(&n.method.to_string(), n.args.iter().collect(), false);
                 visit::visit_expr_method_call(self, n);
@@ -734,6 +818,21 @@ impl Discover {
     }
 }
 impl<'a> Visit<'a> for Discover {
+    fn visit_arm(&mut self, arm: &'a syn::Arm) {
+        if !skip(&arm.attrs) {
+            visit::visit_arm(self, arm);
+        }
+    }
+    fn visit_file(&mut self, file: &'a syn::File) {
+        if !skip(&file.attrs) {
+            visit::visit_file(self, file);
+        }
+    }
+    fn visit_item_const(&mut self, item: &'a syn::ItemConst) {
+        if !skip(&item.attrs) {
+            visit::visit_item_const(self, item);
+        }
+    }
     fn visit_item_mod(&mut self, n: &'a syn::ItemMod) {
         if !skip(&n.attrs) {
             visit::visit_item_mod(self, n);
@@ -799,8 +898,11 @@ fn files(root: &Path) -> Vec<PathBuf> {
         if out.contains(&file.to_path_buf()) {
             return;
         }
-        out.push(file.to_owned());
         let ast = syn::parse_file(&fs::read_to_string(file).unwrap()).unwrap();
+        if skip(&ast.attrs) {
+            return;
+        }
+        out.push(file.to_owned());
         let dir = if ["lib.rs", "mod.rs"].contains(&file.file_name().unwrap().to_str().unwrap()) {
             file.parent().unwrap().to_path_buf()
         } else {
@@ -841,7 +943,10 @@ fn scan(root: &Path, _shared: bool) -> Scan {
         let ast = syn::parse_file(&fs::read_to_string(file).unwrap()).unwrap();
         for item in &ast.items {
             if let syn::Item::Const(c) = item {
-                let keys = object_keys(&c.expr);
+                if skip(&c.attrs) {
+                    continue;
+                }
+                let keys = object_keys(&c.expr, &BTreeMap::new());
                 scan.tables.insert(c.ident.to_string(), keys);
             }
         }
@@ -853,6 +958,7 @@ fn scan(root: &Path, _shared: bool) -> Scan {
             .display()
             .to_string();
         scan.aliases.clear();
+        scan.pair_helpers.clear();
         scan.members.clear();
         scan.locals.clear();
         scan.wrappers.clear();
@@ -867,7 +973,7 @@ fn scan(root: &Path, _shared: bool) -> Scan {
                 }
                 for stmt in &f.block.stmts {
                     if let syn::Stmt::Expr(e, _) = stmt {
-                        let keys = object_keys(e);
+                        let keys = object_keys(e, &BTreeMap::new());
                         if !keys.is_empty() {
                             scan.tables.insert(f.sig.ident.to_string(), keys);
                         }
@@ -1242,4 +1348,167 @@ fn compound_test_only_cfg_never_supplies_production_bindings() {
     for fake in ["fakeModule", "fakeImpl", "fakeNot"] {
         assert!(!scan.globals.contains(fake), "{fake}");
     }
+}
+
+#[test]
+fn review_control_function_debug_names_do_not_register_object_members() {
+    let ast = syn::parse_file(
+        r#"
+        fn install(g:&Js) {
+            let pair = |name:&str, value:Js| (name,value);
+            g.define("Actual", Js::object(vec![pair("realMember",value)]));
+            g.define("Factory", Js::function("missingMember", |_,_| {
+                Js::object(vec![("returnedMember", value)])
+            }));
+        }
+        fn production(h:&Host) { h.global("Factory.missingMember"); }
+    "#,
+    )
+    .unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(scan.globals.contains("Factory"));
+    assert!(
+        scan.globals.contains("Actual.realMember"),
+        "tuple-producing helper supplies the actual member"
+    );
+    assert!(
+        !scan.globals.contains("Factory.missingMember"),
+        "debug name is not a member"
+    );
+    assert!(
+        !scan.globals.contains("Factory.returnedMember"),
+        "callback result is not a member"
+    );
+}
+
+#[test]
+fn review_control_test_only_tables_and_files_cannot_register_bindings() {
+    let temp = std::env::temp_dir().join(format!(
+        "venue-binding-cfg-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let root = temp.join("safe-cex-venue-control/src");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("lib.rs"),
+        r#"
+        mod hidden;
+        #[cfg(not(test))] const MEMBERS: &[(&str,i32)] = &[("realMember",1)];
+        #[cfg(all(test,feature="native"))] const MEMBERS: &[(&str,i32)] = &[("fakeMember",1)];
+        fn install(g:&Js) { g.define("Root", Js::object(MEMBERS)); }
+    "#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("hidden.rs"),
+        r#"
+        #![cfg(all(test,feature="native"))]
+        fn install(g:&Js) { g.define("fakeFileBinding",value); }
+    "#,
+    )
+    .unwrap();
+    let observed = scan(&root, false);
+    let admitted = files(&root);
+    fs::remove_dir_all(temp).unwrap();
+    assert!(
+        observed.globals.contains("Root.realMember"),
+        "production table is retained"
+    );
+    assert!(
+        !observed.globals.contains("Root.fakeMember"),
+        "test-only table cannot register members"
+    );
+    assert!(
+        !observed.globals.contains("fakeFileBinding"),
+        "inner cfg excludes registrations"
+    );
+    assert_eq!(
+        admitted.len(),
+        1,
+        "inner cfg file is outside the production graph"
+    );
+}
+
+#[test]
+fn review_control_file_level_test_cfg_excludes_direct_scans() {
+    let ast =
+        syn::parse_file(r#"#![cfg(test)] fn install(g:&Js) {g.define("fake",value);}"#).unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(
+        scan.globals.is_empty(),
+        "file-level cfg(test) excludes direct AST scans"
+    );
+}
+
+#[test]
+fn review_control_tuple_helper_shadowing_respects_lexical_blocks_and_types() {
+    let ast = syn::parse_file(
+        r#"
+        fn install(g:&Js) {
+            let pair=|name,value|Js::function(name,value);
+            { let pair=|name,value|(name,value); consume(pair("inner",value)); }
+            g.define("Factory",pair("missingMember",callback));
+            let pair=|name,value|(name,value);
+            { let pair:NativeFn=make_function(); consume(pair("innerFunction",callback)); }
+            g.define("Actual",Js::object(vec![pair("realMember",value)]));
+            let pair:NativeFn=make_function();
+            g.define("TypedFactory",pair("typedMissingMember",callback));
+        }
+    "#,
+    )
+    .unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(
+        !scan.globals.contains("Factory.missingMember"),
+        "nested tuple helper cannot classify outer function"
+    );
+    assert!(
+        scan.globals.contains("Actual.realMember"),
+        "outer tuple helper survives inner function shadow"
+    );
+    assert!(
+        !scan.globals.contains("TypedFactory.typedMissingMember"),
+        "typed shadow invalidates tuple helper"
+    );
+}
+
+#[test]
+fn review_control_test_only_match_arms_cannot_supply_production_intrinsics() {
+    let ast = syn::parse_file(
+        r#"
+        fn intrinsic(name:&str) { match name {
+            "real"=>value,
+            #[cfg(all(test,feature="native"))] "fake"=>host.global("testOnlyReference"),
+            _=>value,
+        }}
+    "#,
+    )
+    .unwrap();
+    let mut scan = Scan {
+        binding: true,
+        ..Scan::default()
+    };
+    scan.visit_file(&ast);
+    assert!(scan.intrinsics.contains("real"));
+    assert!(
+        !scan.intrinsics.contains("fake"),
+        "test-only match arm is not a production intrinsic"
+    );
+    assert!(!scan.refs.contains_key("global testOnlyReference"));
 }
