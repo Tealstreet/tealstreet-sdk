@@ -695,3 +695,79 @@ fn leverage_refresh_prefers_stored_settings_over_stale_positions() {
         venue.dispose().unwrap();
     }
 }
+
+#[test]
+fn rest_ticker_funding_time_uses_the_host_local_date_converter() {
+    use safe_cex_store::Store;
+    use std::cell::Cell;
+    let source = std::process::Command::new("node")
+        .env("TZ", "America/Los_Angeles")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/ticker-local-date-oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source ticker oracle: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected.len(), 4);
+    for (index, (id, timestamp)) in [
+        ("local", json!("2026-10-17T08:00:00")),
+        ("utc", json!("2026-10-17T08:00:00Z")),
+        ("date", json!("2026-10-17")),
+        ("numeric", json!(1792224000000_u64)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(expected[index]["id"], id);
+        let conversions = Rc::new(Cell::new(0));
+        let observed = conversions.clone();
+        let (o, rt, store, wire) = support::fixture_with_settings_and_local_time(
+            json!({"key":"fixture-key","secret":"fixture-secret"}),
+            Rc::new(|_, _| panic!("no external data configured")),
+            true,
+            Rc::new(move |local| {
+                observed.set(observed.get() + 1);
+                local + 7.0 * 60.0 * 60.0 * 1000.0
+            }),
+        );
+        let venue: &dyn Exchange = o.as_ref();
+        script_venue(&wire);
+        let markets = drive(&rt, venue.fetch_markets()).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        script(
+            &wire,
+            TICKER,
+            json!([{"symbol":"BTC_USDT","lastPrice":60000,"nextSettleTime":timestamp}]),
+        );
+        calls(&wire);
+        let tickers = drive(&rt, venue.fetch_tickers()).unwrap();
+        assert_eq!(tickers.len(), 1, "{id}");
+        assert_eq!(
+            tickers[0].funding_time.to_bits(),
+            expected[index]["fundingTime"].as_f64().unwrap().to_bits(),
+            "{id}: actual source funding time"
+        );
+        assert_eq!(
+            conversions.get(),
+            usize::from(id == "local"),
+            "{id}: only offset-less date-time needs host conversion"
+        );
+        let log = calls(&wire);
+        assert_eq!(bodies(&log, "GET", TICKER).len(), 1, "{id}");
+        venue.dispose().unwrap();
+    }
+}
