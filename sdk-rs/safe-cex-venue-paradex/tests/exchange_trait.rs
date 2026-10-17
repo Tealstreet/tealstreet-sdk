@@ -1005,9 +1005,12 @@ fn real_trait_history_fills_reach_authenticated_rows() {
     assert_eq!(rows[0].realized_pnl, Some(20.0));
     assert_eq!(rows[1].price, 100.0);
     let requests = wire.requests.borrow();
-    let read = requests.iter().find(|r| r.url == "/fills").unwrap();
-    assert_eq!(read.params.as_ref().unwrap()["market"], "BTC-USD-PERP");
-    assert_eq!(read.params.as_ref().unwrap()["end_at"], 1700000100000.0);
+    let read = requests
+        .iter()
+        .find(|r| r.url.split('?').next() == Some("/fills"))
+        .unwrap();
+    assert_eq!(trait_request_query(read, "market"), "BTC-USD-PERP");
+    assert_eq!(trait_request_query(read, "end_at"), "1700000100000");
     drop(requests);
     venue.dispose().unwrap();
 }
@@ -1085,9 +1088,9 @@ fn real_trait_history_orders_reach_authenticated_rows() {
     let requests = wire.requests.borrow();
     let read = requests
         .iter()
-        .find(|r| r.url == "/orders-history")
+        .find(|r| r.url.split('?').next() == Some("/orders-history"))
         .unwrap();
-    assert_eq!(read.params.as_ref().unwrap()["start_at"], 1699999800000.0);
+    assert_eq!(trait_request_query(read, "start_at"), "1699999800000");
     drop(requests);
     venue.dispose().unwrap();
 }
@@ -1112,10 +1115,10 @@ fn real_trait_history_journal_uses_symbol_scoped_fills() {
     assert_eq!(rows[0]["realizedPnl"], 20.0);
     assert_eq!(rows[0]["fees"], 0.2);
     assert!(wire.requests.borrow().iter().any(|r| {
-        r.url == "/fills"
-            && r.params
-                .as_ref()
-                .is_some_and(|p| p["market"] == "BTC-USD-PERP")
+        r.url.split('?').next() == Some("/fills")
+            && r.url.split_once('?').is_some_and(|(_, query)| {
+                query.split('&').any(|pair| pair == "market=BTC-USD-PERP")
+            })
     }));
     venue.dispose().unwrap();
 }
@@ -1155,7 +1158,13 @@ fn real_trait_stream_book_delivers_and_cleans_up_socket_listener() {
     for _ in 0..16 {
         runtime.pump();
     }
-    assert_eq!(seen.borrow().len(), 1);
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "runtime errors: {:?}; console: {:?}",
+        runtime.errors.borrow(),
+        runtime.console.borrow()
+    );
     assert_eq!(seen.borrow()[0].bids[0].price, 101.25);
     assert_eq!(seen.borrow()[0].asks[0].amount, 3.0);
     cleanup().unwrap();
@@ -1237,4 +1246,17 @@ fn real_trait_stream_ohlcv_polls_then_stops_after_cleanup() {
         runtime.errors.borrow()
     );
     venue.dispose().unwrap();
+}
+
+fn trait_request_query<'a>(request: &'a safe_cex_transport::RestRequest, key: &str) -> &'a str {
+    request
+        .url
+        .split_once('?')
+        .expect("actual serialized query")
+        .1
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(name, _)| *name == key)
+        .expect("actual query parameter")
+        .1
 }
