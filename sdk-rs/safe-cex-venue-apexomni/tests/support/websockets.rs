@@ -950,6 +950,16 @@ fn frame_units(value: &Value) -> Vec<u16> {
 #[test]
 fn socket_frame_units_are_observed_before_wire() {
     use safe_cex_num::numeric_ingress::js_from_str;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    fn property<'a>(value: &'a Input, name: &str) -> Option<&'a Input> {
+        let Input::Object(entries) = value else {
+            return None;
+        };
+        entries
+            .iter()
+            .find(|(key, _)| key.iter().copied().eq(name.encode_utf16()))
+            .map(|(_, value)| value)
+    }
     let output = Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
