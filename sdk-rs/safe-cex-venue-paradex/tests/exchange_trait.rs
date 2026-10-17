@@ -829,3 +829,69 @@ fn numeric_created_at_survives_constructed_fetch_orders() {
     );
     venue.dispose().unwrap();
 }
+
+#[test]
+fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
+    let (venue, runtime, store, _) = support::fixture_with(private_options(), |wire| {
+        private_script(wire);
+        let mut rows = Vec::new();
+        for (id, date) in [
+            ("null-date", Some(json!(null))),
+            ("false-date", Some(json!(false))),
+            ("true-date", Some(json!(true))),
+            ("missing-date", None),
+            ("valid-sibling", Some(json!("2026-07-20T00:00:00Z"))),
+        ] {
+            let mut row = json!({
+                "id": id, "market": "BTC-USD-PERP", "side": "BUY", "type": "LIMIT",
+                "status": "OPEN", "price": "101.5", "size": 0.006,
+                "remaining_size": 0.003, "reduce_only": false
+            });
+            if let Some(date) = date {
+                row["created_at"] = date;
+            }
+            rows.push(row);
+        }
+        wire.responses
+            .borrow_mut()
+            .insert("/orders".into(), json!({"results": rows}));
+    });
+    let venue: &dyn Exchange = venue.as_ref();
+    drive(&runtime, venue.start()).expect("raw order coercion must preserve startup batch");
+    let orders = drive(&runtime, venue.fetch_orders(None)).expect("raw order REST batch");
+    assert_eq!(
+        orders.len(),
+        5,
+        "retain every odd row and its valid sibling"
+    );
+    assert!(store.loaded().orders);
+    assert_eq!(store.orders().len(), 5);
+    for (order, id) in orders.iter().zip([
+        "null-date",
+        "false-date",
+        "true-date",
+        "missing-date",
+        "valid-sibling",
+    ]) {
+        assert_eq!(order.id, id);
+        assert_eq!(order.amount.to_bits(), 0.006_f64.to_bits());
+        assert_eq!(order.remaining.to_bits(), 0.003_f64.to_bits());
+        assert_eq!(order.filled.to_bits(), (0.006_f64 - 0.003).to_bits());
+        let stored = store
+            .orders()
+            .iter()
+            .find(|row| row.id == id)
+            .unwrap()
+            .clone();
+        assert_eq!(stored.amount.to_bits(), order.amount.to_bits());
+        assert_eq!(stored.last_update.to_bits(), order.last_update.to_bits());
+    }
+    for (index, expected) in [(0, 0.0_f64), (1, 0.0), (2, 1.0), (4, 1784505600000.0)] {
+        assert_eq!(orders[index].last_update.to_bits(), expected.to_bits());
+    }
+    assert!(orders[3].last_update.is_nan());
+    assert!(orders[0].info.as_ref().unwrap()["created_at"].is_null());
+    assert_eq!(orders[1].info.as_ref().unwrap()["created_at"], false);
+    assert_eq!(orders[2].info.as_ref().unwrap()["created_at"], true);
+    assert!(orders[3].info.as_ref().unwrap().get("created_at").is_none());
+}
