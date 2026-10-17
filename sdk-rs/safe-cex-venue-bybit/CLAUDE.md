@@ -652,3 +652,8 @@ advances it, checking suppression, USD delta and inverse qty/value price.
 frame, requires the duplicate-fill assertion to fail after compilation, restores
 the exact source bytes and requires the same witness to pass. Historical socket
 body evidence describes the removed adapter, not production coverage.
+
+Primary placement preserves Lodash `times` count admission before materializing
+lots. A zero market maximum produces Infinity and no payloads, as in TypeScript.
+`tests/zero_order_max_binding.rs` drives both actual primary/demo placement paths
+in bounded child processes so the pre-fix infinite loop fails safely.
