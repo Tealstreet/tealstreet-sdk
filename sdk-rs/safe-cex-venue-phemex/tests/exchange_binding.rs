@@ -871,6 +871,11 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
         json!([[warning, "warning"], [warning, "warning"]])
     );
     for attempt in 0..3 {
+        if attempt == 1 {
+            // Markets/tickers plus the first snapshot consumed the real
+            // three-per-second read budget. Advance its clock, not its policy.
+            h.runtime.advance(1_000.);
+        }
         if attempt == 2 {
             h.runtime.advance(30_000.);
         }
@@ -917,6 +922,10 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
         "a later valid snapshot must recover"
     );
     assert_eq!(received.borrow()[0].bids[0].amount, 4.);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "snapshot failure must be handled by its warning path"
+    );
     cleanup().unwrap();
     h.venue().dispose().unwrap();
 }

@@ -1131,3 +1131,40 @@ Reproduce selected compiler/native checks with
 see safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for individual proof commands.
 This does not assert full current discovery: ten post-census owners, one public
 alias, local scopes, feature combinations and WASM remain separate obligations.
+
+
+## Post-merge #418: real snapshot failure warnings
+
+At master b07c56cb67, test-only62ccac890c/c075109733 constructs the actual Phemex
+Exchange public book and rejects terminal HTTP. The real shared client, socket,
+snapshot continuation and warning path run unchanged. The maintained TS class
+and ENDPOINTS declaration run independently in snapshot-warning-source.cjs.
+
+Compiled RED1: the parent-dispatch bug produces zero warnings instead of one
+(`/tmp/port-txflow-phemex-warning-parent-red.log`). WsHost routes log to the
+socket's nonexistent member instead of parent.log. With only that dispatch
+repaired, compiled RED2 fails the named PHEMEX-SNAPSHOT-WARNING assertion:
+`Error: unscripted request ...` instead of the original Error.message
+(`/tmp/port-txflow-phemex-warning-message-red.log`). Both compilation failures
+are excluded: these are executed test failures, each exit101.
+
+The complete fix dispatches log to parent and selects Error.message for native
+Error/AxiosError instances, retaining String(value) for other thrown values.
+The real regression passes next-delta retries, one warning inside the30-second
+window, reopening after30seconds, exact severity/text, no escaped runtime error,
+and recovery to a valid snapshot merged with its initial delta. The actual read
+limiter remains enabled; the fixture advances its clock between retry attempts.
+The source supplement separately asserts Error, ordinary-object and string
+rejections. All36 constructed binding tests pass, including the original three
+#418 chart history/candle/book regressions. No original oracle corpus changed.
+
+Reproduce from root:
+
+```sh
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-phemex --jobs 1 --test exchange_binding
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" node sdk-rs/safe-cex-venue-phemex/tests/snapshot-warning-source.cjs
+```
+
+Review scope also traced source symbol formatting, parent timeframe/xhr selection,
+REST field mapping and the snapshot await/delta boundary from #418. The daily UTC
+normalization gap is already owned by #825; this PR makes no date changes.

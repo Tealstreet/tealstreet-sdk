@@ -15,7 +15,7 @@ async function run(error) {
   class Base { constructor() { this.isConnected = true; this.orderBookInnerState = {}; this.parent = {xhr:{get:async () => {attempts++; throw error;}},log:(...args)=>logs.push(args)}; } send(){} cleanupMessageHandlerStats(){} }
   const Public = new Function('BaseWebSocket','nanoid','Date','LogSeverity','ENDPOINTS',code)(Base,()=> 'book',{now:()=>clock},{Warning:'warning'},constants.ENDPOINTS);
   const ws = new Public(); const cleanup = ws.listenOrderBook('BTCUSDT',()=>{throw Error('failure must not publish book');});
-  for (let i=0;i<3;i++) { if(i===2)clock=30000; ws.messageHandlers['orderbook_p.BTCUSDT'][0]({sequence:101,bids:[],asks:[]}); for(let j=0;j<8;j++)await Promise.resolve(); }
+  for (let i=0;i<3;i++) { if(i===1)clock=1000; if(i===2)clock=31000; ws.messageHandlers['orderbook_p.BTCUSDT'][0]({sequence:101,bids:[],asks:[]}); for(let j=0;j<8;j++)await Promise.resolve(); }
   assert.equal(attempts,3); assert.equal(logs.length,2); cleanup(); return logs;
 }
 (async()=>{const text='unscripted request GET /md/v2/fullbook'; const error=await run(new Error(text)); const plain=await run({message:'must not read this'}); const string=await run('plain failure'); const prefix='[Phemex] Orderbook snapshot request failed for BTCUSDT; waiting for next delta to retry: '; assert.equal(error[0][0],prefix+text); assert.equal(plain[0][0],prefix+'[object Object]'); assert.equal(string[0][0],prefix+'plain failure'); process.stdout.write(JSON.stringify({error,plain,string}));})().catch(error=>{console.error(error);process.exitCode=1;});
