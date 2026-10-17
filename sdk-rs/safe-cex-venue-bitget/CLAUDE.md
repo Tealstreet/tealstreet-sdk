@@ -1,5 +1,16 @@
 # Bitget venue family
 
+The private-topic host consumes the shared iterator protocol instead of indexing
+Map/Set storage. It admits native iterator objects, caches the next method, keeps
+live insertion positions and propagates iterator errors with their original value.
+Private-topic loops close on body errors, preserving that throw over close errors;
+step/value errors do not close.
+The constructed-host `private_host_*` tests reproduce both iterator-object refusal
+and deletion skipping on master. Native references, signed zero, Unicode code
+points and permanent exhaustion stay in the runtime. Maintained wire frames remain
+JSON arrays; iterator-object cases cover the reachable host boundary, not a claimed
+current venue payload. `private_binding_frames` retains the four private topics.
+
 The typed `Exchange::cancel_all_orders` routes to the family's assembled override.
 Classic accounts send venue-wide cancellation even with an empty local order store;
 UTA sweeps venue normal and strategy orders before cancellation; inverse uses each
