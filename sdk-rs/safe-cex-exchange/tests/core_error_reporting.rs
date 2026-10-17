@@ -50,7 +50,7 @@ fn enhanced_error_causal_status_and_config_projection() {
     let result =
         safe_cex_exchange::js_runtime::value::to_json(&format_error_for_sentry(&error)).unwrap();
     assert_eq!(result["tags"]["errorType"], "network");
-    assert_eq!(result["tags"]["statusCode"], 403);
+    assert_eq!(result["tags"]["statusCode"].as_f64(), Some(403.));
     assert_eq!(result["extra"]["originalMessage"], "original");
     assert_eq!(
         result["extra"]["config"]["headers"],

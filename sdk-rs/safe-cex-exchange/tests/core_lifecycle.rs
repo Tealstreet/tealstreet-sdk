@@ -368,10 +368,10 @@ fn worker_correlation_ignores_wrong_request_and_dispatches_override_without_sock
             ),
         )
         .unwrap();
-    assert!(matches!(poll(request.as_mut()), Poll::Ready(Ok(value)) if value == json!([1,2])));
+    assert!(matches!(poll(request.as_mut()), Poll::Ready(Ok(value)) if value == json!([1.0,2.0])));
     assert_eq!(
         *venue.hooks.borrow(),
-        vec![(json!([1, 2]), json!("fetchOrders"), vec![json!("BTC")])]
+        vec![(json!([1.0, 2.0]), json!("fetchOrders"), vec![json!("BTC")])]
     );
 }
 
