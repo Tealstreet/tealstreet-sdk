@@ -477,3 +477,10 @@ Snapshot rulings cite [§16](../parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-a
 Market/response admission rulings cite the record-shape declaration above.
 Native assertions precede oracle-wire comparisons, and existing corpora remain
 unchanged.
+
+The typed Exchange `nuke` and `nuke_positions` entrypoints dispatch to the existing
+WEEX members: close all venue positions, replace the refreshed snapshot, then
+(for `nuke`) cancel ordinary and algo orders. The source has no retry-count input.
+`exchange_binding` proves endpoint reachability from an empty Store and close/refresh/
+cancel order; private order, position and account frames assert actual Store changes
+alongside the retained fill-event witness.

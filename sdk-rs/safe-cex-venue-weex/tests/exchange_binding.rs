@@ -551,3 +551,132 @@ fn income_page_and_range_use_bound_post_normalizer_and_shared_pager() {
     assert_eq!(body(&calls[1])["startTime"], 1700000000000.0);
     assert_eq!(body(&calls[1])["incomeType"], "FUNDING_FEE");
 }
+
+#[test]
+fn trait_nuke_positions_closes_unseen_positions_and_replaces_snapshot() {
+    let h = harness(options(), |http| {
+        script(http);
+        http.ok("POST", endpoint("CLOSE_POSITIONS"), json!({}));
+        http.ok("GET", endpoint("POSITIONS"), json!([]));
+    });
+    seed(&h);
+    // Consume the initial position page, leaving an empty close-confirmation page.
+    h.drive(h.venue().fetch_positions(None)).unwrap();
+    assert!(h.store.positions().is_empty());
+    expect_ok(h.drive(h.venue().nuke_positions(0)));
+    let calls = h.http.calls(endpoint("CLOSE_POSITIONS"));
+    assert_eq!(
+        calls.len(),
+        1,
+        "close-all reaches positions absent from the local Store"
+    );
+    assert_eq!(body(&calls[0]), json!({}));
+    assert_eq!(h.http.calls(endpoint("POSITIONS")).len(), 2);
+    assert!(!h.store.positions().is_empty());
+    assert!(h.store.positions().iter().all(|p| p.contracts == 0.0));
+    assert!(h.http.calls(endpoint("ORDER")).is_empty());
+}
+
+#[test]
+fn trait_nuke_closes_before_cancelling_both_order_families() {
+    let h = harness(options(), |http| {
+        script(http);
+        http.ok("POST", endpoint("CLOSE_POSITIONS"), json!({}));
+    });
+    seed(&h);
+    expect_ok(h.drive(h.venue().nuke(0)));
+    let calls = h.http.calls(endpoint("CLOSE_POSITIONS"));
+    assert_eq!(
+        calls.len(),
+        1,
+        "trait nuke uses the venue close-all endpoint"
+    );
+    let sent = h.http.sent.lock().unwrap();
+    let paths = sent.iter().map(|r| r.url.as_str()).collect::<Vec<_>>();
+    let close = paths
+        .iter()
+        .position(|p| *p == endpoint("CLOSE_POSITIONS"))
+        .unwrap();
+    let positions = paths
+        .iter()
+        .position(|p| *p == endpoint("POSITIONS"))
+        .unwrap();
+    let orders = paths
+        .iter()
+        .position(|p| *p == endpoint("CANCEL_ALL_OPEN_ORDERS"))
+        .unwrap();
+    let algo = paths
+        .iter()
+        .position(|p| *p == endpoint("CANCEL_ALL_ALGO_ORDERS"))
+        .unwrap();
+    assert!(close < positions && positions < orders && positions < algo);
+    drop(sent);
+    assert!(h.http.calls(endpoint("ORDER")).is_empty());
+}
+
+#[test]
+fn private_orders_frame_updates_the_real_store() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let mut row = raw_order();
+    row["orderId"] = json!("socket-order-42");
+    row["price"] = json!("123.5");
+    let socket = h.venue().base().get_private_sockets()[0].clone();
+    socket
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"orders","d":[row]}).to_string(),
+        ))
+        .unwrap();
+    let orders = h.store.orders();
+    let actual = orders.iter().find(|o| o.id == "socket-order-42").unwrap();
+    assert_eq!(actual.price, 123.5);
+    assert_eq!(actual.amount, 2.0);
+    assert_eq!(actual.filled, 0.25);
+    drop(orders);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_positions_frame_updates_the_real_store() {
+    let h = setup();
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    let socket = h.venue().base().get_private_sockets()[0].clone();
+    socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(
+        json!({"e":"positions","d":[{"symbol":"BTCUSDT","positionSide":"LONG","size":"3","openValue":"330","leverage":"20","marginType":"CROSS","updatedTime":1700000000001.0}]}).to_string(),
+    )).unwrap();
+    let positions = h.store.positions();
+    let actual = positions.iter().find(|p| p.contracts == 3.0).unwrap();
+    assert_eq!(actual.symbol, "BTCUSDT");
+    assert_eq!(actual.entry_price, 110.0);
+    drop(positions);
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_account_frame_refreshes_balance_in_the_real_store() {
+    let h = harness(options(), |http| {
+        script(http);
+        http.ok(
+            "GET",
+            endpoint("BALANCE"),
+            json!([{"asset":"USDT","equity":"285","available":"240","unrealizedPnl":"5"}]),
+        );
+    });
+    seed(&h);
+    expect_ok(h.drive(h.venue().start()));
+    h.runtime.pump();
+    assert_eq!(h.store.balance().total, 150.0);
+    let socket = h.venue().base().get_private_sockets()[0].clone();
+    socket
+        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+            json!({"e":"account","d":[]}).to_string(),
+        ))
+        .unwrap();
+    h.runtime.pump();
+    h.runtime.advance(251.0);
+    assert_eq!(h.store.balance().total, 285.0);
+    assert_eq!(h.store.balance().free, 240.0);
+    h.venue().dispose().unwrap();
+}

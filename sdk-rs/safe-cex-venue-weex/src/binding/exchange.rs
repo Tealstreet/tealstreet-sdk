@@ -191,6 +191,12 @@ impl Exchange for WeexExchange {
         let args = args!(optional(symbols));
         self.invoke("fetchOrders", args)
     }
+    fn nuke(&self, _tries: u32) -> ExchangeFuture<'_, ()> {
+        self.unit("nuke", std::vec![])
+    }
+    fn nuke_positions(&self, _tries: u32) -> ExchangeFuture<'_, ()> {
+        self.unit("nukePositions", std::vec![])
+    }
     fn fetch_symbol_max_leverage(&self, symbol: String) -> ExchangeFuture<'_, f64> {
         let args = args!(js(&symbol));
         self.invoke("fetchSymbolMaxLeverage", args)
