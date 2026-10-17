@@ -701,7 +701,7 @@ fn listen_ohlcv_native_callback_and_cleanup() {
                 );
                 assert_eq!(
                     opts.interval,
-                    Timeframe::M5,
+                    safe_cex_types::AnyTimeframe::Variant1(Timeframe::M5),
                     "LISTEN candle native interval"
                 );
                 assert_eq!(

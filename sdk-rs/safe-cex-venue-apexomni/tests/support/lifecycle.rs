@@ -153,7 +153,10 @@ impl ApexServices for Services {
         opts: OHLCVOptions,
         callback: Rc<dyn Fn(Candle) -> Result<(), ExchangeError>>,
     ) -> Result<Cleanup, ExchangeError> {
-        assert_eq!(opts.interval, Timeframe::M1);
+        assert_eq!(
+            opts.interval,
+            safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1)
+        );
         self.host().record(
             "listen:candle",
             vec![obj(vec![("symbol", s(opts.symbol)), ("interval", s("1m"))])],
@@ -378,9 +381,9 @@ fn run_lifecycle(name: &str) {
                     let opts = OHLCVOptions {
                         symbol: "BTCUSDC".into(),
                         interval: if variant == 1 {
-                            Timeframe::D1
+                            safe_cex_types::AnyTimeframe::Variant1(Timeframe::D1)
                         } else {
-                            Timeframe::M1
+                            safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1)
                         },
                         limit: Some(if variant == 2 {
                             0.
@@ -412,7 +415,7 @@ fn run_lifecycle(name: &str) {
                 "listenOHLCV" => {
                     let opts = OHLCVOptions {
                         symbol: "BTCUSDC".into(),
-                        interval: Timeframe::M1,
+                        interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
                         from: None,
                         to: None,
                         limit: None,
@@ -614,7 +617,7 @@ fn candle_response_shapes_match_actual_source() {
         host.operations.borrow_mut().clear();
         let opts = OHLCVOptions {
             symbol: "BTCUSDC".into(),
-            interval: Timeframe::M1,
+            interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
             from: None,
             to: Some(1700001234567.),
             limit: Some(3.),

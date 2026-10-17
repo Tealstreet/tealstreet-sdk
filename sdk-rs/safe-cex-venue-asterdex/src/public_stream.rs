@@ -13,7 +13,7 @@ use safe_cex_exchange::{
 use safe_cex_num::{js_string, js_truthy};
 use safe_cex_store::model_patch::ModelPatch;
 use safe_cex_transport::socket::SocketFrame;
-use safe_cex_types::{Ticker, Timeframe};
+use safe_cex_types::{AnyTimeframe, Ticker};
 use serde_json::Value;
 use std::{
     cell::RefCell,
@@ -471,7 +471,7 @@ impl PublicDataListeners {
     pub fn listen_ohlcv(
         self: &Rc<Self>,
         symbol: &str,
-        interval: Timeframe,
+        interval: AnyTimeframe,
         callback: CandleCallback,
     ) -> Result<BookCleanup, ExchangeError> {
         let stream = format!(

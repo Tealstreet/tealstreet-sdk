@@ -1081,7 +1081,7 @@ pub struct HistoricalTradeOptions {
 #[ts(optional_fields)]
 pub struct OHLCVOptions {
     pub symbol: String,
-    pub interval: Timeframe,
+    pub interval: AnyTimeframe,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -3161,12 +3161,12 @@ mod strict_codecs {
         UpdateOrderOptsUpdateVariant1, ValidateAccountResult,
     };
     use super::{
-        AccountValidationError, Balance, ClosedPnlEntryContracts, ClosedPnlEntryEntryPrice,
-        ClosedPnlEntryExitPrice, ClosedPnlEntryFees, ClosedPnlEntryLeverage,
-        ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl, CoinBalance, DataProvenance,
-        ExchangeAccountConfigBybitSiteId, ExchangeAccountConfigHealthStatus, ExchangeName,
-        ExchangeOptionsAuth, ExchangeOptionsBybitSiteId, ExchangeOptionsExternalPublicData,
-        ExchangeOptionsExternalPublicDataVariant0Type,
+        AccountValidationError, AnyTimeframe, Balance, ClosedPnlEntryContracts,
+        ClosedPnlEntryEntryPrice, ClosedPnlEntryExitPrice, ClosedPnlEntryFees,
+        ClosedPnlEntryLeverage, ClosedPnlEntryNotional, ClosedPnlEntryUnrealizedPnl, CoinBalance,
+        DataProvenance, ExchangeAccountConfigBybitSiteId, ExchangeAccountConfigHealthStatus,
+        ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
+        ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
         ExchangeOptionsExternalPublicDataVariant1Type, ExchangeOptionsExtra,
         ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraKucoinBroker,
         ExchangeOptionsExtraLighterBuilderFeeMode, ExchangeOptionsHyperliquidBuilder,
@@ -4438,7 +4438,7 @@ mod strict_codecs {
     #[serde(rename_all = "camelCase")]
     struct WireOHLCVOptions {
         symbol: String,
-        interval: Timeframe,
+        interval: AnyTimeframe,
         #[serde(
             default,
             deserialize_with = "deserialize_present",

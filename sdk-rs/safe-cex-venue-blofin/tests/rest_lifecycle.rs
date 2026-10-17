@@ -1244,7 +1244,7 @@ fn native_rest_boundaries() {
     };
     let opts = OHLCVOptions {
         symbol: "BTCUSDT".into(),
-        interval: safe_cex_types::Timeframe::M1,
+        interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),
         to: None,
         from: None,
         limit: None,
@@ -1272,7 +1272,7 @@ fn native_rest_boundaries() {
     };
     let opts = OHLCVOptions {
         symbol: "BTCUSDT".into(),
-        interval: safe_cex_types::Timeframe::D1,
+        interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1),
         to: Some(1710129600000.0),
         from: None,
         limit: Some(1.0),

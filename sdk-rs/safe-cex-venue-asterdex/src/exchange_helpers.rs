@@ -606,21 +606,21 @@ pub fn map_order_type(order_type: OrderType) -> Result<&'static str, &'static st
 }
 
 // ts: AsterDEXExchange.mapTimeframe
-pub fn map_timeframe(timeframe: safe_cex_types::Timeframe) -> &'static str {
-    use safe_cex_types::Timeframe;
+pub fn map_timeframe(timeframe: safe_cex_types::AnyTimeframe) -> &'static str {
     match timeframe {
-        Timeframe::M1 => "1m",
-        Timeframe::M3 => "3m",
-        Timeframe::M5 => "5m",
-        Timeframe::M15 => "15m",
-        Timeframe::M30 => "30m",
-        Timeframe::H1 => "1h",
-        Timeframe::H2 => "2h",
-        Timeframe::H4 => "4h",
-        Timeframe::H6 => "6h",
-        Timeframe::H12 => "12h",
-        Timeframe::D1 => "1d",
-        Timeframe::W1 => "1w",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1) => "1m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M3) => "3m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M5) => "5m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M15) => "15m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M30) => "30m",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H1) => "1h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H2) => "2h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H4) => "4h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H6) => "6h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H12) => "12h",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1) => "1d",
+        safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::W1) => "1w",
+        _ => "1h",
     }
 }
 
