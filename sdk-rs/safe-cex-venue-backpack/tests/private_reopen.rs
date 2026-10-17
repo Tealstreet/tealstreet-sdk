@@ -195,10 +195,12 @@ fn private_reopen_refreshes_orders_without_starting_another_polling_loop() {
         ),
         ("/api/v1/orders", json!([])),
     ] {
-        wire.bodies
-            .lock()
-            .unwrap()
-            .insert(path.into(), RestResponseBody::Untransformed(body));
+        wire.bodies.lock().unwrap().insert(
+            path.into(),
+            RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+            ),
+        );
     }
     // Start the single source tick chain that normal private startup owns.
     drive(&runtime, owner.tick()).unwrap();

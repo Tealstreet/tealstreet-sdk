@@ -303,8 +303,12 @@ fn response(value: Value, phase: u8) -> RestResponse {
         headers: BTreeMap::new(),
         body: match phase % 3 {
             0 => RestResponseBody::Encoded(value.to_string().into_bytes()),
-            1 => RestResponseBody::Untransformed(value),
-            _ => RestResponseBody::Transformed(value),
+            1 => RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+            ),
+            _ => RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+            ),
         },
     }
 }
@@ -1125,7 +1129,12 @@ fn native_create_api() {
                     .unwrap_or("/account")
                     .into(),
                 params: config.get("params").cloned(),
-                body: config.get("data").cloned().map(RestBody::Untransformed),
+                body: config.get("data").cloned().map(|value| {
+                    RestBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
+                            .unwrap(),
+                    )
+                }),
                 headers: config
                     .get("headers")
                     .map(|v| serde_json::from_value(v.clone()).unwrap())
@@ -1150,7 +1159,15 @@ fn native_create_api() {
                 assert!(signed.body.is_none())
             } else {
                 plain(
-                    signed.body.as_ref().unwrap().untransformed().unwrap(),
+                    &signed
+                        .body
+                        .as_ref()
+                        .unwrap()
+                        .untransformed()
+                        .unwrap()
+                        .clone()
+                        .into_value()
+                        .unwrap(),
                     &e["data"],
                 )
             }

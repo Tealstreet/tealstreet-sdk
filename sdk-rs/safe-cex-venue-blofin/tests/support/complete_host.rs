@@ -39,7 +39,9 @@ impl RestAdapter for Adapter {
             req.method,
             req.url,
             req.params,
-            req.body.as_ref().map(|b| b.untransformed().unwrap())
+            req.body
+                .as_ref()
+                .map(|b| b.untransformed().unwrap().clone().into_value().unwrap())
         ]));
         let data = self
             .responses

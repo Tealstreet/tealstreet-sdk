@@ -227,7 +227,10 @@ pub fn collect_native() -> Vec<Value> {
                 );
                 assert_eq!(
                     execution.response.body.clone().into_data(),
-                    json!({"retCode":0,"retMsg":"OK"}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"retCode":0,"retMsg":"OK"})
+                    )
+                    .unwrap(),
                     "factory_params_native_returned_response {carrier}/{id}"
                 );
                 assert_eq!(

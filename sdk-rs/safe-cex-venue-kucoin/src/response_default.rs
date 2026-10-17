@@ -99,11 +99,19 @@ mod tests {
         );
         let quoted = Value::String("{\"code\":\"200000\"}".into());
         assert_eq!(
-            decode(&RestResponseBody::Untransformed(quoted.clone())).unwrap()["code"],
+            decode(&RestResponseBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(quoted.clone())
+                    .unwrap()
+            ))
+            .unwrap()["code"],
             "200000"
         );
         assert_eq!(
-            decode(&RestResponseBody::Transformed(quoted.clone())).unwrap(),
+            decode(&RestResponseBody::Transformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(quoted.clone())
+                    .unwrap()
+            ))
+            .unwrap(),
             quoted,
             "KUCOIN-STAGING transformed strings stay unchanged"
         );

@@ -564,9 +564,14 @@ mod tests {
                     vec![order, Js::str("account-key"), Js::str("GTC")],
                 )
                 .unwrap();
-            let bytes = safe_cex_transport::RestBody::Untransformed(to_json(&payload).unwrap())
-                .wire_bytes_for_content_type(Some("application/json"))
-                .unwrap();
+            let bytes = safe_cex_transport::RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    to_json(&payload).unwrap(),
+                )
+                .unwrap(),
+            )
+            .wire_bytes_for_content_type(Some("application/json"))
+            .unwrap();
             assert_eq!(
                 String::from_utf8(bytes).unwrap(),
                 case["payloadString"].as_str().unwrap(),

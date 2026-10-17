@@ -65,11 +65,17 @@ fn fixture_body(case: &Value) -> safe_cex_transport::RestResponseBody {
     if let Some(raw) = case.get("raw").and_then(Value::as_str) {
         RestResponseBody::Encoded(raw.as_bytes().to_vec())
     } else if case["phase"] == "untransformed" {
-        RestResponseBody::Untransformed(case["data"].clone())
+        RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(case["data"].clone())
+                .unwrap(),
+        )
     } else if case["phase"] == "encoded" {
         RestResponseBody::Encoded(serde_json::to_vec(&case["data"]).unwrap())
     } else {
-        RestResponseBody::Transformed(case["data"].clone())
+        RestResponseBody::Transformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(case["data"].clone())
+                .unwrap(),
+        )
     }
 }
 struct Adapter {

@@ -152,7 +152,7 @@ impl HttpHost for Host {
     }
     fn note_response(&self, response: &RestResponse, request: &RestRequest) {
         self.trace.borrow_mut().push("common-response".into());
-        let value = response.body.clone().into_data();
+        let value = response.body.clone().into_data().into_value().unwrap();
         self.responses.borrow_mut().push(value.clone());
         if let Some(owner) = self.owner.upgrade() {
             owner.base.note_http_response(
@@ -850,7 +850,13 @@ fn transform_cases() -> Vec<Value> {
                 matches!(execution.response.body, RestResponseBody::Transformed(_)),
                 "factory_transform_native_phase {id}"
             );
-            let value = execution.response.body.clone().into_data();
+            let value = execution
+                .response
+                .body
+                .clone()
+                .into_data()
+                .into_value()
+                .unwrap();
             assert_eq!(
                 f.host.responses.borrow().len(),
                 1,
@@ -1352,7 +1358,13 @@ fn retry_condition_cases() -> Vec<Value> {
                 totals[0] += 1;
                 let result = result.unwrap();
                 assert_eq!(
-                    result.response.body.clone().into_data()["retCode"],
+                    result
+                        .response
+                        .body
+                        .clone()
+                        .into_data()
+                        .into_value()
+                        .unwrap()["retCode"],
                     0,
                     "factory_condition_native_result {id}"
                 );
@@ -1382,7 +1394,9 @@ fn retry_condition_cases() -> Vec<Value> {
                 );
                 assert_eq!(
                     error.response.unwrap().body,
-                    RestResponseBody::Transformed(body),
+                    RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap()
+                    ),
                     "factory_condition_native_original_payload {id}"
                 );
                 assert!(
@@ -1484,7 +1498,14 @@ fn native_resolved_signature_rejection_resends_once() {
             attempts,
             "factory_resend_native_attempts {id}"
         );
-        let code = result.response.body.clone().into_data()["retCode"].as_f64();
+        let code = result
+            .response
+            .body
+            .clone()
+            .into_data()
+            .into_value()
+            .unwrap()["retCode"]
+            .as_f64();
         assert_eq!(
             code,
             Some(ret_code),

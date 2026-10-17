@@ -129,7 +129,11 @@ fn request_client_signs_then_transforms_and_keeps_kline_unsigned() {
             method: request["method"].as_str().unwrap().into(),
             url: request["url"].as_str().unwrap().into(),
             params: Some(request["params"].clone()),
-            body: request.get("data").cloned().map(RestBody::Untransformed),
+            body: request.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             ..Default::default()
         }));
         // Core's callback runs after defaults: KLINE clearing must survive to wire.

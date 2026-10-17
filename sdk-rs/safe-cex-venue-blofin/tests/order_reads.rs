@@ -149,7 +149,10 @@ impl RestAdapter for Adapter<'_> {
                         status: 503,
                         reason: None,
                         headers: Default::default(),
-                        body: RestResponseBody::Untransformed(body),
+                        body: RestResponseBody::Untransformed(
+                            safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                                .unwrap(),
+                        ),
                     }));
                 }
                 return Poll::Ready(Err(e));
@@ -160,8 +163,14 @@ impl RestAdapter for Adapter<'_> {
                 headers: Default::default(),
                 body: match self.variant % 3 {
                     0 => RestResponseBody::Encoded(serde_json::to_vec(&value).unwrap()),
-                    1 => RestResponseBody::Untransformed(value),
-                    _ => RestResponseBody::Transformed(value),
+                    1 => RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
+                            .unwrap(),
+                    ),
+                    _ => RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value)
+                            .unwrap(),
+                    ),
                 },
             }))
         }))

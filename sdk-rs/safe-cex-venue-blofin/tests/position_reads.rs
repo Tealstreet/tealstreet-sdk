@@ -212,8 +212,14 @@ impl RestAdapter for Adapter<'_> {
                 headers: Default::default(),
                 body: match self.variant % 3 {
                     0 => RestResponseBody::Encoded(serde_json::to_vec(&value).unwrap()),
-                    1 => RestResponseBody::Untransformed(value.clone()),
-                    _ => RestResponseBody::Transformed(value.clone()),
+                    1 => RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                            .unwrap(),
+                    ),
+                    _ => RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                            .unwrap(),
+                    ),
                 },
             }))
         }))
@@ -558,7 +564,11 @@ fn run(case: &Value, variant: u8, boundary: bool) {
                     let RestResponseBody::Untransformed(value) = &response.body else {
                         panic!("native original response phase")
                     };
-                    assert_eq!(value["msg"], "batch hint", "native original error hint");
+                    assert_eq!(
+                        value.clone().into_value().unwrap()["msg"],
+                        "batch hint",
+                        "native original error hint"
+                    );
                     e.message.clone()
                 }
                 ServiceError::Input(v) => {

@@ -200,11 +200,10 @@ async fn sign(
             string(&url)?
         };
         let body = if data.truthy() {
-            safe_cex_num::js_retained_json_stringify(
-                &to_retained_input(&data).map_err(|error| error.message())?,
-            )
-            .map_err(|error| error.to_string())?
-            .unwrap_or_default()
+            let units = safe_cex_exchange::js_runtime::globals::stringify_json(&data)
+                .map_err(|error| error.message())?
+                .unwrap_or_default();
+            String::from_utf16(&units).map_err(|error| error.to_string())?
         } else {
             String::new()
         };
