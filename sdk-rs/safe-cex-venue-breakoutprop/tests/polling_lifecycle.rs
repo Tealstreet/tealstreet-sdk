@@ -4,12 +4,12 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value};
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_num::numeric_ingress::{js_from_value, JsNumberInput};
+use safe_cex_store::{store::DefaultStore, Store};
 use safe_cex_transport::provider::{RestBody, RestRequest};
 use safe_cex_types::{ExchangeName, OHLCVOptions, OrderBook, Ticker};
 use safe_cex_venue_breakoutprop::{lifecycle::*, polling::*};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
@@ -547,7 +547,7 @@ fn session_coalesces_expiry_retry_finally_and_reentrant_clock_values() {
         assert_eq!(r.url, "/login");
         assert!(r.params.is_none());
         assert!(
-            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&json!({"domain":"default","username":"k","password":"s"}))
+            matches!(&r.body,Some(RestBody::Untransformed(v))if v==&safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({"domain":"default","username":"k","password":"s"})).unwrap())
         );
     }
     s.ready.set(true);
@@ -670,7 +670,7 @@ fn dropped_login_calls_continue_clear_marker_and_report_abandoned_errors() {
 
 use safe_cex_venue_breakoutprop::{
     api::*,
-    runtime::{BreakoutRuntime, OrderUpdate, RuntimeReads, prepare_order},
+    runtime::{prepare_order, BreakoutRuntime, OrderUpdate, RuntimeReads},
 };
 fn final_source() -> Value {
     let out = std::process::Command::new("node")
@@ -1125,6 +1125,9 @@ fn final_cancel_batches_and_update() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["limitPrice"], 102.2, "UPDATE native patched price");
     assert_eq!(body["quantity"], 2.35, "UPDATE native patched amount");
@@ -1226,6 +1229,9 @@ fn final_place_native_numeric_payload_and_failures() {
         .as_ref()
         .unwrap()
         .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
         .unwrap();
     assert_eq!(body["instrument"], "BTC");
     assert_eq!(body["quantity"], 1.23);

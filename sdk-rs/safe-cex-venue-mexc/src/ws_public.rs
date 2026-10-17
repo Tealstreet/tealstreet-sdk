@@ -1,12 +1,12 @@
 //! Public MEXC WebSocket protocol over the exchange-core lifecycle.
 use crate::{
-    types::{BASE_WS_URL, is_mexc_control_channel},
+    types::{is_mexc_control_channel, BASE_WS_URL},
     utils::{from_mexc_symbol, normalize_order_book, normalize_ticker},
     ws::subscription_key,
 };
 use indexmap::IndexMap;
 use safe_cex_exchange::{
-    OwnedOperation, exchange::Exchange, websocket::WsRuntime, ws_parent::WsExchangeParent,
+    exchange::Exchange, websocket::WsRuntime, ws_parent::WsExchangeParent, OwnedOperation,
 };
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, LogSeverity},
@@ -15,10 +15,10 @@ use safe_cex_exchange::{
         WsProtocol,
     },
 };
-use safe_cex_store::{Store, model_patch::ModelPatch};
+use safe_cex_store::{model_patch::ModelPatch, Store};
 use safe_cex_transport::relay::WebSocketConnectionOptions;
 use safe_cex_types::OrderBook;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -499,13 +499,11 @@ impl MexcPublicProtocol {
             safe_cex_transport::socket::SocketFrame::Binary(bytes) => {
                 // MEXC's JS handler calls String(data); Node Buffer conversion
                 // replaces invalid UTF-8, matching from_utf8_lossy here.
-                return Some(
-                    safe_cex_transport::how::big_int_as_string_json_parse(
-                        &String::from_utf8_lossy(bytes),
-                    )
-                    .into_value()
-                    .ok()?,
-                );
+                return safe_cex_transport::how::big_int_as_string_json_parse(
+                    &String::from_utf8_lossy(bytes),
+                )
+                .into_value()
+                .ok();
             }
             safe_cex_transport::socket::SocketFrame::Close { .. } => return None,
         };

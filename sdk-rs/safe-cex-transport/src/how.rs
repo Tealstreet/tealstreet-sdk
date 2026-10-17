@@ -1167,35 +1167,38 @@ pub(crate) fn normalize_json_numbers(value: &mut Value, raw: bool, nested: bool)
 
 // ts-bug: bigIntAsStringJsonParse rewrites digit runs even inside quoted strings;
 // corruption makes JSON.parse fail and the outbound HOW body becomes null.
-fn protect_big_integer_tokens(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut output = String::with_capacity(text.len());
+fn protect_big_integer_tokens(text: &[u16]) -> Vec<u16> {
+    let mut output = Vec::with_capacity(text.len());
     let mut index = 0;
-    while index < bytes.len() {
-        if matches!(bytes[index], b':' | b',' | b'[' | b']') {
-            let tail = &text[index + 1..];
-            let number = index + 1 + tail.len() - safe_cex_num::js_trim_start(tail).len();
-            let digits = number + usize::from(bytes.get(number) == Some(&b'-'));
+    while index < text.len() {
+        if matches!(text[index], 58 | 44 | 91 | 93) {
+            let mut number = index + 1;
+            while text.get(number).is_some_and(|unit| {
+                let mut utf8 = [0; 4];
+                char::from_u32((*unit).into()).is_some_and(|scalar| {
+                    safe_cex_num::js_trim_start(scalar.encode_utf8(&mut utf8)).is_empty()
+                })
+            }) {
+                number += 1;
+            }
+            let digits = number + usize::from(text.get(number) == Some(&45));
             let mut end = digits;
-            while bytes.get(end).is_some_and(u8::is_ascii_digit) {
+            while text.get(end).is_some_and(|unit| matches!(unit, 48..=57)) {
                 end += 1;
             }
             if end - digits >= 16
-                && !bytes
-                    .get(end)
-                    .is_some_and(|byte| matches!(byte, b'0'..=b'9' | b'.' | b'"' | b'e' | b'E'))
+                && !text.get(end).is_some_and(|unit| matches!(unit, 48..=57 | 46 | 34 | 101 | 69))
             {
-                output.push_str(&text[index..number]);
-                output.push('"');
-                output.push_str(&text[number..end]);
-                output.push('"');
+                output.extend_from_slice(&text[index..number]);
+                output.push(34);
+                output.extend_from_slice(&text[number..end]);
+                output.push(34);
                 index = end;
                 continue;
             }
         }
-        let ch = text[index..].chars().next().expect("character boundary");
-        output.push(ch);
-        index += ch.len_utf8();
+        output.push(text[index]);
+        index += 1;
     }
     output
 }
@@ -1207,8 +1210,13 @@ pub fn json_parse(text: &str) -> Input {
 
 /// Preserve the shared TS parser's rewrite, parse, and null-on-failure contract.
 pub fn big_int_as_string_json_parse(text: &str) -> Input {
+    big_int_as_string_json_parse_utf16(&text.encode_utf16().collect::<Vec<_>>())
+}
+
+/// Native string entry; the existing UTF-8 helper delegates to this one rewrite/parser.
+pub fn big_int_as_string_json_parse_utf16(text: &[u16]) -> Input {
     // ts-bug: the source regex also corrupts matching runs inside quoted strings.
-    json_parse(&protect_big_integer_tokens(text))
+    Input::parse_json(&protect_big_integer_tokens(text)).unwrap_or(Input::Null)
 }
 
 #[cfg(test)]
