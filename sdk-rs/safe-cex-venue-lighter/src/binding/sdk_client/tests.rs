@@ -822,3 +822,57 @@ fn transaction_client_retains_native_flags_while_signing_their_truthiness() {
         source
     );
 }
+
+fn poison_unread_helper_fields(value: &Js) {
+    if !value.is_object() { return; }
+    if let Some(values)=value.array_values() {
+        for child in values { poison_unread_helper_fields(&child); }
+    } else {
+        for (_, child) in value.own_entries().unwrap() { poison_unread_helper_fields(&child); }
+    }
+    value.define_accessor("unused", Some(Rc::new(|_| Err(Thrown::error("Error", "unread field")))), None);
+}
+
+#[test]
+fn production_lighter_helpers_read_only_sparse_source_fields() {
+    let output=std::process::Command::new("node").arg(concat!(env!("CARGO_MANIFEST_DIR"),"/scripts/sparse-helper-inputs-oracle.cjs")).output().unwrap();
+    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+    let source:Value=serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.as_array().unwrap().len(),20);
+    let world=World::new();
+    let mut actual=vec![];
+    for case in source.as_array().unwrap() {
+        let helper=case["helper"].as_str().unwrap();
+        let args=case["args"].as_array().unwrap().iter().map(from_json).collect::<Vec<_>>();
+        for value in &args { poison_unread_helper_fields(value); }
+        match case["mode"].as_str().unwrap() {
+            "skip-id" => args[0].get("0").unwrap().define_accessor("id",Some(Rc::new(|_|Err(Thrown::error("Error","unread order id")))),None),
+            "throw-read" => args[0].get("info").unwrap().define_accessor(if helper=="getLighterAmountDecimals" {"amountDecimals"} else {"minBaseAmount"},Some(Rc::new(|_|Err(Thrown::error("Error","used getter")))),None),
+            _ => {},
+        }
+        let result=world.realm.global(helper).unwrap().call(Js::Undefined,args.clone());
+        let observed=match result {
+            Ok(result)=>{
+                if helper=="resolveLighterCancelTargets" {
+                    let orders=args[0].array_values().unwrap();
+                    let mut rows=vec![];
+                    let mut retained=vec![];
+                    for row in result.array_values().unwrap() {
+                        let id=row.get("orderId").unwrap();
+                        let index=orders.iter().position(|order|order.get("id").unwrap().strict_equals(&id));
+                        retained.push(index.is_some());
+                        let mut fields=json!({"marketId":to_json(&row.get("marketId").unwrap()).unwrap()});
+                        if !id.is_undefined() {
+                            fields["orderId"]=case["args"][0][index.unwrap()]["id"].clone();
+                        }
+                        rows.push(fields);
+                    }
+                    json!({"ok":rows,"retained":retained})
+                } else { json!({"ok":to_json(&result).unwrap()}) }
+            }
+            Err(error)=>json!({"error":{"name":error.value.get("name").unwrap().to_display(),"message":error.message()}}),
+        };
+        actual.push(json!({"helper":helper,"args":case["args"],"mode":case["mode"],"expected":observed}));
+    }
+    assert_eq!(actual,source.as_array().unwrap().clone());
+}
