@@ -4,6 +4,7 @@
 mod support;
 use base64::Engine;
 use safe_cex_num::JsJsonValue;
+use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use serde_json::json;
 use std::task::{Context, Poll, Waker};
 
@@ -39,6 +40,8 @@ fn queued_backpack_request_signs_after_the_rate_window_opens() {
             .is_pending()
     );
     assert_eq!(wire.requests.lock().unwrap().len(), 10);
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 80_000.0);
+    let after_dequeue = VIRTUAL_CLOCK.get_current_time();
     runtime.now.set(2000.0);
     assert!(matches!(
         queued
@@ -48,9 +51,11 @@ fn queued_backpack_request_signs_after_the_rate_window_opens() {
     ));
     let sent = wire.requests.lock().unwrap();
     assert_eq!(sent.len(), 11);
-    assert_eq!(sent[0].headers["X-Timestamp"], "1000");
-    assert_eq!(
-        sent[10].headers["X-Timestamp"], "2000",
-        "queued request signs after its rate slot opens"
+    let first = sent[0].headers["X-Timestamp"].parse::<f64>().unwrap();
+    let queued = sent[10].headers["X-Timestamp"].parse::<f64>().unwrap();
+    assert!(first < after_dequeue);
+    assert!(
+        queued >= after_dequeue,
+        "queued request signs from the synced clock after its rate slot opens: {queued} < {after_dequeue}"
     );
 }
