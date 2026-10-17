@@ -629,17 +629,14 @@ impl PrivateStreamHost for SocketHost {
             .mark_private_user_stream_auth_failed(
                 self.host.shared.store.as_ref(),
                 message.as_deref(),
-                |message, severity| {
-                    let _ = self.host.base().log(message, severity);
-                },
+                |message, severity| self.host.base().log(message, severity).map_err(failure),
                 |message| {
-                    let _ = self
-                        .host
+                    self.host
                         .base()
-                        .emit_args("warning", &[json!(message), json!({"forceToast": true})]);
+                        .emit_args("warning", &[json!(message), json!({"forceToast": true})])
+                        .map_err(failure)
                 },
             )
-            .map_err(|error| Rc::new(error.into()))
     }
     fn mark_private_user_stream_message_received(&self) -> Result<(), PortfolioFailure> {
         self.host
