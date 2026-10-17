@@ -2038,7 +2038,7 @@ impl BaseExchange {
                 "Network came online - triggering WebSocket reconnection",
                 "info",
             )?;
-            self.reconnect()?;
+            self.recover_after_offline(|socket| socket.recover_after_offline(true).map(Some))?;
         } else if !online {
             self.log(
                 "Network went offline - WebSocket reconnects will be paused",
