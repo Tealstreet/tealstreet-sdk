@@ -1,12 +1,12 @@
 //! Public MEXC WebSocket protocol over the exchange-core lifecycle.
 use crate::{
-    types::{is_mexc_control_channel, BASE_WS_URL},
+    types::{BASE_WS_URL, is_mexc_control_channel},
     utils::{from_mexc_symbol, normalize_order_book, normalize_ticker},
     ws::subscription_key,
 };
 use indexmap::IndexMap;
 use safe_cex_exchange::{
-    exchange::Exchange, websocket::WsRuntime, ws_parent::WsExchangeParent, OwnedOperation,
+    OwnedOperation, exchange::Exchange, websocket::WsRuntime, ws_parent::WsExchangeParent,
 };
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, LogSeverity},
@@ -15,10 +15,10 @@ use safe_cex_exchange::{
         WsProtocol,
     },
 };
-use safe_cex_store::{model_patch::ModelPatch, Store};
+use safe_cex_store::{Store, model_patch::ModelPatch};
 use safe_cex_transport::relay::WebSocketConnectionOptions;
 use safe_cex_types::OrderBook;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,

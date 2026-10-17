@@ -2,7 +2,7 @@ use safe_cex_exchange::{http::*, runtime::*};
 use safe_cex_transport::{rate_limit::RateLimitClock, signing::*, *};
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_mexc::{api::get_query_string, client::create_api};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
     future::Future,
@@ -454,7 +454,7 @@ fn observe_numbers(value: &Value) -> Value {
 #[test]
 #[expect(clippy::arc_with_non_send_sync)]
 fn mexc_rich_factory_preserves_native_values_before_signing_and_wire() {
-    use safe_cex_transport::query::{query_identity_eq, QueryKeyOrder};
+    use safe_cex_transport::query::{QueryKeyOrder, query_identity_eq};
     use safe_cex_types::QueryValue as Q;
     fn object(fields: Vec<(&str, Q)>) -> Q {
         Q::Object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
@@ -700,7 +700,7 @@ fn mexc_rich_factory_preserves_native_values_before_signing_and_wire() {
 #[test]
 fn mexc_rich_query_recurses_without_reordering_native_inputs() {
     use safe_cex_transport::query::{
-        query_identity_eq, render_query, QueryArrayFormat, QueryKeyOrder, QueryProfile,
+        QueryArrayFormat, QueryKeyOrder, QueryProfile, query_identity_eq, render_query,
     };
     use safe_cex_types::QueryValue as Q;
     fn object(fields: Vec<(&str, Q)>) -> Q {

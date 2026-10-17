@@ -1187,7 +1187,9 @@ fn protect_big_integer_tokens(text: &[u16]) -> Vec<u16> {
                 end += 1;
             }
             if end - digits >= 16
-                && !text.get(end).is_some_and(|unit| matches!(unit, 48..=57 | 46 | 34 | 101 | 69))
+                && !text
+                    .get(end)
+                    .is_some_and(|unit| matches!(unit, 48..=57 | 46 | 34 | 101 | 69))
             {
                 output.extend_from_slice(&text[index..number]);
                 output.push(34);

@@ -4,12 +4,12 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
-use safe_cex_num::numeric_ingress::{js_from_value, JsNumberInput};
-use safe_cex_store::{store::DefaultStore, Store};
+use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_value};
+use safe_cex_store::{Store, store::DefaultStore};
 use safe_cex_transport::provider::{RestBody, RestRequest};
 use safe_cex_types::{ExchangeName, OHLCVOptions, OrderBook, Ticker};
 use safe_cex_venue_breakoutprop::{lifecycle::*, polling::*};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
@@ -670,7 +670,7 @@ fn dropped_login_calls_continue_clear_marker_and_report_abandoned_errors() {
 
 use safe_cex_venue_breakoutprop::{
     api::*,
-    runtime::{prepare_order, BreakoutRuntime, OrderUpdate, RuntimeReads},
+    runtime::{BreakoutRuntime, OrderUpdate, RuntimeReads, prepare_order},
 };
 fn final_source() -> Value {
     let out = std::process::Command::new("node")
