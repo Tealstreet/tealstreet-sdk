@@ -228,6 +228,8 @@ values retain their JSON.stringify phase. Custom serializers and HOW frame param
 keep their existing ownership. See `QUERY_PARITY_EVIDENCE.md` for executed source,
 HTTP witnesses, and the remaining reqwest apostrophe normalization.
 
+`rate_limit::RateLimiter::acquire` is the cancellation-safe FIFO slot shared with `RateLimitedAdapter`. Native clients acquire it before signing each attempt; the adapter retains the same window, failed-request accounting and effective receipt. Dropping a pending acquire removes its ticket without consuming capacity. `tests/p2c.rs::signing_rate_slots_release_cancelled_waiters_without_spending_capacity` exercises the direct gate.
+
 Native HTTP failures inspect connector causes before assigning a network code.
 DNS lookup refusal and expired certificates remain non-retryable under the
 maintained network-read predicate; temporary DNS and genuine connection refusal

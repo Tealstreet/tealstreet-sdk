@@ -210,6 +210,12 @@ availability. Source private HTTP still signs locally before the hosted adapter;
 private WS never reads remoteSigner. Empty secrets retain the source HTTP error
 and the already approved shared WS onOpen recovery. See HOSTED_SIGNER_EVIDENCE.md.
 
+The public `set_all_leverage` trait hook invokes Orderly account leverage, even
+when the Store has no positions. The existing member validates finiteness, clamps
+and rounds 1..100, writes CROSS leverage once, skips unchanged values and advances
+its cache only after success. Binding regressions cover those source behaviors
+and emitted, swallowed failures through the actual signed HTTP client.
+
 Public trait cancellation invokes the existing Orderly cancel-all/symbol members.
 Both ordinary and algo endpoints are attempted in source order, even with an empty
 Store or a failed first request; source errors are emitted and swallowed. The real
