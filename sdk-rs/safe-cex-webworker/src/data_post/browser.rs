@@ -1,7 +1,7 @@
 use super::WorkerDataPost;
 use js_sys::{Array, Object, Reflect};
 use safe_cex_exchange::{
-    js_runtime::value::Js,
+    js_runtime::value::{Js, Prop, utf16},
     runtime::{ExchangeError, ExchangeErrorOrigin},
 };
 use std::rc::Rc;
@@ -101,7 +101,7 @@ fn materialize(value: &Js, seen: &mut Vec<(Js, JsValue)>) -> Result<JsValue, Exc
             }
             Ok(output)
         }
-        Js::Object(_) => {
+        Js::Object(source) => {
             if let Some((_, v)) = seen.iter().find(|(old, _)| old.strict_equals(value)) {
                 return Ok(v.clone());
             }
@@ -115,8 +115,20 @@ fn materialize(value: &Js, seen: &mut Vec<(Js, JsValue)>) -> Result<JsValue, Exc
             seen.push((value.clone(), output.clone()));
             if error {
                 for key in ["name", "message", "stack", "cause"] {
-                    if value.has_own(key) {
-                        let child = value.get(key).map_err(|e| e.to_exchange_error())?;
+                    // Structured clone ignores accessor-backed Error causes.
+                    let child = if key == "cause" {
+                        match source.props.borrow().get(&utf16(key)).cloned() {
+                            Some(Prop::Data(child) | Prop::DataDescriptor { value: child, .. }) => {
+                                Some(child)
+                            }
+                            _ => None,
+                        }
+                    } else if value.has_own(key) {
+                        Some(value.get(key).map_err(|e| e.to_exchange_error())?)
+                    } else {
+                        None
+                    };
+                    if let Some(child) = child {
                         property(
                             &object,
                             &JsValue::from_str(key),
@@ -132,9 +144,10 @@ fn materialize(value: &Js, seen: &mut Vec<(Js, JsValue)>) -> Result<JsValue, Exc
                         ));
                     }
                 }
-            }
-            for (key, child) in value.own_entries().map_err(|e| e.to_exchange_error())? {
-                property(&object, &string(&key), &materialize(&child, seen)?, true)?;
+            } else {
+                for (key, child) in value.own_entries().map_err(|e| e.to_exchange_error())? {
+                    property(&object, &string(&key), &materialize(&child, seen)?, true)?;
+                }
             }
             Ok(output)
         }
