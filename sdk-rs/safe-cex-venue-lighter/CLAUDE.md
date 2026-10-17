@@ -404,4 +404,4 @@ Abrupt callbacks and early breaks invoke return once; original callback errors
 win over close errors, while normal pair completion validates the return result.
 The constructed public class and its real operation table carry the regressions.
 The native exchange target also covers account_all orders, positions, fills and
-the source-throttled signed balance refresh through the real private socket.
+the source-throttled balance refresh through the real private socket.

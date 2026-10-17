@@ -1039,7 +1039,7 @@ fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers()
     assert_eq!(
         h.store.balance().free,
         645.0,
-        "private account frame triggers real signed balance refresh"
+        "private account frame triggers real balance refresh"
     );
     assert!(
         h.runtime.reports.borrow().is_empty(),
