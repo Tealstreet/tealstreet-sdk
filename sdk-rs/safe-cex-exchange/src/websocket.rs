@@ -93,6 +93,10 @@ pub struct PreparedWebSocket {
 pub trait WsProtocol {
     fn dispose(&self) {}
 
+    fn reconnect(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        socket.reconnect_base()
+    }
+
     fn recovers_after_offline(&self) -> bool {
         true
     }
@@ -2140,6 +2144,9 @@ impl BaseWebSocket {
         }
     }
     pub fn reconnect(self: &Rc<Self>) -> Result<(), ExchangeError> {
+        self.protocol.reconnect(self)
+    }
+    pub(crate) fn reconnect_base(self: &Rc<Self>) -> Result<(), ExchangeError> {
         self.parent.log(
             "Explicit reconnect call from ping pong miss or online status change",
             LogSeverity::Info,

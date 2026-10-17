@@ -2463,7 +2463,7 @@
       "reason": "The native dial/event future remains owned by SocketTaskGuard/OwnedTasks. transport_close synchronously dispatches base and venue close hooks, with no state borrow held; existing generation guards and task-drop cleanup are unchanged. The synchronous resolved-wrapper flag now records grouped JS listener dispatch before dialing; all asynchronous boundaries, generation checks and task ownership are unchanged."
     },
     {
-      "owner": "src/websocket.rs::BaseWebSocket::reconnect",
+      "owner": "src/websocket.rs::BaseWebSocket::reconnect_base",
       "boundaries": [
         "owned-or-host-spawn",
         "async-block",
@@ -2472,10 +2472,10 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "2fb360d845fb57b07401e3db09a5656b51ec68869fd11c5f59578e64c0edf4af",
+      "producer_sha256": "db738f3865009608bfac7684541e56e6c69ef1ca3a87afeb547c24a5ba459f7f",
       "classification": "delegated",
       "delegate": "src/websocket.rs::BaseWebSocket::spawn_owned_kind",
-      "reason": "reconnect uses the existing socket-owned operation; TASK cancellation/registration remains with spawn_owned_kind, never a venue-local handle."
+      "reason": "reconnect uses the existing socket-owned operation; TASK cancellation/registration remains with spawn_owned_kind, never a venue-local handle. The existing base algorithm moved unchanged to reconnect_base; synchronous reconnect now dispatches WsProtocol to the live receiver, while the JS superclass member invokes reconnect_base directly. Task ownership and both delayed branches are unchanged."
     },
     {
       "owner": "src/websocket.rs::BaseWebSocket::report_detached_reconnect_error",
@@ -2505,7 +2505,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "6e6b2c23f83b2f6eea3b453a423af30cd3e06ea5147f46a9e82fdba92cd9113c"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2550,7 +2550,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "6e6b2c23f83b2f6eea3b453a423af30cd3e06ea5147f46a9e82fdba92cd9113c"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2654,7 +2654,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "6e6b2c23f83b2f6eea3b453a423af30cd3e06ea5147f46a9e82fdba92cd9113c"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2698,7 +2698,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "d723c61c26eca8eccb9ad9b0e04387a27637294097914fe3e2c5276e3783c86c"
+          "sha256": "6e6b2c23f83b2f6eea3b453a423af30cd3e06ea5147f46a9e82fdba92cd9113c"
         }
       ],
       "guards": [
