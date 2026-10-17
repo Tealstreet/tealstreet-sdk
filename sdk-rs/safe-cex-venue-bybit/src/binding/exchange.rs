@@ -97,6 +97,13 @@ pub(crate) fn capabilities(name: &ExchangeName) -> ExchangeCapabilities {
     if matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo) {
         capabilities.fetch_historical_orders =
             CapabilityBinding::implemented(|venue, options| venue.fetch_historical_orders(options));
+        capabilities.fetch_option_chain =
+            CapabilityBinding::implemented(|venue, query| venue.fetch_option_chain(query));
+        capabilities.fetch_option_expiries = CapabilityBinding::implemented(|venue, underlying| {
+            venue.fetch_option_expiries(underlying)
+        });
+        capabilities.fetch_account_greeks =
+            CapabilityBinding::implemented(|venue, ()| venue.fetch_account_greeks());
     }
     capabilities
 }

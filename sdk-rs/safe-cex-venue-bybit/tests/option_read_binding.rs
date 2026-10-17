@@ -39,7 +39,7 @@ fn quote(symbol: &str, bid: &str) -> Value {
         "markIv":"0.4","bid1Iv":"0.3","ask1Iv":"0.5","underlyingPrice":"60000",
         "delta":"-0","gamma":null,"vega":"0x10","theta":"-3"})
 }
-fn chain(name: ExchangeName) {
+fn chain(name: ExchangeName, dynamic: bool) {
     let mut opts = options();
     opts.enable_option_markets = Some(true);
     let h = harness_as(name, opts, |wire| {
@@ -54,7 +54,14 @@ fn chain(name: ExchangeName) {
     });
     seed(&h);
     let query = serde_json::from_value(json!({"underlying":"BTC"})).unwrap();
-    let rows = h.drive(h.venue().fetch_option_chain(query)).unwrap();
+    let venue = h.venue();
+    let rows = h
+        .drive(if dynamic {
+            venue.capabilities().fetch_option_chain(venue, query)
+        } else {
+            venue.fetch_option_chain(query)
+        })
+        .unwrap();
     assert_eq!(
         rows.iter()
             .map(|r| r.market.symbol.as_str())
@@ -75,25 +82,37 @@ fn chain(name: ExchangeName) {
     assert_eq!(calls[0].params["baseCoin"], "BTC");
     h.venue().dispose().unwrap();
 }
-fn expiries(name: ExchangeName) {
+fn expiries(name: ExchangeName, dynamic: bool) {
     let mut opts = options();
     opts.enable_option_markets = Some(true);
     let h = harness_as(name, opts, |_| {});
     seed(&h);
     assert_eq!(
-        h.drive(h.venue().fetch_option_expiries("BTC".into()))
-            .unwrap(),
+        h.drive(if dynamic {
+            h.venue()
+                .capabilities()
+                .fetch_option_expiries(h.venue(), "BTC".into())
+        } else {
+            h.venue().fetch_option_expiries("BTC".into())
+        })
+        .unwrap(),
         vec![1000., 2000., 3000.]
     );
     assert_eq!(
-        h.drive(h.venue().fetch_option_expiries("SOL".into()))
-            .unwrap(),
+        h.drive(if dynamic {
+            h.venue()
+                .capabilities()
+                .fetch_option_expiries(h.venue(), "SOL".into())
+        } else {
+            h.venue().fetch_option_expiries("SOL".into())
+        })
+        .unwrap(),
         Vec::<f64>::new()
     );
     assert!(h.wire.calls("/v5/market/tickers").is_empty());
     h.venue().dispose().unwrap();
 }
-fn greeks(name: ExchangeName) {
+fn greeks(name: ExchangeName, dynamic: bool) {
     let mut opts = options();
     opts.enable_option_markets = Some(true);
     let h = harness_as(name, opts, |wire| {
@@ -101,7 +120,14 @@ fn greeks(name: ExchangeName) {
             "baseCoin":"BTC","totalDelta":"-0","totalGamma":"1.5x","totalVega":null,"totalTheta":"Infinity"
         }]}));
     });
-    let rows = h.drive(h.venue().fetch_account_greeks()).unwrap();
+    let venue = h.venue();
+    let rows = h
+        .drive(if dynamic {
+            venue.capabilities().fetch_account_greeks(venue)
+        } else {
+            venue.fetch_account_greeks()
+        })
+        .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].underlying, "BTC");
     assert_eq!(rows[0].delta.to_bits(), (-0.0f64).to_bits());
@@ -111,27 +137,27 @@ fn greeks(name: ExchangeName) {
 }
 #[test]
 fn primary_chain_joins_live_markets_and_quotes() {
-    chain(ExchangeName::Bybit);
+    chain(ExchangeName::Bybit, false);
 }
 #[test]
 fn demo_chain_joins_live_markets_and_quotes() {
-    chain(ExchangeName::Bybitdemo);
+    chain(ExchangeName::Bybitdemo, false);
 }
 #[test]
 fn primary_expiries_read_live_markets() {
-    expiries(ExchangeName::Bybit);
+    expiries(ExchangeName::Bybit, false);
 }
 #[test]
 fn demo_expiries_read_live_markets() {
-    expiries(ExchangeName::Bybitdemo);
+    expiries(ExchangeName::Bybitdemo, false);
 }
 #[test]
 fn primary_account_greeks_read_signed_http() {
-    greeks(ExchangeName::Bybit);
+    greeks(ExchangeName::Bybit, false);
 }
 #[test]
 fn demo_account_greeks_read_signed_http() {
-    greeks(ExchangeName::Bybitdemo);
+    greeks(ExchangeName::Bybitdemo, false);
 }
 
 #[test]
@@ -235,7 +261,7 @@ fn option_reads_match_maintained_methods_and_helpers() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.len(), 69);
+    assert_eq!(cases.len(), 79);
     let mut failures = vec![];
     for (index, case) in cases.iter().enumerate() {
         let mut opts = options();
@@ -288,8 +314,7 @@ fn option_reads_match_maintained_methods_and_helpers() {
             }
             Err(error) => {
                 if error.name != case["error"]["name"].as_str().unwrap_or("")
-                    || (error.name == "Error"
-                        && error.message != case["error"]["message"].as_str().unwrap_or(""))
+                    || error.message != case["error"]["message"].as_str().unwrap_or("")
                 {
                     failures.push(format!(
                         "case{index} {}: {}; expected {}",
@@ -329,4 +354,23 @@ fn option_reads_match_maintained_methods_and_helpers() {
         h.venue().dispose().unwrap();
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn dynamic_option_chain_uses_live_capabilities() {
+    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        chain(name, true);
+    }
+}
+#[test]
+fn dynamic_option_expiries_use_live_capabilities() {
+    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        expiries(name, true);
+    }
+}
+#[test]
+fn dynamic_option_account_greeks_use_live_capabilities() {
+    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        greeks(name, true);
+    }
 }

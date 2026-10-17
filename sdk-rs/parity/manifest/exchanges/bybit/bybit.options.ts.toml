@@ -38,7 +38,7 @@ note = ""
 ts = "mapBybitOptionGreeks"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/options.rs::map_bybit_option_greeks"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::map_option_greeks"
 status = "ported"
 note = ""
 
@@ -78,7 +78,7 @@ note = "Native production option-read path; maintained source methods/helpers co
 ts = "optionExpiries"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/options.rs::option_expiries"
+rs = "safe-cex-venue-bybit/src/binding/members/options.rs::option_expiries"
 status = "ported"
 note = ""
 

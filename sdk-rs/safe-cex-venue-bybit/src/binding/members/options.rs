@@ -2,7 +2,7 @@
 use crate::binding::{
     host::get_key,
     promise::await_js,
-    rt::{Rt, venue},
+    rt::Rt,
     value::{Js, Thrown, arg},
 };
 use safe_cex_exchange::js_runtime::ops;
@@ -17,7 +17,7 @@ fn num(value: Js) -> Result<Js, Thrown> {
     Ok(Js::Number(if parsed.is_finite() { parsed } else { 0. }))
 }
 
-fn map_option_greeks(raw: &Js) -> Result<Js, Thrown> {
+pub(crate) fn map_option_greeks(raw: &Js) -> Result<Js, Thrown> {
     let delta = raw.get("delta")?;
     if delta.is_undefined() || delta.strict_equals(&Js::str("")) {
         return Ok(Js::Undefined);
@@ -162,7 +162,7 @@ fn option_expiries(rt: &Rt, markets: Js, underlying: Js) -> Result<Js, Thrown> {
 }
 
 pub(crate) fn assert_options_enabled(rt: &Rt) -> Result<Js, Thrown> {
-    if !venue(rt)?.options_enabled() {
+    if !rt.this.call_method("optionsEnabled", vec![])?.truthy() {
         return Err(Thrown::error(
             "Error",
             "Options are not enabled on this Bybit account",

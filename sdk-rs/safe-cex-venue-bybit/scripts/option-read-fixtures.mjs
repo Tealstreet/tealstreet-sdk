@@ -54,6 +54,10 @@ for(const value of atoms) {
   await add('fetchOptionChain',{underlying:'BTC'},[quote('call',value)]);
   await add('fetchAccountGreeks',undefined,[{baseCoin:'BTC',totalDelta:value,totalGamma:value,totalVega:value,totalTheta:value}]);
 }
+for(const raw of [{delta:'0.5',gamma:'0.01',vega:'3',theta:'-4'},{delta:''},{},{delta:0,gamma:'x'},{delta:'1e309',gamma:null}]) {
+  await add('fetchOptionChain',{underlying:'BTC'},[{symbol:'call',...raw}]);
+  await add('fetchAccountGreeks',undefined,[{baseCoin:'BTC',totalDelta:raw.delta,totalGamma:raw.gamma,totalVega:raw.vega,totalTheta:raw.theta}]);
+}
 for(const method of names.slice(0,3)) {
   const query=method==='fetchOptionChain'?{underlying:'BTC'}:method==='fetchOptionExpiries'?'BTC':undefined;
   await add(method,query,[],false);
@@ -63,5 +67,5 @@ for(const method of names.slice(0,3)) {
   }
 }
 for(const base of ['BTC','ETH','SOL']) await add('fetchOptionExpiries',base);
-assert.equal(cases.length,69);
+assert.equal(cases.length,79);
 process.stdout.write(JSON.stringify(cases));

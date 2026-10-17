@@ -5929,6 +5929,12 @@
       {
         "receiver": "dynamic",
         "kind": "call",
+        "hook": "fetch_account_greeks",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
         "hook": "fetch_closed_pnl",
         "count": 1
       },
@@ -5954,6 +5960,18 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "fetch_income_history_range",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_option_chain",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_option_expiries",
         "count": 1
       },
       {
