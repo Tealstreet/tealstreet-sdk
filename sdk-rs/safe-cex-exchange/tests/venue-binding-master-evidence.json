@@ -1,0 +1,371 @@
+{
+  "master": "999f0564c2",
+  "unbound": {
+    "safe-cex-venue-apexomni": {},
+    "safe-cex-venue-asterdex": {},
+    "safe-cex-venue-backpack": {},
+    "safe-cex-venue-binance": {},
+    "safe-cex-venue-bingx": {},
+    "safe-cex-venue-bitget": {},
+    "safe-cex-venue-bitrue": {
+      "global console.log": [
+        "src/public_streams.rs::message"
+      ]
+    },
+    "safe-cex-venue-bitunix": {},
+    "safe-cex-venue-blofin": {},
+    "safe-cex-venue-breakoutprop": {},
+    "safe-cex-venue-bybit": {
+      "global HYROTRADER_SIMULATOR_URL": [
+        "safe-cex-venue-bybit/src/hyro_snapshot.rs::get_bybit_rest_base_url"
+      ],
+      "global HYROTRADER_SIMULATOR_WS_URL": [
+        "safe-cex-venue-bybit/src/hyro_snapshot.rs::get_bybit_private_ws_url",
+        "safe-cex-venue-bybit/src/hyro_snapshot.rs::get_bybit_public_ws_url"
+      ],
+      "global cleanFloat": [
+        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::order_row"
+      ],
+      "global createIncrementalFills": [
+        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::incremental_fills"
+      ],
+      "global fetchBybitIncomeHistory": [
+        "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history"
+      ],
+      "global fetchBybitIncomeHistoryRange": [
+        "safe-cex-venue-bybit/src/inverse_read_surface.rs::fetch_income_history_range"
+      ],
+      "global jsonParse": [
+        "safe-cex-venue-bybit/src/hyro_private_session.rs::dispatch",
+        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::private_on_message",
+        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::public_on_message"
+      ],
+      "global resolveBybitExecution": [
+        "safe-cex-venue-bybit/src/inverse_socket_bodies.rs::order_row"
+      ],
+      "intrinsic IteratorClose abrupt": [
+        "src/hyro_order_publication.rs::cancel_orders_helper",
+        "src/hyro_order_publication.rs::find_order",
+        "src/hyro_order_publication.rs::walk"
+      ],
+      "intrinsic IteratorClose normal": [
+        "src/hyro_order_publication.rs::find_order"
+      ],
+      "intrinsic Map": [
+        "src/ledger_history.rs::fetch_historical_positions"
+      ],
+      "intrinsic Number": [
+        "src/hyro_private_reads.rs::dispatch"
+      ],
+      "intrinsic Number.isFinite": [
+        "src/hyro_private_reads.rs::finite"
+      ],
+      "intrinsic Promise.resolve": [
+        "src/hyro_snapshot.rs::reconcile_private_state"
+      ],
+      "intrinsic RegExp": [
+        "src/hyro_order_publication.rs::cancel_orders_helper"
+      ],
+      "intrinsic Set": [
+        "src/ledger_history.rs::fetch_historical_orders"
+      ],
+      "intrinsic String": [
+        "src/hyro_order_publication.rs::unknown",
+        "src/ledger_history.rs::fetch_historical_positions"
+      ],
+      "intrinsic computed get": [
+        "src/inverse_socket_bodies.rs::computed"
+      ],
+      "intrinsic construct": [
+        "src/hyro_snapshot.rs::fetch_markets"
+      ],
+      "intrinsic destructure three": [
+        "src/hyro_snapshot.rs::reconcile_private_state"
+      ],
+      "intrinsic division": [
+        "src/inverse_socket_bodies.rs::order_row"
+      ],
+      "intrinsic get-key": [
+        "src/ledger_history.rs::dispatch",
+        "src/ledger_history.rs::fetch_bybit_income_history"
+      ],
+      "intrinsic greater equal": [
+        "src/inverse_socket_bodies.rs::public_on_message"
+      ],
+      "intrinsic increment": [
+        "src/inverse_socket_bodies.rs::private_on_message"
+      ],
+      "intrinsic instanceof Error": [
+        "src/hyro_order_publication.rs::unknown"
+      ],
+      "intrinsic isBybitInverseSymbol": [
+        "src/ledger_history.rs::fetch_closed_pnl"
+      ],
+      "intrinsic isBybitOptionSymbol": [
+        "src/ledger_history.rs::refuse_option_symbol"
+      ],
+      "intrinsic iterable spread": [
+        "src/hyro_snapshot.rs::fetch_markets"
+      ],
+      "intrinsic iterator close after throw": [
+        "src/inverse_socket_bodies.rs::for_of"
+      ],
+      "intrinsic iterator.close": [
+        "src/ledger_history.rs::each"
+      ],
+      "intrinsic iterator.next": [
+        "src/ledger_history.rs::each"
+      ],
+      "intrinsic less": [
+        "src/inverse_socket_bodies.rs::invoke_handlers",
+        "src/inverse_socket_bodies.rs::order_row",
+        "src/ledger_history.rs::fetch_bybit_income_history_range"
+      ],
+      "intrinsic less equal": [
+        "src/inverse_socket_bodies.rs::order_row",
+        "src/inverse_socket_bodies.rs::private_on_message",
+        "src/inverse_socket_bodies.rs::public_on_message"
+      ],
+      "intrinsic less than": [
+        "src/hyro_order_publication.rs::run_group"
+      ],
+      "intrinsic missingTicker": [
+        "src/spot_order_writes.rs::place_trailing_stop_loss"
+      ],
+      "intrinsic new Map": [
+        "src/hyro_private_session.rs::allocate_session"
+      ],
+      "intrinsic new Set": [
+        "src/hyro_order_publication.rs::find_order",
+        "src/hyro_order_publication.rs::submit_create_orders",
+        "src/hyro_private_reads.rs::fetch_private_rows"
+      ],
+      "intrinsic omitUndefined": [
+        "src/ledger_history.rs::fetch_bybit_income_history",
+        "src/ledger_history.rs::omitted"
+      ],
+      "intrinsic property in": [
+        "src/hyro_capabilities.rs::validate_order_capabilities"
+      ],
+      "intrinsic require iterator result object": [
+        "src/inverse_socket_bodies.rs::for_of"
+      ],
+      "intrinsic select:aggregateBybitClosedPnl": [
+        "src/ledger_history.rs::fetch_historical_positions"
+      ],
+      "intrinsic select:fetchBybitIncomeHistory": [
+        "src/ledger_history.rs::fetch_bybit_income_history_range",
+        "src/ledger_history.rs::fetch_income_history"
+      ],
+      "intrinsic select:fetchBybitIncomeHistoryRange": [
+        "src/ledger_history.rs::fetch_income_history_range"
+      ],
+      "intrinsic select:mapBybitClosedPnl": [
+        "src/ledger_history.rs::fetch_closed_pnl"
+      ],
+      "intrinsic select:mapBybitHistoricalOrder": [
+        "src/ledger_history.rs::fetch_historical_orders"
+      ],
+      "intrinsic select:mapBybitTransactionToIncomeRecords": [
+        "src/ledger_history.rs::fetch_bybit_income_history"
+      ],
+      "intrinsic select:sleep": [
+        "src/ledger_history.rs::fetch_bybit_income_history_range"
+      ],
+      "intrinsic select:splitTimeRange": [
+        "src/ledger_history.rs::windows"
+      ],
+      "intrinsic spreadArgs": [
+        "src/ledger_history.rs::fetch_bybit_income_history",
+        "src/ledger_history.rs::fetch_bybit_income_history_range",
+        "src/ledger_history.rs::fetch_closed_position_rows"
+      ],
+      "intrinsic super.dispose": [
+        "src/hyro_private_session.rs::dispose"
+      ],
+      "intrinsic super.mapPosition": [
+        "src/hyro_private_reads.rs::map_position"
+      ],
+      "intrinsic throw value": [
+        "src/hyro_order_publication.rs::run_group"
+      ],
+      "intrinsic unknown callback": [
+        "src/hyro_order_publication.rs::dispatch",
+        "src/hyro_private_reads.rs::dispatch",
+        "src/hyro_private_session.rs::dispatch",
+        "src/hyro_snapshot.rs::dispatch",
+        "src/inverse_read_surface.rs::dispatch",
+        "src/inverse_socket_bodies.rs::dispatch",
+        "src/variant_account_refresh.rs::dispatch"
+      ]
+    },
+    "safe-cex-venue-coinbase": {},
+    "safe-cex-venue-cryptocom": {},
+    "safe-cex-venue-grvt": {},
+    "safe-cex-venue-hyperliquid": {
+      "global DEFAULT_BUILDER_FEE_RATE": [
+        "src/browser_approval_flows.rs::approve_builder_fee_with_browser_wallet",
+        "src/browser_approval_flows.rs::sign_builder_fee_approval"
+      ],
+      "global DEFAULT_BUILDER_FEE_TENTHS_BPS": [
+        "src/browser_approval_flows.rs::create_builder_info"
+      ],
+      "global HIP3_DEX_DISCOVERY_TIMEOUT_MS": [
+        "src/market_bootstrap.rs::body"
+      ],
+      "global HIP3_MARKETS_LOAD_TIMEOUT_CAP_MS": [
+        "src/market_bootstrap.rs::body"
+      ],
+      "global HIP3_MARKETS_LOAD_TIMEOUT_MS": [
+        "src/market_bootstrap.rs::body"
+      ],
+      "global HIP3_PER_DEX_LOAD_BUDGET_MS": [
+        "src/market_bootstrap.rs::body"
+      ],
+      "global SPOT_MARKETS_LOAD_TIMEOUT_MS": [
+        "src/market_bootstrap.rs::body"
+      ],
+      "global TEALSTREET_BUILDER_FEE": [
+        "src/browser_approval_flows.rs::check_builder_fee_approved"
+      ],
+      "global collapseHyperliquidOrderHistory": [
+        "src/core_rest_reads.rs::fetch_historical_orders_body"
+      ],
+      "global deriveHyperliquidClosedPositions": [
+        "src/core_rest_reads.rs::derive_closed_positions_body"
+      ],
+      "global ethers": [
+        "src/browser_approval_flows.rs::browser_flow",
+        "src/browser_approval_flows.rs::provider",
+        "src/browser_approval_flows.rs::sign"
+      ],
+      "global generateAgentWalletName": [
+        "src/browser_approval_flows.rs::create_agent_wallet_with_browser_wallet"
+      ],
+      "global hasEthereumWallet": [
+        "src/browser_approval_flows.rs::connect_browser_wallet"
+      ],
+      "global hasSeenFill": [
+        "src/core_position_order_state.rs::handle_fills"
+      ],
+      "global hyperliquidOrderResponseHasDeferredOrderStatus": [
+        "src/market_data_selectors.rs::response_has_deferred_order_status"
+      ],
+      "global hyperliquidRestRateLimiter": [
+        "src/spot_client.rs::run_client_callback"
+      ],
+      "global installTransportAdapter": [
+        "src/spot_client.rs::create_api"
+      ],
+      "global isFinitePositiveNumber": [
+        "src/placement_dispatch.rs::body"
+      ],
+      "global isHyperliquidRead": [
+        "src/spot_client.rs::create_api"
+      ],
+      "global isOnlyHyperliquidTerminalCancelError": [
+        "src/cancellation.rs::body"
+      ],
+      "global isSigningCaptureRequest": [
+        "src/spot_client.rs::run_client_callback"
+      ],
+      "global mapHyperliquidHistoricalOrder": [
+        "src/core_rest_reads.rs::run_rest_callback"
+      ],
+      "global mapSeries": [
+        "src/placement_dispatch.rs::place_orders"
+      ],
+      "global markFillSeen": [
+        "src/core_position_order_state.rs::handle_fills"
+      ],
+      "global markSkipRemoteSigning": [
+        "src/spot_client.rs::run_client_callback"
+      ],
+      "global networkErrorOnRead": [
+        "src/spot_client.rs::create_api"
+      ],
+      "global qs": [
+        "src/spot_client.rs::run_client_callback"
+      ],
+      "global reportEvent": [
+        "src/browser_approval_flows.rs::browser_flow"
+      ],
+      "global retry": [
+        "src/spot_client.rs::create_api"
+      ],
+      "global safeCexAxiosCreate": [
+        "src/spot_client.rs::create_api"
+      ],
+      "global switchToCorrectNetwork": [
+        "src/browser_approval_flows.rs::browser_flow"
+      ],
+      "global window": [
+        "src/browser_approval_flows.rs::ethereum"
+      ]
+    },
+    "safe-cex-venue-kraken": {},
+    "safe-cex-venue-kucoin": {},
+    "safe-cex-venue-lighter": {
+      "global Number.parseInt": [
+        "src/exchange_historical_fills.rs::fetch_rows",
+        "src/exchange_historical_fills.rs::seconds",
+        "src/exchange_order_snapshot.rs::fallback_orders",
+        "src/exchange_trading_preflight.rs::market_id"
+      ],
+      "global isLighterPartnerAttributionApprovalMissingRejection": [
+        "src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error"
+      ],
+      "global isLighterPartnerAttributionTierRejection": [
+        "src/exchange_live_helpers.rs::is_partner_attribution_tier_order_error"
+      ]
+    },
+    "safe-cex-venue-mexc": {
+      "global bigIntAsStringJsonParse": [
+        "src/runtime_assembly.rs::private_on_message"
+      ],
+      "global isMexcControlChannel": [
+        "src/runtime_assembly.rs::private_on_message"
+      ]
+    },
+    "safe-cex-venue-okx": {
+      "global virtualClock.getCurrentTime": [
+        "src/binding/sockets.rs::private_auth"
+      ],
+      "intrinsic add": [
+        "src/history_stream_api.rs::fetch_income_history"
+      ],
+      "intrinsic is-array": [
+        "src/history_stream_api.rs::format_okx_api_error_message"
+      ],
+      "intrinsic string": [
+        "src/history_stream_api.rs::format_okx_api_error_message"
+      ]
+    },
+    "safe-cex-venue-orderly": {},
+    "safe-cex-venue-paradex": {
+      "global Object.getOwnPropertyNames": [
+        "src/binding/primitives.rs::call"
+      ]
+    },
+    "safe-cex-venue-phemex": {
+      "global virtualClock.getCurrentTime": [
+        "src/binding/api.rs::clock",
+        "src/binding/sockets.rs::clock"
+      ]
+    },
+    "safe-cex-venue-polymarket": {},
+    "safe-cex-venue-txflow": {},
+    "safe-cex-venue-weex": {},
+    "safe-cex-venue-woo": {
+      "global mapFoldedInterval": [
+        "src/legacy_lifecycle.rs::fetch_historical_positions_task"
+      ],
+      "global reconstructPositionIntervals": [
+        "src/legacy_lifecycle.rs::fetch_historical_positions_task"
+      ],
+      "global wooOrdersToExecutions": [
+        "src/legacy_lifecycle.rs::fetch_historical_positions_task"
+      ]
+    }
+  }
+}
