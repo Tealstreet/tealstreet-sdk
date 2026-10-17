@@ -342,3 +342,7 @@ impl Exchange for CryptocomExchange {
         Box::pin(async { Ok(vec![]) })
     }
 }
+
+#[cfg(test)]
+#[path = "iterable_tests.rs"]
+mod iterable_tests;

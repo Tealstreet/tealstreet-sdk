@@ -1,4 +1,6 @@
 //! Bitget venue family. See the linked TypeScript guidance in CLAUDE.md.
+#[cfg(test)]
+extern crate self as safe_cex_venue_bitget;
 pub mod account_positions;
 pub mod account_predicates;
 pub mod account_read;
