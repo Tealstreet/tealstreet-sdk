@@ -251,3 +251,11 @@ compiler inventory covers it directly. Its finite witnesses inspect QueryValue e
 outputs for all JSON container/scalar kinds. The installed repeat serializer remains
 covered through the real native HTTP host; this owned Value input excludes undefined
 and nonfinite JSON values.
+
+Seven ordinary accepted-set function contracts classify listener key lookup/removal,
+outbound message construction, module import/require forwarding, and typed provider
+factory selection. These reviewed bodies do not decode incoming JSON. The
+ExchangeConstructor constructor retains a typed callback capability; its exact
+compiler entrypoint is checked with the ordinary alternate-decoder detectors.
+These classifications do not claim callback execution or discharge the separate
+provider frame, account argument, and host-controller observations.
