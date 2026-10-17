@@ -71,28 +71,6 @@ fn encode<T: Serialize>(result: T) -> Result<Option<Js>, ExchangeError> {
         .map(Some)
         .map_err(|e| e.to_exchange_error())
 }
-pub fn symbol_metadata_throttler(exchange: Rc<dyn Exchange>) -> Rc<ThrottleManager<String>> {
-    let venue = exchange.clone();
-    ThrottleManager::new(
-        exchange.base().runtime.clone(),
-        move |symbol: String| {
-            let venue = venue.clone();
-            let runtime = venue.base().runtime.clone();
-            runtime.spawn_local(Box::pin(async move {
-                if let Err(error) = venue.update_symbol_metadata(symbol).await {
-                    // TS leaves this Promise unawaited; the host receives its unhandled error.
-                    venue
-                        .base()
-                        .runtime
-                        .report_exception(&error, &json!({"method":"updateSymbolMetadata"}));
-                }
-            }));
-        },
-        500,
-        String::clone,
-    )
-}
-
 impl CallMethodHandler {
     pub fn new(
         exchange: Rc<dyn Exchange>,

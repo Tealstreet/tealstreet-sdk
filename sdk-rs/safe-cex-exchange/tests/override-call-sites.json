@@ -11428,18 +11428,6 @@
     ]
   },
   {
-    "file": "safe-cex-webworker/src/call_method.rs",
-    "function": "symbol_metadata_throttler",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "update_symbol_metadata",
-        "count": 1
-      }
-    ]
-  },
-  {
     "file": "safe-cex-webworker/src/chaser_engine.rs",
     "function": "cleanup_instance",
     "edges": [

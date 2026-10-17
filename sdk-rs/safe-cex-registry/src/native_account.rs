@@ -9,6 +9,7 @@ use safe_cex_exchange::{
     exchange::Exchange,
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
     runtime::{Cleanup, ExchangeError, ListenerCleanup, RemoteSigner},
+    throttle::{ThrottleManager, symbol_metadata_throttler},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -19,7 +20,6 @@ use safe_cex_transport::{
     signing::{RemoteSignerRequest, RemoteSignerResponse},
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts};
-use safe_cex_webworker::{call_method::symbol_metadata_throttler, throttle::ThrottleManager};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{
