@@ -229,7 +229,7 @@ impl Exchange for BlofinNativeExchange {
         Box::pin(async move {
             ids(self
                 .inner
-                .place_order(order.options())
+                .place_order(&safe_cex_types::PreparedOrderOpts::from(order.options()))
                 .await
                 .map_err(service_error)?)
         })
@@ -237,11 +237,8 @@ impl Exchange for BlofinNativeExchange {
     fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
         // order_rest::place_orders opens with assertCallerClientOrderIds, as TS placeOrders does.
         Box::pin(async move {
-            let opts: Vec<PlaceOrderOpts> = orders
-                .orders()
-                .iter()
-                .map(|o| o.options().clone())
-                .collect();
+            let opts: Vec<safe_cex_types::PreparedOrderOpts> =
+                orders.orders().iter().map(|o| o.options().into()).collect();
             ids(self
                 .inner
                 .place_orders(&opts)

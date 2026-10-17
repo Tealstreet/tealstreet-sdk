@@ -234,7 +234,7 @@ fn fixture(
     )
 }
 fn state(store: &DefaultStore) -> Value {
-    json!(store.orders().iter().map(|o|{let mut out=json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number(o.price),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"close":o.close.map_or(json!({"undefined":true}),|b|json!(b)),"timeInForce":o.time_in_force.map_or(json!({"undefined":true}),|b|json!(b)),"lastUpdate":number(o.last_update)});out["info"]=o.info.as_ref().map(observe).unwrap_or(json!({"undefined":true}));out}).collect::<Vec<_>>())
+    json!(store.orders().iter().map(|o|{let mut out=json!({"id":o.id,"symbol":o.symbol,"status":o.status,"type":o.r#type,"side":o.side,"price":number((o.price).to_number()),"amount":number(o.amount),"filled":number(o.filled),"remaining":number(o.remaining),"reduceOnly":o.reduce_only,"close":o.close.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"timeInForce":o.time_in_force.into_value().map_or(json!({"undefined":true}),|b|json!(b)),"lastUpdate":number(o.last_update)});out["info"]=o.info.as_ref().map(observe).unwrap_or(json!({"undefined":true}));out}).collect::<Vec<_>>())
 }
 fn invoke(venue: &Rc<BingxPlacement>, method: &str, input: &Value) -> Result<Value, ExchangeError> {
     let opts: PlaceOrderOpts = serde_json::from_value(input["opts"].clone()).unwrap();
@@ -250,7 +250,7 @@ fn invoke(venue: &Rc<BingxPlacement>, method: &str, input: &Value) -> Result<Val
             input["uuid"].as_str().unwrap()
         ))),
         "getOrderPositionSide" => ready(venue.get_order_position_side(
-            &opts,
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
             input["override"].as_str().map(|s| {
                 if s == "hedged" {
                     PositionMode::Hedged
@@ -260,14 +260,25 @@ fn invoke(venue: &Rc<BingxPlacement>, method: &str, input: &Value) -> Result<Val
             }),
         ))
         .map(|s| json!(s)),
-        "formatCreateOrder" => ready(venue.format_create_order(&opts)).map(|v| observe(&json!(v))),
-        "formatCreateTrailingStopLossOrder" => {
-            ready(venue.format_create_trailing_stop_loss_order(&opts)).map(|v| observe(&json!(v)))
+        "formatCreateOrder" => {
+            ready(venue.format_create_order(&safe_cex_types::PreparedOrderOpts::from(&opts)))
+                .map(|v| observe(&json!(v)))
         }
-        "placeOrder" => ready(venue.place_order(&opts)).map(ids),
-        "placeOrders" => ready(venue.place_orders(
-            &serde_json::from_value::<Vec<PlaceOrderOpts>>(input["orders"].clone()).unwrap(),
+        "formatCreateTrailingStopLossOrder" => ready(venue.format_create_trailing_stop_loss_order(
+            &safe_cex_types::PreparedOrderOpts::from(&opts),
         ))
+        .map(|v| observe(&json!(v))),
+        "placeOrder" => {
+            ready(venue.place_order(&safe_cex_types::PreparedOrderOpts::from(&opts))).map(ids)
+        }
+        "placeOrders" => ready(
+            venue.place_orders(
+                &serde_json::from_value::<Vec<safe_cex_types::PreparedOrderOpts>>(
+                    input["orders"].clone(),
+                )
+                .unwrap(),
+            ),
+        )
         .map(ids),
         "placeOrderBatch" => ready(venue.place_order_batch(
             &serde_json::from_value::<Vec<Value>>(input["payloads"].clone()).unwrap(),
@@ -470,9 +481,15 @@ fn nan_payload_refusal_is_priced_for_formatter_and_wrappers() {
             serde_json::from_value(corpus()["cases"][index]["input"]["opts"].clone()).unwrap();
         opts.amount = f64::NAN;
         let error = match method {
-            "formatCreateOrder" => ready(venue.format_create_order(&opts)).unwrap_err(),
-            "placeOrder" => ready(venue.place_order(&opts)).unwrap_err(),
-            _ => ready(venue.place_orders(&[opts])).unwrap_err(),
+            "formatCreateOrder" => {
+                ready(venue.format_create_order(&safe_cex_types::PreparedOrderOpts::from(&opts)))
+                    .unwrap_err()
+            }
+            "placeOrder" => {
+                ready(venue.place_order(&safe_cex_types::PreparedOrderOpts::from(&opts)))
+                    .unwrap_err()
+            }
+            _ => ready(venue.place_orders(&[(opts).into()])).unwrap_err(),
         };
         assert_eq!(
             error.message, "BingX typed payload refuses NaN",
@@ -616,9 +633,14 @@ fn rejected_formatter_keeps_pending_sibling_running() {
         transport.clone(),
         uuid.clone(),
     );
-    let error = ready(venue.place_orders(
-        &serde_json::from_value::<Vec<PlaceOrderOpts>>(input["orders"].clone()).unwrap(),
-    ))
+    let error = ready(
+        venue.place_orders(
+            &serde_json::from_value::<Vec<safe_cex_types::PreparedOrderOpts>>(
+                input["orders"].clone(),
+            )
+            .unwrap(),
+        ),
+    )
     .unwrap_err();
     assert_eq!(
         error.message, "Market MISSING not found",

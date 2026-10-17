@@ -1503,7 +1503,7 @@ fn native_position_controls_match_thirty_two_source_compositions() {
         };
         let positions: Vec<_> = h.store.positions().iter().map(|p| {
             let leverage = if p.leverage.is_nan() { "NaN".into() } else if p.leverage.to_bits() == (-0.0f64).to_bits() { "-0".into() } else {safe_cex_num::js_number_string(p.leverage)};
-            json!({"symbol":p.symbol,"mode":match p.position_mode {Some(PositionMode::OneWay)=>"oneway",Some(PositionMode::Hedged)=>"hedged",None=>"undefined"},"leverage":leverage})
+            json!({"symbol":p.symbol,"mode":match p.position_mode.into_value() {Some(PositionMode::OneWay)=>"oneway",Some(PositionMode::Hedged)=>"hedged",None=>"undefined"},"leverage":leverage})
         }).collect();
         let posts: Vec<_> = h
             .wire

@@ -410,7 +410,7 @@ fn actual_typescript_map_order() {
                 }
             );
             assert_eq!(
-                bits(actual.price),
+                bits((actual.price).to_number()),
                 expected["price"],
                 "MAP-ORDER native price bits {i}"
             );

@@ -86,8 +86,8 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
     );
     let mut opts = safe_cex_venue_backpack::order_actions::Options {
         symbol: units("BTC_USDC"),
-        kind: OrderType::Limit,
-        side: OrderSide::Buy,
+        r#type: safe_cex_types::ModelField::Value(OrderType::Limit),
+        side: safe_cex_types::ModelField::Value(OrderSide::Buy),
         amount: 1.25,
         price: Some(10.0),
         trigger_price: None,
@@ -97,7 +97,8 @@ fn concrete_exchange_owns_api_and_sdk_bindings() {
         time_in_force: None,
         tp_trigger_type: None,
         sl_trigger_type: None,
-        client_id: Some(units("1")),
+        client_order_id: Some(units("1")),
+        ..Default::default()
     };
     let before = wire.requests.lock().unwrap().len();
     assert!(

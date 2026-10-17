@@ -46,13 +46,13 @@ fn native(o: Order) -> Value {
     if let Some(v) = extra.filled_in_placement_units {
         x["filledInPlacementUnits"] = bits(v);
     }
-    let status = match o.status {
+    let status = match o.status.value().expect("present source enum in fixture") {
         OrderStatus::Open => "open",
         OrderStatus::Closed => "closed",
         OrderStatus::Canceled => "canceled",
         other => panic!("unexpected_status {other:?}"),
     };
-    let kind = match o.r#type {
+    let kind = match o.r#type.value().expect("present source enum in fixture") {
         OrderType::Limit => "limit",
         OrderType::Market => "market",
         OrderType::Conditional => "conditional",
@@ -60,12 +60,12 @@ fn native(o: Order) -> Value {
         OrderType::StopLoss => "stop_market",
         other => panic!("unexpected_type {other:?}"),
     };
-    let side = match o.side {
+    let side = match o.side.value().expect("present source enum in fixture") {
         OrderSide::Buy => "buy",
         OrderSide::Sell => "sell",
     };
-    let mut value = json!({"id":o.id,"status":status,"symbol":o.symbol,"type":kind,"side":side,"price":bits(o.price),"amount":bits(o.amount),"filled":bits(o.filled),"remaining":bits(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":bits(o.last_update),"extra":x,"info":info(o.info.expect("orders_info_present"))});
-    if let Some(time) = o.time_in_force {
+    let mut value = json!({"id":o.id,"status":status,"symbol":o.symbol,"type":kind,"side":side,"price":bits((o.price).to_number()),"amount":bits(o.amount),"filled":bits(o.filled),"remaining":bits(o.remaining),"reduceOnly":o.reduce_only,"lastUpdate":bits(o.last_update),"extra":x,"info":info(o.info.expect("orders_info_present"))});
+    if let Some(time) = o.time_in_force.into_value() {
         value["timeInForce"] = json!(match time {
             OrderTimeInForce::PostOnly => "PostOnly",
             OrderTimeInForce::GoodTillCancel => "GoodTillCancel",

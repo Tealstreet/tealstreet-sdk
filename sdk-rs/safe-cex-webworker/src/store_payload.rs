@@ -128,7 +128,7 @@ pub fn sanitize_for_post_message(
         let mut orders = orders.clone();
         for order in &mut orders {
             if safe_cex_num::js_truthy(order.info.as_ref()) {
-                order.info = None;
+                order.info = safe_cex_types::ModelField::Absent;
             }
         }
         orders
@@ -137,7 +137,7 @@ pub fn sanitize_for_post_message(
         let mut positions = positions.clone();
         for position in &mut positions {
             if safe_cex_num::js_truthy(position.info.as_ref()) {
-                position.info = None;
+                position.info = safe_cex_types::ModelField::Absent;
             }
         }
         positions
@@ -145,7 +145,7 @@ pub fn sanitize_for_post_message(
     let mut displayed_positions = displayed_positions.clone();
     for position in &mut displayed_positions {
         if safe_cex_num::js_truthy(position.position.info.as_ref()) {
-            position.position.info = None;
+            position.position.info = safe_cex_types::ModelField::Absent;
         }
     }
     safe_cex_store::StoreUpdate {
