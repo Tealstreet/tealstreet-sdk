@@ -1415,7 +1415,9 @@ fn hyro_option_reads_reject_with_inherited_source_guard() {
     if configured_child("hyro_option_reads_reject_with_inherited_source_guard") {
         return;
     }
-    let h = support::harness_as(ExchangeName::Hyrotrader, support::options(), |_| {});
+    let mut options = support::options();
+    options.enable_option_markets = Some(true);
+    let h = support::harness_as(ExchangeName::Hyrotrader, options, |_| {});
     let source = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
