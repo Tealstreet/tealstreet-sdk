@@ -9,7 +9,7 @@ rs=crate/'src/private_events.rs';spot_types=Path('packages/safe-cex/src/exchange
 inputs=[str(rs),str(crate/'src/private_event_value.rs'),str(crate/'src/lib.rs'),str(crate/'tests/private_events.rs'),str(crate/'tests/fixtures/private-events.json'),str(crate/'scripts/private-events.mjs'),str(crate/'scripts/private-events-controls.py')]
 for stem in ['binance','binancepm','binancespot']:
  inputs += [f'packages/safe-cex/src/exchanges/binance/{stem}.ws-private.ts',f'packages/safe-cex/src/exchanges/binance/{stem}.types.ts',f'sdk-rs/parity/manifest/exchanges/binance/{stem}.ws-private.ts.toml']
-inputs += ['packages/safe-cex/src/types.ts','packages/safe-cex/src/utils/createPositionId.ts','packages/safe-cex/src/utils/get-key.ts',str(crate/'src/private_order_logic.rs')]
+inputs += ['packages/safe-cex/src/types.ts','packages/safe-cex/src/utils/createPositionId.ts','packages/safe-cex/src/utils/get-key.ts']
 originals={s:Path(s).read_bytes() for s in inputs}
 for s,data in originals.items():assert subprocess.check_output(['git','show',sha+':'+s])==data,s
 records=[];env=dict(os.environ,SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript');logs=Path('sdk-rs/target/binance-private-events')/sha;logs.mkdir(parents=True,exist_ok=True)

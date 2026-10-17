@@ -321,3 +321,12 @@ clock calls. Lifecycle clocks and transport deadlines remain runtime operations.
 private socket with a deliberately different host wall clock and a pushed
 40-second server offset; the shared Bitunix audit control runner independently
 replaces each signing clock with wall time and requires a compiled failure.
+
+Native public/private ping sends copy the venue's already sampled `core.ping_at`
+into `BaseWebSocket::set_ping_at` before sending. The base pong handler owns latency
+and ping timers; do not sample the clock again or leave it reading a detached zero.
+`native_ping_latency` opens the actual constructed exchange sockets, checks both
+pong latencies and pushes private orders/fills/positions/account frames into the
+production handlers, asserting Store contents and the complete emitted fill.
+The baseline ping regression fails at latency 0 versus 13 ms; all five scoped
+checks pass after the timestamp forwarding.

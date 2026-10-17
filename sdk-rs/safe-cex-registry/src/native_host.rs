@@ -199,6 +199,8 @@ impl RustVenueHost for NativeVenueHost {
         &self,
         options: &safe_cex_types::ExchangeOptions,
     ) -> Result<crate::rust_venues::MexcDependencies, ExchangeError> {
+        let current_time_ms: Rc<dyn Fn() -> f64> =
+            Rc::new(|| safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms());
         let http = safe_cex_venue_mexc::client::create_api(
             native_http_options(
                 &self.runtime,
@@ -211,9 +213,11 @@ impl RustVenueHost for NativeVenueHost {
             ),
             &safe_cex_transport::TransportRegistry::default(),
             Rc::new(NativeRetryClock(self.runtime.clone())),
+            current_time_ms.clone(),
         )
         .map_err(|e| ExchangeError::new(e.to_string()))?;
         Ok(crate::rust_venues::MexcDependencies {
+            current_time_ms,
             runtime: self.runtime.clone(),
             http: Rc::new(http),
             local_to_utc: Rc::new(|local| local),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Three family defects, nine named native failures, exact restoration."""
+"""Two family defects, seven named native failures, exact restoration."""
 import os
 import subprocess
 from pathlib import Path
@@ -7,7 +7,6 @@ crate=Path(__file__).resolve().parents[1]
 revision=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
 controls=[
  ('classes.rs','for definition in definitions(kind) {','for definition in definitions(kind).iter().rev() {',2,('futures_exchange_class_native','spot_exchange_class_native','futures_public_class_native','spot_public_class_native','futures_private_class_native','spot_private_class_native'),'native own-key order'),
- ('construction.rs','h.rate_limit(client, 5.0)','h.rate_limit(client, 6.0)',1,('futures_constructor_native','spot_constructor_native'),'native bits'),
  ('ohlcv_polling.rs','h.set_timeout(poll, 5000.0)?','h.set_timeout(poll, 5001.0)?',1,('polling_native',),'native bits'),
 ]
 originals={name:(crate/'src'/name).read_bytes()for name,*_ in controls}

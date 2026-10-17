@@ -148,8 +148,11 @@ Cancellation also uses the unlimited client. Single and batch replies validate
 the response envelope's code/msg, leaving live Store orders untouched on a
 rejected batch. The assembled placeOrders member checks all caller IDs before
 placing its first order, matching the inherited source batch preflight.
-The four order_regressions unit tests run the real assembled binding/clients;
+The order_regressions unit tests run the real assembled binding/clients;
 they cover both batch outcomes, a full read-limiter window, and duplicate IDs.
+Symbol cancellation checks the actual Store filter, selected IDs in the signed
+DELETE query and unrelated orders staying open. Its dead callback helper and
+fake-only test were removed; the manifest points to binding/methods.rs::async_method.
 
 The production symbol helpers and raw ticker reader use the shared Js carrier.
 `utilities::{format_symbol_in_value, format_symbol_out_value}` retain lone UTF-16

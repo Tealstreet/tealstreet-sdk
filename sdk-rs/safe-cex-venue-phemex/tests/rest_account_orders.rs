@@ -195,7 +195,6 @@ struct Host {
     store: Rows,
     raw: Rows,
     input: Rc<RefCell<Rows>>,
-    store_orders: Rows,
     cached: Option<V>,
     markets: V,
     stored_reads: usize,
@@ -235,13 +234,6 @@ impl Host {
                     .map(v)
                     .collect(),
             )),
-            store_orders: row["storeOrders"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .cloned()
-                .map(v)
-                .collect(),
             cached: row["fixture"].get("cached").cloned().map(v),
             markets: v(row["fixture"].get("markets").cloned().unwrap_or(
                 json!([{"symbol":"BTCUSDT","limits":{"leverage":{"min":1,"max":100}}}]),
@@ -969,35 +961,6 @@ fn run(name: &str, count: usize) {
                 suspended += pending;
                 result.map(|_| obs(&absent()))
             }
-            "cancelSymbolOrders" => {
-                let host = RefCell::new(host);
-                let host_ref = &host;
-                let output = drive(rest_order_control::cancel_symbol_orders(
-                    symbol,
-                    |symbol| {
-                        Ok::<_, Error>(
-                            host.borrow()
-                                .store_orders
-                                .iter()
-                                .filter(|o| same(&o.borrow()["symbol"], &symbol.borrow()))
-                                .cloned()
-                                .collect::<Vec<_>>(),
-                        )
-                    },
-                    |orders| async move {
-                        host_ref.borrow_mut().note(
-                            "cancel",
-                            vec![json!(
-                                orders.iter().map(|o| obs(&o.borrow())).collect::<Vec<_>>()
-                            )],
-                        )
-                    },
-                ))
-                .0;
-                let host = host.into_inner();
-                host.check(output.map(|_| obs(&absent())));
-                continue;
-            }
             "getOrFetchMarketForSymbol" => {
                 let (result, pending) =
                     drive(rest_order_control::get_or_fetch_market(&mut host, symbol));
@@ -1051,10 +1014,6 @@ fn actual_typescript_leverage_helper() {
 #[test]
 fn actual_typescript_cancel_orders() {
     run("cancelOrders", 13)
-}
-#[test]
-fn actual_typescript_cancel_symbol() {
-    run("cancelSymbolOrders", 4)
 }
 #[test]
 fn actual_typescript_market_lookup() {

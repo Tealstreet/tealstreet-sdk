@@ -1220,3 +1220,9 @@ conversion algorithm with its string-hint ordering. Object results and
 non-callable members advance to the next method; no primitive result throws.
 The production native-host `js_number_coercion` witness compares Node traces,
 negative-zero/NaN results, inheritance, live lookup and conversion failures.
+
+The JS Number `toFixed` builtin delegates to `safe_cex_num::js_to_fixed` after
+ordinary digits coercion. Exact binary ties round away from zero; negative zero,
+nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
+`tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
+Polymarket's concrete binding witness checks the resulting signed order amounts.

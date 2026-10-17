@@ -345,7 +345,7 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
                 rt.shared.runtime.transport().as_ref(),
                 arg(&a, 0),
                 &arg(&a, 1),
-                crate::binding::value::to_typed(&arg(&a, 2).get("name")?)?,
+                rt.base(),
             )
         }),
     );
