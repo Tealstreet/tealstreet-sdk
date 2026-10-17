@@ -105,6 +105,124 @@ fn err(e: Thrown) -> ExchangeError {
 }
 
 impl BybitExchange {
+    fn listen_public_ohlcv(
+        &self,
+        options: safe_cex_types::OHLCVOptions,
+        callback: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        use safe_cex_exchange::socket_lifecycle::SocketSlot;
+        let websocket = |property: &str| {
+            let slot = match property {
+                "publicWebsocket" => SocketSlot::Public,
+                "publicInverseWebsocket" => SocketSlot::PublicSecondary,
+                _ => return Err(ExchangeError::new("Unknown Bybit public socket")),
+            };
+            self.base
+                .get_socket(slot)
+                .ok_or_else(|| ExchangeError::new("Bybit public socket unavailable"))
+        };
+        let call = |socket: Rc<safe_cex_exchange::websocket::BaseWebSocket>,
+                    _: &str,
+                    options,
+                    callback| {
+            let primary = matches!(
+                self.base.name,
+                ExchangeName::Bybit | ExchangeName::Bybitdemo
+            );
+            let secondary = self
+                .base
+                .get_socket(SocketSlot::PublicSecondary)
+                .is_some_and(|other| Rc::ptr_eq(&socket, &other));
+            let category = if secondary {
+                "inverse"
+            } else if self.base.name == ExchangeName::Bybitspot {
+                "spot"
+            } else {
+                "linear"
+            };
+            crate::ws_public::single_candles::listen_ohlcv(
+                socket.clone(),
+                self.subscription_topics(category),
+                options,
+                self.base.clone(),
+                if primary {
+                    Some(self.candle_recovery(&socket, category))
+                } else {
+                    None
+                },
+                callback,
+            )
+        };
+        let symbol = options.symbol.clone();
+        match self.base.name {
+            ExchangeName::Bybitinverse => {
+                crate::stream_delegation::listen_inverse_ohlcv(options, callback, websocket, call)
+            }
+            ExchangeName::Bybitspot => {
+                crate::stream_delegation::listen_ohlcv(options, callback, websocket, call)
+            }
+            _ => crate::stream_delegation::listen_primary_ohlcv(
+                options,
+                &symbol,
+                callback,
+                websocket,
+                || Ok(self.base.get_socket(SocketSlot::PublicSecondary)),
+                call,
+            ),
+        }
+    }
+    fn listen_public_ohlcvs(
+        &self,
+        options: safe_cex_types::OHLCVSOptions,
+        callback: Rc<dyn Fn(safe_cex_exchange::exchange::SubscribedCandle)>,
+    ) -> Result<(), ExchangeError> {
+        use safe_cex_exchange::socket_lifecycle::SocketSlot;
+        let websocket = |property: &str| {
+            let slot = match property {
+                "publicWebsocket" => SocketSlot::Public,
+                "publicInverseWebsocket" => SocketSlot::PublicSecondary,
+                _ => return Err(ExchangeError::new("Unknown Bybit public socket")),
+            };
+            self.base
+                .get_socket(slot)
+                .ok_or_else(|| ExchangeError::new("Bybit public socket unavailable"))
+        };
+        let call = |socket: Rc<safe_cex_exchange::websocket::BaseWebSocket>,
+                    _: &str,
+                    options,
+                    callback| {
+            let secondary = self
+                .base
+                .get_socket(SocketSlot::PublicSecondary)
+                .is_some_and(|other| Rc::ptr_eq(&socket, &other));
+            let category = if secondary { "inverse" } else { "linear" };
+            crate::ws_public::candles::listen_ohlcvs(
+                socket,
+                self.subscription_topics(category),
+                options,
+                callback,
+            )
+        };
+        match self.base.name {
+            ExchangeName::Bybitinverse => {
+                crate::stream_delegation::listen_inverse_ohlcvs(options, callback, websocket, call)
+            }
+            ExchangeName::Bybitspot => Ok(()),
+            _ => crate::stream_delegation::listen_primary_ohlcvs(
+                Ok(options.symbols.clone()),
+                callback,
+                websocket,
+                || Ok(self.base.get_socket(SocketSlot::PublicSecondary)),
+                Rc::ptr_eq,
+                |symbols| {
+                    let mut group = options.clone();
+                    group.symbols = symbols;
+                    group
+                },
+                call,
+            ),
+        }
+    }
     fn listen_public_order_book(
         &self,
         symbol: String,
@@ -548,6 +666,25 @@ impl Exchange for BybitExchange {
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
         self.invoke("fetchMarkets", vec![])
     }
+    fn listen_ohlcv(
+        &self,
+        options: safe_cex_types::OHLCVOptions,
+        callback: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        self.listen_public_ohlcv(options, callback)
+    }
+    fn listen_ohlcvs(
+        &self,
+        options: safe_cex_types::OHLCVSOptions,
+        callback: Rc<dyn Fn(safe_cex_exchange::exchange::SubscribedCandle)>,
+    ) {
+        if let Err(error) = self.listen_public_ohlcvs(options, callback) {
+            self.base.runtime.report_exception(
+                &error,
+                &serde_json::json!({"operation":"Bybit listenOHLCVs"}),
+            );
+        }
+    }
     fn listen_order_book(
         &self,
         symbol: String,
@@ -557,6 +694,29 @@ impl Exchange for BybitExchange {
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&options)))
+    }
+    fn fetch_income_history(
+        &self,
+        options: Option<IncomeHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        self.invoke("fetchIncomeHistory", args!(opt_js(options)))
+    }
+    fn fetch_income_history_range(
+        &self,
+        start: f64,
+        end: f64,
+        kind: Option<String>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        self.invoke(
+            "fetchIncomeHistoryRange",
+            args!(js(&start), js(&end), opt_js(kind)),
+        )
+    }
+    fn fetch_closed_pnl(
+        &self,
+        options: HistoricalTradeOptions,
+    ) -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
+        self.invoke("fetchClosedPnl", args!(js(&options)))
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
         self.invoke("fetchTickers", vec![])

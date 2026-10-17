@@ -1,27 +1,16 @@
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Candle mapper awaits subscription lifecycle")
-)]
-//! Candle-state slice; socket subscription/timer ownership remains pending.
-use crate::exchange_state::{number, parse_float};
+//! Candle state consumed by the concrete public kline listener.
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_types::Candle;
-use serde_json::Value;
 
-pub(crate) fn apply_kline(
-    last: &mut Option<Candle>,
-    raw: &Value,
-) -> Result<Option<Candle>, &'static str> {
-    if raw.is_null() {
-        return Err("Cannot read properties of null (reading 'start')");
-    }
-    let timestamp = number(raw.get("start"))? / 1000.;
+pub(crate) fn apply_kline(last: &mut Option<Candle>, raw: &Js) -> Result<Option<Candle>, Thrown> {
+    let timestamp = raw.get("start")?.to_number()? / 1000.;
     if last.as_ref().is_some_and(|last| last.timestamp > timestamp) {
         return Ok(None);
     }
-    let high = parse_float(raw.get("high"))?;
-    let low = parse_float(raw.get("low"))?;
-    let close = parse_float(raw.get("close"))?;
-    let volume = parse_float(raw.get("volume"))?;
+    let high = raw.get("high")?.parse_float()?;
+    let low = raw.get("low")?.parse_float()?;
+    let close = raw.get("close")?.parse_float()?;
+    let volume = raw.get("volume")?.parse_float()?;
     let next = match last.as_ref() {
         Some(previous)
             if previous.timestamp.partial_cmp(&timestamp) != Some(std::cmp::Ordering::Less) =>
@@ -45,7 +34,7 @@ pub(crate) fn apply_kline(
         }
         _ => Candle {
             timestamp,
-            open: parse_float(raw.get("open"))?,
+            open: raw.get("open")?.parse_float()?,
             high,
             low,
             close,

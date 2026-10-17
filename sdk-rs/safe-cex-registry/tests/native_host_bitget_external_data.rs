@@ -1,4 +1,4 @@
-//! Every Bitget registry constructor uses the common native gateway provider.
+//! Bitget gateway startup and source-equivalent direct-socket stream overrides.
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
 use safe_cex_types::ExchangeName;
@@ -89,10 +89,6 @@ async fn verify(name: ExchangeName, exchange: &'static str) {
             Rc::new(move |candle| sink.borrow_mut().push(candle)),
         )
         .unwrap();
-    eventually("Bitget book/candle gateway subscriptions", || {
-        frame(&h, "subscribe", exchange, "orderbook") && frame(&h, "subscribe", exchange, "candle")
-    })
-    .await;
     let push = h
         .peers
         .borrow()
@@ -107,22 +103,33 @@ async fn verify(name: ExchangeName, exchange: &'static str) {
         "data":{"timestamp":1700000000000.0,"open":9.0,"high":12.0,"low":8.0,"close":11.0,"volume":17.0}}).to_string();
     push.send(book.clone()).unwrap();
     push.send(candle.clone()).unwrap();
-    eventually("Bitget external callbacks", || {
-        books.borrow().len() == 1 && candles.borrow().len() == 1
+    // A later ticker on this same ordered socket proves both stream frames were
+    // processed. Bitget's own stream overrides delegate to its disconnected
+    // venue socket, unlike BaseExchange's gateway-aware defaults.
+    push.send(
+        json!({"type":"data","exchangeId":exchange,"channel":"tickers","data":[ticker(10.5)]})
+            .to_string(),
+    )
+    .unwrap();
+    eventually("gateway stream processing barrier", || {
+        h.store.tickers()[0].last == 10.5
     })
     .await;
-    assert_eq!(books.borrow()[0].bids[0].price, 9.9);
-    assert_eq!(books.borrow()[0].asks[0].amount, 3.0);
-    assert_eq!(candles.borrow()[0].timestamp, 1700000000000.0);
-    assert_eq!(candles.borrow()[0].close, 11.0);
-    assert_eq!(candles.borrow()[0].volume, 17.0);
+    let observation = json!({
+        "bookSubscribed": frame(&h, "subscribe", exchange, "orderbook"),
+        "candleSubscribed": frame(&h, "subscribe", exchange, "candle"),
+        "books": books.borrow().len(),
+        "candles": candles.borrow().len(),
+    });
+    assert_eq!(
+        observation,
+        source_stream_observation(),
+        "Bitget actual TS stream routing"
+    );
     clean_book().unwrap();
     clean_candle().unwrap();
-    eventually("Bitget gateway unsubscriptions", || {
-        frame(&h, "unsubscribe", exchange, "orderbook")
-            && frame(&h, "unsubscribe", exchange, "candle")
-    })
-    .await;
+    assert!(!frame(&h, "unsubscribe", exchange, "orderbook"));
+    assert!(!frame(&h, "unsubscribe", exchange, "candle"));
     push.send(book).unwrap();
     push.send(candle).unwrap();
     // A later ticker on the same ordered socket is a processing barrier.
@@ -135,9 +142,20 @@ async fn verify(name: ExchangeName, exchange: &'static str) {
         h.store.tickers()[0].last == 11.0
     })
     .await;
-    assert_eq!(books.borrow().len(), 1, "book cleanup removed callback");
-    assert_eq!(candles.borrow().len(), 1, "candle cleanup removed callback");
+    assert!(
+        books.borrow().is_empty(),
+        "gateway book does not reach venue callback"
+    );
+    assert!(
+        candles.borrow().is_empty(),
+        "gateway candle does not reach venue callback"
+    );
     assert!(h.seen.borrow().is_empty());
+    assert_eq!(
+        h.peers.borrow().len(),
+        1,
+        "streams do not dial a venue socket"
+    );
     h.exchange.dispose().unwrap();
     assert!(h.exchange.base().is_disposed());
 }
@@ -152,4 +170,20 @@ fn bitget_usdc_uses_native_external_gateway() {
 #[test]
 fn bitget_inverse_uses_native_external_gateway() {
     run_local(verify(ExchangeName::Bitgetinverse, "bitgetinverse"));
+}
+
+fn source_stream_observation() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/bitget_external_streams.cjs"
+        ))
+        .output()
+        .expect("execute actual Bitget source");
+    assert!(
+        output.status.success(),
+        "Bitget stream source witness: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("Bitget source observation")
 }

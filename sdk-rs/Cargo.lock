@@ -4208,6 +4208,7 @@ dependencies = [
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-candle-cache",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
@@ -4256,6 +4257,7 @@ name = "safe-cex-venue-grvt"
 version = "0.1.0"
 dependencies = [
  "indexmap 2.14.2",
+ "num-bigint 0.4.6",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",

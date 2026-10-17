@@ -37,7 +37,25 @@ impl NativeValue {
         value::to_typed(&self.to_js()).map_err(|e| e.to_exchange_error())
     }
     pub fn from_js(value: &Js) -> Result<Self, ExchangeError> {
-        Ok(match value {
+        Self::capture(value, &mut vec![])
+    }
+    fn capture(value: &Js, ancestors: &mut Vec<Js>) -> Result<Self, ExchangeError> {
+        let compound = matches!(value, Js::Array(_) | Js::Object(_));
+        if compound {
+            if ancestors.len() >= 512 {
+                return Err(ExchangeError::new(
+                    "native account value nesting exceeds 512",
+                ));
+            }
+            if ancestors
+                .iter()
+                .any(|ancestor| value.same_reference(ancestor))
+            {
+                return Err(ExchangeError::new("native account value contains a cycle"));
+            }
+            ancestors.push(value.clone());
+        }
+        let captured = match value {
             Js::Undefined => Self::Undefined,
             Js::Null => Self::Null,
             Js::Bool(value) => Self::Bool(*value),
@@ -55,7 +73,7 @@ impl NativeValue {
                     .array_values()
                     .expect("array variant has values")
                     .iter()
-                    .map(Self::from_js)
+                    .map(|value| Self::capture(value, ancestors))
                     .collect::<Result<_, _>>()?,
             ),
             Js::Object(_) => Self::Object(
@@ -63,7 +81,9 @@ impl NativeValue {
                     .own_entries()
                     .map_err(|e| e.to_exchange_error())?
                     .into_iter()
-                    .map(|(key, value)| Self::from_js(&value).map(|value| (key.to_vec(), value)))
+                    .map(|(key, value)| {
+                        Self::capture(&value, ancestors).map(|value| (key.to_vec(), value))
+                    })
                     .collect::<Result<_, _>>()?,
             ),
             _ => {
@@ -71,7 +91,11 @@ impl NativeValue {
                     "native account values require structured data",
                 ));
             }
-        })
+        };
+        if compound {
+            ancestors.pop();
+        }
+        Ok(captured)
     }
     pub fn to_js(&self) -> Js {
         match self {

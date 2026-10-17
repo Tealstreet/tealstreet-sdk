@@ -2843,7 +2843,18 @@ fn how_consumes_grvt_config_extensions_like_actual_source() {
         let mut call = request("/lite/v1/account_summary");
         call.base_url = Some("https://trades.grvt.io".into());
         call.headers = serde_json::from_value(case["headers"].clone()).unwrap();
-        call.config_extensions = serde_json::from_value(case["extra"].clone()).unwrap();
+        call.config_extensions = case["extra"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value.clone())
+                        .unwrap(),
+                )
+            })
+            .collect();
         host.run(leaf_error(adapter.execute(call))).unwrap();
         assert_eq!(
             host.venue.requests.borrow()[0]["arg"]["headers"],
@@ -2852,4 +2863,112 @@ fn how_consumes_grvt_config_extensions_like_actual_source() {
             case["extra"]
         );
     }
+}
+
+#[test]
+fn how_projects_retained_grvt_native_config_only_at_frame_boundary() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let output = std::process::Command::new("node")
+        .env(
+            "SAFE_CEX_TYPESCRIPT_PATH",
+            std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+            }),
+        )
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/grvt-config-source.cjs"
+        ))
+        .arg("--native")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "native GRVT source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 5, "independent native GRVT source cases");
+    let native = [
+        Input::Undefined,
+        Input::Float(f64::NAN),
+        Input::Float(f64::INFINITY),
+        Input::Float(-0.0),
+        Input::Object(vec![
+            ("missing".into(), Input::Undefined),
+            ("nan".into(), Input::Float(f64::NAN)),
+            ("infinity".into(), Input::Float(f64::INFINITY)),
+        ]),
+    ];
+    for index in 0..5 {
+        let host = FakeHost::new();
+        let adapter = HowRestAdapter::new(host.clone(), None, false).unwrap();
+        let mut call = request("/lite/v1/account_summary");
+        call.base_url = Some("https://trades.grvt.io".into());
+        call.headers = serde_json::from_value(cases[index]["headers"].clone()).unwrap();
+        call.config_extensions = [
+            ("grvtCookie".into(), native[index].clone()),
+            ("grvtAccountId".into(), native[index].clone()),
+        ]
+        .into();
+        host.run(leaf_error(adapter.execute(call))).unwrap();
+        assert_eq!(
+            host.venue.requests.borrow()[0]["arg"]["headers"],
+            cases[index]["expected"],
+            "native GRVT truthiness before JSON frame projection {index}"
+        );
+    }
+}
+
+#[test]
+fn relay_constructor_preserves_source_url_error_classes_and_query_bytes() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let urls = [
+        "relative",
+        "wss://[",
+        "wss://tunnel.test/a",
+        "wss://tunnel.test/a?ts-relay=&ts-relay=wss%3A%2F%2Fvenue",
+        "wss://tunnel.test/a?tag=a%20b&ts-relay=wss%3A%2F%2Fvenue&other=%7E#frag",
+    ];
+    let mut node = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/relay-url-source.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    node.stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&urls).unwrap().as_bytes())
+        .unwrap();
+    let output = node.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected.len(), urls.len());
+    let mut observed = Vec::new();
+    for url in urls {
+        let host = FakeHost::new();
+        observed.push(match RelayWebSocket::new(host, url) {
+            Ok(_) => json!({"ok":safe_cex_transport::relay::parse_relay_url(url).unwrap()}),
+            Err(TransportError::JavaScript(error)) => {
+                json!({"name":error.name,"message":error.message})
+            }
+            Err(error) => json!({"name":"Error","message":error.to_string()}),
+        });
+    }
+    assert_eq!(
+        observed, expected,
+        "real relay constructor must preserve source URL errors and query encoding"
+    );
 }

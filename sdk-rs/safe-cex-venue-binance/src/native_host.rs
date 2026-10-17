@@ -61,12 +61,18 @@ fn exchange_failure(error: ExchangeError) -> Failure {
 }
 /// JSON view of a native value; undefined members are omitted as JSON.stringify does.
 fn to_json(value: &EventValue) -> Result<Value, Failure> {
-    let Some(text) =
-        safe_cex_num::js_json_stringify(&native_json(value)).map_err(|e| failure(e.message))?
+    let Some(text) = safe_cex_num::js_json_stringify(&native_json(value))
+        .map_err(|e| exchange_failure(e.into()))?
     else {
         return Ok(Value::Null);
     };
     serde_json::from_str(&text).map_err(|e| failure(e.to_string()))
+}
+
+/// qs renders BigInt query leaves with String(), independently of JSON bodies.
+fn query_json(value: &EventValue) -> Result<Value, Failure> {
+    safe_cex_exchange::js_runtime::value::to_json(value)
+        .map_err(|error| exchange_failure(error.to_exchange_error()))
 }
 
 /// Production Binance dependencies over a native runtime and terminal HTTP adapter.
@@ -313,20 +319,11 @@ async fn dispatch(
     path: &'static str,
     args: Option<EventValue>,
 ) -> Result<(RestResponse, RestRequest), Dispatch> {
-    let mut request = RestRequest {
+    let request = RestRequest {
         method: method_name(method).into(),
         url: path.into(),
         ..Default::default()
     };
-    match (method, &args) {
-        (HttpMethod::Get | HttpMethod::Delete, Some(params)) if !params.nullish() => {
-            request.params = to_json(params).ok();
-        }
-        (HttpMethod::Post | HttpMethod::Put, Some(data)) if !data.nullish() => {
-            request.body = to_json(data).ok().map(RestBody::Untransformed);
-        }
-        _ => {}
-    }
     let raised: Rc<RefCell<Option<Failure>>> = Rc::new(RefCell::new(None));
     let http = client_http(client).map_err(|e| {
         Dispatch::Transport(
@@ -341,6 +338,18 @@ async fn dispatch(
             let original = request.clone();
             let outcome: Result<RestRequest, Failure> = async {
                 let mut config = config_value(&request)?;
+                // Request interceptors must observe the original arguments before
+                // signing moves data into params or JSON transformation can fail.
+                if let Some(value) = args.as_ref().filter(|value| !value.nullish()) {
+                    config.write(
+                        if matches!(method, HttpMethod::Get | HttpMethod::Delete) {
+                            "params"
+                        } else {
+                            "data"
+                        },
+                        value.clone(),
+                    );
+                }
                 let mut bindings = NativeRequestBindings;
                 // Axios runs request interceptors last-registered first.
                 for interceptor in interceptors.iter().rev() {
@@ -415,7 +424,7 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
     request.params = if params.nullish() {
         None
     } else {
-        Some(to_json(&params)?)
+        Some(query_json(&params)?)
     };
     let data = config.read("data")?;
     request.body = if matches!(data, EventValue::Undefined) {
@@ -587,9 +596,6 @@ impl RequestBindings for NativeRequestBindings {
         name: EventValue,
         recv_window: EventValue,
     ) -> Result<ApiFuture, Failure> {
-        let Value::Object(map) = to_json(&config)? else {
-            return Err(failure("request config must be an object"));
-        };
         let text = |key: &str| -> Result<String, Failure> {
             let value = options.get(key)?;
             if value.nullish() {
@@ -604,6 +610,21 @@ impl RequestBindings for NativeRequestBindings {
             serde_json::from_value(Value::String(name.text()?))
                 .map_err(|e| failure(e.to_string()))?;
         let window = recv_window.number()?;
+        if remote
+            || key.is_empty()
+            || !safe_cex_crypto::can_sign_payload(&safe_cex_crypto::SigningOptions {
+                key: &key,
+                secret: &secret,
+                payload_signer: None,
+            })
+        {
+            return Ok(Box::pin(async move { Ok(config) }));
+        }
+        // A signed body becomes query fields; BigInt uses qs decimal spelling.
+        // Keep the original config untouched when signing is skipped.
+        let Value::Object(map) = query_json(&config)? else {
+            return Err(failure("request config must be an object"));
+        };
         Ok(Box::pin(async move {
             let signing = safe_cex_crypto::SigningOptions {
                 key: &key,
