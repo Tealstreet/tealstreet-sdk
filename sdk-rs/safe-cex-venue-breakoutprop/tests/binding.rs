@@ -74,6 +74,7 @@ impl WsRuntime for clock::Runtime {
 struct Wire {
     runtime: Rc<clock::Runtime>,
     requests: RefCell<Vec<Value>>,
+    native_requests: RefCell<Vec<Js>>,
     faults: RefCell<VecDeque<(String, u16, Value)>>,
     errors: RefCell<VecDeque<(String, Js)>>,
     candle_response: RefCell<Option<Value>>,
@@ -100,6 +101,7 @@ impl JsHttpHost for Wire {
             .to_display()
             .to_ascii_uppercase();
         self.requests.borrow_mut().push(observed);
+        self.native_requests.borrow_mut().push(config.clone());
         if self
             .errors
             .borrow()
@@ -123,7 +125,7 @@ impl JsHttpHost for Wire {
         } else {
             match (method.as_str(), url.as_str()) {
                 ("POST", "/login") => json!({"sessionToken":"token","timeout":"1:00:00"}),
-                ("GET", "/users/k") => {
+                ("GET", "/users/k" | "/users/Infinity") => {
                     json!({"userDetails":[{"login":"k","domain":"default","version":1,"fullName":"Trader","username":"k","accounts":[{"owner":"k","account":"default:A","version":1,"baseCurrency":"USD","registrationTime":"2026-01-01T00:00:00Z","accountStatus":"FULL_TRADING","pricingStream":"quote","positionBased":false}]}]})
                 }
                 ("GET", "instruments/query") => json!({"instruments":[instrument()]}),
@@ -1545,4 +1547,116 @@ fn portfolio_balance_and_filtered_positions_accept_native_intermediate_scalars()
         assert_eq!(f.store.positions()[0].contracts, 0.0);
         f.exchange.dispose().unwrap();
     }
+}
+
+fn auth_request() -> safe_cex_transport::RestRequest {
+    safe_cex_transport::RestRequest {
+        method: "GET".into(),
+        url: "/users/k".into(),
+        ..Default::default()
+    }
+}
+fn pump_pending<T>(f: &Fixture, future: &mut std::pin::Pin<Box<impl Future<Output = T>>>) {
+    for _ in 0..32 {
+        assert!(
+            future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        f.runtime.advance(f.runtime.now.get());
+    }
+}
+#[test]
+fn auth_pipeline_checks_session_after_rate_limit_dequeue() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    f.run(client.request(auth_request())).unwrap();
+    let mut queued = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut queued);
+    f.exchange.invalidate_session();
+    let error = f.run(queued).unwrap_err();
+    assert_eq!(error.message, "No session token");
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+}
+#[test]
+fn auth_pipeline_reads_replacement_token_after_dequeue() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    f.run(client.request(auth_request())).unwrap();
+    let mut queued = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut queued);
+    *f.exchange.session_token.borrow_mut() = Some("replacement".into());
+    f.run(queued).unwrap();
+    assert_eq!(
+        f.request("GET", "/users/k")["headers"]["Coinbase-Authorization"],
+        "DXAPI replacement"
+    );
+}
+#[test]
+fn auth_pipeline_reauthenticates_network_retry() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    client.rate_limit(1.).unwrap();
+    let error = safe_cex_exchange::js_runtime::value::error_object("Error", "Network Error");
+    error.define("code", Js::str("ERR_NETWORK")).unwrap();
+    f.wire
+        .errors
+        .borrow_mut()
+        .push_back(("/users/k".into(), error));
+    let mut retrying = Box::pin(client.request(auth_request()));
+    pump_pending(&f, &mut retrying);
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+    *f.exchange.session_token.borrow_mut() = Some("replacement".into());
+    f.run(retrying).unwrap();
+    assert_eq!(
+        f.request("GET", "/users/k")["headers"]["Coinbase-Authorization"],
+        "DXAPI replacement"
+    );
+}
+
+#[test]
+fn auth_pipeline_preserves_overflow_url_params() {
+    let f = fixture();
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    let mut request = auth_request();
+    request.url = "/users/{username}".into();
+    request.params = Some(serde_json::from_str(r#"{"username":1e400,"untouched":1e400}"#).unwrap());
+    f.run(client.request(request)).unwrap();
+    let sent = f.request("GET", "/users/Infinity");
+    assert_eq!(sent["params"]["untouched"], Value::Null);
+    let requests = f.wire.native_requests.borrow();
+    let native = requests.last().unwrap();
+    assert_eq!(
+        native
+            .get("params")
+            .unwrap()
+            .get("untouched")
+            .unwrap()
+            .as_f64(),
+        Some(f64::INFINITY)
+    );
+    assert!(sent["params"].get("username").is_none());
 }

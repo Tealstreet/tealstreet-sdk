@@ -22,5 +22,10 @@
     "runtimeOwner": "safe_cex_venue_asterdex::ws_helpers::public_depth_snapshot",
     "reason": "Inside public_depth_snapshot: admits only two-string arrays with nonblank, finite, positive price and amount, refusing the whole snapshot otherwise. Raw JSON admission; its runtime owner's probes exercise it.",
     "sourceSha256": "e3fcc6733e6ad17eb313d95e8a518a281228c07a421e7801b46b0ff7801055f2"
+  },
+  "safe-cex-venue-asterdex/src/exchange_helpers.rs::LOCAL_FUNCTION:get_data": {
+    "category": "non-decoder",
+    "reason": "Inside fetch_open_interest_map: performs the configured GET with an optional symbol and Axios-style JSON/text response projection. It returns untyped Value data to the outer collector; it neither constructs a typed domain record nor validates its fields. Transport JSON syntax handling remains the response body capability, not a hidden model decoder.",
+    "sourceSha256": "56536c8748d32df3a5aaf0b892ba9e7b3b4356db878ab7b45fedf6aa54d9e69b"
   }
 }

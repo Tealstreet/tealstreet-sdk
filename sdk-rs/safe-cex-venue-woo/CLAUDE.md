@@ -218,7 +218,7 @@ Infinity or -Infinity in these open string fields; Number::as_f64's finite-only
 projection must not erase the asset. Fourteen live-source cases pin both asset
 fields across overflow, signed zero, underflow and ordinary numbers.
 
-The three public ticker writers are callable extracted operations. Their
+The three public ticker writers run through the production socket class. Their
 87 source cases use the full production DefaultStore constructor and update
 path, tagging numeric bits before serialization. The implementation uses native
 ModelPatch numbers and drops the lookup borrow before writing; its Store result
@@ -228,10 +228,11 @@ commit-before-throw, ordered fanout abort and remaining-batch abort. Copied
 non-numeric fields remain a separate typed-output divergence. Seven compiling mutations
 pin field routing, filtering, batch continuation, deferred-refusal error priority
 and signed-zero preservation;
-live socket registration remains pending.
+real constructor/socket regressions additionally cover ticker, BBO and mark frames.
 
-A typed writer refusal is deferred until batch completion, allowing a later
-source TypeError to win with its own identity/text. The unrepresentable patch
+Typed writer reports are collected per refused row with its symbol, field and
+original value, then deferred until batch completion, allowing a later source
+TypeError to win with its own identity/text. The unrepresentable patch
 and its notification are still lost (declared); other representable writes are
 retained, and the operation never returns a successful subset.
 
