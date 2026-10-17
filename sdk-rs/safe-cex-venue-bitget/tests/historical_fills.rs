@@ -313,7 +313,9 @@ fn historical_fills_preserves_escaped_error_metadata() {
         error.name = "OriginalFailure".into();
         error.context = Some(json!({"stage":stage,"identity":[7,19,42]}));
         error.response = Some(json!({"data":{"msg":"venue detail"}}));
-        error.code = Some(json!("ORIGINAL"));
+        error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+            "ORIGINAL"
+        )));
         error.original_error = Some(json!({"retained":"source object"}));
         let expected = error.clone();
         let allocation = std::ptr::from_ref(error.metadata.as_ref());
