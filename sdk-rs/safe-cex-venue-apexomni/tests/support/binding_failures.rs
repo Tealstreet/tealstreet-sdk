@@ -14,14 +14,30 @@ fn signature_envelope_retries_once_using_legacy_signing() {
         json!({"code":20016,"msg":"signature rejected"}),
     );
     h.http.ok("GET", "/v3/account", json!({"id":"16909060"}));
+    let before = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
     assert_eq!(
         h.drive(h.venue().get_account()).unwrap().user_id,
         "16909060"
     );
     let calls = h.http.calls("/v3/account");
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].headers["APEX-TIMESTAMP"], "1700000000123");
-    assert_eq!(calls[1].headers["APEX-TIMESTAMP"], "1700000000000");
+    let after = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
+    let stamp = |index: usize| {
+        calls[index].headers["APEX-TIMESTAMP"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()
+    };
+    assert!((before..=after).contains(&stamp(0)));
+    assert!(
+        ((before / 1000.).floor() * 1000. ..=(after / 1000.).floor() * 1000.).contains(&stamp(1))
+    );
+    assert_eq!(
+        stamp(1) % 1000.,
+        0.,
+        "legacy UTCString truncates milliseconds"
+    );
     assert_ne!(
         calls[0].headers["APEX-SIGNATURE"],
         calls[1].headers["APEX-SIGNATURE"]

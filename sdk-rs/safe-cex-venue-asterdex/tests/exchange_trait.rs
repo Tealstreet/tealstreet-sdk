@@ -932,6 +932,169 @@ fn production_private_balance_frame_updates_store() {
 }
 
 #[test]
+fn market_load_ignores_unmatched_bracket_keys_and_defaults_falsy_leverage() {
+    use std::io::Write;
+    let row = |symbol: Value, value: Value| json!({"symbol":symbol,"brackets":[{"initialLeverage":value}]});
+    let good = row(json!("BTCUSDT"), json!(125));
+    let missing = json!({"symbol":"BTCUSDT","brackets":[{}]});
+    let cases = vec![
+        (
+            "missing-symbol",
+            json!([good,{"brackets":[{"initialLeverage":20}]}]),
+            125.0,
+        ),
+        (
+            "null-symbol",
+            json!([good, row(Value::Null, json!(20))]),
+            125.0,
+        ),
+        (
+            "number-symbol",
+            json!([good, row(json!(42), json!(20))]),
+            125.0,
+        ),
+        (
+            "object-symbol",
+            json!([good, row(json!({"market":"BTCUSDT"}), json!(20))]),
+            125.0,
+        ),
+        (
+            "array-symbol",
+            json!([good, row(json!(["BTCUSDT"]), json!(20))]),
+            125.0,
+        ),
+        (
+            "null-leverage",
+            json!([row(json!("BTCUSDT"), Value::Null)]),
+            10.0,
+        ),
+        ("missing-leverage", json!([missing]), 10.0),
+        (
+            "false-leverage",
+            json!([row(json!("BTCUSDT"), json!(false))]),
+            10.0,
+        ),
+        (
+            "empty-leverage",
+            json!([row(json!("BTCUSDT"), json!(""))]),
+            10.0,
+        ),
+        (
+            "zero-leverage",
+            json!([row(json!("BTCUSDT"), json!(0))]),
+            10.0,
+        ),
+        (
+            "duplicate-last-null",
+            json!([good, row(json!("BTCUSDT"), Value::Null)]),
+            10.0,
+        ),
+        ("duplicate-last-missing", json!([good, missing]), 10.0),
+        (
+            "partial-before-null",
+            json!([row(json!("BTCUSDT"), json!(35)), null]),
+            35.0,
+        ),
+        (
+            "single-null-leverage",
+            row(json!("BTCUSDT"), Value::Null),
+            10.0,
+        ),
+        (
+            "unmatched-string-null",
+            json!([good, row(json!("ETHUSDT"), Value::Null)]),
+            125.0,
+        ),
+    ];
+    assert_eq!(cases.len(), 15);
+    let (_, _, _, wire) = support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    script(&wire);
+    let market = wire.responses.borrow()["/fapi/v1/exchangeInfo"]["symbols"][0].clone();
+    let compiler = std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+    });
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/market-bracket-source.cjs"
+        ))
+        .env("SAFE_CEX_TYPESCRIPT_PATH", compiler)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = json!({"market":market,"cases":cases.iter().map(|(name,data,_)|json!({"name":name,"data":data})).collect::<Vec<_>>()});
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&input).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 30);
+    for (version, index) in [("v1", 0), ("v3", 15)] {
+        let options = if version == "v3" {
+            let secret = format!("{:064x}", 1);
+            let wallet =
+                safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&secret).unwrap();
+            json!({"key":wallet.address().to_checksum(None),"secret":secret,"applicationId":"0x1111111111111111111111111111111111111111"})
+        } else {
+            json!({"key":"fixture-key","secret":"fixture-secret"})
+        };
+        for (offset, (name, data, expected)) in cases.iter().enumerate() {
+            let source = &source[index + offset];
+            assert_eq!(source["version"], version);
+            assert_eq!(source["name"], *name);
+            assert_eq!(
+                source["max"].as_f64(),
+                Some(*expected),
+                "source default floor"
+            );
+            let (venue, rt, _, wire) = support::fixture(options.clone());
+            script(&wire);
+            wire.responses.borrow_mut().insert(
+                format!("/fapi/{version}/exchangeInfo"),
+                json!({"symbols":[market]}),
+            );
+            wire.responses
+                .borrow_mut()
+                .insert(format!("/fapi/{version}/leverageBracket"), data.clone());
+            let markets = drive(&rt, venue.fetch_markets()).unwrap_or_else(|e| {
+                panic!(
+                    "real market bracket admission {version}/{name}: {}",
+                    e.message
+                )
+            });
+            assert_eq!(markets.len(), 1);
+            assert_eq!(
+                markets[0].limits.leverage.max.to_bits(),
+                expected.to_bits(),
+                "real market bracket leverage {version}/{name}"
+            );
+            assert!(sent(
+                &wire,
+                "GET",
+                &format!("/fapi/{version}/leverageBracket")
+            ));
+            assert_eq!(
+                source["requests"],
+                json!([
+                    format!("/fapi/{version}/exchangeInfo"),
+                    format!("/fapi/{version}/leverageBracket")
+                ])
+            );
+        }
+    }
+}
+
+#[test]
 fn algo_capacity_counts_raw_stop_info_when_normalized_type_is_undefined() {
     use safe_cex_store::{Store, StoreUpdate};
     let (venue, rt, store, wire) =
