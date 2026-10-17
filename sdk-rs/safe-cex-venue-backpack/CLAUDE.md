@@ -317,3 +317,10 @@ registry also exposes that capability to typed canSign. Private WebSocket auth
 uses the local Ed25519 secret exactly as the source: a missing secret logs the
 original RangeError and sends no subscription, even when HTTP is hosted. See
 [the hosted signer evidence](HOSTED_SIGNER_EVIDENCE.md); no hosted WS path is added.
+
+The API factory carries the complete shared ExchangeOptions through native
+construction and adapter installation, including proxy flags, region, overrides
+and public-only state. Requests inherit the shared HTTP factory's routed base
+URL and 20-second timeout. The native_routing regressions run native_inputs,
+the production Exchange binding and actual Direct/Tealstreet providers to check
+direct-transport refusal, override routing, JA routing/authorization and timeout.

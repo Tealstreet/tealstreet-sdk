@@ -12,7 +12,7 @@ use safe_cex_exchange::{
     websocket::WsRuntime,
 };
 use safe_cex_transport::{RestAdapter, RestAdapterVariant, RestRequest, TransportRegistry};
-use safe_cex_types::{ExchangeName, ExchangeOptions};
+use safe_cex_types::ExchangeName;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 pub struct NativeBackpackInputs {
@@ -20,16 +20,6 @@ pub struct NativeBackpackInputs {
     pub build_http: BuildHttp,
     pub install_transport: InstallTransport,
     pub date_parse: DateParser,
-}
-
-fn account_options(options: &Options) -> ExchangeOptions {
-    serde_json::from_value(serde_json::json!({
-        "key": options.key,
-        "secret": options.secret,
-        "testnet": options.testnet,
-        "tealstreetTunnel": options.tunnel,
-    }))
-    .expect("account options from key/secret/testnet/tunnel")
 }
 
 /// Fresh inputs for one construction; `adapter` is the terminal HTTP adapter.
@@ -70,7 +60,7 @@ pub fn native_inputs_signed(
                 params_serializer: Some(params_serializer),
                 response_transform: None,
                 exchange: ExchangeName::Backpack,
-                options: account_options(&options.borrow()),
+                options: options.borrow().clone(),
                 request,
                 provider: Some(build_runtime.transport()),
                 signer: remote.as_ref().map(|(signer, _)| {
@@ -98,7 +88,7 @@ pub fn native_inputs_signed(
         install_transport_adapter(
             client,
             &registry,
-            &account_options(&options.borrow()),
+            &options.borrow(),
             Some(&transport),
             RestAdapterVariant::Default,
         );
