@@ -344,3 +344,10 @@ through authentication and the shared receive timer. GRVT stays silent at 8 seco
 pings after 30 seconds and reconnects after 90 seconds with source Warning severity.
 The shared socket bridge preserves lastReceived reads and dispatches the actual
 GRVT override; the former base-only timer fails the 8-second assertion.
+
+The uncalled generic api_runtime::last_segment copy and its isolated session
+routing cases were removed. TypeScript lastSegment is an unexported helper of
+isGrvtRead; production request classification retains the shared transport
+predicate. The session oracle keeps its other eight groups (84 source cases).
+The helper manifest row is not-applicable, with the live predicate mapped next
+to it; this does not remove any exported builder or browser workflow.

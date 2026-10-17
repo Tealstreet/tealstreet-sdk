@@ -1226,6 +1226,14 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+`__configureRateLimit` registers a request interceptor at the source registration point. Axios LIFO ordering therefore waits before the earlier signing interceptor, while later request hooks still run before the wait. Each registration owns its window. The queued nonce regression and installed Axios oracle are `tests/js_runtime.rs::rate_limit_dequeues_before_signing_and_keeps_interceptor_registration_order` and `tests/rate-limit-signing-source.cjs`.
+
+JS runtime StringToNumber delegates directly to `safe_cex_num::number_from_string`.
+It rejects signs inside radix digits (for example `0x+1`) and preserves the shared
+full-string, whitespace and arbitrary-length binary64 rounding rules. The native
+host `js_string_number` target compares 93 Node results through installed Number,
+including signed radix refusals, large values, overflow and signed zero.
+
 Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
 JavaScript callbacks need not define a Rust total order: NaN comparison results
 mean equality, and inconsistent callbacks must not panic. The first source throw
@@ -1336,9 +1344,45 @@ including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
 
+The runtime JSON builtin and default encoded-HTTP response parser decode directly
+into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
+including lone surrogates; object members use own data-property definition, and
+numbers retain binary64 bits. Both consumers share one private parser. Invalid
+HTTP JSON retains Axios's existing raw-text result, while the builtin throws
+SyntaxError. tests/js_json_parse.rs compares 200 valid/invalid syntax cases and
+all 65,536 escaped units with Node and checks a real loopback HTTP response
+against actual Axios. scripts/json-parse-controls.py restores the original
+builtin parser, raw-unit replacement, and HTTP parser independently; each fault
+must compile, fail its named real-boundary assertion, and pass after exact
+restoration. This does not widen HOW response data or typed Store/model strings;
+JSON reviver behavior and exact engine diagnostic text remain outside this fix.
+
 The JS Axios dispatcher lets installed callable adapters own response settlement,
 as Axios does. HOW fulfills non-2xx and zero-status responses, so their configured
 transforms and fulfilled response interceptors run; default native HTTP responses
 still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
 the actual native runtime, factory, transport and HOW protocol against scripted
 socket I/O and compares four statuses with the maintained HOW adapter and Axios.
+
+Plain JS socket dispatch follows the DOM listener snapshot and per-registration
+removed flag: removal before a callback's turn skips it, and readding the same
+function cannot revive its old registration. ReconnectingWebSocket retains its
+vendored captured-array removal behavior. The native TCP
+`js_socket_listener_removal` witness compares 16 open/message cases with Node
+EventTarget and the actual vendored class, using only shared Node/DOM outcomes.
+The browser rule is https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke;
+Node's additions-during-dispatch quirk is outside this removal comparison.
+
+For array inputs, JS Store `removeOrders` reads each element's `id` and applies
+source object-key coercion; it never treats a bare element as the ID itself.
+Property access and string-hint conversion failures propagate after the source's
+empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
+24 maintained Store cases through the production facade, including numeric keys,
+primitive elements, nullish elements and throwing getters/conversions.
+
+Shared console.info/debug route to the native runtime console sink and return
+undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
+output in a child process and compares its payloads with Node, including exact
+info/debug severity dispatch. The original shared globals compile but fail at
+console.info before either host output can be observed. Console.log is handled
+by its separate source-binding change.

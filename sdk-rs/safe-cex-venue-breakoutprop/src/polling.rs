@@ -1,7 +1,10 @@
 //! DXtrade's public "websocket" is a polling handler table. No wire socket is
 //! opened by these methods. The inherited socket lifecycle remains a host binding.
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_types::{Candle, OHLCVOptions, OrderBook, OrderBookOrders, Ticker, Timeframe};
+use safe_cex_types::{
+    AnyTimeframe, Candle, ExtendedTimeframe, OHLCVOptions, OrderBook, OrderBookOrders,
+    SecondsTimeframe, Ticker, Timeframe,
+};
 use std::{cell::RefCell, rc::Rc};
 
 pub type TickerHandler = Rc<dyn Fn(&Ticker) -> Result<(), ExchangeError>>;
@@ -84,18 +87,33 @@ impl BreakoutpropPublicWebsocket {
         callback: CandleCallback,
     ) -> Unsubscribe {
         let seconds = match opts.interval {
-            Timeframe::M1 => 60.,
-            Timeframe::M3 => 180.,
-            Timeframe::M5 => 300.,
-            Timeframe::M15 => 900.,
-            Timeframe::M30 => 1800.,
-            Timeframe::H1 => 3600.,
-            Timeframe::H2 => 7200.,
-            Timeframe::H4 => 14400.,
-            Timeframe::H6 => 21600.,
-            Timeframe::H12 => 43200.,
-            Timeframe::D1 => 86400.,
-            Timeframe::W1 => 604800.,
+            AnyTimeframe::Variant1(Timeframe::M1) => 60.,
+            AnyTimeframe::Variant1(Timeframe::M3) => 180.,
+            AnyTimeframe::Variant1(Timeframe::M5) => 300.,
+            AnyTimeframe::Variant1(Timeframe::M15) => 900.,
+            AnyTimeframe::Variant1(Timeframe::M30) => 1800.,
+            AnyTimeframe::Variant1(Timeframe::H1) => 3600.,
+            AnyTimeframe::Variant1(Timeframe::H2) => 7200.,
+            AnyTimeframe::Variant1(Timeframe::H4) => 14400.,
+            AnyTimeframe::Variant1(Timeframe::H6) => 21600.,
+            AnyTimeframe::Variant1(Timeframe::H12) => 43200.,
+            AnyTimeframe::Variant1(Timeframe::D1) => 86400.,
+            AnyTimeframe::Variant1(Timeframe::W1) => 604800.,
+            AnyTimeframe::Variant0(SecondsTimeframe::S1) => 1.,
+            AnyTimeframe::Variant0(SecondsTimeframe::S5) => 5.,
+            AnyTimeframe::Variant0(SecondsTimeframe::S15) => 15.,
+            AnyTimeframe::Variant0(SecondsTimeframe::S30) => 30.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H3) => 10800.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H5) => 18000.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H7) => 25200.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H8) => 28800.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H9) => 32400.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H10) => 36000.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H11) => 39600.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::H24) => 86400.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::D2) => 172800.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::D3) => 259200.,
+            AnyTimeframe::Variant2(ExtendedTimeframe::MN1) => 2592000.,
         };
         let ancestor = self.ancestor.clone();
         let parser: TickerHandler = Rc::new(move |ticker| {
