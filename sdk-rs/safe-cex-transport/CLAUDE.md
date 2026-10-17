@@ -250,3 +250,15 @@ OpenSSL self-signed/chain/leaf label, so exact label equivalence is unclaimed.
 Bybit signature and network retries run through its constructed venue factory and
 the shared signature_rejection module. The obsolete retry.rs compatibility
 engine and the tests that only exercised it have been removed.
+
+HOWWebSocket, RelayWebSocket, TransportRegistry and TealstreetTransport have
+reviewed accepted contracts for all fourteen compiler-discovered APIs. Ten raw
+entrypoints execute twenty-seven independently authored native observations:
+stored endpoints, actual auth/frame bytes, latency fields, relay close events,
+instance-provider precedence and exact upgrade headers. Typed routing/host
+capabilities remain classified separately. The fixture only records host I/O;
+it does not replace protocol or provider bodies. Run
+`node --test sdk-rs/safe-cex-parity/scripts/accepted-transport-socket-native.test.mjs`
+from the repository root. Its four production disconnect controls compile,
+require named observation failures and restore exact bytes; run it serially
+with every other source-sensitive probe or Cargo command in this worktree.

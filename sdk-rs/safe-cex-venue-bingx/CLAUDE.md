@@ -226,7 +226,8 @@ or replacement reconnect path is needed. Private text frames cover order Store
 writes, terminal fill emission/status, and position writes before REST healing.
 Balance-only account rows remain ignored as in TS; this socket has no balance
 handler and the REST balance stays unchanged. Approved strict-asset market row
-refusals emit the row, symbol, field and value, while retaining valid siblings.
+refusals include base/quote and nonnumeric leverage maxima. They emit the row,
+symbol, field and value while retaining valid siblings.
 Source/transport failures retain the stored snapshot; all refused rows return
 an empty fresh result.
 
