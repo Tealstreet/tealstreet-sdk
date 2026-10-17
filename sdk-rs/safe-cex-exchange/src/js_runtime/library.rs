@@ -1299,7 +1299,11 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         define_on(
             &clock,
             "getCurrentTime",
-            scoped("getCurrentTime", |s, _| Ok(dayjs(s.now()))),
+            func("getCurrentTime", |_| {
+                Ok(dayjs(
+                    safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time(),
+                ))
+            }),
         );
     }
     def(
