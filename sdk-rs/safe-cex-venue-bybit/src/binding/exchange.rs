@@ -489,6 +489,62 @@ impl Exchange for BybitExchange {
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
         self.invoke("fetchMarkets", vec![])
     }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(safe_cex_types::OrderBook)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        use safe_cex_exchange::socket_lifecycle::SocketSlot;
+        let websocket = |property: &str| {
+            let slot = match property {
+                "publicWebsocket" => SocketSlot::Public,
+                "publicInverseWebsocket" => SocketSlot::PublicSecondary,
+                _ => return Err(ExchangeError::new("Unknown Bybit public socket")),
+            };
+            self.base
+                .get_socket(slot)
+                .ok_or_else(|| ExchangeError::new("Bybit public socket unavailable"))
+        };
+        let call = |socket: Rc<safe_cex_exchange::websocket::BaseWebSocket>,
+                    _: &str,
+                    symbol: &str,
+                    callback| {
+            let secondary = self
+                .base
+                .get_socket(SocketSlot::PublicSecondary)
+                .is_some_and(|other| Rc::ptr_eq(&socket, &other));
+            let spot = self.base.name == ExchangeName::Bybitspot;
+            let category = if secondary {
+                "inverse"
+            } else if spot {
+                "spot"
+            } else {
+                "linear"
+            };
+            crate::ws_public::streams::listen_order_book(
+                socket,
+                self.subscription_topics(category),
+                symbol,
+                if spot { 200 } else { 1000 },
+                callback,
+            )
+        };
+        match self.base.name {
+            ExchangeName::Bybitinverse => crate::stream_delegation::listen_inverse_order_book(
+                &symbol, callback, websocket, call,
+            ),
+            ExchangeName::Bybitspot => {
+                crate::stream_delegation::listen_order_book(&symbol, callback, websocket, call)
+            }
+            _ => crate::stream_delegation::listen_primary_order_book(
+                &symbol,
+                callback,
+                websocket,
+                || Ok(self.base.get_socket(SocketSlot::PublicSecondary)),
+                call,
+            ),
+        }
+    }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&options)))
     }

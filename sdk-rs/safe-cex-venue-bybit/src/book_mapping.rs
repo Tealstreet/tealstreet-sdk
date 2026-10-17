@@ -1,8 +1,4 @@
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Book mapper awaits subscription lifecycle")
-)]
-//! Orderbook frame state; sending and resubscribe timer ownership remain pending.
+//! Shared book snapshot/delta state used by the public socket subscriptions.
 use crate::{
     api::truthy,
     exchange_state::{number, parse_float},
