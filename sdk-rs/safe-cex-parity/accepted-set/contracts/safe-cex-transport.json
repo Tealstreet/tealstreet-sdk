@@ -5099,39 +5099,62 @@
       }
     },
     "category": "decoder",
-    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness.",
-    "call": "$type($value.as_str().expect(\"text witness\")).into_value().unwrap()",
+    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Number bits are asserted before the shared JSON writer produces the source-equivalent report; JSON fixture loading cannot preserve integer-versus-float lexical tokens.",
+    "call": "{fn number_bits(v:&safe_cex_types::retained_json::RetainedJsonInput,out:&mut Vec<String>){use safe_cex_types::retained_json::RetainedJsonInput as I;match v {I::Float(n)=>out.push(n.to_bits().to_string()),I::Lexeme(n)=>out.push(n.parse::<f64>().unwrap().to_bits().to_string()),I::Array(a)=>for v in a {number_bits(v,out)},I::Object(o)=>for (_,v) in o {number_bits(v,out)},_=>{}}}fn report(v:safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{let mut bits=Vec::new();number_bits(&v,&mut bits);let text=safe_cex_num::js_retained_json_stringify(&v).unwrap().unwrap();let value:serde_json::Value=serde_json::from_str(&text).unwrap();serde_json::json!({\"value\":value,\"numberBits\":bits})}report($type($value.as_str().expect(\"text witness\")))}",
     "cases": [
       {
         "input": "{}",
-        "output": {}
+        "output": {
+          "value": {},
+          "numberBits": []
+        }
       },
       {
         "input": "[1,true]",
-        "output": [
-          1.0,
-          true
-        ]
+        "output": {
+          "value": [
+            1.0,
+            true
+          ],
+          "numberBits": [
+            "4607182418800017408"
+          ]
+        }
       },
       {
         "input": "null",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "false",
-        "output": false
+        "output": {
+          "value": false,
+          "numberBits": []
+        }
       },
       {
         "input": "\"x\"",
-        "output": "x"
+        "output": {
+          "value": "x",
+          "numberBits": []
+        }
       },
       {
         "input": "invalid",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       }
     ]
   },
@@ -5168,59 +5191,96 @@
       }
     },
     "category": "decoder",
-    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior.",
-    "call": "$type($value.as_str().expect(\"text witness\")).into_value().unwrap()",
+    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior. Number bits are asserted before the shared JSON writer produces the source-equivalent report; JSON fixture loading cannot preserve integer-versus-float lexical tokens.",
+    "call": "{fn number_bits(v:&safe_cex_types::retained_json::RetainedJsonInput,out:&mut Vec<String>){use safe_cex_types::retained_json::RetainedJsonInput as I;match v {I::Float(n)=>out.push(n.to_bits().to_string()),I::Lexeme(n)=>out.push(n.parse::<f64>().unwrap().to_bits().to_string()),I::Array(a)=>for v in a {number_bits(v,out)},I::Object(o)=>for (_,v) in o {number_bits(v,out)},_=>{}}}fn report(v:safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{let mut bits=Vec::new();number_bits(&v,&mut bits);let text=safe_cex_num::js_retained_json_stringify(&v).unwrap().unwrap();let value:serde_json::Value=serde_json::from_str(&text).unwrap();serde_json::json!({\"value\":value,\"numberBits\":bits})}report($type($value.as_str().expect(\"text witness\")))}",
     "cases": [
       {
         "input": "{}",
-        "output": {}
+        "output": {
+          "value": {},
+          "numberBits": []
+        }
       },
       {
         "input": "[1,true]",
-        "output": [
-          1.0,
-          true
-        ]
+        "output": {
+          "value": [
+            1.0,
+            true
+          ],
+          "numberBits": [
+            "4607182418800017408"
+          ]
+        }
       },
       {
         "input": "null",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "false",
-        "output": false
+        "output": {
+          "value": false,
+          "numberBits": []
+        }
       },
       {
         "input": "\"x\"",
-        "output": "x"
+        "output": {
+          "value": "x",
+          "numberBits": []
+        }
       },
       {
         "input": "invalid",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "9007199254740993",
-        "output": 9007199254740992.0
+        "output": {
+          "value": 9007199254740992.0,
+          "numberBits": [
+            "4845873199050653696"
+          ]
+        }
       },
       {
         "input": "[9007199254740993]",
-        "output": [
-          "9007199254740993"
-        ]
+        "output": {
+          "value": [
+            "9007199254740993"
+          ],
+          "numberBits": []
+        }
       },
       {
         "input": "{\"x\":9007199254740993}",
         "output": {
-          "x": "9007199254740993"
+          "value": {
+            "x": "9007199254740993"
+          },
+          "numberBits": []
         }
       },
       {
         "input": "\"x:9007199254740993!\"",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       }
     ]
   },
@@ -14811,7 +14871,7 @@
     },
     "category": "decoder",
     "evidence": "Shared canonical JSON.parse adapter; production HOW body regressions additionally assert native UTF-16/Float bits before any model view.",
-    "call": "{let actual=$type($value.as_str().unwrap());match actual { Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value.into_value().unwrap()}),Err(_)=>serde_json::json!({\"ok\":false}) }}",
+    "call": "{fn number_bits(v:&safe_cex_types::retained_json::RetainedJsonInput,out:&mut Vec<String>){use safe_cex_types::retained_json::RetainedJsonInput as I;match v {I::Float(n)=>out.push(n.to_bits().to_string()),I::Lexeme(n)=>out.push(n.parse::<f64>().unwrap().to_bits().to_string()),I::Array(a)=>for v in a {number_bits(v,out)},I::Object(o)=>for (_,v) in o {number_bits(v,out)},_=>{}}}fn report(v:safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{let mut bits=Vec::new();number_bits(&v,&mut bits);let text=safe_cex_num::js_retained_json_stringify(&v).unwrap().unwrap();let value:serde_json::Value=serde_json::from_str(&text).unwrap();serde_json::json!({\"value\":value,\"numberBits\":bits})}match $type($value.as_str().unwrap()){Ok(v)=>{let mut r=report(v);r.as_object_mut().unwrap().insert(\"ok\".into(),serde_json::json!(true));r},Err(_)=>serde_json::json!({\"ok\":false})}}",
     "cases": [
       {
         "input": "{\"a\":1}",
@@ -14819,7 +14879,10 @@
           "ok": true,
           "value": {
             "a": 1.0
-          }
+          },
+          "numberBits": [
+            "4607182418800017408"
+          ]
         }
       },
       {
@@ -14829,7 +14892,8 @@
           "value": [
             null,
             true
-          ]
+          ],
+          "numberBits": []
         }
       },
       {
