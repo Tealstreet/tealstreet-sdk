@@ -1660,3 +1660,96 @@ fn auth_pipeline_preserves_overflow_url_params() {
     );
     assert!(sent["params"].get("username").is_none());
 }
+
+#[test]
+fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/final_runtime_oracle.mjs"
+        ))
+        .arg("amendmentCallerId")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let cases = source["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 4, "actual source caller-ID presence floor");
+    for case in cases {
+        let label = case["label"].as_str().unwrap();
+        let f = fixture();
+        f.fetch_markets();
+        f.wire.requests.borrow_mut().clear();
+        let emitted = Rc::new(RefCell::new(Vec::new()));
+        let seen = emitted.clone();
+        f.exchange.base.on_args(
+            "error",
+            Rc::new(move |_, args| {
+                seen.borrow_mut().push(args.to_vec());
+                Ok(())
+            }),
+        );
+        let mut order = order();
+        order.client_order_id = match label {
+            "absent" => ModelField::Absent,
+            "undefined" => ModelField::Undefined,
+            "value" => ModelField::Value("caller-id".into()),
+            "empty" => ModelField::Value(String::new()),
+            _ => panic!("unexpected source case"),
+        };
+        let result = f.run(f.exchange.update_order(UpdateOrderOpts {
+            order,
+            update: serde_json::from_value(json!({"amount":2.345,"price":102.16})).unwrap(),
+        }));
+        let refused = case["result"].get("error").is_some();
+        assert_eq!(
+            result.is_err(),
+            refused,
+            "replacement refusal {label}: {result:?}"
+        );
+        if refused {
+            assert_eq!(
+                result.unwrap_err().message,
+                case["result"]["error"].as_str().unwrap(),
+                "original preflight error {label}"
+            );
+            let emitted = emitted.borrow();
+            assert_eq!(emitted.len(), 1, "one visible refusal {label}");
+            assert!(
+                emitted[0][0]
+                    .as_str()
+                    .unwrap()
+                    .contains(case["result"]["error"].as_str().unwrap()),
+                "visible caller-ID refusal {label}: {emitted:?}"
+            );
+        } else {
+            assert_eq!(result.unwrap(), ["placed"], "accepted replacement {label}");
+            assert!(emitted.borrow().is_empty());
+        }
+        let requests = f.wire.requests.borrow();
+        let money_methods: Vec<_> = requests
+            .iter()
+            .filter(|r| {
+                r["url"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("accounts/default:A/orders")
+            })
+            .map(|r| r["method"].as_str().unwrap())
+            .collect();
+        let expected: Vec<_> = case["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            money_methods, expected,
+            "cancel then guarded replacement {label}"
+        );
+    }
+}
