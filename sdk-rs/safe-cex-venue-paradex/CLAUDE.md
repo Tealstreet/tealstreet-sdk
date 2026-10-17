@@ -153,8 +153,9 @@ separate pending rows.
 Value construction; preserve unknown raw info keys and numeric ingress. The
 shared owned info copy differs from the source alias, and None differs from its
 own undefined timeInForce property. Observe both boundaries in the oracle.
-Required non-string identity fields and unsupported side/prototype enum values
-fail visibly. Size and remaining_size use the shared String/parseFloat coercion,
+Required non-string identity fields and inherited prototype enum values fail
+visibly. Ordinary unmapped side keys retain ModelField::Undefined, using shared
+source property-key coercion before lookup. No enum is widened. Size and remaining_size use the shared String/parseFloat coercion,
 including numeric inputs and NaN from missing or nonnumeric values. created_at
 retains Date conversion: null/false become +0, true becomes 1, missing becomes
 NaN, Numbers use TimeClip, and other JSON data is string-converted then parsed.
@@ -213,3 +214,11 @@ The constructed RequestSigner witness executes eight original source profiles
 plus two finite1e400 supplements, and the public placement regression observes
 zero order POSTs for infinite price. It uses the shared BigNumber facade and the
 actual SDK constructor rather than the standalone injected signing callbacks.
+
+The constructed undefined-side regression retains eight missing/unknown/null/
+boolean/number/object/empty-array profiles in both returned and stored Orders,
+plus BUY/SELL and an array key coercing to BUY. Native own-undefined presence is
+checked directly; later Date errors still propagate. The 152-case pure source
+corpus is unchanged. Its two historical unknown-side refusal labels now have
+positive native ModelField assertions and all-field comparisons, with explicit
+115 mapped / 37 refused / 2 recovered-side floors; prototype refusals remain.
