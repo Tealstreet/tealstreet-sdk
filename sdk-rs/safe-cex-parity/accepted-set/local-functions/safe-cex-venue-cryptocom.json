@@ -1,0 +1,7 @@
+{
+  "safe-cex-venue-cryptocom/src/binding/globals.rs::LOCAL_FUNCTION:open_window": {
+    "category": "non-decoder",
+    "reason": "Inside throttle construction: schedules the existing callback, tracks the open/pending/last state and recursively starts the next timer window. It forwards native callback arguments/results without a raw-data decoder or model projection.",
+    "sourceSha256": "537cae25332bfa4f3f0c23c9b6f939d60cd8a2cfaa821442b261fd6ca2905a7c"
+  }
+}
