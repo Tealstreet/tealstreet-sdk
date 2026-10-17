@@ -11,7 +11,7 @@ const fixtures = [
  ['resolveLighterCancelTargets', [[{id:'unread',symbol:'BTC'}],{BTC:{id:'invalid'}}], 'skip-id'],
  ['resolveLighterCancelTargets', [[{id:'one',symbol:'BTC'}],{BTC:{}}]],
  ['resolveLighterCancelTargets', [[{symbol:'BTC'}],{BTC:{id:'3'}}]],
- ['getLighterAmountDecimals', [{info:{amountDecimals:4}}]],
+ ['getLighterAmountDecimals', [{info:{amountDecimals:4}}], 'early-decimal'],
  ['getLighterAmountDecimals', [{info:{quantityDecimals:'6'}}]],
  ['getLighterAmountDecimals', [{info:{sizeScale:1000}}]],
  ['getLighterAmountDecimals', [{precision:{amount:0.0001}}]],
@@ -27,6 +27,11 @@ const fixtures = [
  ['getLighterOrderMinimums', [{info:{min_base_amount:'-1',min_quote_amount:'Infinity'}}]],
  ['getLighterOrderMinimums', [{info:{minBaseAmount:'1'}}], 'throw-read'],
 ];
+fixtures.push(
+ ['resolveLighterCancelTargets', [[{id:'utf16',symbol:'BTC'}],{BTC:{id:'3'}}], 'utf16-id'],
+ ['getLighterAmountDecimals', [{precision:{amount:{}}}], 'precision-coercion'],
+ ['getLighterOrderMinimums', [{info:{minBaseAmount:null}}], 'symbol-minimum'],
+);
 const rows = fixtures.map(([helper,args,mode='plain']) => {
  const input=structuredClone(args);
  function poison(value) {
@@ -36,6 +41,13 @@ const rows = fixtures.map(([helper,args,mode='plain']) => {
   }
  }
  input.forEach(poison);
+ if(mode==='early-decimal'){
+  Object.defineProperty(input[0],'precision',{get(){throw new Error('unread precision');}});
+  Object.defineProperty(input[0].info,'quantityDecimals',{get(){throw new Error('unread alias');}});
+ }
+ if(mode==='utf16-id')input[0][0].id=String.fromCharCode(0xd800);
+ if(mode==='precision-coercion')input[0].precision.amount={valueOf(){return 7;},toString(){return 'not.012';}};
+ if(mode==='symbol-minimum')input[0].info.minBaseAmount=Symbol.iterator;
  if(mode==='skip-id')Object.defineProperty(input[0][0],'id',{get(){throw new Error('unread order id');}});
  if(mode==='throw-read')Object.defineProperty(input[0].info,helper==='getLighterAmountDecimals'?'amountDecimals':'minBaseAmount',{get(){throw new Error('used getter');}});
  let expected;
@@ -45,10 +57,11 @@ const rows = fixtures.map(([helper,args,mode='plain']) => {
   if(helper==='resolveLighterCancelTargets') {
    const indices=result.map(row=>input[0].findIndex(order=>Object.is(order.id,row.orderId)));
    expected.retained=indices.map(index=>index>=0);
+   expected.idUnits=result.map(row=>typeof row.orderId==='string'?Array.from({length:row.orderId.length},(_,i)=>row.orderId.charCodeAt(i)):null);
    expected.ok=result.map((row,i)=>({...('id' in args[0][indices[i]]?{orderId:args[0][indices[i]].id}:{}),marketId:row.marketId}));
   }
  }catch(error){expected={error:{name:error.name,message:error.message}};}
  return {helper,args,mode,expected};
 });
-assert.equal(rows.length,20);
+assert.equal(rows.length,23);
 process.stdout.write(JSON.stringify(rows));
