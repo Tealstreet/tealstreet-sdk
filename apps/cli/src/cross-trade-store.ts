@@ -8,8 +8,9 @@ import type {
   CrossTradeCopier,
   CrossTradeExecution,
 } from '@tealstreet/safe-cex/src/crossTrade/types';
+import { BRAND } from './brand';
 
-const CONFIG_DIR = process.env.TEALSTREET_CONFIG_DIR || join(homedir(), '.tealstreet');
+const CONFIG_DIR = process.env.TEALSTREET_CONFIG_DIR || join(homedir(), BRAND.configDirName);
 const CROSS_TRADE_FILE = join(CONFIG_DIR, 'cross-trade.json');
 
 export const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;

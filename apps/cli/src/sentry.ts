@@ -6,6 +6,7 @@ import * as Sentry from '@sentry/bun';
 import { RESTRICTIVE_SENTRY_DATA_COLLECTION } from '@tealstreet/service-telemetry/src/dataCollection';
 import { OUTGOING_REQUEST_BREADCRUMB_INTEGRATIONS } from '@tealstreet/service-telemetry/src/integrations';
 import { scrub, scrubString } from '@tealstreet/service-telemetry/src/scrub';
+import { BRAND } from './brand';
 
 const DSN = 'https://dc80fdcd175badb5f3da861273c46f93@o815347.ingest.us.sentry.io/4511874153709568';
 
@@ -47,7 +48,8 @@ export function initCliSentry(): void {
   Sentry.init({
     dsn: DSN,
     debug: false,
-    release: `tealstreet-cli@${process.env.TEALSTREET_CLI_VERSION ?? 'dev'}`,
+    release: `${BRAND.binName}-cli@${process.env.TEALSTREET_CLI_VERSION ?? 'dev'}`,
+    initialScope: { tags: { brand: BRAND.id } },
 
     // This runs on a user's own machine against their own trading accounts.
     // Keep the restrictive v10 baseline explicit: Sentry v11 removed

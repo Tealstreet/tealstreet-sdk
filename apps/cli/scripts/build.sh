@@ -13,8 +13,18 @@ if [ -z "$BUN" ]; then
   fi
 fi
 
-# Get version from package.json or use argument
-VERSION=${1:-$(node -p "require('./package.json').version")}
+# Usage: build.sh [brand] [version]
+#   brand   tealstreet (default) | disrupt — see src/brand.ts. Selects the
+#           binary name, the web app the CLI logs in through, and which
+#           release repo the updater polls. Relay URLs are shared.
+#   version defaults to package.json's version.
+BRAND="${1:-tealstreet}"
+case "$BRAND" in
+  tealstreet) BIN_NAME="tealstreet"; PROD_WEB_URL="https://preview.tealstreet.io" ;;
+  disrupt)    BIN_NAME="disrupt";    PROD_WEB_URL="https://disrupt.trade" ;;
+  *) echo "Unknown brand: $BRAND (expected tealstreet|disrupt)"; exit 1 ;;
+esac
+VERSION=${2:-$(node -p "require('./package.json').version")}
 DIST_DIR="dist"
 
 cleanup_bun_build_artifacts() {
@@ -26,7 +36,7 @@ cleanup_bun_build_artifacts() {
 
 trap cleanup_bun_build_artifacts EXIT
 
-echo "Building Tealstreet CLI v${VERSION}..."
+echo "Building ${BRAND} CLI v${VERSION}..."
 echo "Using bun at: $BUN"
 
 # Clean
@@ -58,11 +68,11 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     windows-x64) TARGET="bun-windows-x64"; EXT=".exe" ;;
   esac
 
-  OUTPUT="${DIST_DIR}/tealstreet-${PLATFORM}"
+  OUTPUT="${DIST_DIR}/${BIN_NAME}-${PLATFORM}"
 
   # Production URLs - bundled into the release
-  # These can be overridden at runtime via env vars for local development
-  PROD_WEB_URL="https://preview.tealstreet.io"
+  # These can be overridden at runtime via env vars for local development.
+  # PROD_WEB_URL is per brand (above); the relay is shared infrastructure.
   PROD_RELAY_URL="https://connect.tealstreet.io"
   PROD_RELAY_WS="wss://connect.tealstreet.io/account"
 
@@ -73,6 +83,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     --target="$TARGET" \
     --outfile="$OUTPUT" \
     --define "process.env.TEALSTREET_CLI_VERSION='${VERSION}'" \
+    --define "process.env.TEALSTREET_BRAND='${BRAND}'" \
     --define "process.env.TEALSTREET_API='${PROD_WEB_URL}'" \
     --define "process.env.TEALSTREET_WEB_URL='${PROD_WEB_URL}'" \
     --define "process.env.TEALSTREET_EXCHANGE_RELAY_URL='${PROD_RELAY_URL}'" \
