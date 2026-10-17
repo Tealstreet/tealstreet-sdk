@@ -66,6 +66,21 @@ the `DisruptTrade/cli` README, and `src/brand.test.ts` greps the disrupt brand
 for `tealstreet.io`. The internal HoW `Origin` header and the listener's origin
 allowlist are not user-visible and are exempt.
 
+**Docs for a whitelabel are GENERATED, never hand-maintained.**
+`scripts/brand-docs.mjs <brand> <out>` rebrands `apps/documentation/cli` (drops
+front matter and `:::` admonitions so GitHub renders it, rewrites binary name,
+config dir, env prefix, release repo, hosts and the routing flags, writes a
+`README.md` index in sidebar order) and REFUSES if any page still names the
+source brand. Pages whose content genuinely differs — install channels — are
+whole-file overrides in `docs-brands/<brand>/`; keep them in step with the
+source page when it changes. The release workflow pushes the result to the
+brand's release repo under `docs/` on every `<brand>-cli-v*` tag, authored as
+the token's owner, and `BRAND.docsUrl` points there. This is also why the REPL
+and `account add` help on a whitelabel show `--proxy` / `--tunnel` /
+`--ws-route`: both spellings are accepted on every brand (`cli-core`'s
+`getCliBrand().flags` picks which one help shows), so the docs never have to
+print a `--tealstreet-*` flag.
+
 **Release:** `BRAND=disrupt yarn release:patch` pushes `disrupt-cli-vX.Y.Z`.
 `cli-release.yml` derives brand, binary name and repo from the tag prefix and
 skips the npm and Homebrew steps for anything but tealstreet; the Windows smoke
