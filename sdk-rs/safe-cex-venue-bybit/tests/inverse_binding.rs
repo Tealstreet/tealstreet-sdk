@@ -521,7 +521,7 @@ fn inverse_public_topics_follow_active_and_market_callbacks_on_the_secondary_slo
         &json!(["tickers.ETHUSD"]),
         "dedicated inverse active callback uses its secondary socket"
     );
-    h.venue().base().emit("markets:changed",json!({"added":[{"symbol":"DOGEUSD","quote":"USD"},{"symbol":"DOGEUSD","quote":"USD"}],"removed":[]})).unwrap();
+    h.venue().base().emit("markets:changed",safe_cex_exchange::js_runtime::value::from_json(&json!({"added":[{"symbol":"DOGEUSD","quote":"USD"},{"symbol":"DOGEUSD","quote":"USD"}],"removed":[]}))).unwrap();
     assert_eq!(
         subscriptions().last().unwrap(),
         &json!(["tickers.DOGEUSD", "tickers.DOGEUSD"]),
@@ -553,6 +553,7 @@ fn inverse_private_socket_delivers_native_contracts_and_fill_prices() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             sink.borrow_mut().push(value.clone());
             Ok(())
         }),

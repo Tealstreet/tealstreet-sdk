@@ -23,8 +23,13 @@ fn thrown(r: &Realm, e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
     error
 }
 /// Keep the argument list distinct from a single argument that is itself an array.
-fn payload(r: &mut Realm, args: &[Value]) -> Result<Vec<serde_json::Value>, Thrown> {
-    args.iter().map(|value| r.to_serde(value)).collect()
+fn payload(
+    r: &mut Realm,
+    args: &[Value],
+) -> Result<Vec<safe_cex_exchange::js_runtime::value::Js>, Thrown> {
+    args.iter()
+        .map(|value| r.capture_typed_value(value, 0))
+        .collect()
 }
 pub(crate) fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, Thrown> {
     Ok(match value {

@@ -313,7 +313,8 @@ fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
             h.venue().base().on(
                 "error",
                 Rc::new(move |_, data| {
-                    seen.borrow_mut().push(data.to_string());
+                    seen.borrow_mut()
+                        .push(String::from_utf16(data.as_str().unwrap().as_ref()).unwrap());
                     Ok(())
                 }),
             );

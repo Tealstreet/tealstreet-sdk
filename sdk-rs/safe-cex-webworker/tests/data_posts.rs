@@ -364,7 +364,7 @@ fn data_post_rejection_reaches_the_original_reply_catch() {
         let mut failure = ExchangeError::new("native post rejected");
         failure.name = "TypeError".into();
         failure.stack = Some("native stack".into());
-        failure.code = Some(json!(42));
+        failure.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(42)));
         let handler = CallMethodHandler::new(
             venue(),
             WorkerDataPost::new(Rc::new(move |payload| {

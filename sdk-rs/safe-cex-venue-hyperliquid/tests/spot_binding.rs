@@ -3,7 +3,7 @@
 #[path = "support/binding_runtime.rs"]
 mod host;
 use host::{Host, Routes};
-use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeSigners};
+use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js, runtime::ExchangeSigners};
 use safe_cex_store::store::DefaultStore;
 use safe_cex_venue_hyperliquid::{
     binding::{HyperliquidDependencies, RuntimeClock},
@@ -524,7 +524,7 @@ fn private_frame(f: &Fixture, wire: &host::Wire, value: Value) {
     );
 }
 
-fn observe_private_fills(f: &Fixture) -> Rc<std::cell::RefCell<Vec<Value>>> {
+fn observe_private_fills(f: &Fixture) -> Rc<std::cell::RefCell<Vec<Js>>> {
     let values = Rc::new(std::cell::RefCell::new(vec![]));
     let saved = values.clone();
     f.exchange.base().on(
@@ -595,10 +595,23 @@ fn private_spot_live_fills_emit_exact_payload_and_refresh_real_balance() {
             "isSnapshot":false,"user":address(),"fills":[fill]
         }}),
     );
-    assert_eq!(
-        &*fills.borrow(),
-        &[json!({"id":"123","side":"buy","symbol":"PURR/USDC","price":1.375,"amount":0.25})]
-    );
+    {
+        let fills = fills.borrow();
+        assert_eq!(fills.len(), 1);
+        let fill = &fills[0];
+        assert_eq!(fill.own_keys().len(), 5);
+        for (key, expected) in [("id", "123"), ("side", "buy"), ("symbol", "PURR/USDC")] {
+            assert!(fill.has_own(key));
+            assert!(fill.get(key).unwrap().strict_equals(&Js::str(expected)));
+        }
+        for (key, expected) in [("price", 1.375_f64), ("amount", 0.25_f64)] {
+            assert!(fill.has_own(key));
+            assert_eq!(
+                fill.get(key).unwrap().as_f64().unwrap().to_bits(),
+                expected.to_bits()
+            );
+        }
+    }
     assert_eq!(f.routes.count("info:spotClearinghouseState"), before + 1);
     assert_eq!(
         (
