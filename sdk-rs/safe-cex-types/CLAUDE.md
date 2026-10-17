@@ -201,3 +201,10 @@ Serde-looking keys and all 65,536 raw/escaped code units before projection.
 checks nine exact compiler-owned retained APIs and their bounded native/default
 outputs. It retires the deleted ObjectVisitor and checks the shared parser's
 actual signature; the full model/local/feature/target inventories remain separate.
+
+The accepted-set ModelField visitor review executes the fixed f64 decoder through
+ordinary JSON, native Serde unit and Default paths; native presence and number
+bits are observed before serialization. PreparedOrderOpts, its private wire and
+optional decoder have independent native field witnesses in the same scoped
+`accepted-model-field-native.test.mjs` target. Generic helper delegation requires
+an exact source review and the inventoried decoder's native observations.

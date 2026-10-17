@@ -1417,6 +1417,15 @@ info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
 
+Number.toString applies radix coercion and range validation before formatting,
+including for NaN, infinities and zero. Radix 10 uses the existing number formatter;
+other radices use the private V8-derived precision/rounding algorithm documented
+in THIRD_PARTY_NOTICES.md. The installed-native `js_number_radix` witness compares
+5,320 Node outputs across all radices 2..36, fixed boundaries and deterministic
+binary64 samples, plus 60 coercion/error cases. Its test-only commit compiles and
+fails on the original binding at `(255).toString(2)`. This does not change the separate
+BigInt formatter or the existing Number method receiver profile.
+
 BigNumber's private value representation distinguishes finite decimals, signed
 infinities and NaN; finite zero retains its sign. Arithmetic and comparisons use
 that representation directly, including zero division and infinity operations.
@@ -1442,6 +1451,17 @@ throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
 installed NativeRuntime bindings, observing getter order, holes, duplicate amount
 reads, inserted identity and reentrant row/length changes. Both regressions compile
 and fail on the prior implementation; their inputs do not replace utility code.
+
+The imported get-key `v` helper rejects non-null primitive right-hand operands
+with TypeError before key conversion can execute user code. Null/undefined
+short-circuit without coercing the key. Property traversal stops at an explicit
+null prototype; existing own/inherited keys and alias precedence remain intact.
+The internal `in` helper is fallible, and lodash throttle checks whether options
+are objects before using it, as the maintained implementation does.
+`tests/js_get_key_in.rs` executes the complete maintained get-key module and
+installed lodash through 126 real native-host scenes, including poisonous keys,
+null prototypes and primitive/default throttle options. String-key diagnostics
+match Node; malformed non-string keys use an engine-neutral TypeError diagnostic.
 
 BigNumber.isFinite reads the private decimal/Infinity/NaN variant directly; it
 never converts through f64. The Node oracle includes finite values at +/-1e1000
