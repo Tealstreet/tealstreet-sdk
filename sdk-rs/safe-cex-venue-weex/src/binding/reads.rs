@@ -95,7 +95,7 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
         },
         copy_properties: |_, value| value.spread_object(),
         define_property: v::define,
-        extract_array: |h, value| v::extract(h, value, &["items", "list", "rows"]),
+        extract_array: |h, value| v::extract(h, value, &[]),
         omit_undefined: v::omit,
         public_only: |h| Ok(h.root("isPublicDataOnly")?.truthy()),
         provider: |h| h.root("externalPublicDataProvider"),
