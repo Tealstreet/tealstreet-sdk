@@ -1493,3 +1493,8 @@ BigNumber.isFinite reads the private decimal/Infinity/NaN variant directly; it
 never converts through f64. The Node oracle includes finite values at +/-1e1000
 and +/-1e-1000, which overflow or underflow a Number conversion, as well as
 NaN, both infinities, signed zero, clones and arithmetic results.
+
+GetIterator rejects missing or non-callable iterator methods with the shared V8
+non-iterable diagnostic, before invoking input coercion hooks. Nullish inputs use
+that diagnostic as well. `tests/js_iterator_errors.rs` compares 30 live Node
+Promise.all/allSettled errors through NativeRuntime and the shared iterator API.

@@ -1353,3 +1353,86 @@ fn portfolio_absent_open_positions_retains_filter_type_error() {
         "Cannot read properties of undefined (reading 'filter')"
     );
 }
+
+fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let observed = errors.clone();
+    f.exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    errors
+}
+
+#[test]
+fn portfolio_orders_defer_projection_until_source_mapping_completes() {
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["orders"][0]["legs"][0]["price"] = json!("13");
+    data["portfolios"][0]["orders"]
+        .as_array_mut()
+        .unwrap()
+        .push(Value::Null);
+    queue_portfolio(&f, data);
+    let rows = f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert!(rows.is_empty());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("Cannot read properties of null (reading 'orderCode')")
+    );
+}
+
+#[test]
+fn portfolio_positions_defer_projection_until_source_mapping_completes() {
+    let f = fixture();
+    let errors = portfolio_error_log(&f);
+    let mut data = source_only_portfolio();
+    data["portfolios"][0]["positions"][0]["openPrice"] = json!("100");
+    data["portfolios"][0]["positions"]
+        .as_array_mut()
+        .unwrap()
+        .push(Value::Null);
+    queue_portfolio(&f, data);
+    let rows = f.run(f.exchange.fetch_positions(Some(vec![]))).unwrap();
+    assert!(rows.is_empty());
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("Cannot read properties of null (reading 'side')")
+    );
+}
+
+#[test]
+fn portfolio_balance_and_filtered_positions_accept_native_intermediate_scalars() {
+    for side in ["BUY", "constructor"] {
+        let f = fixture();
+        let mut data = source_only_portfolio();
+        let position = &mut data["portfolios"][0]["positions"][0];
+        position["symbol"] = json!("EXCLUDED");
+        position["openPrice"] = json!("100");
+        position["quantity"] = json!("2");
+        position["side"] = json!(side);
+        queue_portfolio(&f, data.clone());
+        queue_portfolio(&f, data);
+        f.run(f.exchange.start()).unwrap();
+        assert_eq!(
+            (
+                f.store.balance().total,
+                f.store.balance().used,
+                f.store.balance().free
+            ),
+            (50.25, 10.0, 40.25)
+        );
+        assert_eq!(f.store.positions().len(), 1);
+        assert_eq!(f.store.positions()[0].symbol, "BTCUSD");
+        assert_eq!(f.store.positions()[0].contracts, 0.0);
+        f.exchange.dispose().unwrap();
+    }
+}
