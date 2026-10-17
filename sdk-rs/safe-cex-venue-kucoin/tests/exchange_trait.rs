@@ -749,3 +749,273 @@ fn source_identity_flags_survive_spot_facade_construction() {
     spot.dispose().unwrap();
     futures.dispose().unwrap();
 }
+
+fn private_topic_fixture(spot: bool) -> (Rc<dyn Exchange>, support::Fixture, Rc<support::Socket>) {
+    let (venue, f): (Rc<dyn Exchange>, _) = if spot {
+        let (venue, f) = support::spot();
+        spot_wire(&f.wire);
+        (venue, f)
+    } else {
+        let (venue, f) = support::futures();
+        futures_wire(&f.wire);
+        (venue, f)
+    };
+    drive(&f.runtime, venue.start()).unwrap();
+    f.runtime.pump();
+    for _ in 0..40 {
+        let loaded = f.store.loaded().clone();
+        if loaded.orders && loaded.positions && loaded.balance {
+            break;
+        }
+        f.runtime.now.set(f.runtime.now.get() + 100.0);
+        f.runtime.pump();
+    }
+    let loaded = f.store.loaded().clone();
+    assert!(
+        loaded.orders && loaded.positions && loaded.balance,
+        "startup settled: {loaded:?}"
+    );
+    let topic = if spot {
+        "/spotMarket/tradeOrdersV2"
+    } else {
+        "/contractMarket/tradeOrders"
+    };
+    let socket = f
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|socket| {
+            socket.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text).is_ok_and(|v| {
+                    v["type"] == "subscribe" && v["topic"] == topic && v["privateChannel"] == true
+                })
+            })
+        })
+        .expect("production private subscription")
+        .clone();
+    assert_eq!(f.store.orders().len(), 1);
+    assert!(
+        f.runtime.errors.borrow().is_empty(),
+        "{:?}",
+        f.runtime.errors.borrow()
+    );
+    (venue, f, socket)
+}
+
+fn private_topic_frame(f: &support::Fixture, socket: &support::Socket, value: Value) {
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(value.to_string()),
+        ));
+    f.runtime.pump();
+    assert!(
+        f.runtime.errors.borrow().is_empty(),
+        "{:?}",
+        f.runtime.errors.borrow()
+    );
+}
+
+fn private_order_topic(spot: bool, event: &str) -> Value {
+    if spot {
+        json!({"type":"message","topic":"/spotMarket/tradeOrdersV2","data":{
+            "orderId":"s1","symbol":"BTC-USDT","side":"buy","orderType":"limit",
+            "price":"96","size":"0.5","dealSize":"0.2","remainSize":"0.3",
+            "matchSize":"0.1","matchPrice":"97.5","type":event,"status":"open",
+            "ts":1700000000000000000u64
+        }})
+    } else {
+        json!({"type":"message","topic":"/contractMarket/tradeOrders","data":{
+            "orderId":"o1","symbol":"XBTUSDTM","side":"buy","orderType":"limit",
+            "price":"96","size":10,"filledSize":2,"remainSize":8,
+            "matchSize":1,"matchPrice":"97.5","type":event,"status":"open",
+            "ts":1700000000000000000u64
+        }})
+    }
+}
+
+#[test]
+fn private_topic_orders_update_real_store_for_both_families() {
+    for spot in [false, true] {
+        let (_venue, f, socket) = private_topic_fixture(spot);
+        let mut frame = private_order_topic(spot, "update");
+        frame["data"].as_object_mut().unwrap().remove("matchSize");
+        private_topic_frame(&f, &socket, frame);
+        let orders = f.store.orders().to_vec();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].symbol, if spot { "BTC-USDT" } else { "BTCUSDT" });
+        assert_eq!(orders[0].price.to_number(), 96.0);
+        let expected = if spot {
+            (0.5, 0.2, 0.3)
+        } else {
+            (0.01, 0.002, 0.008)
+        };
+        assert_eq!(
+            (orders[0].amount, orders[0].filled, orders[0].remaining),
+            expected
+        );
+        private_topic_frame(&f, &socket, private_order_topic(spot, "canceled"));
+        assert_eq!(
+            f.store.orders()[0].status,
+            safe_cex_types::OrderStatus::Canceled
+        );
+    }
+}
+
+#[test]
+fn private_topic_fills_emit_incremental_amount_and_update_real_orders() {
+    for spot in [false, true] {
+        let (venue, f, socket) = private_topic_fixture(spot);
+        let fills = Rc::new(std::cell::RefCell::new(vec![]));
+        let saved = fills.clone();
+        venue.base().on(
+            "fill",
+            Rc::new(move |_, value| {
+                saved.borrow_mut().push(value.clone());
+                Ok(())
+            }),
+        );
+        private_topic_frame(&f, &socket, private_order_topic(spot, "match"));
+        let amount = if spot { 0.1 } else { 0.001 };
+        let id = if spot { "s1" } else { "o1" };
+        let symbol = if spot { "BTC-USDT" } else { "BTCUSDT" };
+        assert_eq!(
+            &*fills.borrow(),
+            &[json!({"id":id,"side":"buy","symbol":symbol,"price":97.5,"amount":amount})]
+        );
+        assert_eq!(f.store.orders()[0].filled, if spot { 0.2 } else { 0.002 });
+        let mut terminal = private_order_topic(spot, "filled");
+        terminal["data"]
+            .as_object_mut()
+            .unwrap()
+            .remove("matchSize");
+        private_topic_frame(&f, &socket, terminal);
+        assert_eq!(
+            f.store.orders()[0].status,
+            safe_cex_types::OrderStatus::Closed
+        );
+        assert_eq!(
+            fills.borrow().len(),
+            1,
+            "terminal cumulative frame must not duplicate fill"
+        );
+    }
+}
+
+#[test]
+fn private_topic_futures_account_frames_follow_source_orders_only_snapshot() {
+    for topic in ["/contract/positionAll", "/contractAccount/wallet"] {
+        let (_venue, f, socket) = private_topic_fixture(false);
+        let positions = f.store.positions().to_vec();
+        let balance = f.store.balance().clone();
+        f.wire
+            .script("GET", "/api/v1/orders", ok(json!({"items":[]})));
+        f.wire.take();
+        private_topic_frame(
+            &f,
+            &socket,
+            json!({"type":"message","topic":topic,
+            "data":{"symbol":"XBTUSDTM","currentQty":999,"balance":999}}),
+        );
+        assert_eq!(f.store.orders().len(), 1);
+        f.runtime.now.set(f.runtime.now.get() + 499.0);
+        f.runtime.pump();
+        assert_eq!(f.store.orders().len(), 1, "source500ms debounce");
+        f.runtime.now.set(f.runtime.now.get() + 1.0);
+        f.runtime.pump();
+        assert!(
+            sent(&f.wire.take(), "GET", "/api/v1/orders"),
+            "snapshot starts at500ms"
+        );
+        for _ in 0..40 {
+            if f.store.orders().is_empty() {
+                break;
+            }
+            f.runtime.now.set(f.runtime.now.get() + 100.0);
+            f.runtime.pump();
+        }
+        assert!(
+            f.store.orders().is_empty(),
+            "{topic} refreshes real order Store; requests {:?}; errors {:?}; console {:?}",
+            f.wire.requests.lock().unwrap(),
+            f.runtime.errors.borrow(),
+            f.runtime.console.borrow()
+        );
+        let log = f.wire.take();
+        assert!(sent(&log, "GET", "/api/v1/stopOrders"), "{log:?}");
+        assert!(!sent(&log, "GET", "/api/v1/positions"));
+        assert!(!sent(&log, "GET", "/api/v1/account-overview"));
+        assert_eq!(&*f.store.positions(), positions.as_slice());
+        assert_eq!(&*f.store.balance(), &balance);
+    }
+}
+
+#[test]
+fn private_topic_spot_balance_refreshes_authoritative_real_store() {
+    let (_venue, f, socket) = private_topic_fixture(true);
+    f.wire.script(
+        "GET",
+        "/api/v1/accounts",
+        ok(json!([
+            {"currency":"USDT","available":"260","holds":"40","balance":"300"}
+        ])),
+    );
+    let before = f.store.balance().total;
+    private_topic_frame(
+        &f,
+        &socket,
+        json!({"type":"message","topic":"/account/balance",
+        "data":{"balance":999}}),
+    );
+    assert_eq!(
+        f.store.balance().total,
+        before,
+        "partial wire balance waits for REST"
+    );
+    f.runtime.now.set(f.runtime.now.get() + 249.0);
+    f.runtime.pump();
+    assert_eq!(f.store.balance().total, before);
+    f.runtime.now.set(f.runtime.now.get() + 1.0);
+    f.runtime.pump();
+    assert_eq!(
+        (f.store.balance().free, f.store.balance().total),
+        (260.0, 300.0)
+    );
+}
+
+#[test]
+fn private_topic_spot_positions_preserve_real_synthetic_store_without_fill() {
+    let (venue, f, socket) = private_topic_fixture(true);
+    let positions = f.store.positions().to_vec();
+    let orders = f.store.orders().to_vec();
+    let balance = f.store.balance().clone();
+    assert!(!positions.is_empty());
+    f.wire.take();
+    let fills = Rc::new(std::cell::Cell::new(0));
+    let saved = fills.clone();
+    venue.base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            saved.set(saved.get() + 1);
+            Ok(())
+        }),
+    );
+    private_topic_frame(
+        &f,
+        &socket,
+        json!({"type":"message","topic":"/contract/positionAll",
+        "data":{"symbol":"BTC-USDT","currentQty":999}}),
+    );
+    f.runtime.now.set(f.runtime.now.get() + 500.0);
+    f.runtime.pump();
+    assert_eq!(&*f.store.positions(), positions.as_slice());
+    assert_eq!(&*f.store.orders(), orders.as_slice());
+    assert_eq!(&*f.store.balance(), &balance);
+    assert_eq!(fills.get(), 0);
+    assert!(
+        f.wire.take().is_empty(),
+        "unsupported position topic must not trigger HTTP"
+    );
+}

@@ -78,7 +78,7 @@ fn mutate(order: &Rc<RefCell<Order>>, fields: &Value) {
         order.symbol = value.as_str().unwrap().into();
     }
     if let Some(value) = fields.get("reduceOnly") {
-        order.reduce_only = value.as_bool().unwrap();
+        order.reduce_only = value.as_bool().unwrap().into();
     }
     if let Some(value) = fields.get("type") {
         order.r#type = serde_json::from_value(value.clone()).unwrap();

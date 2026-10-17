@@ -331,8 +331,9 @@ submission when the market maximum is zero. It still schedules order refresh.
 Trigger-price fallback preserves an adjusted zero in the final `price` operand.
 All split payloads are submitted before response IDs are read and projected;
 a numeric ID cannot interrupt the remaining submissions or reconciliation.
-Exact non-string placement results remain a coordinated shared `Vec<String>`
-representation issue; they are never stringified or replaced by fabricated IDs.
+The approved placement-result policy applies JS String to every provided ID
+after all submissions; missing IDs remain visible errors. Reconciliation is
+scheduled before ID conversion, so a result error cannot hide submitted orders.
 `tests/support/placement_parity.rs` drives all three cases through the real
 constructed binding and L2 signer, observing the signed HTTP requests.
 
@@ -467,3 +468,24 @@ signOrder wrapper cases and initialization; the retained outputs match the
 pre-deletion corpus. Twenty-four fake transaction orchestration cases and one
 hundred withdrawal-only precision cases were retired. Existing native placement,
 private frames, hosted signing, lifecycle, packing and signature proofs remain.
+
+Truthy non-boolean Order.reduceOnly is a maintainer-approved per-row refusal.
+The mapper warns with its field and original value, returning no orders for that
+row so valid surrounding REST/private rows continue; it never coerces the flag.
+
+
+Market batches retain the source config update, filter and complete numeric map
+before strict output admission. A refused id/symbol/base/quote/active/info row
+warns with its index, field and original value; valid siblings remain available
+to fetch and Store refresh. Source evaluation and reporting failures propagate.
+
+
+`binding::production_ticker_coercion_matches_constructed_typescript` adds
+64 field-independent cases through the constructed production socket/Store:
+three-row instrumentInfo frames, truthy guards and mark/index fallback. Each case resets both native and
+maintained TS Stores to finite baselines, then checks all eleven native numeric
+fields after malformed and good rows. Null, numeric/prefix/NaN strings, objects,
+overflow, signed zero and false follow the actual TS exchange and DefaultStore.
+The shared ticker census records the witness. The compiling
+`parity/scripts/ticker-native-controls.py apexomni` fault must fail that test and
+pass after exact source restoration.

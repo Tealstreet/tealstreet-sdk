@@ -88,12 +88,12 @@ export async function openStartedAccount(t, options = {}) {
   });
   const events = [];
   const stores = [];
-  id = await native.nativeAccountOpen({ exchange: 'binance', optionsJson: JSON.stringify({
+  id = await native.nativeAccountOpen({ exchange: 'binance', options: {
     key: 'test-key', secret: 'test-secret', publicDataOnly: true, overrideProxyUrl: `http://${origin}`,
     ...options,
     externalPublicData: { type: 'websocket', url: `ws://${origin}/gateway`, exchangeId: 'binance' },
-  }) }, event => events.push(JSON.parse(event)), store => stores.push(JSON.parse(store)));
-  const call = async (method, ...args) => JSON.parse(await native.nativeAccountCallMethod(id, method, JSON.stringify(args)));
+  } }, event => events.push(event), store => stores.push(store));
+  const call = async (method, ...args) => await native.nativeAccountCallMethod(id, method, args);
   await call('start');
   return { call, seen, events, stores, received, close: async () => {
     await native.nativeAccountClose(id);

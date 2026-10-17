@@ -1,3 +1,4 @@
+use crate::native_value::NativeValue;
 use safe_cex_exchange::{
     delivery_timers::WorkerPortTimers,
     message_stats::MessageHandlerStatsPostprocessor,
@@ -10,7 +11,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::Store;
 use safe_cex_types::StoreData;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -61,14 +62,14 @@ pub(super) struct NativeStoreDelivery {
     exchange: Weak<dyn Exchange>,
     store: Weak<dyn Store>,
     preparer: RefCell<StorePayloadPreparer>,
-    post: Rc<dyn Fn(Value)>,
+    post: Rc<dyn Fn(NativeValue)>,
     throttle: Rc<StoreUpdateThrottle<NativeStoreTimers>>,
 }
 impl NativeStoreDelivery {
     pub fn new(
         exchange: &Rc<dyn Exchange>,
         store: &Rc<dyn Store>,
-        post: Rc<dyn Fn(Value)>,
+        post: Rc<dyn Fn(NativeValue)>,
     ) -> Rc<Self> {
         let options = exchange.base().options();
         let multiplier = options
@@ -115,8 +116,7 @@ impl NativeStoreDelivery {
             exchange.base().options().hosted_mode == Some(true),
             Some(full),
         );
-        let value =
-            serde_json::to_value(payload).map_err(|error| ExchangeError::new(error.to_string()))?;
+        let value = NativeValue::encode(&payload)?;
         (self.post)(value);
         Ok(())
     }

@@ -21,7 +21,7 @@ use crate::{
     ws_public_subscriptions::PublicSubscriptionHost,
     ws_public_watchdogs::PublicWatchdogHost,
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_json, to_json, to_typed};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, to_typed};
 use std::{
     cell::{OnceCell, RefCell},
     rc::{Rc, Weak},
@@ -91,15 +91,17 @@ impl PublicSocketContexts for SocketRealm {
         let store = js(to_js(&owner).get("parent").and_then(|p| p.get("store")))?;
         js(store.get("tickers").and_then(|t| to_typed(&t)))
     }
-    fn json_value(&self, value: &AccountValue) -> SigningResult<Option<serde_json::Value>> {
-        let value = to_js(value);
-        if value.is_undefined() {
-            return Ok(None);
-        }
-        js(to_json(&value)).map(Some)
+    fn parse_rest_order_book_levels(&self, value: &AccountValue) -> SigningResult<AccountValue> {
+        js(crate::ws_public::parse_rest_order_book_levels(Some(
+            &to_js(value),
+        )))
+        .map(|value| to_account(&value))
     }
-    fn rebuild_json(&self, value: &serde_json::Value) -> SigningResult<AccountValue> {
-        Ok(to_account(&from_json(value)))
+    fn parse_rest_ticker_items(&self, value: &AccountValue) -> SigningResult<AccountValue> {
+        js(crate::ws_public::parse_rest_ticker_items(Some(&to_js(
+            value,
+        ))))
+        .map(|value| to_account(&value))
     }
 }
 

@@ -223,3 +223,13 @@ binding target checks both trait paths, signed symbol queries and continuation.
 Private execution and position frames assert Store changes and actual fill events.
 Orderly subscribes to executionreport, algoexecutionreportv2 and position only;
 balance comes from the REST fetchPositions path, not a private balance topic.
+
+
+Public ticker, BBO and mark-price frames enforce the approved strict Ticker row
+policy at the native Store boundary. A null/string/undefined numeric field
+refuses that complete row; valid siblings update before deferred reports name
+each refused symbol, field and value. Later source property or Store errors
+retain precedence. This intentionally differs from TS retaining malformed values.
+`exchange_trait` mixed-row regressions run each topic through all six real account
+classes and sockets. The source-only stream oracle retains its raw-value Store;
+it does not substitute for these native typed-boundary witnesses.

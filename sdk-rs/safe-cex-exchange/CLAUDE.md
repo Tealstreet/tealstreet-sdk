@@ -1502,3 +1502,11 @@ GetIterator rejects missing or non-callable iterator methods with the shared V8
 non-iterable diagnostic, before invoking input coercion hooks. Nullish inputs use
 that diagnostic as well. `tests/js_iterator_errors.rs` compares 30 live Node
 Promise.all/allSettled errors through NativeRuntime and the shared iterator API.
+
+
+Number.isSafeInteger accepts only native Number values that are finite, integral
+and at most 2^53-1 in magnitude; it never coerces arguments. The installed-native
+js_number_safe_integer witness compares239 raw-bit inputs and13 argument types
+with Node, including poisonous objects. WOO’s constructed client-ID rule compares
+26 actual maintained-source cases through this shared builtin. Both regressions
+compile and fail when the static binding is absent.

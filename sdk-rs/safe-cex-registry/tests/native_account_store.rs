@@ -15,7 +15,7 @@ fn startup_forces_the_complete_worker_snapshot_and_order_updates_strip_info() {
         let unwatch = native_account_watch(
             &h.account,
             Rc::new(|_, _| {}),
-            Rc::new(move |data| captured.borrow_mut().push(data)),
+            Rc::new(move |data| captured.borrow_mut().push(support::boundary_json(data))),
         );
         h.ok("start", json!([])).await;
         {
@@ -64,7 +64,7 @@ fn gateway_bursts_are_throttled_and_latest_ticker_snapshot_is_delivered() {
             &h.account,
             Rc::new(|_, _| {}),
             Rc::new(move |data| {
-                captured.borrow_mut().push(data);
+                captured.borrow_mut().push(support::boundary_json(data));
             }),
         );
         h.ok("start", json!([])).await;

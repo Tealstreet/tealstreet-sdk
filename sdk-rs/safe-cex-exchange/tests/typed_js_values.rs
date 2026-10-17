@@ -243,3 +243,42 @@ fn declared_dto_profile_keeps_present_undefined_and_refuses_callables() {
         "DTO callable field refuses rather than silently omitting"
     );
 }
+
+#[test]
+fn integer_fields_accept_whole_js_numbers_and_reject_fractional_or_overflow() {
+    assert_eq!(to_typed::<u32>(&Js::Number(1.0)).unwrap(), 1);
+    assert_eq!(to_typed::<u32>(&Js::Number(-0.0)).unwrap(), 0);
+    assert_eq!(
+        to_typed::<u32>(&Js::Number(u32::MAX as f64)).unwrap(),
+        u32::MAX
+    );
+    assert_eq!(
+        to_typed::<i32>(&Js::Number(i32::MIN as f64)).unwrap(),
+        i32::MIN
+    );
+    assert_eq!(
+        to_typed::<i128>(&Js::Number(-2.0f64.powi(127))).unwrap(),
+        i128::MIN
+    );
+    assert_eq!(
+        to_typed::<u128>(&Js::Number(2.0f64.powi(127))).unwrap(),
+        1u128 << 127
+    );
+    for number in [
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -1.0,
+        0.5,
+        4294967296.0,
+    ] {
+        assert!(to_typed::<u32>(&Js::Number(number)).is_err(), "{number}");
+    }
+    assert!(to_typed::<i32>(&Js::Number(2147483648.0)).is_err());
+    assert!(to_typed::<i64>(&Js::Number(2.0f64.powi(63))).is_err());
+    assert!(to_typed::<u64>(&Js::Number(2.0f64.powi(64))).is_err());
+    assert!(to_typed::<u128>(&Js::Number(2.0f64.powi(128))).is_err());
+    assert!(to_typed::<i128>(&Js::Number(2.0f64.powi(127))).is_err());
+    assert_eq!(to_typed::<Option<u32>>(&Js::Number(7.0)).unwrap(), Some(7));
+    assert!(to_typed::<u32>(&Js::str("7")).is_err());
+}

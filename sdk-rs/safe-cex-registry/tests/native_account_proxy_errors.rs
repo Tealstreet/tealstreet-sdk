@@ -28,7 +28,8 @@ async fn proxied_account(reply: Value) -> (Rc<NativeAccount>, Rc<RefCell<Vec<See
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange: "binance".into(),
         options: json!({"key":"test-key","secret":"test-secret","tealstreetProxy":true,
-            "overrideProxyUrl":origin}),
+            "overrideProxyUrl":origin})
+        .into(),
         account_name: None,
         sign: None,
         proxy_token: Some(Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) }))),
@@ -45,7 +46,9 @@ async fn error_events(reply: Value) -> Vec<Value> {
         &account,
         Rc::new(move |name, data| {
             if name == "error" {
-                recorded.borrow_mut().push(data.clone());
+                recorded
+                    .borrow_mut()
+                    .push(support::boundary_json(data.clone()));
             }
         }),
         Rc::new(|_| {}),
@@ -54,7 +57,7 @@ async fn error_events(reply: Value) -> Vec<Value> {
     native_account_call(
         account.clone(),
         "fetchAndSetOrders".into(),
-        vec![Value::Null],
+        vec![Value::Null.into()],
     )
     .await
     .unwrap();

@@ -2681,14 +2681,6 @@ rs = "safe-cex-venue-apexomni/src/lifecycle.rs::ApexServices::place_orders"
 reason = "C3 imported Date/Base/private-socket capability place_orders. This is runtime/dependency glue with no separately exported local TypeScript declaration; mapped placement/cancellation bodies retain venue logic and native call-order assertions."
 
 [[exempt]]
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::RecentOrderCache"
-reason = "C3: ordered storage for the anonymous recentlyPlacedOrders Map field in the mapped inverse/spot methods. A private RefCell vector enforces insert/replace/delete through mapped functions and retains Rc order references; no standalone TypeScript declaration names this field representation. This does not implement an exchange class or constructor."
-
-[[exempt]]
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::RecentOrderCache::snapshot"
-reason = "C3: read-only Map-state observer for the anonymous cache field, exposing ordered keys, placedAt and retained references for native callers and gates. It adds no venue policy or mutation; all cache behavior belongs to the separately mapped functions."
-
-[[exempt]]
 rs = "safe-cex-venue-coinbase/src/json_key_scanner.rs::JsonKeyScanResult"
 reason = "Native tag for the scanner internal JsonKeyScanResult union, which has no extracted source row. The mapped scanner methods execute the grammar and return this tag without introducing a Serde or frame-classification ingress."
 
@@ -7332,3 +7324,52 @@ reason = "C3: direct canonical retained-data ECMAScript JSON.stringify projectio
 [[exempt]]
 rs = "safe-cex-num/src/json_stringify.rs::js_retained_truthy"
 reason = "C3: ECMAScript Boolean conversion on canonical retained data before wire JSON projection; retains undefined/nonfinite/signed-zero truthiness. No standalone TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue"
+reason = "FFI boundary glue (MANIFEST-SPEC section 5): owned structured data carrier between the JS runtime, native account thread and napi. Retains undefined, binary64 bits, UTF-16 strings/keys and BigInt words without JSON. It is not a separately declared TypeScript SDK model; executable values, cycles and depth beyond 512 are explicitly refused by this approved native tree profile. Real napi lossless-value regressions cover the boundary."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::string"
+reason = "FFI data construction: copies a native diagnostic string into the owned UTF-16 carrier. No venue policy or independent TypeScript declaration."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::object"
+reason = "FFI data construction: builds ordered owned field pairs for native results/error envelopes. No TypeScript object policy beyond the native tree representation."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::as_f64"
+reason = "FFI data observation: returns the stored binary64 only for the Number variant; does not coerce JavaScript inputs or normalize nonfinite bits. No independent source SDK method."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::get"
+reason = "FFI data observation: selects a named field from the already captured ordered native object. Does not invoke getters or add source property semantics; runtime capture and typed admission remain separate tested boundaries."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::encode"
+reason = "FFI typed-value bridge: delegates the existing native serde codec into the runtime JS carrier, then captures the owned tree. Native ModelField presence and numeric/UTF-16 observations remain with their canonical codecs and real account-value tests; no JSON encoding path or extra TypeScript API."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::decode"
+reason = "FFI typed-value bridge: materializes the owned runtime value and delegates canonical typed admission. It does not widen required arguments or add a venue coercion policy. Existing native account decoder/lossless tests own this host boundary."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::from_js"
+reason = "FFI capture glue: copies supported runtime values into the shared owned tree with cycle and 512-depth refusal, preserving own undefined and numeric/UTF-16 data. The approved tree profile is documented by the actual napi value/guard regressions; no independent TypeScript helper declaration is claimed."
+
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue::to_js"
+reason = "FFI materialization glue: reconstructs the shared runtime value directly from the owned carrier, including own data properties and BigInt words. It does not JSON-roundtrip payloads or expose a new SDK operation; real napi account-value regressions exercise this seam."
+
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_value.rs::JsData"
+reason = "napi ABI glue: FromNapiValue/ToNapiValue wrapper for the shared owned tree, preserving own undefined, numeric bits, UTF-16 keys/strings and BigInt across the addon boundary. It applies the same explicit cycle/depth/unsupported-value profile; actual Node account-value regressions cover it. No independently declared TypeScript model."
