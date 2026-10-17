@@ -46,6 +46,11 @@ fn native_book_updates_match_source_iteration_for_wire_payloads() {
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(cases.len(), 16, "NATIVE-ITERATION source cardinality");
+    assert_eq!(
+        cases.iter().filter(|row| !row["error"].is_null()).count(),
+        6,
+        "NATIVE-ITERATION non-iterable source failures"
+    );
     for row in cases {
         let (h, parts, deps, _transport) = fx::io::connected_parts(ExchangeName::Kucoin);
         let venue = KucoinExchange::new(parts, deps).unwrap();
@@ -80,16 +85,18 @@ fn native_book_updates_match_source_iteration_for_wire_payloads() {
         assert_eq!(books.borrow().len(), 1, "NATIVE-ITERATION initial snapshot");
         let mut message = row["message"].clone();
         message["topic"] = json!("/contractMarket/level2:XBTUSDTM");
-        let error = socket
+        let reported_before = h.runtime.errors.borrow().len();
+        socket
             .on_message(&safe_cex_transport::socket::SocketFrame::Text(
                 message.to_string(),
             ))
-            .err()
-            .map(|error| error.name);
+            .unwrap();
+        // The actual socket reports listener throws through the runtime hook.
+        let reported = h.runtime.errors.borrow().len() - reported_before;
         assert_eq!(
-            json!(error),
-            row["error"],
-            "NATIVE-ITERATION {}/{} error",
+            reported,
+            usize::from(!row["error"].is_null()),
+            "NATIVE-ITERATION {}/{} reported exception count",
             row["side"],
             row["index"]
         );
