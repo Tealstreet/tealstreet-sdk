@@ -138,6 +138,30 @@ pub(crate) fn bind(realm: &Realm) {
             exchange_helpers::calculate_price_change_percentage(p, prev),
         ))
     });
+    b("isFinitePositiveNumber", 1, |r, a| {
+        // This predicate never coerces a non-number or reads object properties.
+        let Value::Number(number) = arg(a, 0) else {
+            return Ok(Value::Bool(false));
+        };
+        let Some(number) = serde_json::Number::from_f64(number) else {
+            return Ok(Value::Bool(false));
+        };
+        exchange_helpers::is_finite_positive_number(&serde_json::Value::Number(number))
+            .map(Value::Bool)
+            .map_err(|error| r.error_of(error.name, &error.message))
+    });
+    b(
+        "hyperliquidOrderResponseHasDeferredOrderStatus",
+        1,
+        |r, a| {
+            let response = r.to_serde(&arg(a, 0))?;
+            Ok(Value::Bool(
+                crate::order_response::hyperliquid_order_response_has_deferred_order_status(
+                    &response,
+                ),
+            ))
+        },
+    );
     b("parseFiniteNumber", 1, |r, a| {
         let v = r.to_serde(&arg(a, 0))?;
         exchange_helpers::parse_finite_number(&v)
