@@ -695,6 +695,23 @@ impl Exchange for BybitExchange {
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         self.invoke("fetchOHLCV", args!(js(&options)))
     }
+    fn fetch_income_history(
+        &self,
+        options: Option<IncomeHistoryOptions>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        self.invoke("fetchIncomeHistory", args!(opt_js(options)))
+    }
+    fn fetch_income_history_range(
+        &self,
+        start: f64,
+        end: f64,
+        kind: Option<String>,
+    ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        self.invoke(
+            "fetchIncomeHistoryRange",
+            args!(js(&start), js(&end), opt_js(kind)),
+        )
+    }
     fn fetch_closed_pnl(
         &self,
         options: HistoricalTradeOptions,
