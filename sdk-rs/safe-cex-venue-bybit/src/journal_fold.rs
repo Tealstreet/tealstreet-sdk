@@ -1,304 +1,268 @@
-//! Bybit partial-close aggregation into the shared canonical journal record.
-use crate::exchange_state::parse_float;
-use safe_cex_num::{js_number_string, js_string};
-use serde_json::Value;
+//! Bybit partial-close aggregation over native receiver values and resolvers.
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use std::collections::HashMap;
-pub fn num(value: Option<&Value>) -> Result<f64, String> {
-    let number = parse_float(value.filter(|v| !v.is_null()))?;
-    Ok(if number.is_finite() { number } else { 0. })
+
+pub struct BybitPositionAdapterDeps(pub Js);
+pub fn num(value: &Js) -> Result<f64, Thrown> {
+    crate::ledger_mapping::to_number(value)
 }
-fn text(value: Option<&Value>) -> Result<String, String> {
-    js_string(value).map_err(|e| e.message.into())
+fn nullish(value: Js, fallback: Js) -> Js {
+    if value.is_nullish() { fallback } else { value }
 }
-fn order_id(row: &Value) -> Result<String, String> {
-    row.get("orderId")
-        .filter(|v| !v.is_null())
-        .map(|v| text(Some(v)))
-        .unwrap_or_else(|| Ok(String::new()))
+fn string(value: Js) -> Result<Js, Thrown> {
+    Ok(Js::utf16(&value.to_js_string()?))
 }
-fn group_rows(
-    rows: &[Value],
-    mut resolve_leg: Option<&mut dyn FnMut(&str) -> Option<String>>,
-) -> Result<Vec<Vec<Value>>, String> {
-    let mut indices = HashMap::<String, usize>::new();
-    let mut buckets: Vec<Vec<Value>> = vec![];
-    for row in rows {
-        if row.is_null() {
-            return Err(format!(
-                "Cannot read properties of null (reading '{}')",
-                if resolve_leg.is_some() {
-                    "orderId"
-                } else {
-                    "symbol"
-                }
-            ));
+fn key(parts: &[Js]) -> Result<Js, Thrown> {
+    let mut units = vec![];
+    for (index, part) in parts.iter().enumerate() {
+        if index > 0 {
+            units.push(b'|' as u16);
         }
-        let leg = match resolve_leg.as_mut() {
-            Some(resolve) => resolve(&order_id(row)?).unwrap_or_else(|| "both".into()),
-            None => "both".into(),
-        };
-        let key = format!(
-            "{}|{}|{}|{}",
-            text(row.get("symbol"))?,
-            leg,
-            text(row.get("side"))?,
-            js_number_string(num(row.get("avgEntryPrice"))?)
-        );
-        if let Some(index) = indices.get(&key) {
-            buckets[*index].push(row.clone());
-        } else {
-            indices.insert(key, buckets.len());
-            buckets.push(vec![row.clone()]);
+        units.extend_from_slice(&part.to_js_string()?);
+    }
+    Ok(Js::utf16(&units))
+}
+fn optional(owner: &Js, property: &str) -> Result<Js, Thrown> {
+    if owner.is_nullish() {
+        Ok(Js::Undefined)
+    } else {
+        owner.get(property)
+    }
+}
+fn optional_call(
+    deps: &Js,
+    property: &str,
+    args: impl FnOnce() -> Result<Vec<Js>, Thrown>,
+) -> Result<Js, Thrown> {
+    let callback = deps.get(property)?;
+    if callback.is_nullish() {
+        Ok(Js::Undefined)
+    } else {
+        callback.call(deps.clone(), args()?)
+    }
+}
+fn leg(row: &Js, deps: &Js) -> Result<Js, Thrown> {
+    Ok(nullish(
+        optional_call(deps, "resolveLeg", || {
+            Ok(vec![string(nullish(row.get("orderId")?, Js::str("")))?])
+        })?,
+        Js::str("both"),
+    ))
+}
+fn each(values: &Js, mut body: impl FnMut(Js) -> Result<(), Thrown>) -> Result<(), Thrown> {
+    let iterator = values.iterator()?;
+    let next = iterator.get("next")?;
+    loop {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        if step.get("done")?.truthy() {
+            return Ok(());
+        }
+        if let Err(error) = body(step.get("value")?) {
+            let close = iterator.get("return").and_then(|f| {
+                if f.is_nullish() {
+                    Ok(Js::Undefined)
+                } else {
+                    f.call(iterator.clone(), vec![])
+                }
+            });
+            // A thrown body completion outranks an IteratorClose failure.
+            drop(close);
+            return Err(error);
         }
     }
-    Ok(buckets)
 }
-fn sort_run(bucket: &mut [Value]) -> Result<(), String> {
-    let mut failure = None;
-    bucket.sort_by(|a, b| {
-        if failure.is_some() {
+fn sort(rows: &mut [Js], property: &str) -> Result<(), Thrown> {
+    let mut error = None;
+    rows.sort_by(|a, b| {
+        if error.is_some() {
             return std::cmp::Ordering::Equal;
         }
-        match num(a.get("updatedTime")).and_then(|a| num(b.get("updatedTime")).map(|b| (a, b))) {
-            Ok((a, b)) => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
-            Err(error) => {
-                failure = Some(error);
+        let compared = (|| {
+            Ok::<_, Thrown>(
+                (num(&a.get(property)?)? - num(&b.get(property)?)?)
+                    .partial_cmp(&0.)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+        })();
+        match compared {
+            Ok(order) => order,
+            Err(e) => {
+                if error.is_none() {
+                    error = Some(e);
+                }
                 std::cmp::Ordering::Equal
             }
         }
     });
-    if let Some(error) = failure {
-        return Err(error);
+    error.map_or(Ok(()), Err)
+}
+fn close_reason(first: &Js) -> Result<Js, Thrown> {
+    let table = Js::object(vec![
+        ("Trade", Js::str("user")),
+        ("AdlTrade", Js::str("adl")),
+        ("BustTrade", Js::str("liquidation")),
+        ("Settle", Js::str("settlement")),
+    ]);
+    if let Js::Object(object) = &table {
+        *object.proto.borrow_mut() = Some(Js::Builtin(
+            safe_cex_num::PrototypeRealm::current().reference(safe_cex_num::ProtoMember::Prototype),
+        ));
     }
-    Ok(())
+    Ok(nullish(
+        table.get_property(&string(nullish(first.get("execType")?, Js::str("")))?)?,
+        Js::str("user"),
+    ))
 }
-#[cfg(test)]
-fn buckets(
-    rows: &[Value],
-    mut resolve: impl FnMut(&str) -> Option<String>,
-) -> Result<Vec<Vec<Value>>, String> {
-    let mut runs = group_rows(rows, Some(&mut resolve))?;
-    for run in &mut runs {
-        sort_run(run)?;
+pub fn fold_run(run: &Js, deps: &BybitPositionAdapterDeps) -> Result<Js, Thrown> {
+    let deps = &deps.0;
+    let first = run.get("0")?;
+    let symbol = string(nullish(first.get("symbol")?, Js::str("")))?;
+    if !symbol.truthy() {
+        return Ok(Js::Null);
     }
-    Ok(runs)
-}
-
-// Intermediate numeric accumulation, not a second canonical journal model.
-pub(crate) struct FoldTotals {
-    pub closed_size: f64,
-    pub fees: f64,
-    pub net_pnl: f64,
-    pub exit_value: f64,
-    pub closed_notional: f64,
-    pub closed_at: f64,
-}
-pub(crate) fn totals(run: &[Value]) -> Result<FoldTotals, String> {
-    let mut totals = FoldTotals {
-        closed_size: 0.,
-        fees: 0.,
-        net_pnl: 0.,
-        exit_value: 0.,
-        closed_notional: 0.,
-        closed_at: 0.,
+    let side = if first.get("side")?.strict_equals(&Js::str("Sell")) {
+        "long"
+    } else {
+        "short"
     };
-    for row in run {
-        if row.is_null() {
-            return Err("Cannot read properties of null (reading 'closedSize')".into());
-        }
-        let closed = num(row.get("closedSize"))?.abs();
-        totals.closed_size += closed;
-        totals.fees += num(row.get("openFee"))? + num(row.get("closeFee"))?;
-        totals.net_pnl += num(row.get("closedPnl"))?;
-        totals.exit_value += closed * num(row.get("avgExitPrice"))?;
-        totals.closed_notional += num(row.get("cumExitValue"))?;
-        let updated = num(row.get("updatedTime"))?;
+    let position_side = leg(&first, deps)?;
+    let (
+        mut closed_size,
+        mut fees,
+        mut net_pnl,
+        mut exit_value,
+        mut closed_notional,
+        mut closed_at,
+    ) = (0., 0., 0., 0., 0., 0.);
+    each(run, |row| {
+        let closed = num(&row.get("closedSize")?)?.abs();
+        closed_size += closed;
+        fees += num(&row.get("openFee")?)? + num(&row.get("closeFee")?)?;
+        net_pnl += num(&row.get("closedPnl")?)?;
+        exit_value += closed * num(&row.get("avgExitPrice")?)?;
+        closed_notional += num(&row.get("cumExitValue")?)?;
+        let updated = num(&row.get("updatedTime")?)?;
         let time = if updated != 0. {
             updated
         } else {
-            num(row.get("createdTime"))?
+            num(&row.get("createdTime")?)?
         };
-        totals.closed_at = totals.closed_at.max(time);
+        closed_at = safe_cex_num::math_max(closed_at, time);
+        Ok(())
+    })?;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+    if !(closed_size > 0.) {
+        return Ok(Js::Null);
     }
-    Ok(totals)
+    let context = optional_call(deps, "resolveContext", || {
+        Ok(vec![Js::object(vec![
+            ("symbol", symbol.clone()),
+            ("positionSide", position_side.clone()),
+            ("closedAt", Js::Number(closed_at)),
+        ])])
+    })?;
+    let funding = nullish(optional(&context, "funding")?, Js::Number(0.));
+    let funding_attributed = nullish(optional(&context, "fundingAttributed")?, Js::Bool(false));
+    let record_key = key(&[
+        string(deps.get("account")?)?,
+        symbol.clone(),
+        string(position_side.clone())?,
+        string(nullish(first.get("orderId")?, Js::Number(closed_at)))?,
+        Js::Number(closed_at),
+    ])?;
+    let account = deps.get("account")?;
+    let currency = deps
+        .get("resolveSettleCurrency")?
+        .call(deps.clone(), vec![symbol.clone()])?;
+    let opened = optional(&context, "openedAt")?;
+    let leverage = num(&first.get("leverage")?)?;
+    let order_id = first.get("orderId")?;
+    let venue_id = if order_id.truthy() {
+        string(first.get("orderId")?)?
+    } else {
+        Js::Undefined
+    };
+    let entry_price = num(&first.get("avgEntryPrice")?)?;
+    let realized_pnl = net_pnl + fees - funding.to_number()?;
+    let reason = close_reason(&first)?;
+    let joined = deps.get("resolveLeg")?.truthy();
+    let number_or_undefined = |value: f64| {
+        if value != 0. && !value.is_nan() {
+            Js::Number(value)
+        } else {
+            Js::Undefined
+        }
+    };
+    Ok(Js::object(vec![
+        ("key", record_key),
+        ("account", account),
+        ("symbol", symbol),
+        ("settleCurrency", currency),
+        ("side", Js::str(side)),
+        ("positionSide", position_side),
+        ("state", Js::str("closed")),
+        ("openedAt", opened),
+        ("closedAt", number_or_undefined(closed_at)),
+        ("closedSize", Js::Number(closed_size)),
+        ("maxSize", Js::Undefined),
+        ("leverage", number_or_undefined(leverage)),
+        ("closedNotional", number_or_undefined(closed_notional)),
+        ("venueId", venue_id),
+        ("avgEntryPrice", Js::Number(entry_price)),
+        ("avgExitPrice", Js::Number(exit_value / closed_size)),
+        ("realizedPnl", Js::Number(realized_pnl)),
+        ("fees", Js::Number(fees)),
+        ("funding", funding),
+        ("fundingAttributed", funding_attributed),
+        ("closeReason", reason),
+        ("provenance", Js::str("reported")),
+        (
+            "sourceAxis",
+            Js::str(if joined {
+                "closed-positions+orders"
+            } else {
+                "closed-positions"
+            }),
+        ),
+        ("closeCount", run.get("length")?),
+    ]))
+}
+pub fn aggregate_bybit_closed_pnl(
+    rows: &Js,
+    deps: &BybitPositionAdapterDeps,
+) -> Result<Js, Thrown> {
+    let mut indices = HashMap::<Vec<u16>, usize>::new();
+    let mut buckets: Vec<Vec<Js>> = vec![];
+    each(rows, |row| {
+        let position_side = leg(&row, &deps.0)?;
+        let group = key(&[
+            string(row.get("symbol")?)?,
+            string(position_side)?,
+            string(row.get("side")?)?,
+            Js::Number(num(&row.get("avgEntryPrice")?)?),
+        ])?;
+        let group = group.to_js_string()?.to_vec();
+        if let Some(index) = indices.get(&group) {
+            buckets[*index].push(row);
+        } else {
+            indices.insert(group, buckets.len());
+            buckets.push(vec![row]);
+        }
+        Ok(())
+    })?;
+    let mut records = vec![];
+    for mut bucket in buckets {
+        sort(&mut bucket, "updatedTime")?;
+        let record = fold_run(&Js::array(bucket), deps)?;
+        if record.truthy() {
+            records.push(record);
+        }
+    }
+    sort(&mut records, "closedAt")?;
+    Ok(Js::array(records))
 }
 #[cfg(test)]
 mod tests;
-
-use safe_cex_types::PositionSide;
-use safe_cex_types::position_record::{
-    PositionCloseReason, PositionProvenance, PositionRecord, PositionRecordLeg,
-    PositionRecordState, PositionSourceAxis,
-};
-
-pub struct BybitPositionContext {
-    pub opened_at: Option<f64>,
-    pub funding: f64,
-    pub funding_attributed: bool,
-}
-pub struct BybitPositionAdapterDeps<'a> {
-    pub account: &'a str,
-    pub resolve_settle_currency: &'a mut dyn FnMut(&str) -> String,
-    pub resolve_leg: Option<&'a mut dyn FnMut(&str) -> Option<PositionRecordLeg>>,
-    pub resolve_context:
-        Option<&'a mut dyn FnMut(&str, PositionRecordLeg, f64) -> Option<BybitPositionContext>>,
-}
-fn leg_text(leg: PositionRecordLeg) -> &'static str {
-    match leg {
-        PositionRecordLeg::Long => "long",
-        PositionRecordLeg::Short => "short",
-        PositionRecordLeg::Both => "both",
-    }
-}
-fn resolve_leg(
-    row: &Value,
-    deps: &mut BybitPositionAdapterDeps<'_>,
-) -> Result<PositionRecordLeg, String> {
-    // Optional-call short circuits before evaluating String(orderId).
-    match deps.resolve_leg.as_mut() {
-        Some(resolve) => Ok(resolve(&order_id(row)?).unwrap_or(PositionRecordLeg::Both)),
-        None => Ok(PositionRecordLeg::Both),
-    }
-}
-
-pub fn fold_run(
-    run: &[Value],
-    deps: &mut BybitPositionAdapterDeps<'_>,
-) -> Result<Option<PositionRecord>, String> {
-    let first = run
-        .first()
-        .ok_or("Cannot read properties of undefined (reading 'symbol')")?;
-    if first.is_null() {
-        return Err("Cannot read properties of null (reading 'symbol')".into());
-    }
-    let symbol = text(
-        first
-            .get("symbol")
-            .filter(|v| !v.is_null())
-            .or(Some(&Value::String(String::new()))),
-    )?;
-    if symbol.is_empty() {
-        return Ok(None);
-    }
-    let side = if first.get("side").and_then(Value::as_str) == Some("Sell") {
-        PositionSide::Long
-    } else {
-        PositionSide::Short
-    };
-    let leg = resolve_leg(first, deps)?;
-    let total = totals(run)?;
-    if total.closed_size <= 0. || total.closed_size.is_nan() {
-        return Ok(None);
-    }
-    let context = deps
-        .resolve_context
-        .as_mut()
-        .and_then(|resolve| resolve(&symbol, leg, total.closed_at));
-    let funding = context.as_ref().map_or(0., |c| c.funding);
-    let key_id = first
-        .get("orderId")
-        .filter(|v| !v.is_null())
-        .map(|v| text(Some(v)))
-        .unwrap_or_else(|| Ok(js_number_string(total.closed_at)))?;
-    let key = format!(
-        "{}|{symbol}|{}|{key_id}|{}",
-        deps.account,
-        leg_text(leg),
-        js_number_string(total.closed_at)
-    );
-    let settle_currency = (deps.resolve_settle_currency)(&symbol);
-    let leverage = num(first.get("leverage"))?;
-    let venue_id = if safe_cex_num::js_truthy(first.get("orderId")) {
-        Some(text(first.get("orderId"))?)
-    } else {
-        None
-    };
-    let avg_entry_price = num(first.get("avgEntryPrice"))?;
-    let reason = text(
-        first
-            .get("execType")
-            .filter(|v| !v.is_null())
-            .or(Some(&Value::String(String::new()))),
-    )?;
-    let close_reason = match safe_cex_num::js_table_lookup(
-        &[
-            ("Trade", PositionCloseReason::User),
-            ("AdlTrade", PositionCloseReason::Adl),
-            ("BustTrade", PositionCloseReason::Liquidation),
-            ("Settle", PositionCloseReason::Settlement),
-        ],
-        &reason,
-    ) {
-        safe_cex_num::TableHit::Mapped(reason) => *reason,
-        safe_cex_num::TableHit::Missing => PositionCloseReason::User,
-        safe_cex_num::TableHit::Inherited(_) => {
-            return Err(
-                "RepresentationError: inherited closeReason is outside PositionCloseReason".into(),
-            );
-        }
-    };
-    Ok(Some(PositionRecord {
-        key,
-        account: deps.account.into(),
-        symbol,
-        settle_currency,
-        side,
-        position_side: leg,
-        state: PositionRecordState::Closed,
-        opened_at: context.as_ref().and_then(|c| c.opened_at),
-        closed_at: (total.closed_at != 0.).then_some(total.closed_at),
-        closed_size: total.closed_size,
-        max_size: None,
-        leverage: (leverage != 0.).then_some(leverage),
-        closed_notional: (total.closed_notional != 0.).then_some(total.closed_notional),
-        venue_id,
-        avg_entry_price,
-        avg_exit_price: Some(total.exit_value / total.closed_size),
-        realized_pnl: total.net_pnl + total.fees - funding,
-        fees: total.fees,
-        funding,
-        funding_attributed: context.as_ref().is_some_and(|c| c.funding_attributed),
-        close_reason: Some(close_reason),
-        provenance: PositionProvenance::Reported,
-        source_axis: if deps.resolve_leg.is_some() {
-            PositionSourceAxis::ClosedPositionsOrders
-        } else {
-            PositionSourceAxis::ClosedPositions
-        },
-        close_count: run.len() as f64,
-    }))
-}
-
-pub fn aggregate_bybit_closed_pnl(
-    rows: &[Value],
-    deps: &mut BybitPositionAdapterDeps<'_>,
-) -> Result<Vec<PositionRecord>, String> {
-    // This preserves the documented identical-entry reopen collision in the source.
-    let runs = match deps.resolve_leg.as_mut() {
-        Some(resolve) => group_rows(
-            rows,
-            Some(&mut |id| resolve(id).map(|leg| leg_text(leg).into())),
-        )?,
-        None => group_rows(rows, None)?,
-    };
-    let mut records = Vec::new();
-    let mut refusal = None;
-    for mut run in runs {
-        sort_run(&mut run)?;
-        match fold_run(&run, deps) {
-            Ok(Some(record)) => records.push(record),
-            Ok(None) => {}
-            Err(error) if error.starts_with("RepresentationError:") => refusal = Some(error),
-            Err(error) => return Err(error),
-        }
-    }
-    if let Some(error) = refusal {
-        return Err(error);
-    }
-    records.sort_by(|a, b| {
-        (a.closed_at.unwrap_or(0.) - b.closed_at.unwrap_or(0.))
-            .partial_cmp(&0.)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    Ok(records)
-}

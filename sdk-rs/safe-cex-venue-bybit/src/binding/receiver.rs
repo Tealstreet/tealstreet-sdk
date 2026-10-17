@@ -76,6 +76,26 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     let this = rt.this.clone();
     let typed = venue(rt)?;
 
+    if matches!(
+        typed.base.name,
+        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+    ) {
+        method(&this, rt, "fetchClosedPositionRows", |r, a| {
+            Ok(crate::ledger_history::fetch_closed_position_rows(
+                h(r),
+                r.this.clone(),
+                arg(&a, 0),
+            ))
+        });
+        method(&this, rt, "fetchHistoricalPositions", |r, a| {
+            Ok(crate::ledger_history::fetch_historical_positions(
+                h(r),
+                r.this.clone(),
+                arg(&a, 0),
+            ))
+        });
+    }
+
     // Constructor fields: the signed clients and the three sockets.
     let runtime = rt.exchange_runtime();
     this.define(

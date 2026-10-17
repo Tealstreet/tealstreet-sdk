@@ -1372,9 +1372,32 @@ empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compa
 24 maintained Store cases through the production facade, including numeric keys,
 primitive elements, nullish elements and throwing getters/conversions.
 
+Standard Error instances inherit stock names and define supplied messages with
+writable/configurable, non-enumerable descriptors. Omitted or undefined constructor
+messages stay inherited; string coercion preserves UTF-16 and propagates failures.
+The existing native string diagnostic factory shares this creation body; custom
+Axios diagnostic name/message fields retain their distinct enumerable profile.
+Stock prototypes contain no runtime captures or constructor backreferences.
+`tests/js_error_enumerability.rs` compares156 Node cases through actual installed
+constructors, Object.keys/assign, JSON and native spread, including assignments,
+message deletion, coercion failures and lone surrogates. It inspects real native
+Prop descriptors directly because Object.getOwnPropertyDescriptor is not bound;
+constructor.prototype/stack reflection is outside this instance-property repair.
+An actual installed AxiosError supplies the separate custom descriptor witness.
+
 Shared console.info/debug route to the native runtime console sink and return
 undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
 output in a child process and compares its payloads with Node, including exact
 info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
+
+Orderbook utility bindings preserve raw price/amount comparisons and the source
+binary-search read order. They read only visited prices, defer amount reads until
+lookup completes, and retain the inserted update object. Totals capture both sides
+before looping, re-read live lengths/rows and use JS addition; missing/null sides
+throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
+147 update and10 total cases against the maintained TS utility modules through
+installed NativeRuntime bindings, observing getter order, holes, duplicate amount
+reads, inserted identity and reentrant row/length changes. Both regressions compile
+and fail on the prior implementation; their inputs do not replace utility code.
