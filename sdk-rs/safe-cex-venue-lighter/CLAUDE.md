@@ -417,3 +417,7 @@ calling the live owner helper; source oracles cover identity, numeric bits and U
 Nonce retry classification reads the original error's code and message directly.
 Both String conversions precede the final OR, so matching codes still observe
 message coercion failures. Unread surrogate fields and cycles stay untouched.
+
+The TransactionClient approval binding retains raw l1Signature metadata outside
+its typed signing parameters. Falsy values remain visible to callers and are
+omitted by the actual SDK request serializer, matching the maintained source.
