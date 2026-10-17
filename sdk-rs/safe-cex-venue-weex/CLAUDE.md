@@ -38,6 +38,13 @@ Error reporting and async ownership choices remain priced at
 [weex-async-observation-choice](../parity/MANIFEST-SPEC.md#weex-async-observation-choice);
 normalizer record boundaries keep their existing declarations.
 
+`fetchOrders` retains only fulfilled normal/algo legs and silently discards each
+rejection, matching Promise.allSettled in the maintained source. Its constructed
+regression checks successful rows and the actual error emitter after one HTTP
+leg rejects. The removed reporting capability and old native-only expectation
+are no longer part of the account-read runtime; source order/dedup mutation
+coverage replaces the former reporting-divergence control.
+
 
 The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly and
 async observation choices cite their explicit MANIFEST-SPEC anchors; ready
