@@ -156,7 +156,7 @@ impl ReadTransport for Transport {
         let host = self.host.clone();
         let mut call = json!({"op":"http","method":r.method.to_uppercase(),"url":r.url});
         if let Some(body) = &r.body {
-            call["body"] = body.untransformed().unwrap().clone()
+            call["body"] = body.untransformed().unwrap().clone().into_value().unwrap()
         } else if let Some(p) = &r.params {
             call["body"] = p.clone()
         }
@@ -310,8 +310,11 @@ impl ApiHost for ApiImport {
         }
         Ok(())
     }
-    fn serialize(&self, v: &Value) -> Result<String, ExchangeError> {
-        Ok(qs(v))
+    fn serialize(
+        &self,
+        v: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<String, ExchangeError> {
+        Ok(qs(&v.clone().into_value().unwrap()))
     }
     fn hmac_sha256_hex(&self, key: &str, message: &str) -> Result<String, ExchangeError> {
         self.host
@@ -876,14 +879,18 @@ fn api_factory_matches_actual_typescript() {
             method: c["method"].as_str().unwrap().into(),
             url: c["url"].as_str().unwrap().into(),
             params: Some(c["params"].clone()),
-            body: c.get("data").cloned().map(RestBody::Untransformed),
+            body: c.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             ..Default::default()
         };
         let original = request.clone();
         let prepared = api.prepare(request).unwrap();
         let mut value = json!({"method":prepared.method,"url":prepared.url,"headers":prepared.headers,"params":prepared.params});
         if let Some(body) = &prepared.body {
-            value["data"] = body.untransformed().unwrap().clone();
+            value["data"] = body.untransformed().unwrap().clone().into_value().unwrap();
         }
         assert_eq!(
             observe(&value),
@@ -900,7 +907,14 @@ fn api_factory_matches_actual_typescript() {
                 prepared
                     .params
                     .as_ref()
-                    .or_else(|| prepared.body.as_ref().map(|b| b.untransformed().unwrap()))
+                    .cloned()
+                    .or_else(|| prepared.body.as_ref().map(|b| b
+                        .untransformed()
+                        .unwrap()
+                        .clone()
+                        .into_value()
+                        .unwrap()))
+                    .as_ref()
                     .unwrap()
             )
             .unwrap(),
@@ -1042,7 +1056,10 @@ fn api_nan_field_boundary_is_visible() {
         url: "/api".into(),
         params: Some(c["input"]["config"]["params"].clone()),
         body: Some(RestBody::Untransformed(
-            c["input"]["config"]["data"].clone(),
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                c["input"]["config"]["data"].clone(),
+            )
+            .unwrap(),
         )),
         ..Default::default()
     };
@@ -1088,7 +1105,10 @@ fn api_prototype_key_refusal_is_visible() {
             method: "post".into(),
             url: "/api".into(),
             body: Some(RestBody::Untransformed(
-                c["input"]["config"]["data"].clone(),
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                    c["input"]["config"]["data"].clone(),
+                )
+                .unwrap(),
             )),
             ..Default::default()
         })

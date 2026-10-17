@@ -95,7 +95,7 @@ impl RestAdapter for Wire {
         Box::pin(async move {
             let body = request.body.as_ref().map(|body| match body {
                 // Observe the inner adapter's data BEFORE network byte projection.
-                RestBody::Transformed(data) => data.value().clone(),
+                RestBody::Transformed(data) => data.value().clone().into_value().unwrap(),
                 RestBody::Encoded(bytes) => json!(String::from_utf8(bytes.clone()).unwrap()),
                 RestBody::Untransformed(_) => panic!("inner adapter received untransformed data"),
             });
@@ -229,7 +229,14 @@ fn run_with_expected_schedules(case: &Value, expected: Option<usize>) -> Value {
         body: case["dataPresent"]
             .as_bool()
             .unwrap_or(!case["data"].is_null())
-            .then(|| RestBody::Untransformed(case["data"].clone())),
+            .then(|| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        case["data"].clone(),
+                    )
+                    .unwrap(),
+                )
+            }),
         headers: case["extra"]["request"]["headers"]
             .as_object()
             .map(|m| {

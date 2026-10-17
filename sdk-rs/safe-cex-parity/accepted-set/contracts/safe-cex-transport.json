@@ -1611,7 +1611,7 @@
     "sample": {
       "url": "/native-one",
       "params": {
-        "limit": -0.0
+        "limit": 0
       },
       "headers": {
         "X-Native": "one"
@@ -1681,7 +1681,7 @@
       "method": "PATCH",
       "url": "/native-one",
       "params": {
-        "limit": -0.0
+        "limit": 0
       },
       "headers": {
         "X-Native": "one"
@@ -5087,7 +5087,7 @@
         ],
         "output": {
           "resolved_path": {
-            "path": "serde_json::value::Value",
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
             "args": null
           }
         },
@@ -5100,7 +5100,7 @@
     },
     "category": "decoder",
     "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness.",
-    "call": "$type($value.as_str().expect(\"text witness\"))",
+    "call": "$type($value.as_str().expect(\"text witness\")).into_value().unwrap()",
     "cases": [
       {
         "input": "{}",
@@ -5156,7 +5156,7 @@
         ],
         "output": {
           "resolved_path": {
-            "path": "serde_json::value::Value",
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
             "args": null
           }
         },
@@ -5169,7 +5169,7 @@
     },
     "category": "decoder",
     "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior.",
-    "call": "$type($value.as_str().expect(\"text witness\"))",
+    "call": "$type($value.as_str().expect(\"text witness\")).into_value().unwrap()",
     "cases": [
       {
         "input": "{}",
@@ -5321,7 +5321,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "serde_json::value::Value",
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
                         "args": null
                       }
                     }
@@ -5349,7 +5349,7 @@
     },
     "category": "decoder",
     "evidence": "HOW form fallback requires nonempty key/value pairs and no extra equals; duplicate keys retain the last value, otherwise preserve the complete text.",
-    "call": "match $type($value.as_str().expect(\"text witness\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
+    "call": "match $type($value.as_str().expect(\"text witness\")).map(|value|value.into_value().unwrap()) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
     "cases": [
       {
         "input": "a=1&b=two",
@@ -5398,172 +5398,6 @@
         "input": "",
         "output": {
           "ok": ""
-        }
-      }
-    ]
-  },
-  "safe_cex_transport::how::parse_data": {
-    "api": {
-      "kind": "function",
-      "name": "parse_data",
-      "signature": {
-        "inputs": [
-          [
-            "bytes",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "slice": {
-                    "primitive": "u8"
-                  }
-                }
-              }
-            }
-          ],
-          [
-            "raw",
-            {
-              "primitive": "bool"
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "core::result::Result",
-            "args": {
-              "angle_bracketed": {
-                "args": [
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "serde_json::value::Value",
-                        "args": null
-                      }
-                    }
-                  },
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_transport::provider::TransportError",
-                        "args": null
-                      }
-                    }
-                  }
-                ],
-                "constraints": []
-              }
-            }
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "category": "decoder",
-    "evidence": "HOW byte parser distinguishes raw big-integer JSON, ordinary JSON/form/text fallback and UTF-8 rejection. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior.",
-    "call": "match $type(&$value[\"bytes\"].as_array().expect(\"bytes\").iter().map(|v| v.as_u64().expect(\"byte\") as u8).collect::<Vec<_>>(), $value[\"raw\"].as_bool().expect(\"raw flag\")) { Ok(value) => serde_json::json!({\"ok\": value}), Err(_) => serde_json::json!({\"error\": true}) }",
-    "cases": [
-      {
-        "input": {
-          "bytes": [
-            123,
-            125
-          ],
-          "raw": false
-        },
-        "output": {
-          "ok": {}
-        }
-      },
-      {
-        "input": {
-          "bytes": [
-            97,
-            61,
-            49
-          ],
-          "raw": false
-        },
-        "output": {
-          "ok": {
-            "a": "1"
-          }
-        }
-      },
-      {
-        "input": {
-          "bytes": [
-            105,
-            110,
-            118,
-            97,
-            108,
-            105,
-            100
-          ],
-          "raw": false
-        },
-        "output": {
-          "ok": "invalid"
-        }
-      },
-      {
-        "input": {
-          "bytes": [
-            105,
-            110,
-            118,
-            97,
-            108,
-            105,
-            100
-          ],
-          "raw": true
-        },
-        "output": {
-          "ok": null
-        }
-      },
-      {
-        "input": {
-          "bytes": [
-            57,
-            48,
-            48,
-            55,
-            49,
-            57,
-            57,
-            50,
-            53,
-            52,
-            55,
-            52,
-            48,
-            57,
-            57,
-            51
-          ],
-          "raw": true
-        },
-        "output": {
-          "ok": 9007199254740992
-        }
-      },
-      {
-        "input": {
-          "bytes": [
-            255
-          ],
-          "raw": false
-        },
-        "output": {
-          "error": true
         }
       }
     ]
@@ -5618,11 +5452,11 @@
       },
       {
         "input": "%FF",
-        "output": "�"
+        "output": "\ufffd"
       },
       {
         "input": "%E2%82%AC",
-        "output": "€"
+        "output": "\u20ac"
       }
     ]
   },
@@ -6894,7 +6728,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -6957,7 +6791,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -6972,7 +6806,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -7047,7 +6881,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -9693,7 +9527,7 @@
         "method": "PATCH",
         "url": "/native-one",
         "params": {
-          "limit": -0.0
+          "limit": 0
         },
         "headers": {
           "X-Native": "one"
@@ -9779,7 +9613,7 @@
       "config": {
         "url": "/native-one",
         "params": {
-          "limit": -0.0
+          "limit": 0
         },
         "headers": {
           "X-Native": "one"
@@ -9866,7 +9700,7 @@
       "method": "PATCH",
       "url": "/native-one",
       "params": {
-        "limit": -0.0
+        "limit": 0
       },
       "headers": {
         "X-Native": "one"
@@ -9942,7 +9776,7 @@
     "sample": {
       "url": "/native-one",
       "params": {
-        "limit": -0.0
+        "limit": 0
       },
       "headers": {
         "X-Native": "one"
@@ -10016,7 +9850,7 @@
         "method": "PATCH",
         "url": "/native-one",
         "params": {
-          "limit": -0.0
+          "limit": 0
         },
         "headers": {
           "X-Native": "one"
@@ -10102,7 +9936,7 @@
       "config": {
         "url": "/native-one",
         "params": {
-          "limit": -0.0
+          "limit": 0
         },
         "headers": {
           "X-Native": "one"
@@ -10542,10 +10376,10 @@
       {
         "input": {
           "items[]": {
-            "length": 3,
-            "2": false,
+            "0": "x y",
             "1": null,
-            "0": "x y"
+            "2": false,
+            "length": 3
           },
           "skip": null
         },
@@ -10557,8 +10391,8 @@
       {
         "input": {
           "items[]": {
-            "length": 1.5,
-            "0": "never"
+            "0": "never",
+            "length": 1.5
           }
         },
         "output": {
@@ -11466,9 +11300,9 @@
           "metadata": {
             "requiresCors": true,
             "privateProxyRegions": {
-              "JA": [],
+              "1": [],
               "2": [],
-              "1": []
+              "JA": []
             }
           }
         },
@@ -11484,117 +11318,6 @@
     "shape": "observed",
     "evidence": "Complete four-API production owner. Real Untransformed/Encoded/remote-adapter Transformed inputs expose borrowed identity, signing refusal, phase retention, content-type matching, raw bytes and actual JSON/form transforms. Native Value variants and numeric bits are inspected before output projection; the body owner is never serialized to infer behavior.",
     "entrypoints": [
-      {
-        "api": {
-          "kind": "inherent",
-          "name": "untransformed",
-          "signature": {
-            "inputs": [
-              [
-                "self",
-                {
-                  "borrowed_ref": {
-                    "lifetime": null,
-                    "is_mutable": false,
-                    "type": {
-                      "generic": "Self"
-                    }
-                  }
-                }
-              ]
-            ],
-            "output": {
-              "resolved_path": {
-                "path": "core::result::Result",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      },
-                      {
-                        "type": {
-                          "resolved_path": {
-                            "path": "safe_cex_transport::provider::TransportError",
-                            "args": null
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
-                  }
-                }
-              }
-            },
-            "is_c_variadic": false
-          }
-        },
-        "input": "observed",
-        "reason": "Inspect the actual borrowed payload and its address, including transformed adapter data; encoded bytes refuse signing rather than reconstructing JSON.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}}let input=arrange($value);match $type::untransformed(&input){Ok(v)=>{let same=match &input{crate::RestBody::Untransformed(original)=>std::ptr::eq(v,original),crate::RestBody::Transformed(d)=>std::ptr::eq(v,d.value()),_=>false};serde_json::json!({\"ok\":true,\"borrowed\":same,\"value\":observe(v)})},Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} }",
-        "cases": [
-          {
-            "input": {
-              "phase": "untransformed",
-              "raw": "{\"zero\":-0}"
-            },
-            "output": {
-              "ok": true,
-              "borrowed": true,
-              "value": {
-                "kind": "object",
-                "entries": [
-                  [
-                    "zero",
-                    {
-                      "kind": "number",
-                      "bits": "9223372036854775808"
-                    }
-                  ]
-                ]
-              }
-            }
-          },
-          {
-            "input": {
-              "phase": "transformed",
-              "raw": "\"parser text\""
-            },
-            "output": {
-              "ok": true,
-              "borrowed": true,
-              "value": {
-                "kind": "string",
-                "value": "parser text"
-              }
-            }
-          },
-          {
-            "input": {
-              "phase": "encoded",
-              "bytes": [
-                123,
-                125
-              ]
-            },
-            "output": {
-              "ok": false,
-              "message": "Signing requires untransformed request data"
-            }
-          }
-        ]
-      },
       {
         "api": {
           "kind": "inherent",
@@ -11617,7 +11340,7 @@
                 "value",
                 {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -11652,8 +11375,8 @@
           }
         },
         "input": "observed",
-        "reason": "Observe returned variant and signed payload, original receiver immutability and encoded-template rejection.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestBody)->serde_json::Value {use crate::RestBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(d)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(d.value())})}}let input=arrange($value);let signed=serde_json::from_str($value[\"signed\"].as_str().expect(\"signed input\")).expect(\"signed JSON\");let before=phase(&input);match $type::with_signed_data(&input,signed){Ok(actual)=>serde_json::json!({\"ok\":true,\"before\":before,\"unchanged\":phase(&input)==before,\"actual\":phase(&actual)}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string(),\"unchanged\":phase(&input)==before})} }",
+        "reason": "Observe returned variant and signed payload, original receiver immutability and encoded-template rejection. Keeps every independent untransformed witness as a tagged supplemental observation after the getter return becomes the canonical typed carrier.",
+        "call": "{let input=$value;if input.get(\"retained_untransformed\").is_some() { trait NativeObserve {fn observed(&self)->serde_json::Value;} impl NativeObserve for serde_json::Value {fn observed(&self)->serde_json::Value { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}} observe(self) }} impl NativeObserve for safe_cex_types::retained_json::RetainedJsonInput {fn observed(&self)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;use serde_json::json;match self {I::Undefined=>json!({\"kind\":\"undefined\"}),I::Null=>json!({\"kind\":\"null\"}),I::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),I::Text(s)=>json!({\"kind\":\"string\",\"value\":String::from_utf16(s).expect(\"bounded string fixture\")}),I::Float(n)=>json!({\"kind\":\"number\",\"bits\":n.to_bits().to_string()}),I::Lexeme(n)=>json!({\"kind\":\"number\",\"bits\":n.parse::<f64>().expect(\"numeric fixture\").to_bits().to_string()}),I::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),I::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([String::from_utf16(k).expect(\"bounded key fixture\"),observe(v)])).collect::<Vec<_>>()})}}} fn observe<T:NativeObserve>(value:&T)->serde_json::Value {value.observed()}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}}let input=arrange((&input[\"retained_untransformed\"]));match $type::untransformed(&input){Ok(v)=>{let same=match &input{crate::RestBody::Untransformed(original)=>std::ptr::eq(v,original),crate::RestBody::Transformed(d)=>std::ptr::eq(v,d.value()),_=>false};serde_json::json!({\"ok\":true,\"borrowed\":same,\"value\":observe(v)})},Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} } else { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestBody)->serde_json::Value {use crate::RestBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(d)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(d.value())})}}let input=arrange($value);let signed=serde_json::from_str($value[\"signed\"].as_str().expect(\"signed input\")).expect(\"signed JSON\");let before=phase(&input);match $type::with_signed_data(&input,signed){Ok(actual)=>serde_json::json!({\"ok\":true,\"before\":before,\"unchanged\":phase(&input)==before,\"actual\":phase(&actual)}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string(),\"unchanged\":phase(&input)==before})} }}",
         "cases": [
           {
             "input": {
@@ -11735,6 +11458,61 @@
               "message": "Signing requires untransformed request data",
               "unchanged": true
             }
+          },
+          {
+            "input": {
+              "retained_untransformed": {
+                "phase": "untransformed",
+                "raw": "{\"zero\":-0}"
+              }
+            },
+            "output": {
+              "ok": true,
+              "borrowed": true,
+              "value": {
+                "kind": "object",
+                "entries": [
+                  [
+                    "zero",
+                    {
+                      "kind": "number",
+                      "bits": "9223372036854775808"
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "input": {
+              "retained_untransformed": {
+                "phase": "transformed",
+                "raw": "\"parser text\""
+              }
+            },
+            "output": {
+              "ok": true,
+              "borrowed": true,
+              "value": {
+                "kind": "string",
+                "value": "parser text"
+              }
+            }
+          },
+          {
+            "input": {
+              "retained_untransformed": {
+                "phase": "encoded",
+                "bytes": [
+                  123,
+                  125
+                ]
+              }
+            },
+            "output": {
+              "ok": false,
+              "message": "Signing requires untransformed request data"
+            }
           }
         ]
       },
@@ -11813,7 +11591,7 @@
         },
         "input": "observed",
         "reason": "Execute actual Axios transform with JSON/form/no content type and real retry identities; preserve native negative zero before wire stringification.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestBody)->serde_json::Value {use crate::RestBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(d)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(d.value())})}}let input=arrange($value);let before=phase(&input);match $type::transform(&input,$value.get(\"content\").and_then(serde_json::Value::as_str)){Ok(actual)=>serde_json::json!({\"ok\":true,\"actual\":phase(&actual),\"unchanged\":phase(&input)==before}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} }",
+        "call": "{ trait NativeObserve {fn observed(&self)->serde_json::Value;} impl NativeObserve for serde_json::Value {fn observed(&self)->serde_json::Value { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}} observe(self) }} impl NativeObserve for safe_cex_types::retained_json::RetainedJsonInput {fn observed(&self)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;use serde_json::json;match self {I::Undefined=>json!({\"kind\":\"undefined\"}),I::Null=>json!({\"kind\":\"null\"}),I::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),I::Text(s)=>json!({\"kind\":\"string\",\"value\":String::from_utf16(s).expect(\"bounded string fixture\")}),I::Float(n)=>json!({\"kind\":\"number\",\"bits\":n.to_bits().to_string()}),I::Lexeme(n)=>json!({\"kind\":\"number\",\"bits\":n.parse::<f64>().expect(\"numeric fixture\").to_bits().to_string()}),I::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),I::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([String::from_utf16(k).expect(\"bounded key fixture\"),observe(v)])).collect::<Vec<_>>()})}}} fn observe<T:NativeObserve>(value:&T)->serde_json::Value {value.observed()}fn arrange(v:&serde_json::Value)->crate::RestBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestBody::from_remote_adapter_data(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native adapter input\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestBody)->serde_json::Value {use crate::RestBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(d)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(d.value())})}}let input=arrange($value);let before=phase(&input);match $type::transform(&input,$value.get(\"content\").and_then(serde_json::Value::as_str)){Ok(actual)=>serde_json::json!({\"ok\":true,\"actual\":phase(&actual),\"unchanged\":phase(&input)==before}),Err(e)=>serde_json::json!({\"ok\":false,\"message\":e.to_string()})} }",
         "cases": [
           {
             "input": {
@@ -12307,14 +12085,14 @@
               "request": [
                 [
                   "x-token",
-                  "\tlast\r\n\u0000\t"
+                  "\tlast\r\n\u0000\u007f\t"
                 ],
                 [
                   " New ",
                   " a\tb "
                 ],
                 [
-                  " ﻿ ",
+                  " \ufeff ",
                   "skip"
                 ]
               ]
@@ -12881,93 +12659,6 @@
       {
         "api": {
           "kind": "inherent",
-          "name": "into_data",
-          "signature": {
-            "inputs": [
-              [
-                "self",
-                {
-                  "generic": "Self"
-                }
-              ]
-            ],
-            "output": {
-              "resolved_path": {
-                "path": "serde_json::value::Value",
-                "args": null
-              }
-            },
-            "is_c_variadic": false
-          }
-        },
-        "input": "observed",
-        "reason": "Physical bytes become raw lossy UTF-8 text; native adapter and prior parser values retain their current type and numeric bits.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}}let actual=$type::into_data(arrange($value));observe(&actual) }",
-        "cases": [
-          {
-            "input": {
-              "phase": "encoded",
-              "bytes": [
-                123,
-                34,
-                120,
-                34,
-                58,
-                49,
-                125
-              ]
-            },
-            "output": {
-              "kind": "string",
-              "value": "{\"x\":1}"
-            }
-          },
-          {
-            "input": {
-              "phase": "encoded",
-              "bytes": [
-                255,
-                65
-              ]
-            },
-            "output": {
-              "kind": "string",
-              "value": "�A"
-            }
-          },
-          {
-            "input": {
-              "phase": "untransformed",
-              "raw": "{\"zero\":-0}"
-            },
-            "output": {
-              "kind": "object",
-              "entries": [
-                [
-                  "zero",
-                  {
-                    "kind": "number",
-                    "bits": "9223372036854775808"
-                  }
-                ]
-              ]
-            }
-          },
-          {
-            "input": {
-              "phase": "transformed",
-              "raw": "\"prior parser\""
-            },
-            "output": {
-              "kind": "string",
-              "value": "prior parser"
-            }
-          }
-        ]
-      },
-      {
-        "api": {
-          "kind": "inherent",
           "name": "transform",
           "signature": {
             "inputs": [
@@ -12990,14 +12681,14 @@
                               "inputs": [
                                 {
                                   "resolved_path": {
-                                    "path": "serde_json::value::Value",
+                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                     "args": null
                                   }
                                 }
                               ],
                               "output": {
                                 "resolved_path": {
-                                  "path": "serde_json::value::Value",
+                                  "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                   "args": null
                                 }
                               }
@@ -13020,7 +12711,7 @@
         },
         "input": "observed",
         "reason": "Actual FnOnce callback executes exactly once on current data, including a Transformed string; callback return is placed in Transformed provenance.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let mut seen=serde_json::Value::Null;let mut calls=0;let actual=$type::transform(arrange($value),|input|{calls+=1;seen=observe(&input);serde_json::Value::String(\"callback output\".into())});serde_json::json!({\"calls\":calls,\"seen\":seen,\"actual\":phase(&actual)}) }",
+        "call": "{ trait NativeObserve {fn observed(&self)->serde_json::Value;} impl NativeObserve for serde_json::Value {fn observed(&self)->serde_json::Value { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}} observe(self) }} impl NativeObserve for safe_cex_types::retained_json::RetainedJsonInput {fn observed(&self)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;use serde_json::json;match self {I::Undefined=>json!({\"kind\":\"undefined\"}),I::Null=>json!({\"kind\":\"null\"}),I::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),I::Text(s)=>json!({\"kind\":\"string\",\"value\":String::from_utf16(s).expect(\"bounded string fixture\")}),I::Float(n)=>json!({\"kind\":\"number\",\"bits\":n.to_bits().to_string()}),I::Lexeme(n)=>json!({\"kind\":\"number\",\"bits\":n.parse::<f64>().expect(\"numeric fixture\").to_bits().to_string()}),I::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),I::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([String::from_utf16(k).expect(\"bounded key fixture\"),observe(v)])).collect::<Vec<_>>()})}}} fn observe<T:NativeObserve>(value:&T)->serde_json::Value {value.observed()}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let mut seen=serde_json::Value::Null;let mut calls=0;let actual=$type::transform(arrange($value),|input|{calls+=1;seen=observe(&input);serde_json::Value::String(\"callback output\".into())});serde_json::json!({\"calls\":calls,\"seen\":seen,\"actual\":phase(&actual)}) }",
         "cases": [
           {
             "input": {
@@ -13062,7 +12753,7 @@
               "calls": 1,
               "seen": {
                 "kind": "string",
-                "value": "�A"
+                "value": "\ufffdA"
               },
               "actual": {
                 "phase": "transformed",
@@ -13148,7 +12839,7 @@
                               "inputs": [
                                 {
                                   "resolved_path": {
-                                    "path": "serde_json::value::Value",
+                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                     "args": null
                                   }
                                 }
@@ -13162,7 +12853,7 @@
                                         {
                                           "type": {
                                             "resolved_path": {
-                                              "path": "serde_json::value::Value",
+                                              "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                               "args": null
                                             }
                                           }
@@ -13216,7 +12907,7 @@
         },
         "input": "observed",
         "reason": "Observe callback count, exact current native input, success phase and unmodified caller error identity without requiring an error serialization bound.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let mut seen=serde_json::Value::Null;let mut calls=0;let sentinel=std::rc::Rc::new(String::from(\"source parser failure\"));let actual=$type::try_transform(arrange($value),|input|{calls+=1;seen=observe(&input);if $value[\"fail\"]==true {Err(sentinel.clone())}else{Ok(serde_json::Value::String(\"success output\".into()))}});match actual {Ok(v)=>serde_json::json!({\"ok\":true,\"calls\":calls,\"seen\":seen,\"actual\":phase(&v)}),Err(e)=>serde_json::json!({\"ok\":false,\"calls\":calls,\"seen\":seen,\"sameError\":std::rc::Rc::ptr_eq(&e,&sentinel),\"message\":e.as_str()})} }",
+        "call": "{ trait NativeObserve {fn observed(&self)->serde_json::Value;} impl NativeObserve for serde_json::Value {fn observed(&self)->serde_json::Value { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}} observe(self) }} impl NativeObserve for safe_cex_types::retained_json::RetainedJsonInput {fn observed(&self)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;use serde_json::json;match self {I::Undefined=>json!({\"kind\":\"undefined\"}),I::Null=>json!({\"kind\":\"null\"}),I::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),I::Text(s)=>json!({\"kind\":\"string\",\"value\":String::from_utf16(s).expect(\"bounded string fixture\")}),I::Float(n)=>json!({\"kind\":\"number\",\"bits\":n.to_bits().to_string()}),I::Lexeme(n)=>json!({\"kind\":\"number\",\"bits\":n.parse::<f64>().expect(\"numeric fixture\").to_bits().to_string()}),I::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),I::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([String::from_utf16(k).expect(\"bounded key fixture\"),observe(v)])).collect::<Vec<_>>()})}}} fn observe<T:NativeObserve>(value:&T)->serde_json::Value {value.observed()}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let mut seen=serde_json::Value::Null;let mut calls=0;let sentinel=std::rc::Rc::new(String::from(\"source parser failure\"));let actual=$type::try_transform(arrange($value),|input|{calls+=1;seen=observe(&input);if $value[\"fail\"]==true {Err(sentinel.clone())}else{Ok(serde_json::Value::String(\"success output\".into()))}});match actual {Ok(v)=>serde_json::json!({\"ok\":true,\"calls\":calls,\"seen\":seen,\"actual\":phase(&v)}),Err(e)=>serde_json::json!({\"ok\":false,\"calls\":calls,\"seen\":seen,\"sameError\":std::rc::Rc::ptr_eq(&e,&sentinel),\"message\":e.as_str()})} }",
         "cases": [
           {
             "input": {
@@ -13340,7 +13031,7 @@
         },
         "input": "observed",
         "reason": "Decode BOM only at physical-byte ingress, parse current strings, preserve native values and numeric bits, and expose valid-but-unrepresentable JSON refusal.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}match $type::transform_axios_response(arrange($value)){Ok(v)=>serde_json::json!({\"ok\":true,\"actual\":phase(&v)}),Err(crate::TransportError::Host(message))=>serde_json::json!({\"ok\":false,\"representationRefused\":message.starts_with(\"Axios response representation refused: \")}),Err(e)=>panic!(\"unexpected error: {e}\")} }",
+        "call": "{ trait NativeObserve {fn observed(&self)->serde_json::Value;} impl NativeObserve for serde_json::Value {fn observed(&self)->serde_json::Value { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}} observe(self) }} impl NativeObserve for safe_cex_types::retained_json::RetainedJsonInput {fn observed(&self)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;use serde_json::json;match self {I::Undefined=>json!({\"kind\":\"undefined\"}),I::Null=>json!({\"kind\":\"null\"}),I::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),I::Text(s)=>json!({\"kind\":\"string\",\"value\":String::from_utf16(s).expect(\"bounded string fixture\")}),I::Float(n)=>json!({\"kind\":\"number\",\"bits\":n.to_bits().to_string()}),I::Lexeme(n)=>json!({\"kind\":\"number\",\"bits\":n.parse::<f64>().expect(\"numeric fixture\").to_bits().to_string()}),I::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),I::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([String::from_utf16(k).expect(\"bounded key fixture\"),observe(v)])).collect::<Vec<_>>()})}}} fn observe<T:NativeObserve>(value:&T)->serde_json::Value {value.observed()}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}match $type::transform_axios_response(arrange($value)){Ok(v)=>serde_json::json!({\"ok\":true,\"actual\":phase(&v)}),Err(crate::TransportError::Host(message))=>serde_json::json!({\"ok\":false,\"representationRefused\":message.starts_with(\"Axios response representation refused: \")}),Err(e)=>panic!(\"unexpected error: {e}\")} }",
         "cases": [
           {
             "input": {
@@ -13388,7 +13079,7 @@
                 "phase": "transformed",
                 "value": {
                   "kind": "string",
-                  "value": "﻿{}"
+                  "value": "\ufeff{}"
                 }
               }
             }
@@ -13570,8 +13261,8 @@
           }
         },
         "input": "observed",
-        "reason": "Actual model-read parser preserves literal reserved-looking keys and number tokens, leaves native strings unparsed and does not mutate response provenance.",
-        "call": "{ fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let input=arrange($value);let before=phase(&input);match $type::json_value(&input){Ok(v)=>serde_json::json!({\"ok\":true,\"value\":observe(&v),\"unchanged\":phase(&input)==before}),Err(_)=>serde_json::json!({\"ok\":false,\"unchanged\":phase(&input)==before})} }",
+        "reason": "Actual model-read parser preserves literal reserved-looking keys and number tokens, leaves native strings unparsed and does not mutate response provenance. Keeps every independent into_data witness as a tagged supplemental observation after the getter return becomes the canonical typed carrier.",
+        "call": "{let input=$value;if input.get(\"retained_into_data\").is_some() { trait NativeObserve {fn observed(&self)->serde_json::Value;} impl NativeObserve for serde_json::Value {fn observed(&self)->serde_json::Value { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}} observe(self) }} impl NativeObserve for safe_cex_types::retained_json::RetainedJsonInput {fn observed(&self)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;use serde_json::json;match self {I::Undefined=>json!({\"kind\":\"undefined\"}),I::Null=>json!({\"kind\":\"null\"}),I::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),I::Text(s)=>json!({\"kind\":\"string\",\"value\":String::from_utf16(s).expect(\"bounded string fixture\")}),I::Float(n)=>json!({\"kind\":\"number\",\"bits\":n.to_bits().to_string()}),I::Lexeme(n)=>json!({\"kind\":\"number\",\"bits\":n.parse::<f64>().expect(\"numeric fixture\").to_bits().to_string()}),I::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),I::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([String::from_utf16(k).expect(\"bounded key fixture\"),observe(v)])).collect::<Vec<_>>()})}}} fn observe<T:NativeObserve>(value:&T)->serde_json::Value {value.observed()}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}}let actual=$type::into_data(arrange((&input[\"retained_into_data\"])));observe(&actual) } else { fn observe(v:&serde_json::Value)->serde_json::Value {use serde_json::{Value as V,json};match v {V::Null=>json!({\"kind\":\"null\"}),V::Bool(b)=>json!({\"kind\":\"bool\",\"value\":b}),V::String(s)=>json!({\"kind\":\"string\",\"value\":s}),V::Number(_)=>json!({\"kind\":\"number\",\"bits\":safe_cex_num::js_number(Some(v)).expect(\"native number\").to_bits().to_string()}),V::Array(a)=>json!({\"kind\":\"array\",\"items\":a.iter().map(observe).collect::<Vec<_>>()}),V::Object(o)=>json!({\"kind\":\"object\",\"entries\":o.iter().map(|(k,v)|json!([k,observe(v)])).collect::<Vec<_>>()})}}fn arrange(v:&serde_json::Value)->crate::RestResponseBody {match v[\"phase\"].as_str().expect(\"phase\") {\"encoded\"=>crate::RestResponseBody::Encoded(v[\"bytes\"].as_array().expect(\"bytes\").iter().map(|b|b.as_u64().expect(\"byte\") as u8).collect()),\"untransformed\"=>crate::RestResponseBody::Untransformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native input\")),\"transformed\"=>crate::RestResponseBody::Transformed(serde_json::from_str(v[\"raw\"].as_str().expect(\"raw data\")).expect(\"native parser output\")),_=>panic!(\"unreviewed phase\")}} fn phase(v:&crate::RestResponseBody)->serde_json::Value {use crate::RestResponseBody as B;match v {B::Encoded(b)=>serde_json::json!({\"phase\":\"encoded\",\"bytes\":b}),B::Untransformed(v)=>serde_json::json!({\"phase\":\"untransformed\",\"value\":observe(v)}),B::Transformed(v)=>serde_json::json!({\"phase\":\"transformed\",\"value\":observe(v)})}}let input=arrange($value);let before=phase(&input);match $type::json_value(&input){Ok(v)=>serde_json::json!({\"ok\":true,\"value\":observe(&v),\"unchanged\":phase(&input)==before}),Err(_)=>serde_json::json!({\"ok\":false,\"unchanged\":phase(&input)==before})} }}",
         "cases": [
           {
             "input": {
@@ -13695,6 +13386,73 @@
             "output": {
               "ok": false,
               "unchanged": true
+            }
+          },
+          {
+            "input": {
+              "retained_into_data": {
+                "phase": "encoded",
+                "bytes": [
+                  123,
+                  34,
+                  120,
+                  34,
+                  58,
+                  49,
+                  125
+                ]
+              }
+            },
+            "output": {
+              "kind": "string",
+              "value": "{\"x\":1}"
+            }
+          },
+          {
+            "input": {
+              "retained_into_data": {
+                "phase": "encoded",
+                "bytes": [
+                  255,
+                  65
+                ]
+              }
+            },
+            "output": {
+              "kind": "string",
+              "value": "\ufffdA"
+            }
+          },
+          {
+            "input": {
+              "retained_into_data": {
+                "phase": "untransformed",
+                "raw": "{\"zero\":-0}"
+              }
+            },
+            "output": {
+              "kind": "object",
+              "entries": [
+                [
+                  "zero",
+                  {
+                    "kind": "number",
+                    "bits": "9223372036854775808"
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "input": {
+              "retained_into_data": {
+                "phase": "transformed",
+                "raw": "\"prior parser\""
+              }
+            },
+            "output": {
+              "kind": "string",
+              "value": "prior parser"
             }
           }
         ]
@@ -14986,6 +14744,1034 @@
         },
         "input": "typed",
         "reason": "Constructs FIFO window state from an existing RateLimitClock capability and typed usize/u64 budget; accepts no serialized domain model. Native slot cancellation, failure accounting, and queued venue timestamp witnesses execute the resulting state."
+      }
+    ]
+  },
+  "safe_cex_transport::native_data::parse": {
+    "api": {
+      "kind": "function",
+      "name": "parse",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Shared canonical JSON.parse adapter; production HOW body regressions additionally assert native UTF-16/Float bits before any model view.",
+    "call": "{let actual=$type($value.as_str().unwrap());match actual { Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value.into_value().unwrap()}),Err(_)=>serde_json::json!({\"ok\":false}) }}",
+    "cases": [
+      {
+        "input": "{\"a\":1}",
+        "output": {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        }
+      },
+      {
+        "input": "[null,true]",
+        "output": {
+          "ok": true,
+          "value": [
+            null,
+            true
+          ]
+        }
+      },
+      {
+        "input": "invalid",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::native_data::from_json": {
+    "api": {
+      "kind": "function",
+      "name": "from_json",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Explicit finite JSON fixture/control ingress into the canonical retained carrier; native runtime bodies bypass this constructor.",
+    "call": "{let actual=$type($value.clone());match actual { Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value.into_value().unwrap()}),Err(_)=>serde_json::json!({\"ok\":false}) }}",
+    "cases": [
+      {
+        "input": {
+          "a": 1
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        }
+      },
+      {
+        "input": [
+          null,
+          true
+        ],
+        "output": {
+          "ok": true,
+          "value": [
+            null,
+            true
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::native_data::deserialize_present": {
+    "api": {
+      "kind": "function",
+      "name": "deserialize_present",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Serde present-field hook preserves a present null separately from an omitted optional signing .data property. Signing envelope tests execute both presence paths.",
+    "call": "{let actual=$type($value.clone()).unwrap().expect(\"present data\");serde_json::json!({\"present\":true,\"value\":actual.into_value().unwrap()})}",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "a": 1
+        },
+        "output": {
+          "present": true,
+          "value": {
+            "a": 1
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::native_data::object": {
+    "api": {
+      "kind": "function",
+      "name": "object",
+      "signature": {
+        "inputs": [
+          [
+            "fields",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::iter::traits::collect::IntoIterator",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Item",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "tuple": [
+                                      {
+                                        "impl_trait": [
+                                          {
+                                            "trait_bound": {
+                                              "trait": {
+                                                "path": "core::convert::AsRef",
+                                                "args": {
+                                                  "angle_bracketed": {
+                                                    "args": [
+                                                      {
+                                                        "type": {
+                                                          "primitive": "str"
+                                                        }
+                                                      }
+                                                    ],
+                                                    "constraints": []
+                                                  }
+                                                }
+                                              },
+                                              "generic_params": [],
+                                              "modifier": "none"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "resolved_path": {
+                                          "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                          "args": null
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl AsRef<str>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::AsRef",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl IntoIterator<Item = (impl AsRef<str>, Input)>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::iter::traits::collect::IntoIterator",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [],
+                            "constraints": [
+                              {
+                                "name": "Item",
+                                "args": null,
+                                "binding": {
+                                  "equality": {
+                                    "type": {
+                                      "tuple": [
+                                        {
+                                          "impl_trait": [
+                                            {
+                                              "trait_bound": {
+                                                "trait": {
+                                                  "path": "core::convert::AsRef",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "primitive": "str"
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                },
+                                                "generic_params": [],
+                                                "modifier": "none"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                                            "args": null
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Constructs an ordered native object from already typed retained children and Rust text keys; no wire/domain decoding or validation.",
+    "reason": "Constructs an ordered native object from already typed retained children and Rust text keys; no wire/domain decoding or validation."
+  },
+  "safe_cex_transport::native_data::property": {
+    "api": {
+      "kind": "function",
+      "name": "property",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Borrows the last matching own property from an already retained object without conversion or mutation; no domain decoding.",
+    "reason": "Borrows the last matching own property from an already retained object without conversion or mutation; no domain decoding."
+  },
+  "safe_cex_transport::native_data::take_property": {
+    "api": {
+      "kind": "function",
+      "name": "take_property",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Detaches the last matching own property from an already retained object before typed envelope metadata decoding; it never projects or decodes the payload. Real HOW native body assertions pin this separation.",
+    "reason": "Detaches the last matching own property from an already retained object before typed envelope metadata decoding; it never projects or decodes the payload. Real HOW native body assertions pin this separation."
+  },
+  "safe_cex_transport::native_data::wire_json": {
+    "api": {
+      "kind": "function",
+      "name": "wire_json",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Explicit outgoing wire-only serde_json view through the borrowed canonical writer; not native callback or domain-model ingress.",
+    "reason": "Explicit outgoing wire-only serde_json view through the borrowed canonical writer; not native callback or domain-model ingress."
+  },
+  "safe_cex_transport::how_diagnostics::log_summary": {
+    "api": {
+      "kind": "function",
+      "name": "log_summary",
+      "signature": {
+        "inputs": [
+          [
+            "request",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "route",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "primitive": "u16"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Formats a diagnostic summary of already retained native request/response data; no domain model is decoded and the actual body is untouched. Native diagnostics tests retain redaction/truncation and exact native-unit assertions.",
+    "reason": "Formats a diagnostic summary of already retained native request/response data; no domain model is decoded and the actual body is untouched. Native diagnostics tests retain redaction/truncation and exact native-unit assertions."
+  },
+  "safe_cex_transport::signing::try_parse_params_json": {
+    "api": {
+      "kind": "function",
+      "name": "try_parse_params_json",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Signing only parses object/array strings and returns every other input unchanged. This separately named params profile retains the previous typed query boundary; native body replay now uses canonical Input independently.",
+    "call": "$type($value.clone())",
+    "cases": [
+      {
+        "input": "{}",
+        "output": {}
+      },
+      {
+        "input": "[1]",
+        "output": [
+          1
+        ]
+      },
+      {
+        "input": "1",
+        "output": "1"
+      },
+      {
+        "input": "null",
+        "output": "null"
+      },
+      {
+        "input": "\"x\"",
+        "output": "\"x\""
+      },
+      {
+        "input": "bad",
+        "output": "bad"
+      },
+      {
+        "input": 12,
+        "output": 12
+      },
+      {
+        "input": {},
+        "output": {}
+      }
+    ]
+  },
+  "safe_cex_transport::how::decode_response_metadata": {
+    "api": {
+      "kind": "function",
+      "name": "decode_response_metadata",
+      "signature": {
+        "inputs": [
+          [
+            "frame",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "response",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::frames::RpcHttpResponse",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Decodes only selected HTTP envelope metadata through the existing production RpcHttpResponse map-only decoder after payload detachment. Real HOW host regressions separately assert native body/key/Float identity and phases; these direct witnesses observe all selected metadata and absent typed payload before projection.",
+    "call": "{use safe_cex_types::retained_json::RetainedJsonInput as I;let frame=I::from_value($value[\"frame\"].clone()).unwrap();let response=I::from_value($value[\"response\"].clone()).unwrap();match $type(&frame,&response){Ok(actual)=>serde_json::json!({\"ok\":true,\"nonce\":actual.nonce,\"status\":actual.data.status,\"url\":actual.data.config.url,\"payloadAbsent\":actual.data.data.is_none(),\"headers\":actual.data.headers}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": {
+          "frame": {
+            "type": "rpc.http",
+            "nonce": "first"
+          },
+          "response": {
+            "config": {
+              "url": "/first"
+            },
+            "status": 207,
+            "status_text": "fixture",
+            "headers": {
+              "x-test": "first"
+            },
+            "ignored": {
+              "unmodeled": true
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "nonce": "first",
+          "status": 207,
+          "url": "/first",
+          "payloadAbsent": true,
+          "headers": {
+            "x-test": "first"
+          }
+        }
+      },
+      {
+        "input": {
+          "frame": {
+            "type": "rpc.http",
+            "nonce": "second"
+          },
+          "response": {
+            "config": {
+              "url": "/second"
+            },
+            "status": 503,
+            "status_text": "fixture",
+            "headers": {
+              "x-test": "second"
+            },
+            "ignored": {
+              "unmodeled": true
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "nonce": "second",
+          "status": 503,
+          "url": "/second",
+          "payloadAbsent": true,
+          "headers": {
+            "x-test": "second"
+          }
+        }
+      },
+      {
+        "input": {
+          "frame": {
+            "type": "rpc.http",
+            "nonce": 17
+          },
+          "response": {
+            "config": {
+              "url": "/"
+            },
+            "status": 200,
+            "status_text": "",
+            "headers": {}
+          }
+        },
+        "output": {
+          "ok": false
+        }
       }
     ]
   }

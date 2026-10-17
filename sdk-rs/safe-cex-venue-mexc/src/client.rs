@@ -113,11 +113,13 @@ impl RestAdapter for MexcAttempt {
                         .transpose()
                         .map_err(|e| RestFailure::from_transport(e, request.clone()))?;
                     normalize_request_data(
-                        &data
-                            .cloned()
-                            .unwrap_or(safe_cex_types::retained_json::RetainedJsonInput::Undefined),
+                        &safe_cex_exchange::js_runtime::value::from_retained_input(
+                            data.cloned().unwrap_or(
+                                safe_cex_types::retained_json::RetainedJsonInput::Undefined,
+                            ),
+                        ),
                     )
-                    .map_err(|e| RestFailure::pre_transmit(e.message.into(), request.clone()))?
+                    .map_err(|e| RestFailure::pre_transmit(e.message(), request.clone()))?
                 };
                 let param = if is_get {
                     get_query_string(

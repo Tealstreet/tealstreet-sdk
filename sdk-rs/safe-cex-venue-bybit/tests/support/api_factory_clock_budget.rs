@@ -130,7 +130,10 @@ pub fn collect_native() -> Vec<Value> {
             Ok(execution) => {
                 assert_eq!(
                     execution.response.body.clone().into_data(),
-                    json!({"retCode":0,"retMsg":"OK"}),
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        json!({"retCode":0,"retMsg":"OK"})
+                    )
+                    .unwrap(),
                     "factory_clock_budget_native_final_success {id}"
                 );
                 assert_eq!(

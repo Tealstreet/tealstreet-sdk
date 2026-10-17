@@ -615,15 +615,15 @@ impl JsRestAdapter {
         let method = request.method.to_lowercase();
         let pending = if method == "post" {
             let data = match &request.body {
-                Some(body) => {
-                    let bytes = body
-                        .wire_bytes()
-                        .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-                    let text = String::from_utf8_lossy(&bytes);
-                    from_json(
-                        &serde_json::from_str(&text)
-                            .unwrap_or(serde_json::Value::String(text.into_owned())),
+                Some(RestBody::Untransformed(value)) => from_retained_input(value.clone()),
+                Some(RestBody::Transformed(data)) => from_retained_input(data.value().clone()),
+                Some(RestBody::Encoded(bytes)) => {
+                    let text = String::from_utf8_lossy(bytes);
+                    safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                        &text.encode_utf16().collect::<Vec<_>>(),
                     )
+                    .map(from_retained_input)
+                    .unwrap_or_else(|_| Js::str(&text))
                 }
                 None => Js::Undefined,
             };

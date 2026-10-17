@@ -25,10 +25,12 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
     panic!("scripted call must settle");
 }
 fn script(wire: &support::Wire, path: &str, body: Value) {
-    wire.bodies
-        .lock()
-        .unwrap()
-        .insert(path.into(), RestResponseBody::Untransformed(body));
+    wire.bodies.lock().unwrap().insert(
+        path.into(),
+        RestResponseBody::Untransformed(
+            safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+        ),
+    );
 }
 fn calls(wire: &support::Wire) -> Vec<(String, String)> {
     wire.requests

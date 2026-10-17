@@ -155,7 +155,9 @@ impl HttpHost for Host {
                 .as_ref()
                 .map(|body| {
                     safe_cex_venue_mexc::api::normalize_request_data(
-                        &safe_cex_num::JsJsonValue::from(body.untransformed().unwrap().clone()),
+                        &safe_cex_exchange::js_runtime::value::from_retained_input(
+                            body.untransformed().unwrap().clone(),
+                        ),
                     )
                     .unwrap()
                 })
@@ -326,7 +328,11 @@ fn mexc_factory_live_shared_http_composition() {
             method: config["method"].as_str().unwrap_or("get").into(),
             url: config["url"].as_str().unwrap().into(),
             params: config.get("params").cloned(),
-            body: config.get("data").cloned().map(RestBody::Untransformed),
+            body: config.get("data").cloned().map(|value| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(value).unwrap(),
+                )
+            }),
             ..Default::default()
         };
         if let Some(headers) = config.get("headers").and_then(Value::as_object) {
@@ -883,8 +889,7 @@ fn mexc_factory_native_utf8_refusal_and_response_projection() {
             matches!(
                 response.body,
                 RestResponseBody::Transformed(
-                    safe_cex_types::retained_json::RetainedJsonInput::from_value(Value::Null)
-                        .unwrap()
+                    safe_cex_types::retained_json::RetainedJsonInput::Null
                 )
             ),
             "factory native actual lone-surrogate response projects to transformed Null"

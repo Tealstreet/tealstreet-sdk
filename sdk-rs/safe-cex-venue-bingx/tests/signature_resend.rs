@@ -58,8 +58,13 @@ impl ApiHost for Host {
     ) -> Result<(), ExchangeError> {
         unreachable!("the api is assembled directly")
     }
-    fn serialize(&self, params: &Value) -> Result<String, ExchangeError> {
-        Ok(params.to_string())
+    fn serialize(
+        &self,
+        params: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<String, ExchangeError> {
+        Ok(safe_cex_num::js_retained_json_stringify(params)
+            .unwrap()
+            .unwrap())
     }
     fn hmac_sha256_hex(&self, _: &str, message: &str) -> Result<String, ExchangeError> {
         Ok(format!("sig({message})"))

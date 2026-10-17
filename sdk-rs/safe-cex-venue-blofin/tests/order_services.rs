@@ -314,7 +314,7 @@ struct Adapter {
 impl RestAdapter for Adapter {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         let payload = match &request.body {
-            Some(RestBody::Untransformed(value)) => value.clone(),
+            Some(RestBody::Untransformed(value)) => value.clone().into_value().unwrap(),
             None => Value::Null,
             _ => panic!("native request origin"),
         };
@@ -375,8 +375,12 @@ impl RestAdapter for Adapter {
                 headers: Default::default(),
                 body: match self.path {
                     0 => RestResponseBody::Encoded(serde_json::to_vec(&row).unwrap()),
-                    1 => RestResponseBody::Untransformed(row),
-                    _ => RestResponseBody::Transformed(row),
+                    1 => RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(row).unwrap(),
+                    ),
+                    _ => RestResponseBody::Transformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(row).unwrap(),
+                    ),
                 },
             })
         };

@@ -74,7 +74,8 @@ fn parse_response_json(body: &RestResponseBody) -> Result<Value, serde_json::Err
                 serde_json::from_slice::<ConsumeArrays>(bytes).map(|value| value.0)
             }
             RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-                serde_json::from_value::<ConsumeArrays>(value.clone()).map(|value| value.0)
+                serde_json::from_value::<ConsumeArrays>(value.clone().into_value()?)
+                    .map(|value| value.0)
             }
         };
     }

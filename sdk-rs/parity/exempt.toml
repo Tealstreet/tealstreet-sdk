@@ -7396,3 +7396,7 @@ reason = "C3: explicit legacy Rust Error JSON-view boundary, approved by oversee
 [[exempt]]
 rs = "safe-cex-exchange/src/js_runtime/library.rs::qs_stringify"
 reason = "C3: direct entry to the existing shared native npm qs binding for typed WOO signer composition. WOO and imported runtime calls execute the same implementation; no standalone TypeScript SDK declaration or second query algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/globals.rs::stringify_json"
+reason = "C3: shared native JSON.stringify entry delegates the existing production SerializeJSONProperty implementation without a replacer. MEXC normalization uses it directly so native BigInt throws remain covered without a second serializer or JSON carrier."

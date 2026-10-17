@@ -215,7 +215,7 @@ fn api_weight_errors_precede_pacing_and_transport_while_capture_bypasses() {
         Arc::new(|_| panic!("pre-request weight failure must not emit response error")),
     );
     let body = json!({"type":"candleSnapshot","limit":{"toString":0}});
-    let error = ready(client.prepare_request(client.build_request("/info", &body), false))
+    let error = ready(client.prepare_request(client.build_request("/info", &body).unwrap(), false))
         .expect_err("native API Number failure before pacing");
     assert!(
         matches!(error,safe_cex_transport::TransportError::JavaScript(ref cause) if cause.name=="TypeError" && cause.message=="Cannot convert object to primitive value"),
@@ -226,7 +226,7 @@ fn api_weight_errors_precede_pacing_and_transport_while_capture_bypasses() {
         0,
         "native weight failure before limiter clock"
     );
-    let failure = ready(client.execute(client.build_request("/info", &body), false))
+    let failure = ready(client.execute(client.build_request("/info", &body).unwrap(), false))
         .expect_err("native API weight error must stop actual transport");
     assert!(
         matches!(failure.transport_error.as_deref(),Some(safe_cex_transport::TransportError::JavaScript(cause)) if cause.name=="TypeError" && cause.message=="Cannot convert object to primitive value"),
@@ -245,7 +245,7 @@ fn api_weight_errors_precede_pacing_and_transport_while_capture_bypasses() {
         0,
         "native weight failure before adapter call"
     );
-    let captured = ready(client.execute(client.build_request("/info", &body), true))
+    let captured = ready(client.execute(client.build_request("/info", &body).unwrap(), true))
         .expect("native capture bypasses weight conversion");
     assert_eq!(captured.status, 200, "native capture actual response");
     assert_eq!(
