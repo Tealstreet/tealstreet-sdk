@@ -300,3 +300,14 @@ exercise coercion, parse/default selection, alias precedence, emptiness, text an
 schema identity, integer conversion, nonce retention and callback/log ordering.
 Four factory mutations each fail their named direct native test. Dependent
 helper failures are checked explicitly; compiler failures do not count.
+
+The full stored union now has 112 owners, including all nineteen reviewed
+aliases. Fresh native and actual target-specific Wasm execution each pass 95
+runtime receipts and seventeen explicit classifications with zero failures.
+All 224 selected receipts pass the scoped ratchet, with the standing ledger
+unchanged. The seventeen selected library tests and two maintained source-oracle
+tests pass, as do strict host all-target/all-feature and Wasm library Clippy,
+crate formatting, and the parity invention/status gate (7,459 rows and 17,214
+public Rust items). The remaining 89 compiler nominal/function owners still need
+individual review; this batch does not claim whole-package clearance or broader
+generic, feature, local-owner or executable-host coverage.
