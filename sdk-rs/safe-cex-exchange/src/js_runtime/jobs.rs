@@ -16,9 +16,18 @@ use std::{
 
 type Work = Pin<Box<dyn Future<Output = ()>>>;
 type Queues = Vec<(Weak<dyn ExchangeRuntime>, Weak<Jobs>)>;
-thread_local! {
-    static QUEUES: RefCell<Queues> = const { RefCell::new(Vec::new()) };
-    static CURRENT: RefCell<Option<(Rc<Jobs>, Waker)>> = const { RefCell::new(None) };
+type Current = Option<(Rc<Jobs>, Waker)>;
+fn with_queues<R>(callback: impl FnOnce(&RefCell<Queues>) -> R) -> R {
+    std::thread_local! {
+        static QUEUES: RefCell<Queues> = const { RefCell::new(Vec::new()) };
+    }
+    QUEUES.with(callback)
+}
+fn with_current<R>(callback: impl FnOnce(&RefCell<Current>) -> R) -> R {
+    std::thread_local! {
+        static CURRENT: RefCell<Current> = const { RefCell::new(None) };
+    }
+    CURRENT.with(callback)
 }
 
 #[derive(Default)]
@@ -72,7 +81,7 @@ pub(super) struct Jobs {
 }
 
 pub(super) fn for_runtime(runtime: &Rc<dyn ExchangeRuntime>) -> Rc<Jobs> {
-    QUEUES.with(|queues| {
+    with_queues(|queues| {
         let mut queues = queues.borrow_mut();
         queues.retain(|(runtime, jobs)| runtime.strong_count() > 0 && jobs.strong_count() > 0);
         if let Some(jobs) = queues.iter().find_map(|(owner, jobs)| {
@@ -98,7 +107,7 @@ pub(super) fn for_runtime(runtime: &Rc<dyn ExchangeRuntime>) -> Rc<Jobs> {
 struct Enter(Option<(Rc<Jobs>, Waker)>);
 impl Drop for Enter {
     fn drop(&mut self) {
-        CURRENT.with(|current| *current.borrow_mut() = self.0.take());
+        with_current(|current| *current.borrow_mut() = self.0.take());
     }
 }
 impl Jobs {
@@ -107,7 +116,7 @@ impl Jobs {
         work: Pin<&mut F>,
         cx: &mut Context<'_>,
     ) -> Poll<F::Output> {
-        let previous = CURRENT.with(|current| {
+        let previous = with_current(|current| {
             current
                 .borrow_mut()
                 .replace((self.clone(), cx.waker().clone()))
@@ -204,7 +213,7 @@ impl Jobs {
         }
     }
     pub(super) fn wake(self: &Rc<Self>, waker: Waker) {
-        let active = CURRENT.with(|current| {
+        let active = with_current(|current| {
             current
                 .borrow()
                 .as_ref()
@@ -283,7 +292,7 @@ impl ExchangeTask for Task {
 
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
-    let jobs = QUEUES.with(|queues| {
+    let jobs = with_queues(|queues| {
         queues.borrow().iter().find_map(|(owner, jobs)| {
             owner
                 .upgrade()
@@ -294,7 +303,7 @@ pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
     let Some(jobs) = jobs else {
         return;
     };
-    let nested = CURRENT.with(|current| {
+    let nested = with_current(|current| {
         current
             .borrow()
             .as_ref()
@@ -306,7 +315,7 @@ pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
 }
 
 pub(super) async fn yield_current() {
-    let jobs = CURRENT.with(|current| current.borrow().clone());
+    let jobs = with_current(|current| current.borrow().clone());
     if let Some((jobs, _)) = jobs {
         let mut queued = false;
         std::future::poll_fn(|cx| {

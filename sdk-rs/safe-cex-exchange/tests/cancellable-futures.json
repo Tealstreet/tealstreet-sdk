@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "221 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "222 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1751,7 +1751,7 @@
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "9ffbfffbdbf351fc4616cf9a7237b2f10a17bb14dcacd2a0a357415ce8f9aa06"
+          "sha256": "651621130602cd3d59f851469c71350167bf938a8cbd4bb9659f430ec4fe299d"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1784,7 +1784,7 @@
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "9ffbfffbdbf351fc4616cf9a7237b2f10a17bb14dcacd2a0a357415ce8f9aa06"
+          "sha256": "651621130602cd3d59f851469c71350167bf938a8cbd4bb9659f430ec4fe299d"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -1812,7 +1812,7 @@
         "future-signature",
         "future-poll"
       ],
-      "producer_sha256": "52bc5376b8c41da6eefcc359c9f0e0d3c2c4dbb006f5b2915b6b1a7225d4673b",
+      "producer_sha256": "9ca87e20a4819295431a5d831c78406322f111fb771a3fd388dac1426af67902",
       "classification": "no-owned-latch",
       "reason": "Borrows the pinned caller future for one poll. The Enter RAII guard restores the previous thread-local CURRENT job on every return; it holds no waiter or task registration across suspension."
     },
@@ -1851,19 +1851,28 @@
       "boundaries": [
         "async-block"
       ],
-      "producer_sha256": "e8c588efd4218c5b98fba758655297100595b871b8791c1e84e9411eaabd0c7e",
+      "producer_sha256": "3890c95effbc5e7d01c84b27f79317a0bb0ee1ed61400fd2829c12fdce1aaf99",
       "classification": "delegated",
       "reason": "Wakes the active job directly or queues one foreign-host wake through Jobs::spawn; readiness and driver lifetime belong to the queue.",
       "delegate": "js_runtime Jobs queue / Promise::spawn / OwnedTasks driver"
     },
     {
-      "owner": "src/js_runtime/jobs.rs::opaque-macro:thread_local:0",
+      "owner": "src/js_runtime/jobs.rs::with_current",
       "boundaries": [
         "opaque-macro-review"
       ],
-      "producer_sha256": "9ba9f6a0c5ac4acfcb79865c714a693b96809332e8f7ba3f1d52edfd959df3a4",
+      "producer_sha256": "87607ab83b6e52e4358ae6883f223922dc311e2293642eb4b30cbce88acf8d9e",
       "classification": "immediate",
-      "reason": "thread_local declares only weak runtime/queue lookup storage and a scoped current-job slot. It neither creates nor polls a future; Enter restores CURRENT after each poll."
+      "reason": "Private scoped accessor declares one std::thread_local slot and synchronously invokes its caller. It initializes only weak queue lookup or scoped current-job storage; no future, task or waiter is created."
+    },
+    {
+      "owner": "src/js_runtime/jobs.rs::with_queues",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "34a48791603ac5becf2415fcaabdaf999d220a4c54133de8eb970adc91ab3d92",
+      "classification": "immediate",
+      "reason": "Private scoped accessor declares one std::thread_local slot and synchronously invokes its caller. It initializes only weak queue lookup or scoped current-job storage; no future, task or waiter is created."
     },
     {
       "owner": "src/js_runtime/jobs.rs::yield_current",
@@ -1872,7 +1881,7 @@
         "await",
         "poll-fn"
       ],
-      "producer_sha256": "f3af081db41855669c7780a00825482ae9efbf9b55d7cc0f5a4ff600ca7b356c",
+      "producer_sha256": "9f0defebde4faadc8af7914edb8faa1affffc02c77928dcdf6177226f6974238",
       "classification": "no-owned-latch",
       "reason": "The future queues only its current job waker and a local boolean. Dropping it leaves no waiter registration; queue ownership and host-discard cleanup remain in Driver."
     },
@@ -1933,7 +1942,7 @@
       "source_dependencies": [
         {
           "file": "src/js_runtime/jobs.rs",
-          "sha256": "9ffbfffbdbf351fc4616cf9a7237b2f10a17bb14dcacd2a0a357415ce8f9aa06"
+          "sha256": "651621130602cd3d59f851469c71350167bf938a8cbd4bb9659f430ec4fe299d"
         },
         {
           "file": "src/owned_tasks.rs",
