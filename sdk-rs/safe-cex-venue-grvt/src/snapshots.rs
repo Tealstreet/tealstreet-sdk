@@ -180,21 +180,21 @@ pub fn get_fake_positions(
                 side: existing
                     .get(&market.symbol)
                     .copied()
-                    .unwrap_or(PositionSide::Long),
+                    .unwrap_or(safe_cex_types::ModelField::Value(PositionSide::Long)),
                 entry_price: 0.0,
                 notional: 0.0,
                 leverage: fetched.map_or(default_leverage, |value| value.buy_leverage),
                 unrealized_pnl: 0.0,
                 contracts: 0.0,
                 liquidation_price: 0.0,
-                margin_type: Some(safe_cex_types::MarginType::Isolated),
-                position_mode: Some(PositionMode::OneWay),
-                realized_pnl: None,
-                margin_size: None,
-                info: None,
-                extra: None,
-                last_update: None,
-                option: None,
+                margin_type: (Some(safe_cex_types::MarginType::Isolated)).into(),
+                position_mode: (Some(PositionMode::OneWay)).into(),
+                realized_pnl: (None).into(),
+                margin_size: (None).into(),
+                info: (None).into(),
+                extra: (None).into(),
+                last_update: (None).into(),
+                option: (None).into(),
             })
         })
         .collect()

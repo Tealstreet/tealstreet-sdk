@@ -316,11 +316,11 @@ fn native_positions(actual: &[Position], expected: &Value) {
         ] {
             number(a, &e[key])
         }
-        opt_number(p.realized_pnl, e.get("realizedPnl"));
-        opt_number(p.margin_size, e.get("marginSize"));
-        opt_number(p.last_update, e.get("lastUpdate"));
+        opt_number((p.realized_pnl).into_value(), e.get("realizedPnl"));
+        opt_number((p.margin_size).into_value(), e.get("marginSize"));
+        opt_number((p.last_update).into_value(), e.get("lastUpdate"));
         opt_json(p.info.as_ref(), e.get("info"));
-        match (&p.extra, optional(e.get("extra"))) {
+        match (p.extra.as_ref(), optional(e.get("extra"))) {
             (Some(a), Some(e)) => {
                 opt_number(a.contracts_native, e.get("contractsNative"));
                 opt_number(a.unrealized_pnl_native, e.get("unrealizedPnlNative"));
@@ -714,7 +714,7 @@ fn run(case: &Value, variant: u8, boundary: bool) {
                         before,
                         "native owned position snapshot"
                     );
-                    if let Some(Value::Object(info)) = &mut v[0].info {
+                    if let Some(Value::Object(info)) = v[0].info.as_mut() {
                         info.insert("__native_probe".into(), json!(true));
                         assert!(
                             store.positions()[0]
