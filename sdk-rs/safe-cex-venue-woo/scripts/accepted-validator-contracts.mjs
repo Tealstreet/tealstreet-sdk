@@ -13,6 +13,8 @@ import { buildScanner } from '../../safe-cex-parity/scripts/accepted-scanner.mjs
 import { verifiedMacroOrigins } from '../../safe-cex-parity/scripts/accepted-macro-origins.mjs';
 import { verifiedNumberOutputOrigin } from '../../safe-cex-parity/scripts/accepted-number-output.mjs';
 
+// Keep rustdoc, selected checks and native/wasm probes in one compiler environment.
+process.env.RUSTC_BOOTSTRAP = '1';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const names = [
   "safe_cex_venue_woo::v3_public::require_record",
@@ -91,7 +93,12 @@ console.log('Full ordinary compiler discovery retained: ' + JSON.stringify({ own
 const originals = files.map(file => [file, fs.readFileSync(path.join(root, file))]);
 let mutations = 0;
 if (control) {
-  globalThis.__wooValidatorControl = { owners };
+  const items = new Map(owners.map(owner => {
+    const source = fs.readFileSync(path.join(root, owner.span.filename), 'utf8'), lines = source.split('\n');
+    const offset = ([line, column]) => lines.slice(0, line - 1).reduce((n, s) => n + s.length + 1, 0) + Array.from(lines[line - 1]).slice(0, column - 1).join('').length;
+    return [owner.name, source.slice(offset(owner.span.begin), offset(owner.span.end))];
+  }));
+  globalThis.__wooValidatorControl = { owners, items };
   const url = new URL('../../safe-cex-parity/scripts/accepted-probes.mjs', import.meta.url).href;
   registerHooks({ load(loadedUrl, context, next) {
     const result = next(loadedUrl, context); if (loadedUrl !== url) return result;
@@ -105,14 +112,13 @@ if (control) {
     }
     for (const [file, owners] of changes) {
       let source = fs.readFileSync(file, 'utf8');
-      const lines = source.split('\\n');
-      const offset = ([line, column]) => lines.slice(0, line - 1).reduce((n, s) => n + s.length + 1, 0) + Array.from(lines[line - 1]).slice(0, column - 1).join('').length;
-      const edits = owners.map(owner => ({owner, begin: offset(owner.span.begin), end: offset(owner.span.end)})).sort((a,b) => b.begin-a.begin);
-      for (const {owner, begin, end} of edits) {
-        const item = source.slice(begin, end), body = item.indexOf('{');
+      for (const owner of owners) {
+        const item = globalThis.__wooValidatorControl.items.get(owner.name), body = item.indexOf('{');
         assert.ok(body > 0 && item.includes('fn ' + owner.ident), owner.name + ': exact compiler function item');
+        assert.equal(source.split(item).length, 2, owner.name + ': one unchanged production function after instrumentation');
+        const begin = source.indexOf(item), end = begin + item.length;
         const error = ['required_stats_string','deserialize_present'].includes(owner.ident) ? '<D::Error as serde::de::Error>::custom("validator source mutation")' : 'String::from("validator source mutation")';
-        const replacement = '#[allow(unused_variables)] ' + item.slice(0, body) + '{ Err(' + error + ') }';
+        const replacement = item.slice(0, body + 1) + ' if std::hint::black_box(true) { return Err(' + error + '); } ' + item.slice(body + 1);
         source = source.slice(0, begin) + replacement + source.slice(end);
       }
       fs.writeFileSync(file, source);
@@ -128,12 +134,12 @@ try {
   const output = args.find(arg => arg.startsWith('--out='))?.slice(6);
   if (output) fs.writeFileSync(output, JSON.stringify(rows, null, 2) + '\n');
   const failed = rows.filter(row => row.failures.length);
-  console.log(JSON.stringify({ target: targetName, owners: rows.length, failed: failed.map(row => ({ name: row.name, failures: row.failures })) }));
+  console.log(JSON.stringify({ target: targetName, owners: rows.length, failed: failed.map(row => ({ name: row.name, failures: control ? row.failures.length : row.failures })) }));
   assert.equal(rows.length, 30);
   if (control) {
     assert.equal(mutations, 1);
     assert.equal(failed.length, 30, 'every independent native validator body removal must fail');
-    assert.ok(failed.every(row => row.failures.some(message => message.startsWith('native observation mismatch for '))), 'each actual native validator must distinguish its reviewed valid inputs and outputs');
+    assert.ok(failed.every(row => row.failures.some(message => message.startsWith('function output mismatch for '))), 'each actual native validator must distinguish its reviewed valid inputs and outputs');
     console.log('30 concrete native validator body removals: compiled named observation failures');
   } else assert.deepEqual(failed, [], 'reviewed actual WOO validator outputs and admission');
 } finally { for (const [file, bytes] of originals) assert.deepEqual(fs.readFileSync(path.join(root, file)), bytes, `${file}: real production source remains unchanged`); }

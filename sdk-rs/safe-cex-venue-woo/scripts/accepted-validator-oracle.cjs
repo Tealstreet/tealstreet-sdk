@@ -21,6 +21,7 @@ const apis={
 const bits=require('./number-bits.cjs');
 function atom(value) {return typeof value==='number'?{kind:'number',bits:bits(value)}:typeof value==='string'?{kind:'string',text:value}:typeof value==='boolean'?{kind:'boolean',value}:value===null?{kind:'null'}:Array.isArray(value)?{kind:'array',length:value.length}:{kind:'object',length:Object.keys(value).length};}
 const raws=[undefined,'null','true','false','0','-0','1','-1','2.5','9007199254740991','9007199254740992','1e400','-1e400','5e-324','1e-400','""','"alpha"','"beta"','" "','"\\ufeff2\\ufeff"','"\\u00852"','"0x10"','"0b11"','"0o17"','"1e3"','"-.0"','".5"','"1."','"1..2"','"Infinity"','"NaN"','"-0"','"0"','"00.0"','"BUY"','"SELL"','[]','["a",-0,true]','["b",2.5,false,null]','[1,2]','[null]','["0x10"]','{}','{"alpha":"first","zero":-0,"flag":true}','{"alpha":"second","zero":2.5,"flag":false,"extra":1}','{"toString":null}'];
+raws.push(JSON.stringify('9'.repeat(310))); // Syntax-only regular decimals intentionally retain this string.
 const all={};
 for(const [module,names] of Object.entries(spec)) for(const method of names) {
  const rust=method.replace(/[A-Z]/g,c=>'_'+c.toLowerCase()),name='safe_cex_venue_woo::'+module+'::'+rust;
