@@ -379,7 +379,7 @@ impl reads::Host for Frame {
         (self.owner.date_parse)(v)
     }
     fn clock(&mut self) -> Result<f64, ExchangeError> {
-        Ok(self.owner.runtime.now_ms())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn public_only(&mut self) -> Result<bool, ExchangeError> {
         let o = self.owner.base.options();

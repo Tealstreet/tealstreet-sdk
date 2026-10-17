@@ -350,3 +350,9 @@ credentials and replace the primary proxy override with the source's secondary
 proxy or provider public CORS default. Native routing regressions exercise the
 real binding/factory, verify the secondary signature against an RFC8032 public
 key, and distinguish the separate rate budgets.
+
+Native REST and private subscription signatures read the synchronized shared
+virtual clock. REST ticker IDs and position timestamps use that same source
+clock. Rate limiting, heartbeat timing and private refresh throttles retain their
+source monotonic or Date.now clocks. The native routing and private reopen
+regressions distinguish synced time from an unrelated host clock.

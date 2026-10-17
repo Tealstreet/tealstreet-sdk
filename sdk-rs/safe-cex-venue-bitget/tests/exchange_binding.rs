@@ -455,21 +455,39 @@ fn signature_retry_resolved_envelope_replays_each_family_read_once() {
 
 #[test]
 fn signature_retry_posts_run_signing_again_and_stop_after_second_refusal() {
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    struct RestoreClock(f64);
+    impl Drop for RestoreClock {
+        fn drop(&mut self) {
+            VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + self.0);
+        }
+    }
+    let _restore = RestoreClock(VIRTUAL_CLOCK.get_current_time_ms() - (VIRTUAL_CLOCK.now)());
     for status in [200.0, 401.0] {
         let path = "/api/v2/mix/account/set-position-mode";
         let h = harness(ExchangeName::Bitget, options(), |http| {
             http.route("POST", path, status, signature_refusal());
             classic(http);
         });
+        let first_lower = (VIRTUAL_CLOCK.now)() + 90_000.0;
+        VIRTUAL_CLOCK.sync_from_server_time(first_lower);
         h.http.advance_after_send_ms.set(17.0);
+        h.http.advance_signing_clock_after_send_ms.set(60_000.0);
         h.drive(h.venue().change_position_mode(true, None)).unwrap();
         let calls = h.http.calls(path);
         assert_eq!(calls.len(), 2, "signature_retry::write {status}");
-        assert_ne!(
-            calls[0].headers["ACCESS-TIMESTAMP"], calls[1].headers["ACCESS-TIMESTAMP"],
-            "signature_retry::fresh_timestamp"
-        );
-        for call in &calls {
+        for (index, call) in calls.iter().enumerate() {
+            let timestamp = call.headers["ACCESS-TIMESTAMP"].as_f64().unwrap();
+            let lower = if index == 0 {
+                first_lower
+            } else {
+                calls[0].signing_clock_at_send + 60_000.0
+            };
+            assert!(
+                (lower..=call.signing_clock_at_send).contains(&timestamp),
+                "signature_retry::shared_clock_timestamp attempt {index}: {timestamp} outside [{lower}, {}]",
+                call.signing_clock_at_send
+            );
             let body = r#"{"productType":"usdt-futures","posMode":"hedge_mode"}"#;
             assert_eq!(call.data, serde_json::from_str::<Value>(body).unwrap());
             let timestamp = call.headers["ACCESS-TIMESTAMP"]
