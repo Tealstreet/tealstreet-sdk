@@ -249,6 +249,12 @@ Coinbase create/cancel and REST fallback bodies are mapped individually in `orde
 
 Public frame classification is complete in `starbase_public_frames.rs`, using `json_key_scanner.rs` before a guarded native JSON.parse bridge. Retain UTF16 strings/keys, f64 overflow/underflow/signed-zero, shared array/object payloads and primitive copies; serde Value cannot replace this data carrier. Context remains a plain typed JSON record. This module owns no socket or dispatch. Gates: `FRAME_CLASSIFICATION_GATES.md`.
 
+JWT signing and private user-order `lastUpdate` read the synchronized shared
+virtual clock, matching their source call sites. Polling, private health and
+optimistic REST timestamps retain the source Date.now runtime clock. The native
+clock regression syncs server time, signs real REST JWTs and delivers an opened
+private socket frame for both Coinbase variants with an unrelated host clock.
+
 `PlaceOrderRequest` serializes `leverage` before `order_configuration`, matching
 the source formatOrder object literal. The production transport regression
 observes exact encoded POST bytes for Coinbase and CoinbaseSpot; it drives the
