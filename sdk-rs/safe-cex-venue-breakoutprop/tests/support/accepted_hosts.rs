@@ -10,7 +10,7 @@ use std::{cell::RefCell, rc::Rc};
 mod clock {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../safe-cex-webworker/tests/support/runtime.rs"
+        "/../safe-cex-exchange/tests/support/runtime.rs"
     ));
 }
 

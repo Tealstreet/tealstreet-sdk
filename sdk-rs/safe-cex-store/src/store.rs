@@ -658,20 +658,50 @@ impl StoreState {
     }
     fn patch_ticker_in_place(target: &mut Ticker, source: &Ticker) -> bool {
         let mut changed = false;
-        macro_rules! patch { ($($field:ident),*) => { $(if target.$field != source.$field {target.$field=source.$field;changed=true;})* }; }
-        patch!(
-            bid,
-            ask,
-            last,
-            mark,
-            index,
-            percentage,
-            open_interest,
-            funding_rate,
-            funding_time,
-            volume,
-            quote_volume
-        );
+        if target.bid != source.bid {
+            target.bid = source.bid;
+            changed = true;
+        }
+        if target.ask != source.ask {
+            target.ask = source.ask;
+            changed = true;
+        }
+        if target.last != source.last {
+            target.last = source.last;
+            changed = true;
+        }
+        if target.mark != source.mark {
+            target.mark = source.mark;
+            changed = true;
+        }
+        if target.index != source.index {
+            target.index = source.index;
+            changed = true;
+        }
+        if target.percentage != source.percentage {
+            target.percentage = source.percentage;
+            changed = true;
+        }
+        if target.open_interest != source.open_interest {
+            target.open_interest = source.open_interest;
+            changed = true;
+        }
+        if target.funding_rate != source.funding_rate {
+            target.funding_rate = source.funding_rate;
+            changed = true;
+        }
+        if target.funding_time != source.funding_time {
+            target.funding_time = source.funding_time;
+            changed = true;
+        }
+        if target.volume != source.volume {
+            target.volume = source.volume;
+            changed = true;
+        }
+        if target.quote_volume != source.quote_volume {
+            target.quote_volume = source.quote_volume;
+            changed = true;
+        }
         changed
     }
     fn patch_worker_tickers_in_place(&mut self, tickers: &[Ticker]) -> Option<bool> {
