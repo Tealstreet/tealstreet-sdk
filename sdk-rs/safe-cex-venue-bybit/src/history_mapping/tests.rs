@@ -32,7 +32,7 @@ fn history_rows_match_live_source() {
     let globals = Js::object(vec![]);
     safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&globals, std::rc::Weak::new());
     let mut typed_differences = 0;
-    let mut surrogate_differences = 0;
+    let mut surrogate_fee_cases = 0;
     for (index, case) in cases.iter().enumerate() {
         let rows = case["rows"].as_array().unwrap();
         let opts = &case["opts"];
@@ -81,9 +81,8 @@ fn history_rows_match_live_source() {
         }
         if raw["cumFeeDetail"].as_str() == Some("{\"USDT\":\"1\",\"bad\":\"\\ud800\"}") {
             assert_eq!(case["result"][0]["commission"], 1);
-            assert!(actual[0].get("commission").is_none());
-            actual[0]["commission"] = serde_json::json!(1);
-            surrogate_differences += 1;
+            assert_eq!(actual[0]["commission"], 1.0);
+            surrogate_fee_cases += 1;
         }
         assert_eq!(
             normalize(&actual),
@@ -92,6 +91,6 @@ fn history_rows_match_live_source() {
         );
     }
     assert_eq!(typed_differences, 16);
-    assert_eq!(surrogate_differences, 2);
+    assert_eq!(surrogate_fee_cases, 2);
     assert_eq!(cases.len(), 380);
 }
