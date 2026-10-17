@@ -153,6 +153,12 @@ fn realm() -> (Realm, Rc<Runtime>) {
     (realm, runtime)
 }
 
+pub(super) fn classifier_host() -> (Realm, super::Host) {
+    let (realm, _) = realm();
+    let host = super::Host::new(&realm);
+    (realm, host)
+}
+
 fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
     let mut future = Box::pin(await_js(value));
     for _ in 0..10_000 {

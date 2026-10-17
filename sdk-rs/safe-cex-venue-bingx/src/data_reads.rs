@@ -346,7 +346,14 @@ impl BingxDataReads {
                 market.base = strict_string(base.as_ref(), "base")?;
                 market.quote = strict_string(quote.as_ref(), "quote")?;
                 if js_truthy(leverage.as_ref()) {
-                    market.limits.leverage.max = strict_number(leverage.as_ref(), "max leverage")?;
+                    market.limits.leverage.max = match strict_number(leverage.as_ref(), "max leverage") {
+                        Ok(value) => value,
+                        Err(cause) => {
+                            let value = leverage.as_ref().map_or_else(|| "undefined".into(), Value::to_string);
+                            refusals.push(format!("Refused BingX market row {index} symbol={}: limits.leverage.max={value}: {}", market.id, cause.message));
+                            continue;
+                        }
+                    };
                 }
                 markets.push(market);
             }
