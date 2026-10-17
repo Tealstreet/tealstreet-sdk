@@ -1,3 +1,6 @@
+#[path = "support/oracle_clock.rs"]
+mod oracle_clock;
+
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
@@ -317,8 +320,9 @@ fn run(c: &Value) {
                 json!({"o":input["wireOrder"]})
             }]
         });
+    let clock = oracle_clock::ClockWindow::start();
     let result: Result<Value, ExchangeError> = match method {
-        "mapOrder" => map_order(&input["wireOrder"], &store.orders(), 1234.0)
+        "mapOrder" => map_order(&input["wireOrder"], &store.orders(), 5678.0)
             .map(|o| o.as_ref().map_or(json!({"undefined":true}), order)),
         "normalizeSymbol" => v
             .normalize_symbol(Some(&input["symbol"]))
@@ -359,6 +363,11 @@ fn run(c: &Value) {
         _ => unreachable!(),
     };
     host.drain();
+    let clock = clock.finish();
+    let mut native_orders = json!(store.orders().iter().map(order).collect::<Vec<_>>());
+    if method != "mapOrder" {
+        clock.normalize_orders(&mut native_orders, &c["orders"]);
+    }
     let output = match result {
         Ok(v) => json!({"ok":v}),
         Err(e) => json!({"error":{"name":e.name,"message":e.message}}),
@@ -379,8 +388,7 @@ fn run(c: &Value) {
         "BINGX-PRIVATE fill payloads {method} variant {variant}"
     );
     assert_eq!(
-        json!(store.orders().iter().map(order).collect::<Vec<_>>()),
-        c["orders"],
+        native_orders, c["orders"],
         "BINGX-PRIVATE native orders {method} variant {variant}"
     );
     let positions = json!(store.positions().iter().map(position).collect::<Vec<_>>());
