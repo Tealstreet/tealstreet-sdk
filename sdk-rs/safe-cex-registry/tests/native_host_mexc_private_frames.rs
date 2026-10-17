@@ -76,7 +76,8 @@ fn native_mexc_order_frames_update_partial_fills_and_terminal_statuses() {
                 (first.amount, first.filled, first.remaining),
                 (2.0, 0.75, 1.25)
             );
-            assert_eq!((first.status, first.price), (OrderStatus::Open, 29.5));
+            assert_eq!(first.status, OrderStatus::Open);
+            assert_eq!(first.price, 29.5);
             assert!(
                 orders.iter().any(|o| o.id == "ws-2"),
                 "entire batch delivered"
@@ -158,7 +159,11 @@ fn native_mexc_position_frame_updates_the_production_store() {
             (12.5, 18.75, 10.0)
         );
         assert_eq!(
-            (short.unrealized_pnl, short.realized_pnl, short.margin_size),
+            (
+                short.unrealized_pnl,
+                short.realized_pnl.into_value(),
+                short.margin_size.into_value(),
+            ),
             (1.25, Some(0.5), Some(2.0))
         );
         assert_eq!(short.liquidation_price, 8.0);

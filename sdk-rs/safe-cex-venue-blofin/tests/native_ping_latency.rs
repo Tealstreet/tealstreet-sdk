@@ -139,7 +139,7 @@ fn private_orders_frame_updates_the_production_store() {
     );
     assert_eq!(
         (
-            rows[0].price,
+            rows[0].price.to_number(),
             rows[0].amount,
             rows[0].filled,
             rows[0].remaining

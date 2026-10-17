@@ -1,4 +1,4 @@
-use safe_cex_types::Order;
+use safe_cex_types::{ModelField, Order};
 use safe_cex_webworker::chaser::placement_filled;
 use serde_json::{Value, json};
 
@@ -35,7 +35,7 @@ fn placement_fills_match_live_source_including_nonfinite_fallback_and_negative_z
         .unwrap();
         order.filled = number(&row["filled"]);
         if row["noExtra"] == true {
-            order.extra = None;
+            order.extra = ModelField::Absent;
         } else {
             order.extra.as_mut().unwrap().filled_in_placement_units =
                 row.get("placement").map(number);

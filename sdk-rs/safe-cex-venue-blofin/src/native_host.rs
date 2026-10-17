@@ -25,7 +25,7 @@ use safe_cex_transport::{
     TransportError, TransportFuture, rate_limit::RateLimitClock, secondary::SecondaryKeyClients,
     socket::SocketFrame,
 };
-use safe_cex_types::{ExchangeName, ExchangeOptions, Order, PlaceOrderOpts};
+use safe_cex_types::{ExchangeName, ExchangeOptions, Order, PreparedOrderOpts};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -445,7 +445,7 @@ impl BlofinExchangeHost for NativeHost {
         &self,
         base: &NativeBase,
         _: &ClientOrderIdRule,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Option<String>, ExchangeError> {
         base.get().resolve_caller_client_order_id(opts)
     }
@@ -460,7 +460,7 @@ impl BlofinExchangeHost for NativeHost {
     fn assert_caller_client_order_ids(
         &self,
         base: &NativeBase,
-        opts: &[PlaceOrderOpts],
+        opts: &[PreparedOrderOpts],
     ) -> Result<(), ExchangeError> {
         base.get().assert_caller_client_order_ids(opts)
     }
@@ -1103,17 +1103,10 @@ impl PrivateDataHost for PrivateHost {
     fn emit_fill(&self, fill: PrivateFill) -> Result<(), ExchangeError> {
         self.base()?.emit(
             "fill",
-            json!({
-                "id": fill.id,
-                "orderId": fill.order_id,
-                "side": fill.side,
-                "symbol": fill.symbol,
-                "price": fill.price,
-                "amount": fill.amount,
-                "timestamp": fill.timestamp,
-            }),
+            serde_json::to_value(fill).map_err(|e| ExchangeError::new(e.to_string()))?,
         )
     }
+
     fn emit_mapping_error(&self, message: &str) -> Result<(), ExchangeError> {
         self.base()?
             .emit_and_log_error(ExchangeErrorInput::Message(message.into()), None, None)

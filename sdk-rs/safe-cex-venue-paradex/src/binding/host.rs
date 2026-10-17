@@ -343,7 +343,7 @@ impl crate::market_data::MarketDataHost for Host {
     }
     fn callbacks(&self, s: Js) -> Result<Js, Thrown> {
         self.this
-            .get("orderBookCallbacks")?
+            .get("orderbookCallbacks")?
             .call_method("get", vec![s])
     }
     fn broadcast(&self, c: Js, b: Js) -> Result<(), Thrown> {
