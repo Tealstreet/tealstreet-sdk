@@ -405,3 +405,7 @@ win over close errors, while normal pair completion validates the return result.
 The constructed public class and its real operation table carry the regressions.
 The native exchange target also covers account_all orders, positions, fills and
 the source-throttled balance refresh through the real private socket.
+
+Public REST payload parsers retain native arrays and row references. Book fallback
+selection stays lazy, ticker candidate capture stays eager, and guarded book-side
+reads occur twice as in the source. Native source tests retain UTF16 and sparse rows.

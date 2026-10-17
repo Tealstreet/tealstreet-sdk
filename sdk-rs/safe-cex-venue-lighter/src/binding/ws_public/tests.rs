@@ -972,8 +972,21 @@ fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
             ),
             ("order_book_stats", tickers.clone()),
         ]);
-        let book = f.call("parseRestOrderBookLevels", vec![payload.clone()]);
-        let items = f.call("parseRestTickerItems", vec![payload]);
+        let book = f
+            .socket
+            .call_method("parseRestOrderBookLevels", vec![payload.clone()]);
+        let items = f.socket.call_method("parseRestTickerItems", vec![payload]);
+        let (book, items) = match (book, items) {
+            (Ok(book), Ok(items)) => (book, items),
+            (book, items) => {
+                native.push(json!({"kind":kind,
+                    "bookError":book.err().map(|error| error.message()),
+                    "tickerError":items.err().map(|error| error.message()),
+                }));
+                row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+                continue;
+            }
+        };
         let entries = items.array_items().unwrap();
         let observed = entries
             .iter()
