@@ -1579,10 +1579,13 @@ production JavaScript/transport/Store assembly.
 `fetchOrders` discards rejected normal/algo legs without reporting, matching the
 maintained Promise.allSettled body. Its constructed HTTP regression observes
 successful orders and zero error events after an algo endpoint rejection.
+Public depth-gap recovery silently discards snapshot rejections and routed-callback
+throws, matching the maintained empty catch. The initial listenOrderBook snapshot
+retains its distinct source warning. Constructed HTTP/socket coverage observes
+no gap warning, no failed replacement delivery and a subsequent valid update.
 The three private refresh callbacks silently catch fetch and Store-update failures,
 matching source. A constructed account frame with a rejected REST balance refresh
-retains the old balance without reporting a host exception. Public depth-gap
-recovery still reports failures discarded by source, a separate open finding.
+retains the old balance without reporting a host exception.
 
 The returned `fetchOrders` future owns its aggregation/dedup continuation;
 refresh futures own update continuations. Dropping one can omit those outcomes,

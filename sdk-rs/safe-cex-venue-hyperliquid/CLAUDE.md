@@ -373,3 +373,9 @@ before read-retry classification. extra.recvWindow remains account configuration
 it must not become a per-request timeout override. The native registry timeout
 witness verifies terminal deadlines and signed HTTP; the Node info-read witness
 requires a delayed real response to arrive before method acknowledgement.
+
+The unused hyperliquidspot.api factory/interceptors and their fake HTTP fixtures
+are removed. Source Spot construction imports the perp API, as does the native
+binding; the Spot API module has only a TS test consumer and no package export.
+Keep the separate RateLimiter class and its real Realm witness. spot_runtime
+retains23 source cases across8 files after removing only7 API cases and1 source.
