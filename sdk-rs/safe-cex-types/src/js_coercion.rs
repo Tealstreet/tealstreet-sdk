@@ -148,6 +148,46 @@ pub fn normalize_json_order(value: &mut serde_json::Value) {
     }
 }
 
+/// Well-formed JSON quoting of UTF-16, including escaped lone surrogates.
+pub fn json_quote_utf16(text: &[u16], out: &mut Vec<u16>) {
+    out.push(b'"' as u16);
+    for (i, &c) in text.iter().enumerate() {
+        let lone = match c {
+            0xD800..=0xDBFF => !matches!(text.get(i + 1), Some(0xDC00..=0xDFFF)),
+            0xDC00..=0xDFFF => i == 0 || !matches!(text[i - 1], 0xD800..=0xDBFF),
+            _ => false,
+        };
+        let escaped = match c {
+            0x22 => "\\\"".to_owned(),
+            0x5C => "\\\\".to_owned(),
+            0x08 => "\\b".to_owned(),
+            0x0C => "\\f".to_owned(),
+            0x0A => "\\n".to_owned(),
+            0x0D => "\\r".to_owned(),
+            0x09 => "\\t".to_owned(),
+            c if c < 0x20 || lone => format!("\\u{c:04x}"),
+            c => {
+                out.push(c);
+                continue;
+            }
+        };
+        out.extend(escaped.encode_utf16());
+    }
+    out.push(b'"' as u16);
+}
+
+/// OrdinaryOwnPropertyKeys for retained UTF-16 keys; lone units are ordinary names.
+pub fn js_own_keys_utf16<'a>(keys: impl IntoIterator<Item = &'a [u16]>) -> Vec<&'a [u16]> {
+    let mut keys: Vec<_> = keys.into_iter().collect();
+    keys.sort_by_key(|key| {
+        String::from_utf16(key)
+            .ok()
+            .and_then(|key| js_array_index(&key))
+            .map_or((1, 0), |index| (0, index))
+    });
+    keys
+}
+
 #[cfg(test)]
 mod replacement_tests {
     use super::js_string_replace_utf16;
@@ -189,44 +229,4 @@ mod replacement_tests {
             units("[][ba]b[ab][]")
         );
     }
-}
-
-/// Well-formed JSON quoting of UTF-16, including escaped lone surrogates.
-pub fn json_quote_utf16(text: &[u16], out: &mut Vec<u16>) {
-    out.push(b'"' as u16);
-    for (i, &c) in text.iter().enumerate() {
-        let lone = match c {
-            0xD800..=0xDBFF => !matches!(text.get(i + 1), Some(0xDC00..=0xDFFF)),
-            0xDC00..=0xDFFF => i == 0 || !matches!(text[i - 1], 0xD800..=0xDBFF),
-            _ => false,
-        };
-        let escaped = match c {
-            0x22 => "\\\"".to_owned(),
-            0x5C => "\\\\".to_owned(),
-            0x08 => "\\b".to_owned(),
-            0x0C => "\\f".to_owned(),
-            0x0A => "\\n".to_owned(),
-            0x0D => "\\r".to_owned(),
-            0x09 => "\\t".to_owned(),
-            c if c < 0x20 || lone => format!("\\u{c:04x}"),
-            c => {
-                out.push(c);
-                continue;
-            }
-        };
-        out.extend(escaped.encode_utf16());
-    }
-    out.push(b'"' as u16);
-}
-
-/// OrdinaryOwnPropertyKeys for retained UTF-16 keys; lone units are ordinary names.
-pub fn js_own_keys_utf16<'a>(keys: impl IntoIterator<Item = &'a [u16]>) -> Vec<&'a [u16]> {
-    let mut keys: Vec<_> = keys.into_iter().collect();
-    keys.sort_by_key(|key| {
-        String::from_utf16(key)
-            .ok()
-            .and_then(|key| js_array_index(&key))
-            .map_or((1, 0), |index| (0, index))
-    });
-    keys
 }

@@ -45,8 +45,6 @@ fn discarded_duplicate_capture_still_refuses_invalid_json_syntax() {
 #[test]
 fn discarded_duplicate_capture_keeps_surviving_value_refusals() {
     let deep = format!("{}0{}", "[".repeat(140), "]".repeat(140));
-    for winner in [deep] {
-        let raw = format!(r#"{{"z":"discarded","z":{winner}}}"#);
-        assert!(serde_json::from_str::<RetainedJsonInput>(&raw).is_err());
-    }
+    let raw = format!(r#"{{"z":"discarded","z":{deep}}}"#);
+    assert!(serde_json::from_str::<RetainedJsonInput>(&raw).is_err());
 }

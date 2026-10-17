@@ -21,7 +21,7 @@ pub enum RetainedJsonInput {
 impl RetainedJsonInput {
     /// JSON.parse semantics, retaining native UTF-16 and binary64 values.
     pub fn parse_json(text: &[u16]) -> Result<Self, Error> {
-        parser::parse(text, false)
+        parser::parse(text, false, 0)
     }
     pub fn from_value(value: Value) -> Result<Self, Error> {
         from_value_at_depth(value, 0)
@@ -83,7 +83,7 @@ fn raw_node(raw: &str, depth: usize) -> Result<RetainedJsonInput, Error> {
             "numeric ingress recursion limit exceeded",
         ));
     }
-    parser::parse(&raw.encode_utf16().collect::<Vec<_>>(), true)
+    parser::parse(&raw.encode_utf16().collect::<Vec<_>>(), true, depth)
 }
 
 struct Capture;
@@ -245,6 +245,13 @@ mod tests {
             comparisons += 1;
         }
         assert_eq!(comparisons, 2, "RETAINED-PROJECTION array comparisons");
+    }
+
+    #[test]
+    fn lexical_parser_keeps_the_callers_starting_depth() {
+        assert!(super::raw_node("1", 127).is_ok());
+        assert!(super::raw_node("[1]", 127).is_err());
+        assert!(super::raw_node("1", 128).is_err());
     }
 
     #[test]

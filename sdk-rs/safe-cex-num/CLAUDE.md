@@ -363,3 +363,7 @@ wire projection; typed Rust String/Value adapters explicitly reject lone units.
 The retained_json_writer target compares every UTF-16 unit and a native object
 containing duplicate/index/lone-unit keys, undefined, infinities and signed zero
 with Node JSON.stringify. It also observes the retained input after rendering.
+`python3 scripts/retained-json-controls.py` runs exclusively, injecting the former
+string refusal, former key replacement, writer text replacement and a truncated
+writer array. Each compiled fault must fail its named production boundary or
+Node comparison and pass again after exact source restoration.

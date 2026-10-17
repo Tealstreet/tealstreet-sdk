@@ -192,6 +192,6 @@ serves both native JSON.parse (binary64 numbers) and raw Serde capture (numeric
 lexemes). Duplicate assignment keeps the first key position; only surviving
 values receive the lexical typed-ingress depth budget. Native parsing has no
 explicit typed depth budget. Projection to serde_json::Value remains fallible
-for lone units and nonfinite numbers; it never substitutes replacement text.
+for lone units and NaN; it never substitutes replacement text.
 The retained_utf16 target observes exact keys, both rows, numeric bits, reserved
 Serde-looking keys and all 65,536 raw/escaped code units before projection.

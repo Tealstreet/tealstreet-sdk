@@ -174,7 +174,7 @@ impl Parser<'_> {
     }
 }
 
-pub(super) fn parse(text: &[u16], lexical: bool) -> Result<Input, Error> {
+pub(super) fn parse(text: &[u16], lexical: bool, initial_depth: usize) -> Result<Input, Error> {
     let mut parser = Parser {
         text,
         cursor: 0,
@@ -191,7 +191,7 @@ pub(super) fn parse(text: &[u16], lexical: bool) -> Result<Input, Error> {
                 None => {
                     return if parser.cursor == text.len() {
                         if lexical {
-                            let mut pending = vec![(&value, 0)];
+                            let mut pending = vec![(&value, initial_depth)];
                             while let Some((node, depth)) = pending.pop() {
                                 if depth >= 128 {
                                     return Err(Error::custom(

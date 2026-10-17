@@ -23023,7 +23023,7 @@
     },
     "category": "decoder",
     "evidence": "Calls the actual raw-node parser and observes RetainedJsonInput variants/lexemes before projection. Object fixtures respect its validated-RawValue caller precondition; no arbitrary trailing-text rejection claim. Independently authored finite native-output expectations; compilation and discriminating controls are pending.",
-    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nmatch $type($value[\"raw\"].as_str().expect(\"authored raw JSON\"),$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
+    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),super::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nmatch $type($value[\"raw\"].as_str().expect(\"authored raw JSON\"),$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
     "cases": [
       {
         "input": {
@@ -23075,14 +23075,18 @@
             "kind": "object",
             "entries": [
               [
-                "x",
+                [
+                  120
+                ],
                 {
                   "kind": "lexeme",
                   "value": "23"
                 }
               ],
               [
-                "a",
+                [
+                  97
+                ],
                 {
                   "kind": "bool",
                   "value": true
@@ -23103,10 +23107,45 @@
             "kind": "object",
             "entries": [
               [
-                "$serde_json::private::Number",
+                [
+                  36,
+                  115,
+                  101,
+                  114,
+                  100,
+                  101,
+                  95,
+                  106,
+                  115,
+                  111,
+                  110,
+                  58,
+                  58,
+                  112,
+                  114,
+                  105,
+                  118,
+                  97,
+                  116,
+                  101,
+                  58,
+                  58,
+                  78,
+                  117,
+                  109,
+                  98,
+                  101,
+                  114
+                ],
                 {
                   "kind": "text",
-                  "value": "1e400"
+                  "value": [
+                    49,
+                    101,
+                    52,
+                    48,
+                    48
+                  ]
                 }
               ]
             ]
@@ -23129,7 +23168,9 @@
               },
               {
                 "kind": "text",
-                "value": "x"
+                "value": [
+                  120
+                ]
               },
               {
                 "kind": "null"
@@ -23242,7 +23283,7 @@
     },
     "category": "decoder",
     "evidence": "Consumes an explicitly authored native Value and observes capture variants without calling into_value or the reverse parser. Independently authored finite native-output expectations; compilation and discriminating controls are pending.",
-    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input:serde_json::Value=serde_json::from_str($value[\"raw\"].as_str().expect(\"authored Value JSON\")).expect(\"valid fixture JSON\");match $type(input,$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
+    "call": "{fn project(native:&super::RetainedJsonInput)->serde_json::Value {\nmatch native {\nsuper::RetainedJsonInput::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),super::RetainedJsonInput::Null=>serde_json::json!({\"kind\":\"null\"}),\nsuper::RetainedJsonInput::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nsuper::RetainedJsonInput::Text(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nsuper::RetainedJsonInput::Lexeme(value)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":value}),\nsuper::RetainedJsonInput::Float(value)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",value.to_bits())}),\nsuper::RetainedJsonInput::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nsuper::RetainedJsonInput::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input:serde_json::Value=serde_json::from_str($value[\"raw\"].as_str().expect(\"authored Value JSON\")).expect(\"valid fixture JSON\");match $type(input,$value[\"depth\"].as_u64().expect(\"authored depth\") as usize){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
     "cases": [
       {
         "input": {
@@ -23255,7 +23296,9 @@
             "kind": "object",
             "entries": [
               [
-                "z",
+                [
+                  122
+                ],
                 {
                   "kind": "array",
                   "elements": [
@@ -23271,7 +23314,9 @@
                 }
               ],
               [
-                "a",
+                [
+                  97
+                ],
                 {
                   "kind": "bool",
                   "value": true
@@ -23290,7 +23335,13 @@
           "ok": true,
           "value": {
             "kind": "text",
-            "value": "1e400"
+            "value": [
+              49,
+              101,
+              52,
+              48,
+              48
+            ]
           }
         }
       },
@@ -23793,7 +23844,7 @@
     },
     "category": "decoder",
     "evidence": "Constructs actual retained enum variants independently of capture and consumes the production projection, observing every authored member. General valid JSON in a public Lexeme is intentionally observed; no numeric-only validation is invented. Independently authored finite native-output expectations; compilation and discriminating controls are pending.",
-    "call": "{fn project(native:&serde_json::Value)->serde_json::Value {\nmatch native {\nserde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),\nserde_json::Value::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nserde_json::Value::String(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nserde_json::Value::Number(value)=>{let bits=value.to_string().parse::<f64>().expect(\"native numeric spelling\").to_bits();serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",bits),\"i64\":value.as_i64().map(|value|value.to_string()),\"u64\":value.as_u64().map(|value|value.to_string())})},\nserde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nserde_json::Value::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input=match $value.as_str().expect(\"authored retained variant\") {\n\"array\"=>super::RetainedJsonInput::Array(vec![super::RetainedJsonInput::Lexeme(\"11\".into()),super::RetainedJsonInput::Lexeme(\"23\".into())]),\n\"object\"=>super::RetainedJsonInput::Object(vec![(\"first\".into(),super::RetainedJsonInput::Lexeme(\"11\".into())),(\"second\".into(),super::RetainedJsonInput::Lexeme(\"23\".into()))]),\n\"text\"=>super::RetainedJsonInput::Text(\"unchanged\".into()),\n\"bool\"=>super::RetainedJsonInput::Bool(true),\n\"null\"=>super::RetainedJsonInput::Null,\n\"positive-infinity\"=>super::RetainedJsonInput::Float(f64::INFINITY),\n\"negative-infinity\"=>super::RetainedJsonInput::Float(f64::NEG_INFINITY),\n\"nan\"=>super::RetainedJsonInput::Float(f64::NAN),\n\"bad-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"not JSON\".into()),\n\"boolean-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"true\".into()),\n_=>panic!(\"unknown authored retained variant\"),\n};match $type(input){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
+    "call": "{fn project(native:&serde_json::Value)->serde_json::Value {\nmatch native {\nserde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),\nserde_json::Value::Bool(value)=>serde_json::json!({\"kind\":\"bool\",\"value\":value}),\nserde_json::Value::String(value)=>serde_json::json!({\"kind\":\"text\",\"value\":value}),\nserde_json::Value::Number(value)=>{let bits=value.to_string().parse::<f64>().expect(\"native numeric spelling\").to_bits();serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",bits),\"i64\":value.as_i64().map(|value|value.to_string()),\"u64\":value.as_u64().map(|value|value.to_string())})},\nserde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"elements\":values.iter().map(project).collect::<Vec<_>>()}),\nserde_json::Value::Object(values)=>serde_json::json!({\"kind\":\"object\",\"entries\":values.iter().map(|(key,value)|(key,project(value))).collect::<Vec<_>>()}),\n}}\nlet input=match $value.as_str().expect(\"authored retained variant\") {\n\"array\"=>super::RetainedJsonInput::Array(vec![super::RetainedJsonInput::Lexeme(\"11\".into()),super::RetainedJsonInput::Lexeme(\"23\".into())]),\n\"object\"=>super::RetainedJsonInput::Object(vec![(\"first\".encode_utf16().collect(),super::RetainedJsonInput::Lexeme(\"11\".into())),(\"second\".encode_utf16().collect(),super::RetainedJsonInput::Lexeme(\"23\".into()))]),\n\"text\"=>super::RetainedJsonInput::Text(\"unchanged\".encode_utf16().collect()),\n\"bool\"=>super::RetainedJsonInput::Bool(true),\n\"null\"=>super::RetainedJsonInput::Null,\n\"positive-infinity\"=>super::RetainedJsonInput::Float(f64::INFINITY),\n\"negative-infinity\"=>super::RetainedJsonInput::Float(f64::NEG_INFINITY),\n\"nan\"=>super::RetainedJsonInput::Float(f64::NAN),\n\"bad-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"not JSON\".into()),\n\"boolean-json-lexeme\"=>super::RetainedJsonInput::Lexeme(\"true\".into()),\n_=>panic!(\"unknown authored retained variant\"),\n};match $type(input){Ok(native)=>serde_json::json!({\"ok\":true,\"value\":project(&native)}),Err(error)=>serde_json::json!({\"ok\":false,\"depthError\":error.to_string().contains(\"numeric ingress recursion limit exceeded\")})}}",
     "cases": [
       {
         "input": "array",
@@ -24152,7 +24203,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_unit; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_unit::<serde_json::Error>(helper) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_unit::<serde_json::Error>(helper) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": null,
@@ -24249,7 +24300,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_bool; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_bool::<serde_json::Error>(helper,$value.as_bool().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_bool::<serde_json::Error>(helper,$value.as_bool().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": false,
@@ -24362,7 +24413,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_str; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_str::<serde_json::Error>(helper,$value.as_str().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_str::<serde_json::Error>(helper,$value.as_str().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -24370,7 +24421,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               }
             }
           },
@@ -24380,7 +24434,16 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "{\"x\":23}"
+                "value": [
+                  123,
+                  34,
+                  120,
+                  34,
+                  58,
+                  50,
+                  51,
+                  125
+                ]
               }
             }
           }
@@ -24472,7 +24535,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_string; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_string::<serde_json::Error>(helper,$value.as_str().unwrap().to_owned()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_string::<serde_json::Error>(helper,$value.as_str().unwrap().to_owned()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -24480,7 +24543,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               }
             }
           },
@@ -24490,7 +24556,16 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "{\"x\":23}"
+                "value": [
+                  123,
+                  34,
+                  120,
+                  34,
+                  58,
+                  50,
+                  51,
+                  125
+                ]
               }
             }
           }
@@ -24579,7 +24654,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_i64; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_i64::<serde_json::Error>(helper,$value.as_i64().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_i64::<serde_json::Error>(helper,$value.as_i64().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": -11,
@@ -24686,7 +24761,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_u64; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_u64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<u64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_u64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<u64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -24793,7 +24868,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_f64; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_f64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<f64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_f64::<serde_json::Error>(helper,$value.as_str().unwrap().parse::<f64>().unwrap()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "-0",
@@ -24919,7 +24994,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_seq; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_seq(helper,serde::de::value::SeqDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().clone().into_iter())) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_seq(helper,serde::de::value::SeqDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().clone().into_iter())) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": [
@@ -24960,7 +25035,10 @@
                   },
                   {
                     "kind": "text",
-                    "value": "11"
+                    "value": [
+                      49,
+                      49
+                    ]
                   },
                   {
                     "kind": "null"
@@ -25073,7 +25151,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Visitor::visit_map; no output serialization or retained projection.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].clone())))) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::BufferVisitor; serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].clone())))) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": [
@@ -25092,14 +25170,18 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "11"
                     }
                   ],
                   [
-                    "a",
+                    [
+                      97
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "23"
@@ -25126,14 +25208,27 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "text",
+                    [
+                      116,
+                      101,
+                      120,
+                      116
+                    ],
                     {
                       "kind": "text",
-                      "value": "11"
+                      "value": [
+                        49,
+                        49
+                      ]
                     }
                   ],
                   [
-                    "bool",
+                    [
+                      98,
+                      111,
+                      111,
+                      108
+                    ],
                     {
                       "kind": "bool",
                       "value": false
@@ -25397,7 +25492,7 @@
         },
         "input": "observed",
         "reason": "Direct actual capture-token MapAccess; rejects missing/wrong/extra token entries.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; let entries=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].as_str().unwrap().to_owned())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; let entries=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),p[1].as_str().unwrap().to_owned())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": [
@@ -25427,14 +25522,18 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "11"
                     }
                   ],
                   [
-                    "a",
+                    [
+                      97
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "23"
@@ -25580,7 +25679,7 @@
         },
         "input": "observed",
         "reason": "Direct actual Capture newtype visitor receives Value then calls deserialize_any(BufferVisitor); unlike RetainedJsonInput::from_value this reaches BufferVisitor.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; serde::de::Visitor::visit_newtype_struct(helper,$value.clone()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::Capture; serde::de::Visitor::visit_newtype_struct(helper,$value.clone()) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&decoded)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": "11",
@@ -25588,7 +25687,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               }
             }
           },
@@ -25615,7 +25717,9 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "array",
                       "items": [
@@ -25635,266 +25739,6 @@
             }
           }
         ]
-      }
-    ]
-  },
-  "safe_cex_types::retained_json::ObjectVisitor": {
-    "shape": "observed",
-    "category": "decoder",
-    "evidence": "Actual private compiler-owned decoder helper; direct UFCS execution on this owner with independently authored native outputs. Bounded cases, not universal generic proof.",
-    "entrypoints": [
-      {
-        "api": {
-          "kind": "trait",
-          "trait": "serde_core::de::Visitor",
-          "name": "visit_map",
-          "signature": {
-            "inputs": [
-              [
-                "self",
-                {
-                  "generic": "Self"
-                }
-              ],
-              [
-                "map",
-                {
-                  "generic": "A"
-                }
-              ]
-            ],
-            "output": {
-              "resolved_path": {
-                "path": "core::result::Result",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Value",
-                            "args": null,
-                            "self_type": {
-                              "generic": "Self"
-                            },
-                            "trait": {
-                              "path": "",
-                              "args": null
-                            }
-                          }
-                        }
-                      },
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Error",
-                            "args": null,
-                            "self_type": {
-                              "generic": "A"
-                            },
-                            "trait": {
-                              "path": "",
-                              "args": null
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
-                  }
-                }
-              }
-            },
-            "is_c_variadic": false
-          },
-          "generics": {
-            "params": [
-              {
-                "name": "A",
-                "kind": {
-                  "type": {
-                    "bounds": [
-                      {
-                        "trait_bound": {
-                          "trait": {
-                            "path": "serde_core::de::MapAccess",
-                            "args": {
-                              "angle_bracketed": {
-                                "args": [
-                                  {
-                                    "lifetime": "'de"
-                                  }
-                                ],
-                                "constraints": []
-                              }
-                            }
-                          },
-                          "generic_params": [],
-                          "modifier": "none"
-                        }
-                      }
-                    ],
-                    "default": null,
-                    "is_synthetic": false
-                  }
-                }
-              }
-            ],
-            "where_predicates": []
-          }
-        },
-        "input": "observed",
-        "reason": "Direct actual raw-entry visitor; RawValue deserializers preserve raw numeric spelling and duplicate replacement.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::ObjectVisitor(0); let owned: Vec<(String,Box<serde_json::value::RawValue>)>=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),serde_json::value::RawValue::from_string(p[1].as_str().unwrap().to_owned()).unwrap())).collect(); let entries=owned.iter().map(|(k,v)|(k.as_str(),v.as_ref())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&super::RetainedJsonInput::Object(decoded))}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-        "cases": [
-          {
-            "input": [
-              [
-                "z",
-                "-0.0"
-              ],
-              [
-                "a",
-                "1e400"
-              ]
-            ],
-            "output": {
-              "ok": true,
-              "native": {
-                "kind": "object",
-                "entries": [
-                  [
-                    "z",
-                    {
-                      "kind": "lexeme",
-                      "value": "-0.0"
-                    }
-                  ],
-                  [
-                    "a",
-                    {
-                      "kind": "lexeme",
-                      "value": "1e400"
-                    }
-                  ]
-                ]
-              }
-            }
-          },
-          {
-            "input": [
-              [
-                "a",
-                "11"
-              ],
-              [
-                "b",
-                "23"
-              ],
-              [
-                "a",
-                "37"
-              ]
-            ],
-            "output": {
-              "ok": true,
-              "native": {
-                "kind": "object",
-                "entries": [
-                  [
-                    "a",
-                    {
-                      "kind": "lexeme",
-                      "value": "37"
-                    }
-                  ],
-                  [
-                    "b",
-                    {
-                      "kind": "lexeme",
-                      "value": "23"
-                    }
-                  ]
-                ]
-              }
-            }
-          }
-        ]
-      }
-    ],
-    "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match { let helper: $type=super::ObjectVisitor(0); let owned: Vec<(String,Box<serde_json::value::RawValue>)>=$value.as_array().unwrap().iter().map(|p|(p[0].as_str().unwrap().to_owned(),serde_json::value::RawValue::from_string(p[1].as_str().unwrap().to_owned()).unwrap())).collect(); let entries=owned.iter().map(|(k,v)|(k.as_str(),v.as_ref())); serde::de::Visitor::visit_map(helper,serde::de::value::MapDeserializer::<_,serde_json::Error>::new(entries)) } { Ok(decoded)=>serde_json::json!({\"ok\":true,\"native\":__native(&super::RetainedJsonInput::Object(decoded))}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
-    "cases": [
-      {
-        "input": [
-          [
-            "z",
-            "-0.0"
-          ],
-          [
-            "a",
-            "1e400"
-          ]
-        ],
-        "output": {
-          "ok": true,
-          "native": {
-            "kind": "object",
-            "entries": [
-              [
-                "z",
-                {
-                  "kind": "lexeme",
-                  "value": "-0.0"
-                }
-              ],
-              [
-                "a",
-                {
-                  "kind": "lexeme",
-                  "value": "1e400"
-                }
-              ]
-            ]
-          }
-        }
-      },
-      {
-        "input": [
-          [
-            "a",
-            "11"
-          ],
-          [
-            "b",
-            "23"
-          ],
-          [
-            "a",
-            "37"
-          ]
-        ],
-        "output": {
-          "ok": true,
-          "native": {
-            "kind": "object",
-            "entries": [
-              [
-                "a",
-                {
-                  "kind": "lexeme",
-                  "value": "37"
-                }
-              ],
-              [
-                "b",
-                {
-                  "kind": "lexeme",
-                  "value": "23"
-                }
-              ]
-            ]
-          }
-        }
       }
     ]
   },
@@ -26838,6 +26682,169 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "parse_json",
+          "signature": {
+            "inputs": [
+              [
+                "text",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the canonical UTF-16 parser before typed projection; independently observe every key, both rows and native binary64 bits.",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type::parse_json(&$value.as_str().unwrap().encode_utf16().collect::<Vec<_>>()) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": "[-0,1e400,\"\\ud800\"]",
+            "output": {
+              "ok": true,
+              "kind": "array",
+              "native": {
+                "kind": "array",
+                "items": [
+                  {
+                    "kind": "float",
+                    "bits": "8000000000000000"
+                  },
+                  {
+                    "kind": "float",
+                    "bits": "7ff0000000000000"
+                  },
+                  {
+                    "kind": "text",
+                    "value": [
+                      55296
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "input": "{\"label\":\"tp \\ud800\",\"rows\":[1,2],\"\\udfff\":\"other\"}",
+            "output": {
+              "ok": true,
+              "kind": "object",
+              "native": {
+                "kind": "object",
+                "entries": [
+                  [
+                    [
+                      108,
+                      97,
+                      98,
+                      101,
+                      108
+                    ],
+                    {
+                      "kind": "text",
+                      "value": [
+                        116,
+                        112,
+                        32,
+                        55296
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      114,
+                      111,
+                      119,
+                      115
+                    ],
+                    {
+                      "kind": "array",
+                      "items": [
+                        {
+                          "kind": "float",
+                          "bits": "3ff0000000000000"
+                        },
+                        {
+                          "kind": "float",
+                          "bits": "4000000000000000"
+                        }
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      57343
+                    ],
+                    {
+                      "kind": "text",
+                      "value": [
+                        111,
+                        116,
+                        104,
+                        101,
+                        114
+                      ]
+                    }
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "input": "[1,]",
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": "{\"a\":1,\"a\":}",
+            "output": {
+              "ok": false
+            }
+          }
+        ],
+        "nativeFields": [
+          "kind",
+          "native"
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "from_value",
           "signature": {
             "inputs": [
@@ -26881,7 +26888,7 @@
         },
         "input": "observed",
         "reason": "Execute actual Value-to-retained constructor; inspect native variants.",
-        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type::from_value($value.clone()) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
+        "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type::from_value($value.clone()) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
         "cases": [
           {
             "input": null,
@@ -26910,7 +26917,10 @@
               "ok": true,
               "native": {
                 "kind": "text",
-                "value": "11"
+                "value": [
+                  49,
+                  49
+                ]
               },
               "kind": "text"
             }
@@ -26960,14 +26970,18 @@
                 "kind": "object",
                 "entries": [
                   [
-                    "z",
+                    [
+                      122
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "11"
                     }
                   ],
                   [
-                    "a",
+                    [
+                      97
+                    ],
                     {
                       "kind": "lexeme",
                       "value": "23"
@@ -27030,7 +27044,7 @@
         },
         "input": "observed",
         "reason": "Construct actual native RetainedJsonInput values directly, then execute projection. No decode/reencode roundtrip.",
-        "call": "{ let decoded:$type=match $value[\"kind\"].as_str().unwrap() { \"lexeme\"=>$type::Lexeme($value[\"text\"].as_str().unwrap().to_owned()),\"array\"=>$type::Array(vec![$type::Lexeme($value[\"first\"].as_str().unwrap().to_owned()),$type::Text($value[\"second\"].as_str().unwrap().to_owned())]),_=>panic!(\"unclassified fixture\") };match decoded.into_value(){Ok(native)=>{let kind=match &native {serde_json::Value::Null=>\"null\",serde_json::Value::Bool(_)=>\"bool\",serde_json::Value::Number(_)=>\"number\",serde_json::Value::String(_)=>\"string\",serde_json::Value::Array(_)=>\"array\",serde_json::Value::Object(_)=>\"object\"};serde_json::json!({\"ok\":true,\"kind\":kind,\"value\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+        "call": "{ let decoded:$type=match $value[\"kind\"].as_str().unwrap() { \"lexeme\"=>$type::Lexeme($value[\"text\"].as_str().unwrap().to_owned()),\"array\"=>$type::Array(vec![$type::Lexeme($value[\"first\"].as_str().unwrap().to_owned()),$type::Text($value[\"second\"].as_str().unwrap().encode_utf16().collect())]),_=>panic!(\"unclassified fixture\") };match decoded.into_value(){Ok(native)=>{let kind=match &native {serde_json::Value::Null=>\"null\",serde_json::Value::Bool(_)=>\"bool\",serde_json::Value::Number(_)=>\"number\",serde_json::Value::String(_)=>\"string\",serde_json::Value::Array(_)=>\"array\",serde_json::Value::Object(_)=>\"object\"};serde_json::json!({\"ok\":true,\"kind\":kind,\"value\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
         "cases": [
           {
             "input": {
@@ -27066,7 +27080,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match serde_json::from_value::<$type>($value.clone()) {Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "call": "{ fn __native(v: &super::RetainedJsonInput) -> serde_json::Value { use super::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match serde_json::from_value::<$type>($value.clone()) {Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false})} }",
       "cases": [
         {
           "input": null,
@@ -27095,7 +27109,10 @@
             "ok": true,
             "native": {
               "kind": "text",
-              "value": "11"
+              "value": [
+                49,
+                49
+              ]
             },
             "kind": "text"
           }
@@ -27145,14 +27162,18 @@
               "kind": "object",
               "entries": [
                 [
-                  "z",
+                  [
+                    122
+                  ],
                   {
                     "kind": "lexeme",
                     "value": "11"
                   }
                 ],
                 [
-                  "a",
+                  [
+                    97
+                  ],
                   {
                     "kind": "lexeme",
                     "value": "23"
@@ -46078,6 +46099,230 @@
       },
       {
         "input": "[]",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_types::retained_json::parser::parse": {
+    "api": {
+      "kind": "function",
+      "name": "parse",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "lexical",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "initial_depth",
+            {
+              "primitive": "usize"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::error::Error",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Canonical iterative JSON grammar shared by native binary64 parsing and lexical typed capture; directly observe UTF-16 keys/text, both rows, signed zero, overflow, invalid syntax and starting-depth refusal. Bounded native/default observations; actual runtime/HTTP and compiled corruption controls remain separate executed witnesses.",
+    "call": "{ fn __native(v: &crate::retained_json::RetainedJsonInput) -> serde_json::Value { use crate::retained_json::RetainedJsonInput as R; match v { R::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),R::Null=>serde_json::json!({\"kind\":\"null\"}),R::Bool(x)=>serde_json::json!({\"kind\":\"bool\",\"value\":x}),R::Text(x)=>serde_json::json!({\"kind\":\"text\",\"value\":x}),R::Lexeme(x)=>serde_json::json!({\"kind\":\"lexeme\",\"value\":x}),R::Float(x)=>serde_json::json!({\"kind\":\"float\",\"bits\":format!(\"{:016x}\",x.to_bits())}),R::Array(xs)=>serde_json::json!({\"kind\":\"array\",\"items\":xs.iter().map(__native).collect::<Vec<_>>()}),R::Object(xs)=>serde_json::json!({\"kind\":\"object\",\"entries\":xs.iter().map(|(k,v)|serde_json::json!([k,__native(v)])).collect::<Vec<_>>()}) } } match $type(&$value[\"text\"].as_str().unwrap().encode_utf16().collect::<Vec<_>>(), $value[\"lexical\"].as_bool().unwrap(), $value[\"depth\"].as_u64().unwrap() as usize) { Ok(decoded)=>{let native=__native(&decoded); let kind=native[\"kind\"].clone();serde_json::json!({\"ok\":true,\"kind\":kind,\"native\":native})},Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "text": "[-0,1e400,\"\\ud800\"]",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": true,
+          "kind": "array",
+          "native": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "float",
+                "bits": "8000000000000000"
+              },
+              {
+                "kind": "float",
+                "bits": "7ff0000000000000"
+              },
+              {
+                "kind": "text",
+                "value": [
+                  55296
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "text": "{\"label\":\"tp \\ud800\",\"rows\":[1,2],\"\\udfff\":\"other\"}",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": true,
+          "kind": "object",
+          "native": {
+            "kind": "object",
+            "entries": [
+              [
+                [
+                  108,
+                  97,
+                  98,
+                  101,
+                  108
+                ],
+                {
+                  "kind": "text",
+                  "value": [
+                    116,
+                    112,
+                    32,
+                    55296
+                  ]
+                }
+              ],
+              [
+                [
+                  114,
+                  111,
+                  119,
+                  115
+                ],
+                {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "float",
+                      "bits": "3ff0000000000000"
+                    },
+                    {
+                      "kind": "float",
+                      "bits": "4000000000000000"
+                    }
+                  ]
+                }
+              ],
+              [
+                [
+                  57343
+                ],
+                {
+                  "kind": "text",
+                  "value": [
+                    111,
+                    116,
+                    104,
+                    101,
+                    114
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "text": "[1,]",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "text": "{\"a\":1,\"a\":}",
+          "lexical": false,
+          "depth": 0
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "text": "[-0]",
+          "lexical": true,
+          "depth": 0
+        },
+        "output": {
+          "ok": true,
+          "kind": "array",
+          "native": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "lexeme",
+                "value": "-0"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "text": "[1]",
+          "lexical": true,
+          "depth": 127
+        },
         "output": {
           "ok": false
         }

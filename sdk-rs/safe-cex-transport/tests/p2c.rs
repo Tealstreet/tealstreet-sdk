@@ -1819,7 +1819,9 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
                 panic!("native config object");
             };
             assert_eq!(fields.len(), 3, "hosted config retains every data field");
-            assert!(matches!(&fields[0], (key, Input::Undefined) if key == &"missing".encode_utf16().collect::<Vec<_>>()));
+            assert!(
+                matches!(&fields[0], (key, Input::Undefined) if key == &"missing".encode_utf16().collect::<Vec<_>>())
+            );
             assert!(
                 matches!(&fields[1], (key, Input::Float(value)) if key == &"nan".encode_utf16().collect::<Vec<_>>() && value.to_bits() == 0x7ff8000000000042)
             );

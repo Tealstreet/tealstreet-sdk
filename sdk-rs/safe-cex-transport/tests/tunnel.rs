@@ -2897,7 +2897,10 @@ fn how_projects_retained_grvt_native_config_only_at_frame_boundary() {
         Input::Object(vec![
             ("missing".encode_utf16().collect(), Input::Undefined),
             ("nan".encode_utf16().collect(), Input::Float(f64::NAN)),
-            ("infinity".encode_utf16().collect(), Input::Float(f64::INFINITY)),
+            (
+                "infinity".encode_utf16().collect(),
+                Input::Float(f64::INFINITY),
+            ),
         ]),
     ];
     for index in 0..5 {
