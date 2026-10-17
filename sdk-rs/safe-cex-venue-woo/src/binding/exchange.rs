@@ -354,3 +354,7 @@ impl Exchange for WooExchange {
 #[cfg(test)]
 #[path = "../../tests/support/live_order_mapping.rs"]
 mod live_order_mapping_tests;
+
+#[cfg(test)]
+#[path = "../../tests/support/iterable_binding.rs"]
+mod iterable_binding_tests;

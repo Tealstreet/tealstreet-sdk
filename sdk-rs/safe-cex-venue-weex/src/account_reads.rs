@@ -66,7 +66,6 @@ pub struct WeexAccountReadRuntime<H, V, E> {
     pub push_spread: fn(&H, V, &V) -> Result<(), E>,
     pub error_message: fn(&H, &E) -> Result<Vec<u16>, E>,
     pub warning: fn(&H, Vec<u16>) -> Result<(), E>,
-    pub report_order_error: fn(&H, &E),
 }
 fn ready<'a, V: 'a, E: 'a>(value: Result<V, E>) -> ReadFuture<'a, V, E> {
     Box::pin(std::future::ready(value))
@@ -506,11 +505,8 @@ pub fn fetch_orders<'a, H, V: Clone + 'a, E: 'a>(
     Box::pin(async move {
         let (normal, algo) = aggregate.await;
         let mut out = Vec::new();
-        for result in [normal, algo] {
-            match result {
-                Ok(orders) => spread(host, rt, &orders, &mut out)?,
-                Err(error) => (rt.report_order_error)(host, &error),
-            }
+        for orders in [normal, algo].into_iter().flatten() {
+            spread(host, rt, &orders, &mut out)?;
         }
         (rt.uniq_by_id)(host, (rt.array)(out))
     })
