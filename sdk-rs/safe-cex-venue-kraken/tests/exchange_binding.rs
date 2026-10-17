@@ -808,7 +808,12 @@ fn constructed_private_orders_frame_updates_store() {
         ("frame-order", SYMBOL)
     );
     assert_eq!(
-        (order.price, order.amount, order.filled, order.remaining),
+        (
+            order.price.to_number(),
+            order.amount,
+            order.filled,
+            order.remaining
+        ),
         (29100.0, 3.0, 0.5, 2.5)
     );
     assert_eq!(order.r#type, OrderType::Limit);

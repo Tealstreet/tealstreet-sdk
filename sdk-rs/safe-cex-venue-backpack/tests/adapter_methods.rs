@@ -131,8 +131,8 @@ fn native(v: &J, e: &Value, name: &str) {
 fn options(i: usize) -> a::Options {
     let mut o = a::Options {
         symbol: u("BTC_USDC"),
-        kind: OrderType::Limit,
-        side: OrderSide::Buy,
+        r#type: safe_cex_types::ModelField::Value(OrderType::Limit),
+        side: safe_cex_types::ModelField::Value(OrderSide::Buy),
         amount: 1.375,
         price: None,
         trigger_price: None,
@@ -142,21 +142,22 @@ fn options(i: usize) -> a::Options {
         reduce_only: false,
         tp_trigger_type: None,
         sl_trigger_type: None,
-        client_id: None,
+        client_order_id: None,
+        ..Default::default()
     };
     match i {
         0 => {
             o.price = Some(12.375);
             o.time_in_force = Some(OrderTimeInForce::PostOnly);
-            o.client_id = Some(u("12"));
+            o.client_order_id = Some(u("12"));
         }
-        1 => o.kind = OrderType::Market,
+        1 => o.r#type = OrderType::Market.into(),
         2 => {
-            o.kind = OrderType::StopLoss;
+            o.r#type = OrderType::StopLoss.into();
             o.trigger_price = Some(10.125);
         }
         3 => {
-            o.kind = OrderType::TakeProfit;
+            o.r#type = OrderType::TakeProfit.into();
             o.price = Some(11.75);
         }
         4 | 6 => {
@@ -165,7 +166,7 @@ fn options(i: usize) -> a::Options {
             o.stop_loss = Some(8.0);
         }
         5 => {
-            o.kind = OrderType::Market;
+            o.r#type = OrderType::Market.into();
             o.take_profit = Some(15.0);
             o.stop_loss = Some(8.0);
             o.reduce_only = true;
@@ -186,12 +187,13 @@ struct Orders {
 impl Orders {
     fn new(i: usize) -> Self {
         let mut old = options(1);
-        old.kind = if i == 1 {
+        old.r#type = (if i == 1 {
             OrderType::StopLoss
         } else {
             OrderType::Limit
-        };
-        old.side = OrderSide::Sell;
+        })
+        .into();
+        old.side = safe_cex_types::ModelField::Value(OrderSide::Sell);
         old.amount = 2.0;
         old.price = Some(9.0);
         old.reduce_only = true;
@@ -213,7 +215,7 @@ impl a::Host for Orders {
     type Target = ();
     fn resolve_caller_id(&mut self, o: &a::Options) -> Result<Option<Vec<u16>>, ExchangeError> {
         self.trace.push("resolve".into());
-        Ok(o.client_id.clone())
+        Ok(o.client_order_id.clone())
     }
     fn market(&mut self, _: &[u16]) -> Result<Option<()>, ExchangeError> {
         Ok(Some(()))
@@ -319,7 +321,7 @@ fn placement_native_source_requests() {
     for i in 0..8 {
         let r = row("place", i);
         let o = options(i);
-        let type_name = serde_json::to_value(o.kind).unwrap();
+        let type_name = serde_json::to_value(o.r#type).unwrap();
         string(
             &u(type_name.as_str().unwrap()),
             &r["input"]["type"],
@@ -409,7 +411,7 @@ fn replacement_native_source_options() {
             number(o.price.unwrap(), &e["price"], "REPLACE native price");
             string(&o.symbol, &e["symbol"], "REPLACE native symbol");
             assert_eq!(
-                o.kind,
+                o.r#type,
                 if i == 1 {
                     OrderType::StopLoss
                 } else {

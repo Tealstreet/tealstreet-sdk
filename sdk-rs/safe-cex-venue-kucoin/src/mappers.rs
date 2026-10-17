@@ -55,28 +55,28 @@ fn typed<T>(hit: TableHit<T>, field: &str) -> Result<T, String> {
 }
 fn base_order(id: String, symbol: String, row: &Map<String, Value>) -> Order {
     Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id,
-        parent_id: None,
-        status: OrderStatus::Open,
+        parent_id: (None).into(),
+        status: safe_cex_types::ModelField::Value(OrderStatus::Open),
         symbol,
-        r#type: OrderType::Limit,
-        side: OrderSide::Buy,
-        price: 0.0,
+        r#type: safe_cex_types::ModelField::Value(OrderType::Limit),
+        side: safe_cex_types::ModelField::Value(OrderSide::Buy),
+        price: (0.0).into(),
         amount: 0.0,
         filled: 0.0,
         remaining: 0.0,
         reduce_only: false,
-        close: None,
-        info: Some(Value::Object(row.clone())),
-        time_in_force: None,
+        close: (None).into(),
+        info: (Some(Value::Object(row.clone()))).into(),
+        time_in_force: (None).into(),
         last_update: 0.0,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     }
 }
 // ts: KucoinExchange.mapOrder
@@ -122,11 +122,11 @@ pub fn map_order(
         }
     })?;
     order.side = if row.get("side").and_then(Value::as_str) == Some("buy") {
-        OrderSide::Buy
+        safe_cex_types::ModelField::Value(OrderSide::Buy)
     } else {
-        OrderSide::Sell
+        safe_cex_types::ModelField::Value(OrderSide::Sell)
     };
-    order.price = number_or_zero(row, &["price", "orderPrice"])?;
+    order.price = (number_or_zero(row, &["price", "orderPrice"])?).into();
     order.amount = multiply(size, contract_size);
     order.filled = multiply(filled, contract_size);
     order.remaining = multiply(remaining, contract_size);
@@ -134,7 +134,7 @@ pub fn map_order(
     let time_in_force = lookup(types::TIME_IN_FORCE, row.get("timeInForce"), || {
         OrderTimeInForce::GoodTillCancel
     })?;
-    order.extra = Some(OrderExtra {
+    order.extra = (Some(OrderExtra {
         conditional_order_price: None,
         remaining_native: Some(remaining),
         filled_in_placement_units: Some(filled),
@@ -144,7 +144,8 @@ pub fn map_order(
         chaser_id: None,
         chaser_attempts: None,
         chaser_max_attempts: None,
-    });
+    }))
+    .into();
     let stop = row.get("stop");
     if stop == Some(&Value::Bool(true))
         || stop.and_then(Value::as_str).is_some_and(|s| !s.is_empty())
@@ -161,7 +162,7 @@ pub fn map_order(
             "up" | "profit" | "tp" => order_type = TableHit::Mapped(OrderType::TakeProfit),
             _ => {}
         }
-        order.price = number_or_zero(row, &["stopPrice"])?;
+        order.price = (number_or_zero(row, &["stopPrice"])?).into();
     }
     if stop == Some(&Value::Bool(true))
         && row.get("stopPriceType").and_then(Value::as_str) == Some("TP")
@@ -199,9 +200,13 @@ pub fn map_order(
         if let Some(value) = value {
             let mut attached = order.clone();
             attached.id.push_str(suffix);
-            attached.side = if buy { OrderSide::Sell } else { OrderSide::Buy };
-            attached.r#type = kind;
-            attached.price = number(Some(value))?;
+            attached.side = if buy {
+                safe_cex_types::ModelField::Value(OrderSide::Sell)
+            } else {
+                safe_cex_types::ModelField::Value(OrderSide::Buy)
+            };
+            attached.r#type = (kind).into();
+            attached.price = (number(Some(value))?).into();
             attached.reduce_only = true;
             orders.push(attached);
         }
@@ -214,10 +219,10 @@ pub fn map_order(
     let parent_type = typed(order_type, "type")?;
     let time_in_force = typed(time_in_force, "timeInForce")?;
     for mapped in &mut orders {
-        mapped.status = status;
-        mapped.time_in_force = Some(time_in_force);
+        mapped.status = (status).into();
+        mapped.time_in_force = (Some(time_in_force)).into();
     }
-    orders[0].r#type = parent_type;
+    orders[0].r#type = (parent_type).into();
     Ok(orders)
 }
 // ts: KucoinSpotExchange.mapOrder
@@ -281,14 +286,14 @@ pub fn map_spot_order(row: &Map<String, Value>, now_ms: f64) -> Result<Order, St
         string(row.get("symbol"), "symbol")?,
         row,
     );
-    order.side = side;
-    order.price = price;
+    order.side = (side).into();
+    order.price = (price).into();
     order.amount = size;
     order.filled = filled;
     order.remaining = remaining;
     order.last_update = last_update;
-    order.status = typed(status, "status")?;
-    order.r#type = typed(order_type, "type")?;
-    order.time_in_force = Some(typed(time_in_force, "timeInForce")?);
+    order.status = (typed(status, "status")?).into();
+    order.r#type = (typed(order_type, "type")?).into();
+    order.time_in_force = (Some(typed(time_in_force, "timeInForce")?)).into();
     Ok(order)
 }
