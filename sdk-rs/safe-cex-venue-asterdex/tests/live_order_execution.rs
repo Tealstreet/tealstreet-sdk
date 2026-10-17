@@ -456,8 +456,9 @@ fn order_execution_matches_live_typescript() {
             );
             if r.method == "DELETE" {
                 assert_eq!(
-                    e["__suppressAsterUnknownOrderError"], true,
-                    "source Axios suppression carrier unavailable natively"
+                    r.config_extensions.get("__suppressAsterUnknownOrderError"),
+                    e.get("__suppressAsterUnknownOrderError"),
+                    "native request preserves source Axios suppression"
                 );
             }
         }
