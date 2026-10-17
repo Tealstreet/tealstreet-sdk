@@ -39,7 +39,10 @@ The matching scoped Rust suite is
 With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 `nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
 owned-value account host. Events and worker Store payloads are forwarded to JS; signing
-and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
+and proxy tokens remain host callbacks. `nativeAccountSignerAvailable(id, available)`
+returns a Promise that resolves after the host applies the availability change.
+Await it before the next operation; released handles reject with `AccountClosedError`
+and never-issued handles with the existing missing-account error. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Repeating close on an issued handle resolves as a no-op without retaining the
 account. Calls on released handles reject with `name: "AccountClosedError"`,

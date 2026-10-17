@@ -56,6 +56,7 @@ enum Command {
     SignerAvailable {
         id: u32,
         available: bool,
+        reply: Reply<()>,
     },
     Close {
         id: u32,
@@ -140,13 +141,25 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                         let _ = reply.send(result);
                     });
                 }
-                Command::SignerAvailable { id, available } => {
-                    if let Some(open) = accounts.get(&id) {
-                        safe_cex_registry::native_account::native_account_signer_available(
-                            &open.account,
-                            available,
-                        );
-                    }
+                Command::SignerAvailable {
+                    id,
+                    available,
+                    reply,
+                } => {
+                    let Some(open) = accounts.get(&id) else {
+                        let error = if id > 0 && id < next {
+                            account_closed_error(id)
+                        } else {
+                            host_error(&format!("no native account {id}"))
+                        };
+                        let _ = reply.send(Err(error));
+                        continue;
+                    };
+                    safe_cex_registry::native_account::native_account_signer_available(
+                        &open.account,
+                        available,
+                    );
+                    let _ = reply.send(Ok(()));
                 }
                 Command::Close { id, reply } => {
                     let Some(open) = accounts.remove(&id) else {
@@ -368,10 +381,16 @@ pub fn native_account_call_method<'env>(
 
 /// ts: RemoteSigner.onAvailabilityChange, pushed from the host's signer session.
 #[napi_derive::napi(js_name = "nativeAccountSignerAvailable")]
-pub fn signer_available(env: &Env, id: u32, available: bool) -> napi::Result<()> {
-    commands()
-        .send(Command::SignerAvailable { id, available })
-        .or_else(|_| Err(rejected(env, host_error("native host thread stopped"))?))
+pub fn signer_available<'env>(
+    env: &'env Env,
+    id: u32,
+    available: bool,
+) -> napi::Result<PromiseRaw<'env, ()>> {
+    settle(env, move |reply| Command::SignerAvailable {
+        id,
+        available,
+        reply,
+    })
 }
 
 /// Stops forwarding and resolves after disposal; disposal errors reject.
