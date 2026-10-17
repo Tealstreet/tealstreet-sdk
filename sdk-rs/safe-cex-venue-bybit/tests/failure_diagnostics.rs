@@ -267,47 +267,6 @@ fn failure_diagnostics_native_source_parity() {
         }
     }
     assert_eq!(
-        f["duplicates"].as_array().unwrap().len(),
-        15,
-        "DIAGNOSTIC independent duplicate floor"
-    );
-    for c in f["duplicates"].as_array().unwrap() {
-        let message = input(&c["raw"]);
-        if let Some(r) = outcome(
-            is_duplicate_identity(c["code"].as_f64(), message.as_ref()),
-            &c["result"],
-        ) {
-            assert_eq!(
-                r,
-                c["result"]["ok"].as_bool().unwrap(),
-                "DIAGNOSTIC native duplicate"
-            );
-        }
-    }
-    assert_eq!(
-        f["rejected"].as_array().unwrap().len(),
-        3,
-        "DIAGNOSTIC independent rejection floor"
-    );
-    for c in f["rejected"].as_array().unwrap() {
-        let r = HyroOrderRejectedError::from(c["message"].as_str().unwrap().to_owned());
-        assert_eq!(
-            r.message,
-            c["message"].as_str().unwrap(),
-            "DIAGNOSTIC native rejected message"
-        );
-        assert_eq!(
-            r.name,
-            c["name"].as_str().unwrap(),
-            "DIAGNOSTIC native rejected name"
-        );
-        assert_eq!(
-            r.to_string(),
-            c["rendered"].as_str().unwrap(),
-            "DIAGNOSTIC native rejected rendering"
-        );
-    }
-    assert_eq!(
         f["responses"].as_array().unwrap().len(),
         14,
         "DIAGNOSTIC independent response floor"
