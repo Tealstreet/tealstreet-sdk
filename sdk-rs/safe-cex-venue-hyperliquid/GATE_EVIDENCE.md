@@ -1,3 +1,43 @@
+# Request-weight nested helper ownership
+
+The local-functions policy previously delegated `rate_limit.rs::LOCAL_FUNCTION:text`
+to private `raw_number`, which is absent from the actual compiler inventory. The
+policy now names the inventoried `get_hyperliquid_rest_request_weight` decoder.
+Its actual call chain reaches `raw_request_weight`, `raw_number` and the unchanged
+nested `text` coercer. The category and whole-file source pin are unchanged;
+only the reviewed parent and its explanation change. No production body changes.
+
+The new exact compiler function contract has 51 independently authored raw and
+typed JSON cases. They observe the actual returned weight's decimal text and
+binary64 bits, or thrown error name/message. Cases cover Number coercion, array
+and nested-array joins, late own-toString failures after a surrogate, signed and
+overflow inputs, endpoint suffixes, single JSON parsing and batch boundaries.
+The maintained TS source plus its actual endpoint/type constants independently
+match all 51 expectations. The literal native adapter passes all 51 cases, and
+the normal fresh compiler/artifact/inventory `runProbes` path returns one actual
+runtime result, zero classifications and zero failures. All 534 owners and 36
+aliases remain indexed before selecting that one function.
+
+A compiled mutation changes only nested `text`'s comma separator to `0`. The
+public caller's named comma-join assertion fails with native weight 71 versus
+expected 20, proving the delegated helper executes. Exact source restoration
+passes all 51 native cases. Restoring the old policy parent independently
+reproduces the original named ordinary refusal; the correct policy bytes are
+then restored. The source remains byte-identical to its reviewed SHA
+`b147ca525ffac1439ed6d128d5d2779b4be6a964540f3e5c592bec461a3a103a`.
+
+Strict native all-target clippy, formatting and parity pass; parity indexes 7459
+rows and 17214 public Rust items. After inheriting merged #389, all 102 master
+contracts are unchanged and this PR adds one actual owner contract. Current
+coverage is 94 owners, nine aliases and two construction reviews: 105 of 572
+reviewed obligations, 467 remaining.
+
+Ordinary preflight advances past text and retains
+`browser_approval_flows.rs::LOCAL_FUNCTION:attempt_switch: unclassified nested free function`.
+That helper, live getter/prototype behavior, limiter scheduling, dependencies and
+other target/feature configurations retain their own reviews. No whole-package
+acceptance is claimed.
+
 # Twenty parent and collection record reviews
 
 This cohort reviews twenty concrete maintained records against the actual TS

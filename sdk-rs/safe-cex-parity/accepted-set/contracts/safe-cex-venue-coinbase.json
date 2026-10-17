@@ -12428,5 +12428,2921 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPositionSide": {
+    "shape": "union",
+    "positive": [
+      "POSITION_SIDE_LONG",
+      "POSITION_SIDE_SHORT"
+    ],
+    "negative": [
+      {
+        "POSITION_SIDE_LONG": null
+      },
+      {
+        "POSITION_SIDE_SHORT": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "POSITION_SIDE_LONG ",
+      "position_side_long",
+      [
+        "POSITION_SIDE_LONG"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].position_side complete string-literal set: POSITION_SIDE_LONG, POSITION_SIDE_SHORT. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::PositionSideLong=>\"PositionSideLong\",$type::PositionSideShort=>\"PositionSideShort\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::PositionSideLong)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"POSITION_SIDE_LONG\"",
+          "output": {
+            "ok": true,
+            "variant": "PositionSideLong",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"POSITION_SIDE_SHORT\"",
+          "output": {
+            "ok": true,
+            "variant": "PositionSideShort",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"POSITION_SIDE_LONG\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"POSITION_SIDE_SHORT\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"POSITION_SIDE_LONG \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"position_side_long\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"POSITION_SIDE_LONG\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsCfmResponsePositionsItemSide": {
+    "shape": "union",
+    "positive": [
+      "LONG",
+      "SHORT"
+    ],
+    "negative": [
+      {
+        "LONG": null
+      },
+      {
+        "SHORT": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "LONG ",
+      "long",
+      [
+        "LONG"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts LIST_POSITIONS_CFM_RESPONSE.positions[].side complete string-literal set: LONG, SHORT. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Long=>\"Long\",$type::Short=>\"Short\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Long)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"LONG\"",
+          "output": {
+            "ok": true,
+            "variant": "Long",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"SHORT\"",
+          "output": {
+            "ok": true,
+            "variant": "Short",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"LONG\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"SHORT\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"LONG \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"long\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"LONG\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::CandleEventType": {
+    "shape": "union",
+    "positive": [
+      "snapshot",
+      "update"
+    ],
+    "negative": [
+      {
+        "snapshot": null
+      },
+      {
+        "update": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "snapshot ",
+      "SNAPSHOT",
+      [
+        "snapshot"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts CANDLE_EVENT.type complete string-literal set: snapshot, update. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Snapshot=>\"Snapshot\",$type::Update=>\"Update\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Snapshot)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"snapshot\"",
+          "output": {
+            "ok": true,
+            "variant": "Snapshot",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"update\"",
+          "output": {
+            "ok": true,
+            "variant": "Update",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"snapshot\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"update\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"snapshot \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"SNAPSHOT\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"snapshot\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::TradeEventType": {
+    "shape": "union",
+    "positive": [
+      "snapshot",
+      "update"
+    ],
+    "negative": [
+      {
+        "snapshot": null
+      },
+      {
+        "update": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "snapshot ",
+      "SNAPSHOT",
+      [
+        "snapshot"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts TRADE_EVENT.type complete string-literal set: snapshot, update. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Snapshot=>\"Snapshot\",$type::Update=>\"Update\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Snapshot)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"snapshot\"",
+          "output": {
+            "ok": true,
+            "variant": "Snapshot",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"update\"",
+          "output": {
+            "ok": true,
+            "variant": "Update",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"snapshot\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"update\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"snapshot \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"SNAPSHOT\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"snapshot\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::TradeEventTradesItemSide": {
+    "shape": "union",
+    "positive": [
+      "BUY",
+      "SELL"
+    ],
+    "negative": [
+      {
+        "BUY": null
+      },
+      {
+        "SELL": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "BUY ",
+      "buy",
+      [
+        "BUY"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts TRADE_EVENT.trades[].side complete string-literal set: BUY, SELL. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Buy=>\"Buy\",$type::Sell=>\"Sell\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Buy)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"BUY\"",
+          "output": {
+            "ok": true,
+            "variant": "Buy",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"SELL\"",
+          "output": {
+            "ok": true,
+            "variant": "Sell",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"BUY\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"SELL\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"BUY \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"buy\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"BUY\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::TickerEventType": {
+    "shape": "union",
+    "positive": [
+      "snapshot",
+      "update"
+    ],
+    "negative": [
+      {
+        "snapshot": null
+      },
+      {
+        "update": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "snapshot ",
+      "SNAPSHOT",
+      [
+        "snapshot"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts TICKER_EVENT.type complete string-literal set: snapshot, update. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Snapshot=>\"Snapshot\",$type::Update=>\"Update\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Snapshot)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"snapshot\"",
+          "output": {
+            "ok": true,
+            "variant": "Snapshot",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"update\"",
+          "output": {
+            "ok": true,
+            "variant": "Update",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"snapshot\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"update\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"snapshot \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"SNAPSHOT\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"snapshot\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::Level2EventType": {
+    "shape": "union",
+    "positive": [
+      "snapshot",
+      "update"
+    ],
+    "negative": [
+      {
+        "snapshot": null
+      },
+      {
+        "update": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "snapshot ",
+      "SNAPSHOT",
+      [
+        "snapshot"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts LEVEL2_EVENT.type complete string-literal set: snapshot, update. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Snapshot=>\"Snapshot\",$type::Update=>\"Update\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Snapshot)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"snapshot\"",
+          "output": {
+            "ok": true,
+            "variant": "Snapshot",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"update\"",
+          "output": {
+            "ok": true,
+            "variant": "Update",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"snapshot\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"update\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"snapshot \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"SNAPSHOT\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"snapshot\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::Level2EventUpdatesItemSide": {
+    "shape": "union",
+    "positive": [
+      "bid",
+      "offer"
+    ],
+    "negative": [
+      {
+        "bid": null
+      },
+      {
+        "offer": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "bid ",
+      "BID",
+      [
+        "bid"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts LEVEL2_EVENT.updates[].side complete string-literal set: bid, offer. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Bid=>\"Bid\",$type::Offer=>\"Offer\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Bid)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"bid\"",
+          "output": {
+            "ok": true,
+            "variant": "Bid",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"offer\"",
+          "output": {
+            "ok": true,
+            "variant": "Offer",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"bid\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"offer\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"bid \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"BID\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"bid\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::OrderEventType": {
+    "shape": "union",
+    "positive": [
+      "snapshot",
+      "update"
+    ],
+    "negative": [
+      {
+        "snapshot": null
+      },
+      {
+        "update": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "snapshot ",
+      "SNAPSHOT",
+      [
+        "snapshot"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts ORDER_EVENT.type complete string-literal set: snapshot, update. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Snapshot=>\"Snapshot\",$type::Update=>\"Update\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Snapshot)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"snapshot\"",
+          "output": {
+            "ok": true,
+            "variant": "Snapshot",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"update\"",
+          "output": {
+            "ok": true,
+            "variant": "Update",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"snapshot\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"update\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"snapshot \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"SNAPSHOT\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"snapshot\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::OrderEventOrdersItemStatus": {
+    "shape": "union",
+    "positive": [
+      "PENDING",
+      "OPEN",
+      "FILLED",
+      "CANCELLED",
+      "EXPIRED",
+      "FAILED"
+    ],
+    "negative": [
+      {
+        "PENDING": null
+      },
+      {
+        "OPEN": null
+      },
+      {
+        "FILLED": null
+      },
+      {
+        "CANCELLED": null
+      },
+      {
+        "EXPIRED": null
+      },
+      {
+        "FAILED": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "PENDING ",
+      "pending",
+      [
+        "PENDING"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts ORDER_EVENT.orders[].status complete string-literal set: PENDING, OPEN, FILLED, CANCELLED, EXPIRED, FAILED. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Pending=>\"Pending\",$type::Open=>\"Open\",$type::Filled=>\"Filled\",$type::Cancelled=>\"Cancelled\",$type::Expired=>\"Expired\",$type::Failed=>\"Failed\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Pending)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"PENDING\"",
+          "output": {
+            "ok": true,
+            "variant": "Pending",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"OPEN\"",
+          "output": {
+            "ok": true,
+            "variant": "Open",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"FILLED\"",
+          "output": {
+            "ok": true,
+            "variant": "Filled",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"CANCELLED\"",
+          "output": {
+            "ok": true,
+            "variant": "Cancelled",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"EXPIRED\"",
+          "output": {
+            "ok": true,
+            "variant": "Expired",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"FAILED\"",
+          "output": {
+            "ok": true,
+            "variant": "Failed",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"PENDING\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"OPEN\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FILLED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"CANCELLED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"EXPIRED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FAILED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"PENDING \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"pending\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"PENDING\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::OrderEventOrdersItemOrderSide": {
+    "shape": "union",
+    "positive": [
+      "BUY",
+      "SELL"
+    ],
+    "negative": [
+      {
+        "BUY": null
+      },
+      {
+        "SELL": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "BUY ",
+      "buy",
+      [
+        "BUY"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts ORDER_EVENT.orders[].order_side complete string-literal set: BUY, SELL. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Buy=>\"Buy\",$type::Sell=>\"Sell\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Buy)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"BUY\"",
+          "output": {
+            "ok": true,
+            "variant": "Buy",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"SELL\"",
+          "output": {
+            "ok": true,
+            "variant": "Sell",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"BUY\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"SELL\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"BUY \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"buy\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"BUY\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::OrderEventOrdersItemOrderType": {
+    "shape": "union",
+    "positive": [
+      "Limit",
+      "Market",
+      "Stop Limit"
+    ],
+    "negative": [
+      {
+        "Limit": null
+      },
+      {
+        "Market": null
+      },
+      {
+        "Stop Limit": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "Limit ",
+      "lIMIT",
+      [
+        "Limit"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts ORDER_EVENT.orders[].order_type complete string-literal set: Limit, Market, Stop Limit. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Limit=>\"Limit\",$type::Market=>\"Market\",$type::StopLimit=>\"StopLimit\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Limit)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"Limit\"",
+          "output": {
+            "ok": true,
+            "variant": "Limit",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"Market\"",
+          "output": {
+            "ok": true,
+            "variant": "Market",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"Stop Limit\"",
+          "output": {
+            "ok": true,
+            "variant": "StopLimit",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"Limit\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"Market\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"Stop Limit\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"Limit \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"lIMIT\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"Limit\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListOrdersResponseOrdersItemSide": {
+    "shape": "union",
+    "positive": [
+      "BUY",
+      "SELL"
+    ],
+    "negative": [
+      {
+        "BUY": null
+      },
+      {
+        "SELL": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "BUY ",
+      "buy",
+      [
+        "BUY"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts LIST_ORDERS_RESPONSE.orders[].side complete string-literal set: BUY, SELL. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Buy=>\"Buy\",$type::Sell=>\"Sell\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Buy)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"BUY\"",
+          "output": {
+            "ok": true,
+            "variant": "Buy",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"SELL\"",
+          "output": {
+            "ok": true,
+            "variant": "Sell",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"BUY\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"SELL\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"BUY \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"buy\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"BUY\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListOrdersResponseOrdersItemStatus": {
+    "shape": "union",
+    "positive": [
+      "PENDING",
+      "OPEN",
+      "FILLED",
+      "CANCELLED",
+      "EXPIRED",
+      "FAILED",
+      "UNKNOWN_ORDER_STATUS",
+      "QUEUED",
+      "CANCEL_QUEUED",
+      "EDIT_QUEUED"
+    ],
+    "negative": [
+      {
+        "PENDING": null
+      },
+      {
+        "OPEN": null
+      },
+      {
+        "FILLED": null
+      },
+      {
+        "CANCELLED": null
+      },
+      {
+        "EXPIRED": null
+      },
+      {
+        "FAILED": null
+      },
+      {
+        "UNKNOWN_ORDER_STATUS": null
+      },
+      {
+        "QUEUED": null
+      },
+      {
+        "CANCEL_QUEUED": null
+      },
+      {
+        "EDIT_QUEUED": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "PENDING ",
+      "pending",
+      [
+        "PENDING"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts LIST_ORDERS_RESPONSE.orders[].status complete string-literal set: PENDING, OPEN, FILLED, CANCELLED, EXPIRED, FAILED, UNKNOWN_ORDER_STATUS, QUEUED, CANCEL_QUEUED, EDIT_QUEUED. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Pending=>\"Pending\",$type::Open=>\"Open\",$type::Filled=>\"Filled\",$type::Cancelled=>\"Cancelled\",$type::Expired=>\"Expired\",$type::Failed=>\"Failed\",$type::UnknownOrderStatus=>\"UnknownOrderStatus\",$type::Queued=>\"Queued\",$type::CancelQueued=>\"CancelQueued\",$type::EditQueued=>\"EditQueued\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Pending)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"PENDING\"",
+          "output": {
+            "ok": true,
+            "variant": "Pending",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"OPEN\"",
+          "output": {
+            "ok": true,
+            "variant": "Open",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"FILLED\"",
+          "output": {
+            "ok": true,
+            "variant": "Filled",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"CANCELLED\"",
+          "output": {
+            "ok": true,
+            "variant": "Cancelled",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"EXPIRED\"",
+          "output": {
+            "ok": true,
+            "variant": "Expired",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"FAILED\"",
+          "output": {
+            "ok": true,
+            "variant": "Failed",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"UNKNOWN_ORDER_STATUS\"",
+          "output": {
+            "ok": true,
+            "variant": "UnknownOrderStatus",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"QUEUED\"",
+          "output": {
+            "ok": true,
+            "variant": "Queued",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"CANCEL_QUEUED\"",
+          "output": {
+            "ok": true,
+            "variant": "CancelQueued",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"EDIT_QUEUED\"",
+          "output": {
+            "ok": true,
+            "variant": "EditQueued",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"PENDING\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"OPEN\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FILLED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"CANCELLED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"EXPIRED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FAILED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"UNKNOWN_ORDER_STATUS\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"QUEUED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"CANCEL_QUEUED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"EDIT_QUEUED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"PENDING \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"pending\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"PENDING\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListOrdersResponseOrdersItemOrderType": {
+    "shape": "union",
+    "positive": [
+      "UNKNOWN_ORDER_TYPE",
+      "MARKET",
+      "LIMIT",
+      "STOP",
+      "STOP_LIMIT",
+      "BRACKET",
+      "TWAP",
+      "ROLL_OPEN",
+      "ROLL_CLOSE",
+      "LIQUIDATION",
+      "SCALED"
+    ],
+    "negative": [
+      {
+        "UNKNOWN_ORDER_TYPE": null
+      },
+      {
+        "MARKET": null
+      },
+      {
+        "LIMIT": null
+      },
+      {
+        "STOP": null
+      },
+      {
+        "STOP_LIMIT": null
+      },
+      {
+        "BRACKET": null
+      },
+      {
+        "TWAP": null
+      },
+      {
+        "ROLL_OPEN": null
+      },
+      {
+        "ROLL_CLOSE": null
+      },
+      {
+        "LIQUIDATION": null
+      },
+      {
+        "SCALED": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "UNKNOWN_ORDER_TYPE ",
+      "unknown_order_type",
+      [
+        "UNKNOWN_ORDER_TYPE"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts LIST_ORDERS_RESPONSE.orders[].order_type complete string-literal set: UNKNOWN_ORDER_TYPE, MARKET, LIMIT, STOP, STOP_LIMIT, BRACKET, TWAP, ROLL_OPEN, ROLL_CLOSE, LIQUIDATION, SCALED. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::UnknownOrderType=>\"UnknownOrderType\",$type::Market=>\"Market\",$type::Limit=>\"Limit\",$type::Stop=>\"Stop\",$type::StopLimit=>\"StopLimit\",$type::Bracket=>\"Bracket\",$type::Twap=>\"Twap\",$type::RollOpen=>\"RollOpen\",$type::RollClose=>\"RollClose\",$type::Liquidation=>\"Liquidation\",$type::Scaled=>\"Scaled\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::UnknownOrderType)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"UNKNOWN_ORDER_TYPE\"",
+          "output": {
+            "ok": true,
+            "variant": "UnknownOrderType",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"MARKET\"",
+          "output": {
+            "ok": true,
+            "variant": "Market",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"LIMIT\"",
+          "output": {
+            "ok": true,
+            "variant": "Limit",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"STOP\"",
+          "output": {
+            "ok": true,
+            "variant": "Stop",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"STOP_LIMIT\"",
+          "output": {
+            "ok": true,
+            "variant": "StopLimit",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"BRACKET\"",
+          "output": {
+            "ok": true,
+            "variant": "Bracket",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"TWAP\"",
+          "output": {
+            "ok": true,
+            "variant": "Twap",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"ROLL_OPEN\"",
+          "output": {
+            "ok": true,
+            "variant": "RollOpen",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"ROLL_CLOSE\"",
+          "output": {
+            "ok": true,
+            "variant": "RollClose",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"LIQUIDATION\"",
+          "output": {
+            "ok": true,
+            "variant": "Liquidation",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "\"SCALED\"",
+          "output": {
+            "ok": true,
+            "variant": "Scaled",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"UNKNOWN_ORDER_TYPE\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"MARKET\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"LIMIT\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"STOP\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"STOP_LIMIT\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"BRACKET\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"TWAP\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"ROLL_OPEN\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"ROLL_CLOSE\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"LIQUIDATION\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"SCALED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"UNKNOWN_ORDER_TYPE \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"unknown_order_type\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"UNKNOWN_ORDER_TYPE\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::StopDirection": {
+    "shape": "union",
+    "positive": [
+      "STOP_DIRECTION_STOP_UP",
+      "STOP_DIRECTION_STOP_DOWN"
+    ],
+    "negative": [
+      {
+        "STOP_DIRECTION_STOP_UP": null
+      },
+      {
+        "STOP_DIRECTION_STOP_DOWN": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "STOP_DIRECTION_STOP_UP ",
+      "stop_direction_stop_up",
+      [
+        "STOP_DIRECTION_STOP_UP"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts STOP_DIRECTION complete string-literal set: STOP_DIRECTION_STOP_UP, STOP_DIRECTION_STOP_DOWN. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::StopDirectionStopUp=>\"StopDirectionStopUp\",$type::StopDirectionStopDown=>\"StopDirectionStopDown\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::StopDirectionStopUp)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"STOP_DIRECTION_STOP_UP\"",
+          "output": {
+            "ok": true,
+            "variant": "StopDirectionStopUp",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"STOP_DIRECTION_STOP_DOWN\"",
+          "output": {
+            "ok": true,
+            "variant": "StopDirectionStopDown",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"STOP_DIRECTION_STOP_UP\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"STOP_DIRECTION_STOP_DOWN\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"STOP_DIRECTION_STOP_UP \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"stop_direction_stop_up\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"STOP_DIRECTION_STOP_UP\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::MarginType": {
+    "shape": "union",
+    "positive": [
+      "ISOLATED",
+      "CROSS"
+    ],
+    "negative": [
+      {
+        "ISOLATED": null
+      },
+      {
+        "CROSS": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "ISOLATED ",
+      "isolated",
+      [
+        "ISOLATED"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts MARGIN_TYPE complete string-literal set: ISOLATED, CROSS. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Isolated=>\"Isolated\",$type::Cross=>\"Cross\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Isolated)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"ISOLATED\"",
+          "output": {
+            "ok": true,
+            "variant": "Isolated",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"CROSS\"",
+          "output": {
+            "ok": true,
+            "variant": "Cross",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"ISOLATED\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"CROSS\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"ISOLATED \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"isolated\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"ISOLATED\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::PlaceOrderRequestSide": {
+    "shape": "union",
+    "positive": [
+      "BUY",
+      "SELL"
+    ],
+    "negative": [
+      {
+        "BUY": null
+      },
+      {
+        "SELL": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "BUY ",
+      "buy",
+      [
+        "BUY"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts PLACE_ORDER_REQUEST.side complete string-literal set: BUY, SELL. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::Buy=>\"Buy\",$type::Sell=>\"Sell\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::Buy)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"BUY\"",
+          "output": {
+            "ok": true,
+            "variant": "Buy",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"SELL\"",
+          "output": {
+            "ok": true,
+            "variant": "Sell",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"BUY\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"SELL\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"BUY \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"buy\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"BUY\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::PortfolioBreakdownResponseBreakdownPerpPositionsItemSide": {
+    "shape": "union",
+    "positive": [
+      "FUTURES_POSITION_SIDE_LONG",
+      "FUTURES_POSITION_SIDE_SHORT"
+    ],
+    "negative": [
+      {
+        "FUTURES_POSITION_SIDE_LONG": null
+      },
+      {
+        "FUTURES_POSITION_SIDE_SHORT": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "FUTURES_POSITION_SIDE_LONG ",
+      "futures_position_side_long",
+      [
+        "FUTURES_POSITION_SIDE_LONG"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts PORTFOLIO_BREAKDOWN_RESPONSE.breakdown.perp_positions[].side complete string-literal set: FUTURES_POSITION_SIDE_LONG, FUTURES_POSITION_SIDE_SHORT. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::FuturesPositionSideLong=>\"FuturesPositionSideLong\",$type::FuturesPositionSideShort=>\"FuturesPositionSideShort\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::FuturesPositionSideLong)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"FUTURES_POSITION_SIDE_LONG\"",
+          "output": {
+            "ok": true,
+            "variant": "FuturesPositionSideLong",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"FUTURES_POSITION_SIDE_SHORT\"",
+          "output": {
+            "ok": true,
+            "variant": "FuturesPositionSideShort",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"FUTURES_POSITION_SIDE_LONG\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FUTURES_POSITION_SIDE_SHORT\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"FUTURES_POSITION_SIDE_LONG \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"futures_position_side_long\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"FUTURES_POSITION_SIDE_LONG\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::PortfolioBreakdownResponseBreakdownFuturesPositionsItemSide": {
+    "shape": "union",
+    "positive": [
+      "FUTURES_POSITION_SIDE_LONG",
+      "FUTURES_POSITION_SIDE_SHORT"
+    ],
+    "negative": [
+      {
+        "FUTURES_POSITION_SIDE_LONG": null
+      },
+      {
+        "FUTURES_POSITION_SIDE_SHORT": null
+      },
+      {},
+      [],
+      null,
+      false,
+      17,
+      "",
+      "__unknown__",
+      "FUTURES_POSITION_SIDE_LONG ",
+      "futures_position_side_long",
+      [
+        "FUTURES_POSITION_SIDE_LONG"
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed maintained coinbase.types.ts PORTFOLIO_BREAKDOWN_RESPONSE.breakdown.futures_positions[].side complete string-literal set: FUTURES_POSITION_SIDE_LONG, FUTURES_POSITION_SIDE_SHORT. Reviewed every concrete native enum arm and manual Deserialize mapping. Inputs and expected native identities are authored independently from the TS declaration and concrete enum; nativeObservation exhaustively matches the decoded variant and observes first-variant membership without owner serialization/redecode. Existing String admission and exact spelling/case/whitespace semantics remain intact. Every admitted tag has an explicit externally-tagged-map refusal. Separate private function-local Wire decoder obligations are not exempted or classified by this public-owner row. Twenty temporary native tests execute every admitted tag through raw text, owned Value, concrete qualified and borrowed trait paths, compare the actual enum variant and retain the existing wire spelling. Each of the twenty production String admission guards was independently disconnected: the mutant compiled and failed its named native valid-tagged-object assertion; exact source restoration passed that owner. The final twenty-test, sixty-two-tag baseline passed with the production source restored byte-for-byte. Fresh actual compiler inventories and unchanged production probes pass all twenty selected owners on native and target-specific Wasm after master integration (twenty runtime receipts and zero failures on each target). This public cohort grants no alias, construction, receiver or function-local decoder permission.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>{let variant=match decoded{$type::FuturesPositionSideLong=>\"FuturesPositionSideLong\",$type::FuturesPositionSideShort=>\"FuturesPositionSideShort\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"isFirst\":matches!(decoded,$type::FuturesPositionSideLong)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "isFirst"
+      ],
+      "cases": [
+        {
+          "input": "\"FUTURES_POSITION_SIDE_LONG\"",
+          "output": {
+            "ok": true,
+            "variant": "FuturesPositionSideLong",
+            "isFirst": true
+          }
+        },
+        {
+          "input": "\"FUTURES_POSITION_SIDE_SHORT\"",
+          "output": {
+            "ok": true,
+            "variant": "FuturesPositionSideShort",
+            "isFirst": false
+          }
+        },
+        {
+          "input": "{\"FUTURES_POSITION_SIDE_LONG\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FUTURES_POSITION_SIDE_SHORT\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__unknown__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"FUTURES_POSITION_SIDE_LONG \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"futures_position_side_long\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"FUTURES_POSITION_SIDE_LONG\"]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }

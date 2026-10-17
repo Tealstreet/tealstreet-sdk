@@ -42,3 +42,24 @@ The permanent fixture covers both compiler and source keys, Unicode, Rust
 adapter text and negative zero. Executed controls remove crate ownership,
 drop a merged record and permit a restored flat file; each must fail its named
 assertion and pass after restoration.
+
+Receiver classifications use `itemSha256`, with no whole-file `sourceSha256`
+fallback. For an unsupported receiver, hash the complete compiler impl item text;
+for an uninstantiated default, hash its compiler method item text. Keep `file`,
+`category` and the individual reviewed `reason`. Compute the digest with
+`receiverItemSha256(span, source)` from `accepted-inventory.mjs`, using the fresh
+ordinary rustdoc item's span and exact current source bytes. The gate obtains
+that span from the compiler itself; policy cannot supply or redirect it.
+
+Coordinates are one-based Unicode scalar columns with an exclusive end. They
+are resolved anew and are not stored in policy: an unrelated edit before or
+after the item may move its coordinates without invalidating the review. Any
+change inside the item, including whitespace, invalidates its pin. Dependencies
+called by the item retain their separate inventory and behavioral obligations.
+This does not retire role review or native evidence when a reviewed body changes.
+
+The receiver item cutover rehashed all 76 existing rows in seven crate shards;
+owner keys, categories, source files and reasons were preserved. The compiler
+regression builds an original impl, an unrelated prefix/suffix edit and an impl
+body edit, proving pass/pass/fail and exact restoration. It also rejects the old
+whole-file schema, invalid coordinates and hash-check removal.
