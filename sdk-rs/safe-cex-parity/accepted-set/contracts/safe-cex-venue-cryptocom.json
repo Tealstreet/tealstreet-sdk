@@ -14167,5 +14167,3043 @@
     },
     "reason": "Outbound WebSocket auth-message construction: reads id and nonce in source order, signs the fixed public/auth method with empty params and returns the protocol fields. This generates a request rather than decoding an incoming payload. Clock/signing semantics and returned native fields are independently witnessed.",
     "evidence": "Executed tests/auth.rs::live_auth directly exercises this actual WS builder in 14 independently admitted source cases, observing native fields/signature/numeric bits and the two clock reads. scripts/signing-role-controls.py removes this body's second clock read: it compiles, fails AUTH-EAGER-CLOCK-COUNT with exit 101, restores exact source bytes and passes. Fresh native/default scripts/signing-role-contracts.mjs checks this exact compiler API among five explicit role classifications with zero failed owners; that receipt is classification-only, separate from the executed runtime evidence. Existing signing-data/string boundaries remain unchanged; no arbitrary JS, downstream decoder, alias, local or target-matrix closure is claimed."
+  },
+  "safe_cex_venue_cryptocom::api_error::append": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "append",
+      "signature": {
+        "inputs": [
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "u16"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "literal",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Appends a caller-supplied UTF8 literal as UTF16 units to an already existing mutable message vector. This is outbound message assembly, with the existing prefix retained, rather than a schema/finite-literal decoder.",
+    "evidence": "Individually reviewed the actual api_error.rs append body and its complete source caller role. Executed api_error::accepted_helpers::append_native_contract directly for retained prefix containing a lone surrogate, Unicode pairs, empty appends and ordered separator appends. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::api_error::http_message": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "http_message",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "status",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ],
+          [
+            "body",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_cryptocom::api_error::ApiErrorHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Builds the outbound HTTP diagnostic in prefix/status/separator/body order using supplied host template coercion and string construction. It does not inspect status/body schema; the coercion operations retain their own contracts.",
+    "evidence": "Individually reviewed the actual api_error.rs http_message body and its complete source caller role. Executed api_error::accepted_helpers::http_message_native_contract directly for original status/body carriers, coercion order, literal separator, lone-surrogate message units, and each original coercion error without later construction. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::api_error::optional_get": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional_get",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "qualified_path": {
+                "name": "Value",
+                "args": null,
+                "self_type": {
+                  "generic": "H"
+                },
+                "trait": {
+                  "path": "",
+                  "args": null
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_cryptocom::api_error::ApiErrorHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Implements an optional property access on an existing host carrier: nullish values return the host undefined carrier, otherwise the original Get result/error is forwarded. It does not validate or construct a wire record; nullish/Get semantics remain explicit host operations.",
+    "evidence": "Individually reviewed the actual api_error.rs optional_get body and its complete source caller role. Executed api_error::accepted_helpers::optional_get_native_contract directly for undefined/null short circuit, original child identity, falsey non-nullish property access and original getter error. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::order_mappings::equals": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "equals",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "primitive": "u16"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "literal",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Compares an already captured optional UTF16 string against the caller-provided UTF8 literal using strict code-unit equality. None is the comparison-equivalent non-string fallback and returns false without coercion. This is an internal primitive-comparison operation, with no wire/finite-union admission or typed-record construction; the downstream enum-returning switch functions require independent executed contracts.",
+    "evidence": "Individually reviewed the actual order_mappings.rs equals body and its source strict-string switch role. Executed order_mappings::accepted_equals::native_strict_comparison directly across 24 independently authored fixed/counted comparisons: omitted/non-string comparison class, empty text, exact equality, unequal lengths/case, NUL, Unicode pairs, normalization-distinct strings and lone surrogates. Its own boolean-corruption control compiled, failed the named native-comparison assertion with exit 101, restored exact source bytes and passed. The separate order_mappings::accepted_equals fixture-walk count control also compiled, failed its named counter, restored and passed. A fresh native/default exact-API classification receipt covers this specific role; that metadata is separate from actual native execution. Literal str input retains its UTF8 domain. No generic helper, privacy, parent receiver, downstream decoder or target-matrix exemption is claimed."
+  },
+  "safe_cex_venue_cryptocom::order_mappings::map_order_type": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "map_order_type",
+      "signature": {
+        "inputs": [
+          [
+            "kind",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "primitive": "u16"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_cryptocom::wire::CryptocomOrderType",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let units:Option<Vec<u16>>=serde_json::from_value($value.clone()).unwrap();serde_json::json!(match $type(units.as_deref()){crate::wire::CryptocomOrderType::Limit=>\"Limit\",crate::wire::CryptocomOrderType::Market=>\"Market\",crate::wire::CryptocomOrderType::StopLoss=>\"StopLoss\",crate::wire::CryptocomOrderType::StopLimit=>\"StopLimit\",crate::wire::CryptocomOrderType::TakeProfit=>\"TakeProfit\",crate::wire::CryptocomOrderType::TakeProfitLimit=>\"TakeProfitLimit\"})}",
+    "cases": [
+      {
+        "input": null,
+        "output": "Limit"
+      },
+      {
+        "input": [
+          109,
+          97,
+          114,
+          107,
+          101,
+          116
+        ],
+        "output": "Market"
+      },
+      {
+        "input": [
+          108,
+          105,
+          109,
+          105,
+          116
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          115,
+          116,
+          111,
+          112,
+          95,
+          109,
+          97,
+          114,
+          107,
+          101,
+          116
+        ],
+        "output": "StopLoss"
+      },
+      {
+        "input": [
+          116,
+          97,
+          107,
+          101,
+          95,
+          112,
+          114,
+          111,
+          102,
+          105,
+          116,
+          95,
+          109,
+          97,
+          114,
+          107,
+          101,
+          116
+        ],
+        "output": "TakeProfit"
+      },
+      {
+        "input": [
+          99,
+          111,
+          110,
+          100,
+          105,
+          116,
+          105,
+          111,
+          110,
+          97,
+          108
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          116,
+          114,
+          97,
+          105,
+          108,
+          105,
+          110,
+          103,
+          95,
+          115,
+          116,
+          111,
+          112,
+          95,
+          109,
+          97,
+          114,
+          107,
+          101,
+          116
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          77,
+          65,
+          82,
+          75,
+          69,
+          84
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          32,
+          109,
+          97,
+          114,
+          107,
+          101,
+          116
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          109,
+          97,
+          114,
+          107,
+          101,
+          116,
+          0
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          109,
+          97,
+          114,
+          107,
+          101,
+          116,
+          55296
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          56320,
+          109,
+          97,
+          114,
+          107,
+          101,
+          116
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          55296
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          56320
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          55357,
+          56898
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          76,
+          73,
+          77,
+          73,
+          84
+        ],
+        "output": "Limit"
+      },
+      {
+        "input": [
+          116,
+          97,
+          107,
+          101,
+          95,
+          112,
+          114,
+          111,
+          102,
+          105,
+          116,
+          95,
+          109,
+          97,
+          114,
+          107,
+          101,
+          116,
+          88
+        ],
+        "output": "Limit"
+      }
+    ],
+    "evidence": "Executed tests/accepted_mapping_variants.rs::native_map_order_type directly against this actual function across 18 independently authored captured Option<UTF16> cases, with fixed fixture and executed counters. Each result is matched to its actual native enum variant, independently of Serde tags. The unchanged live tests/order_mappings.rs witness also passed its independently admitted 161 actual-source/native comparisons across all six source switch methods. This owner's wrong-return body mutation compiled, failed its named native-variant assertion with exit 101, restored exact source bytes and passed. The separate native_map_order_type fixture-walk control also compiled, failed its named counter, restored and passed. The fresh closed native/default gate verified all twenty exact APIs, executed these three decoder functions, emitted seventeen separate explicit classifications and reported zero failed owners. The pre-existing strict comparison-equivalent None fallback remains; no dynamic coercion, class binding, downstream decoder or matrix completion is claimed."
+  },
+  "safe_cex_venue_cryptocom::order_mappings::map_stop_trigger_type": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "map_stop_trigger_type",
+      "signature": {
+        "inputs": [
+          [
+            "kind",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "primitive": "u16"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_cryptocom::wire::CryptocomRefPriceType",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let units:Option<Vec<u16>>=serde_json::from_value($value.clone()).unwrap();serde_json::json!(match $type(units.as_deref()){crate::wire::CryptocomRefPriceType::Mark=>\"Mark\",crate::wire::CryptocomRefPriceType::Index=>\"Index\",crate::wire::CryptocomRefPriceType::Last=>\"Last\"})}",
+    "cases": [
+      {
+        "input": null,
+        "output": "Mark"
+      },
+      {
+        "input": [
+          109,
+          97,
+          114,
+          107,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          108,
+          97,
+          115,
+          116,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101
+        ],
+        "output": "Last"
+      },
+      {
+        "input": [
+          105,
+          110,
+          100,
+          101,
+          120,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101
+        ],
+        "output": "Index"
+      },
+      {
+        "input": [],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          73,
+          78,
+          68,
+          69,
+          88,
+          95,
+          80,
+          82,
+          73,
+          67,
+          69
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          77,
+          97,
+          114,
+          107,
+          80,
+          114,
+          105,
+          99,
+          101
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          32,
+          105,
+          110,
+          100,
+          101,
+          120,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          108,
+          97,
+          115,
+          116,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101,
+          0
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          105,
+          110,
+          100,
+          101,
+          120,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101,
+          55296
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          56320,
+          108,
+          97,
+          115,
+          116,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          55296
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          56320
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          55357,
+          56898
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          109,
+          97,
+          114,
+          107,
+          101,
+          116
+        ],
+        "output": "Mark"
+      },
+      {
+        "input": [
+          105,
+          110,
+          100,
+          101,
+          120,
+          95,
+          112,
+          114,
+          105,
+          99,
+          101,
+          88
+        ],
+        "output": "Mark"
+      }
+    ],
+    "evidence": "Executed tests/accepted_mapping_variants.rs::native_map_stop_trigger_type directly against this actual function across 16 independently authored captured Option<UTF16> cases, with fixed fixture and executed counters. Each result is matched to its actual native enum variant, independently of Serde tags. The unchanged live tests/order_mappings.rs witness also passed its independently admitted 161 actual-source/native comparisons across all six source switch methods. This owner's wrong-return body mutation compiled, failed its named native-variant assertion with exit 101, restored exact source bytes and passed. The separate native_map_order_type fixture-walk control also compiled, failed its named counter, restored and passed. The fresh closed native/default gate verified all twenty exact APIs, executed these three decoder functions, emitted seventeen separate explicit classifications and reported zero failed owners. The pre-existing strict comparison-equivalent None fallback remains; no dynamic coercion, class binding, downstream decoder or matrix completion is claimed."
+  },
+  "safe_cex_venue_cryptocom::order_mappings::map_time_in_force": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "map_time_in_force",
+      "signature": {
+        "inputs": [
+          [
+            "tif",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "primitive": "u16"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_cryptocom::wire::CryptocomTimeInForce",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let units:Option<Vec<u16>>=serde_json::from_value($value.clone()).unwrap();serde_json::json!(match $type(units.as_deref()){crate::wire::CryptocomTimeInForce::GoodTillCancel=>\"GoodTillCancel\",crate::wire::CryptocomTimeInForce::ImmediateOrCancel=>\"ImmediateOrCancel\",crate::wire::CryptocomTimeInForce::FillOrKill=>\"FillOrKill\",crate::wire::CryptocomTimeInForce::PostOnly=>\"PostOnly\"})}",
+    "cases": [
+      {
+        "input": null,
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          71,
+          111,
+          111,
+          100,
+          84,
+          105,
+          108,
+          108,
+          67,
+          97,
+          110,
+          99,
+          101,
+          108
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          73,
+          109,
+          109,
+          101,
+          100,
+          105,
+          97,
+          116,
+          101,
+          79,
+          114,
+          67,
+          97,
+          110,
+          99,
+          101,
+          108
+        ],
+        "output": "ImmediateOrCancel"
+      },
+      {
+        "input": [
+          70,
+          105,
+          108,
+          108,
+          79,
+          114,
+          75,
+          105,
+          108,
+          108
+        ],
+        "output": "FillOrKill"
+      },
+      {
+        "input": [
+          80,
+          111,
+          115,
+          116,
+          79,
+          110,
+          108,
+          121
+        ],
+        "output": "PostOnly"
+      },
+      {
+        "input": [],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          80,
+          79,
+          83,
+          84,
+          95,
+          79,
+          78,
+          76,
+          89
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          102,
+          105,
+          108,
+          108,
+          111,
+          114,
+          107,
+          105,
+          108,
+          108
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          32,
+          70,
+          105,
+          108,
+          108,
+          79,
+          114,
+          75,
+          105,
+          108,
+          108
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          70,
+          105,
+          108,
+          108,
+          79,
+          114,
+          75,
+          105,
+          108,
+          108,
+          0
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          70,
+          105,
+          108,
+          108,
+          79,
+          114,
+          75,
+          105,
+          108,
+          108,
+          55296
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          56320,
+          80,
+          111,
+          115,
+          116,
+          79,
+          110,
+          108,
+          121
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          55296
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          56320
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          55357,
+          56898
+        ],
+        "output": "GoodTillCancel"
+      },
+      {
+        "input": [
+          71,
+          79,
+          79,
+          68,
+          95,
+          84,
+          73,
+          76,
+          76,
+          95,
+          67,
+          65,
+          78,
+          67,
+          69,
+          76
+        ],
+        "output": "GoodTillCancel"
+      }
+    ],
+    "evidence": "Executed tests/accepted_mapping_variants.rs::native_map_time_in_force directly against this actual function across 16 independently authored captured Option<UTF16> cases, with fixed fixture and executed counters. Each result is matched to its actual native enum variant, independently of Serde tags. The unchanged live tests/order_mappings.rs witness also passed its independently admitted 161 actual-source/native comparisons across all six source switch methods. This owner's wrong-return body mutation compiled, failed its named native-variant assertion with exit 101, restored exact source bytes and passed. The separate native_map_order_type fixture-walk control also compiled, failed its named counter, restored and passed. The fresh closed native/default gate verified all twenty exact APIs, executed these three decoder functions, emitted seventeen separate explicit classifications and reported zero failed owners. The pre-existing strict comparison-equivalent None fallback remains; no dynamic coercion, class binding, downstream decoder or matrix completion is claimed."
+  },
+  "safe_cex_venue_cryptocom::private_lifecycle::subscribe_one": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "subscribe_one",
+      "signature": {
+        "inputs": [
+          [
+            "state",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::private_lifecycle::PrivateSocketState",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "W"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "channel",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "transport",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "T"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "T"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "W",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_cryptocom::public_subscriptions::SubscriptionTransport",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Checks the existing native subscription set, inserts a caller-supplied channel once, and only when authenticated delegates an outbound subscription frame to the transport. This is state mutation and sending, with no incoming record admission. Duplicate registration returns without sending; source call sites retain their own semantics.",
+    "evidence": "Individually reviewed the actual private_lifecycle.rs subscribe_one body and its complete source caller role. Executed private_lifecycle::accepted_helpers::subscribe_one_native_contract directly for eight independent auth/duplicate/disposed/failure cases, retained set and insertion-before-prepare, original prepared/error identities, exact native frame fields and signed-zero bits, event order and id advancement. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The private subscription fixture-walk mutation also compiled, failed its independently fixed executed-count assertion, restored and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::private_order_mappings::equals": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "equals",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "primitive": "u16"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "literal",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Compares an already captured optional UTF16 string against the caller-provided UTF8 literal using strict code-unit equality. None is the comparison-equivalent non-string fallback and returns false without coercion. This is an internal primitive-comparison operation, with no wire/finite-union admission or typed-record construction; the downstream enum-returning switch functions require independent executed contracts.",
+    "evidence": "Individually reviewed the actual private_order_mappings.rs equals body and its source strict-string switch role. Executed private_order_mappings::accepted_equals::native_strict_comparison directly across 24 independently authored fixed/counted comparisons: omitted/non-string comparison class, empty text, exact equality, unequal lengths/case, NUL, Unicode pairs, normalization-distinct strings and lone surrogates. Its own boolean-corruption control compiled, failed the named native-comparison assertion with exit 101, restored exact source bytes and passed. The separate order_mappings::accepted_equals fixture-walk count control also compiled, failed its named counter, restored and passed. A fresh native/default exact-API classification receipt covers this specific role; that metadata is separate from actual native execution. Literal str input retains its UTF8 domain. No generic helper, privacy, parent receiver, downstream decoder or target-matrix exemption is claimed."
+  },
+  "safe_cex_venue_cryptocom::public_lifecycle::channel": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "channel",
+      "signature": {
+        "inputs": [
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "instrument",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_cryptocom::public_subscriptions::ChannelValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs an outbound ChannelValue::String from the caller-provided UTF8 prefix and captured UTF16 instrument units. It does not admit a remote frame or parse a channel grammar; the source subscription caller supplies the prefix.",
+    "evidence": "Individually reviewed the actual public_lifecycle.rs channel body and its complete source caller role. Executed public_lifecycle::accepted_helpers::channel_native_contract directly for four independently specified prefix/instrument combinations including empty values, Unicode pairs, lone surrogates and NUL units. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The channel construction fixture-walk mutation also compiled, failed its independently fixed executed-count assertion, restored and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::public_lifecycle::is_channel": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_channel",
+      "signature": {
+        "inputs": [
+          [
+            "actual",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "u16"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "expected",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Compares an existing captured UTF16 channel value with a caller-provided UTF8 string using strict code-unit equality. It is the primitive comparison used inside valuation control flow, not remote record or finite-union admission.",
+    "evidence": "Individually reviewed the actual public_lifecycle.rs is_channel body and its complete source caller role. Executed public_lifecycle::accepted_helpers::is_channel_native_contract directly for twenty-two independent equal/unequal, empty, NUL, Unicode/normalization-distinct and lone-surrogate comparisons. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The channel comparison fixture-walk mutation also compiled, failed its independently fixed executed-count assertion, restored and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::caught": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "caught",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "result",
+            {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "generic": "E"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "On successful completion does nothing; on an existing error resolves parent.emitAndLogError, constructs the prefixed message through supplied host coercion, invokes it and discards its return. Errors during that reporting replace the caught error. This is catch/report control flow, not input admission.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs caught body and its complete source caller role. Executed socket_handlers::accepted_helpers::caught_native_contract directly for no effects on success; original error carrier, parent receiver and UTF16 message; parent/method/coercion/invocation order and replacement errors. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::concat": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "concat",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Renders an outbound string by concatenating UTF8 prefix units with the supplied host template-coercion UTF16 units. It constructs a message without reading a wire schema; coercion and string construction are explicit host operations.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs concat body and its complete source caller role. Executed socket_handlers::accepted_helpers::concat_native_contract directly for prefix and lone-surrogate UTF16 units, empty text, numeric negative-zero rendering and no construction after coercion error. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::get": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "object",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Forwards one property Get of the supplied native carrier/key to the supplied SocketOps operation. The original value or error is returned. It does not admit a record or inspect a finite literal domain.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs get body and its complete source caller role. Executed socket_handlers::accepted_helpers::get_native_contract directly for original property result and error referents, UTF8 key forwarding and getter effects. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::global": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "global",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Resolves a caller-named global before evaluating arguments, then invokes the captured value with an undefined receiver. It is global call dispatch rather than data admission; the called operation retains its own behavior obligations.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs global body and its complete source caller role. Executed socket_handlers::accepted_helpers::global_native_contract directly for global lookup/arguments/invoke order, captured callee after replacement, undefined receiver, original arguments/results and errors. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::math": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "math",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Resolves the Math carrier and dispatches its caller-named method through the original receiver before argument evaluation. It is binding/dispatch, with Math operation semantics supplied separately by the host, rather than a numeric parser or wire decoder.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs math body and its complete source caller role. Executed socket_handlers::accepted_helpers::math_native_contract directly for Math/method/argument/invoke order, original Math receiver and argument/result identities, and all four abrupt stages. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::method": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "method",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Resolves a method on the original receiver before evaluating arguments, then invokes the captured callee with that receiver and original argument carriers. This is call dispatch at an explicit host boundary; it does not parse, validate or construct a wire value.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs method body and its complete source caller role. Executed socket_handlers::accepted_helpers::method_native_contract directly for getter/arguments/invoke order, captured callee after replacement, original receiver/argument/result identities and each abrupt completion. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::own": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "own",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Clones the borrowed receiver into method dispatch and forwards the method name and argument thunk. It is a receiver-binding adapter. The shared Js witness demonstrates retained identity for that concrete carrier, without granting permission to arbitrary Clone implementations or downstream callees.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs own body and its complete source caller role. Executed socket_handlers::accepted_helpers::own_native_contract directly for borrowed receiver retained through actual Js Clone, lazy arguments, original result and getter/argument errors. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::parsed_field": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "parsed_field",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Resolves the supplied parseFloat host function before reading the caller-named field, then invokes it with that original field value and undefined receiver. This helper dispatches an external numeric operation and preserves its result/error; it does not implement parseFloat or grant its input grammar.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs parsed_field body and its complete source caller role. Executed socket_handlers::accepted_helpers::parsed_field_native_contract directly for global-before-field ordering, original field and returned carriers, undefined receiver and all three abrupt stages. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
+  },
+  "safe_cex_venue_cryptocom::socket_handlers::parsed_or": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "parsed_or",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::socket_handlers::SocketOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "default",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Delegates field parsing to the explicit host parseFloat operation, applies the supplied truthiness operation to its original result, and lazily constructs the supplied default number only when falsey. It is fallback selection around a host call; parseFloat grammar and downstream record admission remain independent.",
+    "evidence": "Individually reviewed the actual socket_handlers.rs parsed_or body and its complete source caller role. Executed socket_handlers::accepted_helpers::parsed_or_native_contract directly for eleven manually chosen truthy/falsey native results, retained truthy carriers, negative-zero default bits, lazy fallback and original parsing error. Its own body mutation compiled, failed its named native assertion with exit 101, restored exact source bytes and passed. The fallback fixture-walk mutation also compiled, failed its independently fixed executed-count assertion, restored and passed. The unchanged live source/socket/error/lifecycle targets passed. Fresh native/default exact-API classification receipts cover this specific reviewed role; they are separate from the actual native witnesses and controls. No privacy, generic host/Clone, parent receiver, downstream decoder, alias or target-matrix permission is inferred."
   }
 }

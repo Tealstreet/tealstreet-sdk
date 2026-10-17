@@ -347,3 +347,11 @@ SIGNING_ROLE_CONTRACT_REVIEW.md separates fresh compiler classification receipts
 from the actual live native signing/auth targets and per-body mutation controls.
 SigningValue admission, other owners and the existing domain boundaries remain
 independent obligations; no production behavior or manifest status is changed.
+
+The twenty-owner helper batch reviews three enum-returning mapping decoders and
+seventeen specific comparison/rendering/dispatch/state roles. Every owner has a
+direct native witness and individual compiling body control; compiler
+classification receipts remain separate from executed evidence. See
+HELPER_BATCH_CONTRACT_REVIEW.md and scripts/helper-batch-contracts.mjs. Supplied
+host parsers, generic Clone behavior, downstream decoders, aliases and the full
+discovery/feature/target matrix remain independent obligations.
