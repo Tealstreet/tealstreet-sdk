@@ -9,16 +9,6 @@ use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{OptionTerms, Order, OrderStatus, Position, PositionOption};
 use std::rc::Rc;
 
-/// Store mutators take the entity (`updateTicker(ticker, ...)`); its `id` is the key.
-fn id_of(target: &Js) -> Result<String, Thrown> {
-    Ok(if target.is_object() {
-        target.get("id")?
-    } else {
-        target.clone()
-    }
-    .to_display())
-}
-
 // Source findIndex/Map lookups compare to the native model's string id without coercion.
 fn strict_id_of(target: &Js) -> Result<Option<String>, Thrown> {
     Ok(match target.get("id")? {
@@ -204,11 +194,38 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updatePositions",
         Rc::new(|st, a| {
-            let mut updates = vec![];
-            for pair in arg(&a, 0).array_values().unwrap_or_default() {
-                let (position, changes) = (pair.get("0")?, pair.get("1")?);
-                updates.push((id_of(&position)?, position_patch(&changes)?));
+            let pairs = arg(&a, 0).array_values().unwrap_or_default();
+            let positions = st.positions().to_vec();
+            if pairs.is_empty() || positions.is_empty() {
+                return Ok(Js::Undefined);
             }
+            let indexed = pairs.len() > 1 && positions.len() > 1;
+            // Keep every selector row: removing unmatched keys could change
+            // the core Store's index mode and duplicate-ID selection.
+            let mut selected = vec![];
+            for pair in pairs {
+                let (position, changes) = (pair.get("0")?, pair.get("1")?);
+                let id = if indexed {
+                    property_id_of(&position)?
+                } else {
+                    strict_id_of(&position)?
+                };
+                selected.push((id, changes));
+            }
+            let mut updates = vec![];
+            for (id, changes) in selected {
+                let patch = if id
+                    .as_ref()
+                    .is_some_and(|id| positions.iter().any(|position| &position.id == id))
+                {
+                    position_patch(&changes)?
+                } else {
+                    // Source updateInArray never reads changes for a missing row.
+                    ModelPatch::default()
+                };
+                updates.push((id, patch));
+            }
+            drop(positions);
             st.update_positions(&updates).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
