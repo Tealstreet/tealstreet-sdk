@@ -22,33 +22,35 @@ and checks record acceptance against the live TypeScript compiler. CI uses
 Missing optional fields remain distinct from explicit null; private decode
 companions sit behind the shared map-only guard. `account_mode` ports inert UTA detection and Classic-only selection; its JSON
 input boundary and exotic-JS limitations are explicit manifest divergences.
-`order_helpers` holds pure futures side, stop and mode decisions, exercised
-against extracted live source methods. `broker` uses the core normalized string-header boundary and shared crypto.
+`broker` uses the core normalized string-header boundary and shared crypto.
 `api_capture` pins live hashing plus actual Axios transforms before factory
 implementation. `api` now composes the shared HTTP/interceptor, retry, crypto and
 remote adapter operations; remaining exchange/socket runtime methods are pending.
 
 See [gate evidence](GATE_EVIDENCE.md) for measured controls and current scope.
 
-`sizing` uses the production Store for symbols, contract quantities and same-id
-remainder reconciliation. `mappers` preserves native futures quantities beside
-base units and distinct spot semantics; its live oracle tags nonfinite numbers
-before serialization. Shared TableHit preserves inherited branches and later source overrides. The
-closed Order fields refuse inherited outputs as whole records, with callable
-omission and the separately retained __proto__ object witnessed before JSON.
-Typed-output choices, prototype-object findings and input restrictions are
-recorded in the two mapper manifest rows.
+Production futures mapping, formatting and side/mode decisions use
+`futures_native_mapping`, `futures_native_formatters` and `futures_native_helpers`.
+Spot mapping uses `spot_native_order_reads`. The unused typed `mappers`,
+`formatters`, `order_helpers` and sizing copies are deleted with their exclusive
+tests, source scripts and decoder contracts. `sizing::to_api_symbol` stays live in
+`ws_helpers`; `sizing::api_margin_coin` stays live in the futures getter. The small
+`scripts/sizing.cjs` source extractor retains the two methods required by the
+WebSocket helper oracle. Constructed `order_reads_binding` and `exchange_trait`
+tests detect compiled mutations in actual native mapping and format payloads
+while all retired mapper/formatter tests remain green. Native component/source
+targets remain mandatory in the paired package command and CI guard. Historical
+typed-copy refusal/identity findings are not production-route evidence; shared
+Store/Order projection limits remain declared separately in the manifest.
 
 `balance_reference` pins the live Spot whole-object dictionary write behavior:
 `__proto__` replaces the local dictionary prototype and loses its own serialized
 entry, without polluting Object.prototype. Its nested-write control is explicitly
 a different shape. Spot fetchBalance remains pending on the shared write operation.
 
-Futures formatters use shared TableHit for standard inherited market names, including
-source UUID consumption and undefined-symbol payloads. The live formatter oracle
-instantiates DefaultStore and admits markets through its actual update; it must not use
-Object.fromEntries for that dictionary. The two formatter manifest rows record the separately measured typed Store lookup
-cost; their native component evidence is FUTURES_NATIVE_MAPPING_FORMATTERS_EVIDENCE.md.
+Native formatter behavior and its source comparisons are documented in
+FUTURES_NATIVE_MAPPING_FORMATTERS_EVIDENCE.md. Historical typed formatter oracle
+measurements do not cover the installed class implementation.
 
 `ws_helpers::send_channel_op` batches subscription frames using the shared JSON
 encoder, with host callbacks for Date.now and the core socket send. Its live
@@ -301,3 +303,8 @@ including astral Unicode, retain source iteration and native NaN levels; truthy
 non-iterables report one listener exception. Callback count and every price,
 amount and total are observed before JSON numeric projection. The test-only
 commit compiles and fails on master at the unexpected string-input exception.
+
+The canonical Order snapshot supplement in `futures_native_order_reads` observes
+the decoded model directly. All numeric, info ownership and row-floor assertions
+remain; the retired typed reconcile helper was an identity over an empty Store
+and added no production coverage at that representation boundary.
