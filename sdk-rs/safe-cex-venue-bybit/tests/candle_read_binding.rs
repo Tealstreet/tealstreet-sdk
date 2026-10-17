@@ -60,3 +60,44 @@ fn inverse_fetch_ohlcv_reaches_signed_http_and_maps_candles() {
 fn spot_fetch_ohlcv_reaches_signed_http_and_maps_candles() {
     candle_case(ExchangeName::Bybitspot, "spot");
 }
+
+#[test]
+fn primary_candle_errors_surface_the_source_api_and_shape_messages() {
+    for (body, message) in [
+        (
+            json!({"retCode":10001,"retMsg":"bad interval","result":{}}),
+            "Bybit KLINE error: bad interval (retCode=10001)",
+        ),
+        (
+            json!({"retCode":0,"retMsg":"OK","result":{}}),
+            "Bybit KLINE: no candle list in response (keys=retCode,retMsg,result)",
+        ),
+        (
+            serde_json::Value::Null,
+            "Bybit KLINE: null response data (status=200)",
+        ),
+    ] {
+        let h = harness_as(ExchangeName::Bybit, options(), |wire| {
+            wire.route("GET", "/v5/market/kline", 200, body)
+        });
+        let opts =
+            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m","limit":1})).unwrap();
+        let error = h.drive(h.venue().fetch_ohlcv(opts)).unwrap_err();
+        assert_eq!(error.message, message);
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn dedicated_candle_readers_keep_the_source_optional_list_mapping() {
+    for name in [ExchangeName::Bybitspot, ExchangeName::Bybitinverse] {
+        let h = harness_as(name, options(), |wire| {
+            wire.route("GET", "/v5/market/kline", 200, serde_json::Value::Null)
+        });
+        let opts =
+            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m","limit":1})).unwrap();
+        assert!(h.drive(h.venue().fetch_ohlcv(opts)).unwrap().is_empty());
+        assert_eq!(h.wire.calls("/v5/market/kline").len(), 1);
+        h.venue().dispose().unwrap();
+    }
+}

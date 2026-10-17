@@ -72,12 +72,12 @@ pub(crate) fn fetch_ohlcv(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 .validate_candle_interval(&to_json(&options.get("interval")?)?)
                 .map_err(Thrown::from)?;
         }
-        let category = if name == ExchangeName::Bybitspot {
-            Js::str("spot")
-        } else {
-            rt.this
-                .call_method("getCategoryForSymbol", vec![options.get("symbol")?])?
-        };
+        if name == ExchangeName::Bybitspot {
+            return crate::spot_exchange_reads::fetch_ohlcv(&rt, &rt.this, options).await;
+        }
+        let category = rt
+            .this
+            .call_method("getCategoryForSymbol", vec![options.get("symbol")?])?;
         crate::spot_exchange_reads::fetch_ohlcv_for_category(
             &rt,
             &rt.this,
