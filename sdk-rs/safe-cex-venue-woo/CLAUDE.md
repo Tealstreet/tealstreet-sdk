@@ -474,6 +474,16 @@ compiles a live-mapper null-refusal control that must fail its named order-count
 assertion; decoder-only tests are not evidence
 for this production path.
 
+The configured fetchOrders member admits mapped rows individually before either
+the Exchange trait or startup Store write. Order.amount/filled must be numbers;
+reduceOnly admits absent, own undefined and booleans. A malformed row emits its
+id, field and original typed value through emitAndLogError and is omitted; other
+rows keep their values and presence. This is an intentional accepted divergence
+from TypeScript retaining malformed typed fields, per shared-type decision 3.
+The raw mapAlgoOrder/fetchAlgoOrders source-value witnesses remain unchanged.
+The real mixed-row binding regression covers amount, filled and reduceOnly via
+both the public read and actual configured fetch-to-Store path.
+
 
 The constructed clientOrderIdRule retains its source Number(input) conversion and
 uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness

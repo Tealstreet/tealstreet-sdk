@@ -138,7 +138,7 @@ pub fn map_coinbase_rest_order(
             chaser_max_attempts: None,
         }))
         .into(),
-        reduce_only: false,
+        reduce_only: false.into(),
         info: (Some(raw_order.clone())).into(),
         last_update,
         close: (None).into(),
