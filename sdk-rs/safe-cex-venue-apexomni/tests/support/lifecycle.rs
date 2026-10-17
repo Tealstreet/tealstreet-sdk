@@ -130,7 +130,10 @@ impl ApexServices for Services {
     fn throttle_fetch_orders(&self) -> Result<(), ExchangeError> {
         panic!("not used by lifecycle")
     }
-    fn place_orders(&self, _: Vec<PlaceOrderOpts>) -> ExchangeFuture<'_, Vec<String>> {
+    fn place_orders(
+        &self,
+        _: Vec<safe_cex_types::PreparedOrderOpts>,
+    ) -> ExchangeFuture<'_, Vec<String>> {
         panic!("not used by lifecycle")
     }
     fn dayjs_value_ms(&self, input: Option<f64>) -> Result<f64, ExchangeError> {
@@ -328,9 +331,9 @@ fn run_lifecycle(name: &str) {
                 .last_websocket_positions_update
                 .set(Some(1700001234067.));
             let mut p = Store::positions(store.as_ref()).to_vec();
-            p[0].last_update = Some(1700001234067.);
+            p[0].last_update = (Some(1700001234067.)).into();
             p[0].id = "BTC-USDC:short".into();
-            p[0].side = PositionSide::Short;
+            p[0].side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
                 store.as_ref(),
                 StoreUpdate {

@@ -311,7 +311,7 @@ fn lookup_ordinary_status_fallback_and_json_row_spread() {
             assert_eq!(override_state, TableHit::Mapped(expected_state));
             assert_eq!(row["state"], expected_state);
             let mut result = order();
-            result.status = OrderStatus::Canceled;
+            result.status = safe_cex_types::ModelField::Value(OrderStatus::Canceled);
             Ok(vec![result])
         };
         let result = ready(find_order_by_client_order_id(
@@ -503,7 +503,7 @@ fn lookup_store_hit_prices_owned_snapshot_in_both_directions() {
     let reference = oracle();
     assert_eq!(reference["alias"]["sameReference"], true);
     let mut stored = order();
-    stored.info = Some(json!({"clOrdId":"client"}));
+    stored.info = (Some(json!({"clOrdId":"client"}))).into();
     let mut orders = vec![stored];
     let wire = Wire {
         whole_body: false,
@@ -522,7 +522,7 @@ fn lookup_store_hit_prices_owned_snapshot_in_both_directions() {
         panic!("store hit found")
     };
     assert_eq!(wire.calls.get(), 0, "store hit must not dispatch");
-    orders[0].status = safe_cex_types::OrderStatus::Closed;
+    orders[0].status = (safe_cex_types::OrderStatus::Closed).into();
     assert_eq!(
         found.status,
         safe_cex_types::OrderStatus::Open,

@@ -15,7 +15,9 @@ const hmac = (text) => createHmac('sha256', SECRET).update(text).digest('hex');
 const seen = [];
 const routes = {
   'GET /fapi/v3/account': { totalWalletBalance: '100', availableBalance: '60', totalUnrealizedProfit: '1', assets: [], positions: [] },
-  'GET /fapi/v1/openOrders': [{ orderId: 77, clientOrderId: 'c77', symbol: 'BTCUSDT', side: 'BUY', type: 'LIMIT', origQty: '1', price: '10', stopPrice: '0', status: 'NEW', executedQty: '0', reduceOnly: false, positionSide: 'BOTH', time: 1 }],
+  // The actual source ORDER_TYPE has no STOP/TAKE_PROFIT entries, and
+  // ORDER_SIDE has no UNKNOWN entry: the mapped own properties are undefined.
+  'GET /fapi/v1/openOrders': [['LIMIT', 'BUY'], ['STOP', 'BUY'], ['TAKE_PROFIT', 'BUY'], ['LIMIT', 'UNKNOWN']].map(([type, side], index) => ({ orderId: 77 + index, clientOrderId: `c${77 + index}`, symbol: 'BTCUSDT', side, type, origQty: '1', price: '10', stopPrice: '0', status: 'NEW', executedQty: '0', reduceOnly: false, positionSide: 'BOTH', time: 1 })),
   'GET /fapi/v1/openAlgoOrders': [],
   'GET /fapi/v1/income': [],
 };
@@ -50,9 +52,20 @@ const id = await native.nativeAccountOpen(
 );
 
 const orders = JSON.parse(await native.nativeAccountCallMethod(id, 'fetchAndSetOrders', '[null]'));
-assert.equal(orders[0].id, '77');
+assert.deepEqual(orders.map((order) => order.id), ['77', '78', '79', '80']);
+assert.equal(orders[0].type, 'limit');
+assert.equal(orders[0].side, 'buy');
+for (const index of [1, 2]) {
+  assert.equal(Object.hasOwn(orders[index], 'type'), false, 'undefined order type is omitted through napi JSON');
+  assert.equal(orders[index].info.type, index === 1 ? 'STOP' : 'TAKE_PROFIT');
+}
+assert.equal(Object.hasOwn(orders[3], 'side'), false, 'undefined order side is omitted through napi JSON');
+for (const order of orders) {
+  assert.equal(order.price, 10, 'present price stays present');
+  assert.equal(Object.hasOwn(order, 'parentId'), false, 'absent optional property stays absent');
+}
 await new Promise((resolve) => setTimeout(resolve, 50));
-assert.ok(stores.some((s) => s.orders.some((o) => o.id === '77')), 'the Store slice reached JS');
+assert.ok(stores.some((s) => s.orders.length === 4 && s.orders.some((o) => o.id === '78' && !Object.hasOwn(o, 'type'))), 'the Store slice reached JS');
 
 const validated = JSON.parse(await native.nativeAccountCallMethod(id, 'validateAccount', '[]'));
 assert.equal(validated.balance.total, 100, 'validateAccount over the signed private client');
