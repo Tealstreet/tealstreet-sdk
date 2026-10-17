@@ -143,3 +143,83 @@ fn thrown_error_code_roundtrip_retains_native_payload() {
         }
     }
 }
+
+#[test]
+fn formatter_retains_code_identity_and_undefined_fields() {
+    use safe_cex_exchange::error_reporting::format_error_for_sentry;
+    let code = Js::object(vec![("native", Js::Number(f64::INFINITY))]);
+    let mut error = ExchangeError::new("formatter");
+    error.code = Some(code.clone());
+    error.context = Some(json!({"errorCode":0}));
+    let output = format_error_for_sentry(&error);
+    let tags = output.get("tags").unwrap();
+    let extra = output.get("extra").unwrap();
+    assert!(tags.get("errorCode").unwrap().same_reference(&code));
+    assert_eq!(
+        tags.own_keys()
+            .iter()
+            .map(|key| String::from_utf16_lossy(key))
+            .collect::<Vec<_>>(),
+        [
+            "errorType",
+            "errorCode",
+            "statusCode",
+            "isTimeout",
+            "isCORS"
+        ]
+    );
+    assert_eq!(
+        extra
+            .own_keys()
+            .iter()
+            .map(|key| String::from_utf16_lossy(key))
+            .collect::<Vec<_>>(),
+        [
+            "url",
+            "method",
+            "statusText",
+            "enhancedMessage",
+            "originalMessage",
+            "timestamp",
+            "config"
+        ]
+    );
+    for key in ["statusCode", "isTimeout", "isCORS"] {
+        assert!(tags.get(key).unwrap().is_undefined());
+    }
+    for key in [
+        "url",
+        "method",
+        "statusText",
+        "enhancedMessage",
+        "originalMessage",
+        "timestamp",
+        "config",
+    ] {
+        assert!(extra.get(key).unwrap().is_undefined());
+    }
+    code.set("native", Js::Number(-0.0)).unwrap();
+    assert_eq!(
+        tags.get("errorCode")
+            .unwrap()
+            .get("native")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        (-0.0f64).to_bits()
+    );
+}
+#[test]
+fn native_error_code_writes_override_only_code_metadata() {
+    let mut error = ExchangeError::new("native");
+    error.context = Some(json!({"producer":"native"}));
+    let thrown = Thrown::from(error);
+    thrown.value.set("code", Js::Number(f64::INFINITY)).unwrap();
+    let restored = thrown.to_exchange_error();
+    assert_eq!(restored.context, Some(json!({"producer":"native"})));
+    assert_eq!(
+        restored.code.as_ref().unwrap().as_f64().unwrap(),
+        f64::INFINITY
+    );
+}
