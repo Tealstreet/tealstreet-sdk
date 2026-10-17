@@ -200,6 +200,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
       cwd: path.join(sandbox, workspaceRelative), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
       env: { ...process.env, CARGO_BUILD_JOBS: jobs, CARGO_TARGET_DIR: path.join(metadata.target_directory, 'accepted-set-build') },
     });
+    if (node) fs.writeFileSync(path.join(metadata.target_directory, `accepted-set-${pkg.package}-build.log`), `${build.stdout}\n${build.stderr}`);
     const result = node ? executeNodeProbes(build, pkg, metadata.target_directory, manifest) : build;
     const log = `${result.stdout}\n${result.stderr}`;
     fs.writeFileSync(path.join(metadata.target_directory, `accepted-set-${pkg.package}.log`), log);
