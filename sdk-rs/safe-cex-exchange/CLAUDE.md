@@ -1268,6 +1268,16 @@ regression additionally observes final signed GET query ordering through the
 production HTTP client and verifies the signature against the source preimage.
 Other qs options remain outside this imported runtime surface.
 
+The JS socket's lastReceived accessor shares the native core's Number field;
+pre-assembly writes are retained until lazy core creation. Frames and JS session
+resets therefore update the same health timestamp, preserving native f64 bits.
+Receive timers dispatch the instance checkLastReceived method through WsProtocol;
+the inherited facade method calls the base check directly, avoiding recursion.
+Scoped js_runtime witnesses cover lazy initialization, bidirectional reads/writes,
+raw bits, zero reset/reinitialization and a derived watchdog receiver. A real GRVT
+private socket witnesses its 30-second ping / 90-second Warning reconnect behavior;
+all three regressions compile and fail before this bridge/dispatch repair.
+
 Installed Promise.all/allSettled consume the shared synchronous iterator protocol,
 including Map/Set iterators and Unicode strings. Iterator acquisition/step errors
 reject the returned Promise. Inputs remain native Js values until existing
@@ -1300,6 +1310,13 @@ endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
 
+Adapter config capture/restore reuses the canonical RetainedJsonInput and existing
+native typed codec through two thin value helpers. Shared HTTP adapters retain
+own undefined, raw NaN payloads, infinities and signed zero at the terminal and
+effective success/error config; they do not JSON-copy extension data. Transport
+HOW owns the eventual protocol projection. This retains the typed codec
+limitations and does not claim executable callbacks or live JS alias identity.
+
 SubscribedCandle.interval uses ModelField<AnyTimeframe> at the callback boundary.
 Its native record codec preserves absent, own undefined and concrete intervals,
 including 1M, and omits undefined intervals from JSON. Candle number bits remain
@@ -1314,3 +1331,10 @@ reentrant removal/addition behavior. Getter errors preserve their original value
 and side effects. Core host listeners share that snapshot, and an in-flight emit
 keeps its own snapshot. `tests/js_emitter_off.rs` compares 20 cases through the
 production native runtime and BaseExchange facade against installed tiny-emitter.
+
+The JS Axios dispatcher lets installed callable adapters own response settlement,
+as Axios does. HOW fulfills non-2xx and zero-status responses, so their configured
+transforms and fulfilled response interceptors run; default native HTTP responses
+still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
+the actual native runtime, factory, transport and HOW protocol against scripted
+socket I/O and compares four statuses with the maintained HOW adapter and Axios.
