@@ -51,9 +51,9 @@ fn trailing_order_payloads_match_live_typescript() {
             }
             "wrong-side" => {
                 p.side = if opts.side == OrderSide::Buy {
-                    PositionSide::Long
+                    safe_cex_types::ModelField::Value(PositionSide::Long)
                 } else {
-                    PositionSide::Short
+                    safe_cex_types::ModelField::Value(PositionSide::Short)
                 };
                 vec![p]
             }

@@ -115,7 +115,7 @@ pub(super) fn invoke(rt: &Rt, name: &'static str, a: Vec<Js>) -> Result<Js, Thro
         }
         "getOrderPositionSide" => {
             return Ok(Js::str(helpers::get_order_position_side(
-                &to_typed(&value(0))?,
+                &to_typed::<safe_cex_types::PreparedOrderOpts>(&value(0))?,
                 rt.base().store.options().is_hedged,
             )));
         }

@@ -1172,6 +1172,16 @@ pub fn listen_order_book<'a, H: OrderExecutionHost>(
     symbol: H::Value,
     callback: H::Value,
 ) -> Result<BookCleanup<'a, H::Value, H::Error>, H::Error> {
+    let callbacks = register_order_book_listener(h, symbol.clone(), callback.clone())?;
+    Ok(Box::new(move || {
+        cleanup_order_book_listener(h, symbol.clone(), callbacks.clone(), callback.clone())
+    }))
+}
+pub(crate) fn register_order_book_listener<H: OrderExecutionHost>(
+    h: &H,
+    symbol: H::Value,
+    callback: H::Value,
+) -> Result<H::Value, H::Error> {
     if !h.truthy(&call(h, "callbacks.has", vec![symbol.clone()])?) {
         call(h, "callbacks.setNew", vec![symbol.clone()])?;
     }
@@ -1190,19 +1200,25 @@ pub fn listen_order_book<'a, H: OrderExecutionHost>(
             h.observe_rejection(promise, symbol.clone())?;
         }
     }
-    Ok(Box::new(move || {
-        call(h, "Set.delete", vec![callbacks.clone(), callback.clone()])?;
-        if number(h, h.get(&callbacks, "size")?)? == 0.0 {
-            call(h, "callbacks.delete", vec![symbol.clone()])?;
-            sync!(h, "unsubscribeBook", vec![symbol.clone()]);
-            sync!(
-                h,
-                "cleanupStats",
-                vec![cat(h, vec![h.literal("order_book."), symbol.clone()])?]
-            );
-        }
-        Ok(h.undefined())
-    }))
+    Ok(callbacks)
+}
+pub(crate) fn cleanup_order_book_listener<H: OrderExecutionHost>(
+    h: &H,
+    symbol: H::Value,
+    callbacks: H::Value,
+    callback: H::Value,
+) -> Result<H::Value, H::Error> {
+    call(h, "Set.delete", vec![callbacks.clone(), callback.clone()])?;
+    if number(h, h.get(&callbacks, "size")?)? == 0.0 {
+        call(h, "callbacks.delete", vec![symbol.clone()])?;
+        sync!(h, "unsubscribeBook", vec![symbol.clone()]);
+        sync!(
+            h,
+            "cleanupStats",
+            vec![cat(h, vec![h.literal("order_book."), symbol.clone()])?]
+        );
+    }
+    Ok(h.undefined())
 }
 pub fn allocate_history_auth_error<P, V, E>(
     allocate: impl FnOnce(&'static str) -> Result<P, E>,
