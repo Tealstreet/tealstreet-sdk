@@ -1420,3 +1420,56 @@ fn trait_request_query<'a>(request: &'a safe_cex_transport::RestRequest, key: &s
         .expect("actual query parameter")
         .1
 }
+
+#[test]
+fn actual_order_signer_refuses_infinite_price_before_posting() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let before = wire
+        .requests
+        .borrow()
+        .iter()
+        .filter(|request| request.method.eq_ignore_ascii_case("POST") && request.url == "/orders")
+        .count();
+    let mut opts = limit_order("infinite-price");
+    opts.price = Some(f64::INFINITY);
+    let error = drive(&runtime, venue.base().place_order(venue.as_ref(), opts)).unwrap_err();
+    assert_eq!(error.message, "Invalid price value for signing: Infinity");
+    assert_eq!(
+        wire.requests
+            .borrow()
+            .iter()
+            .filter(
+                |request| request.method.eq_ignore_ascii_case("POST") && request.url == "/orders"
+            )
+            .count(),
+        before
+    );
+    venue.dispose().unwrap();
+}
+#[test]
+fn actual_amendment_preflight_refuses_infinite_size_before_putting() {
+    let (venue, runtime, _, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut opts: safe_cex_types::UpdateOrderOpts =
+        typed(json!({"order":reconciled_order(),"update":{"amount":1.0}}));
+    opts.update = safe_cex_types::UpdateOrderOptsUpdate::Variant0(
+        safe_cex_types::UpdateOrderOptsUpdateVariant0 {
+            amount: f64::INFINITY,
+            price: None,
+        },
+    );
+    let error = drive(&runtime, venue.update_order(opts)).unwrap_err();
+    assert_eq!(
+        error.message,
+        "Paradex amended total base size must be greater than zero"
+    );
+    assert!(
+        !wire
+            .requests
+            .borrow()
+            .iter()
+            .any(|request| request.method.eq_ignore_ascii_case("PUT"))
+    );
+    venue.dispose().unwrap();
+}

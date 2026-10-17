@@ -354,3 +354,7 @@ impl safe_cex_exchange::journal::JournalFolder for NativeJournal {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "sdk_quantum_probe.rs"]
+mod sdk_quantum_probe;
