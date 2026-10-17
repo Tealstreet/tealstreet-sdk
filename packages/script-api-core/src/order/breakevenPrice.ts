@@ -37,7 +37,7 @@ import { add, subtract } from '@tealstreet/safe-cex/src/utils/safe-math';
  * live `Position` is unsigned with an explicit `side`. Deriving direction from
  * the sign of the size is exactly how the web copy went wrong.
  *
- * Rounding is deliberately NOT here, matching `nativePositionSize` next door:
+ * Rounding is deliberately NOT here, matching safe-cex's `nativePositionSize`:
  * callers round to their own market's tick when they need to.
  */
 export interface BreakevenInputs {

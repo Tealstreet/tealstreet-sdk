@@ -5,7 +5,7 @@ function load(path,name) {
  return new Function(stripTypeScriptTypes(fs.readFileSync(root+'/'+path,'utf8').replace(/export /g,''))+'\nreturn '+name+';')();
 }
 const cursor = load('packages/safe-cex/src/utils/oldestCursorId.ts','oldestCursorId');
-const sizing = load('packages/script-api-core/src/order/positionSizing.ts','nativePositionSize');
+const sizing = load('packages/safe-cex/src/utils/nativePositionSize.ts','nativePositionSize');
 const encode = x => Number.isNaN(x)?'NaN':Object.is(x,-0)?'-0':String(x);
 const decode = x => x === null ? undefined : Number(x);
 let cases=[];

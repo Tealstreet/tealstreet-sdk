@@ -667,6 +667,14 @@ status = "ported"
 note = " Split member `safe-cex-exchange/src/order_operations.rs::order_options`; plumbing this body consumes: rust construction plumbing for the PlaceOrderOpts object literal {symbol, side, type, amount} that the mapped BaseExchange derive-algo-orders and nuke paths and the crossTradePlaceOrder row build inline; every optional field stays absent. No independent order algorithm."
 
 [[symbol]]
+ts = "BaseExchange#closeAllPositionsAtMarket"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "BaseExchange.nuke"
 kind = "field-fn"
 layer = "adapted"

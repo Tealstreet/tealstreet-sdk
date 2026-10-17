@@ -102,7 +102,7 @@ export interface OemsPositionRef extends OemsPositionAddress {
    * a hundredfold, in the direction that silently CLOSES ALMOST NOTHING.
    *
    * A producer must derive it through `nativePositionSize`
-   * (`packages/script-api-core/src/order/positionSizing.ts`), which both
+   * (`packages/safe-cex/src/utils/nativePositionSize.ts`), which both
    * `getPositionNativeSize` and `getPositionNativeContracts` now call.
    *
    * **This used to say "including the `extra.contractsNative` preference",
