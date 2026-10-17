@@ -1337,3 +1337,75 @@ fn hyro_inherits_journal_closed_rows_and_order_join() {
     assert!(h.wire.calls("/v5/account/transaction-log").is_empty());
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() {
+    if configured_child(
+        "hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics",
+    ) {
+        return;
+    }
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let (h, private, _) = start_private();
+    ack_private(&h, &private, "auth");
+    ack_private(&h, &private, "subscribe");
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let feed = |value: serde_json::Value| {
+        private
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(value.to_string())));
+        h.runtime.pump();
+    };
+    let mut order = json!({"orderId":"hyro-frame","orderLinkId":"native-link","symbol":"BTCUSDT","side":"Buy",
+        "orderType":"Limit","price":"25000","qty":"0.01","leavesQty":"0.01","cumExecQty":"0",
+        "orderStatus":"New","timeInForce":"GTC","reduceOnly":false,"closeOnTrigger":false,
+        "stopOrderType":"","triggerPrice":"","stopLoss":"","takeProfit":"","tpslMode":"",
+        "createType":"CreateByUser","positionIdx":0,"triggerBy":"","slTriggerBy":"MarkPrice","rejectReason":"EC_NoError"});
+    feed(json!({"topic":"order","data":[order.clone()]}));
+    assert_eq!(h.store.orders().len(), 1);
+    assert_eq!(h.store.orders()[0].id, "hyro-frame");
+    order["orderStatus"] = json!("PartiallyFilled");
+    order["cumExecQty"] = json!("0.004");
+    order["cumExecValue"] = json!("100");
+    order["avgPrice"] = json!("25000");
+    feed(json!({"topic":"order","data":[order.clone()]}));
+    feed(json!({"topic":"order","data":[order.clone()]}));
+    assert_eq!(
+        *fills.borrow(),
+        vec![
+            json!({"id":"hyro-frame","side":"buy","symbol":"BTCUSDT","price":25000.0,"amount":0.004})
+        ]
+    );
+    order["orderStatus"] = json!("Filled");
+    order["cumExecQty"] = json!("0.01");
+    order["cumExecValue"] = json!("250");
+    feed(json!({"topic":"order","data":[order]}));
+    assert_eq!(fills.borrow().len(), 2);
+    assert_eq!(
+        h.store.orders()[0].status,
+        safe_cex_types::OrderStatus::Closed
+    );
+    feed(json!({"topic":"position","data":[private_position("12")]}));
+    assert_eq!(h.store.positions()[0].leverage, 12.);
+    let balance = serde_json::to_value(&*h.store.balance()).unwrap();
+    let requests = h.wire.requests.borrow().len();
+    feed(json!({"topic":"wallet","data":[{"totalEquity":"999999"}]}));
+    feed(
+        json!({"topic":"execution","data":[{"orderId":"hyro-frame","execQty":"999","execPrice":"1"}]}),
+    );
+    assert_eq!(serde_json::to_value(&*h.store.balance()).unwrap(), balance);
+    assert_eq!(fills.borrow().len(), 2);
+    assert_eq!(h.wire.requests.borrow().len(), requests);
+    h.venue().dispose().unwrap();
+}
