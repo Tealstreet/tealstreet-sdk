@@ -14,6 +14,106 @@ mod exchange_data;
 use exchange_data::script;
 
 #[test]
+fn candle_reads_follow_source_fields_without_decoding_unused_tuple_columns() {
+    use std::io::Write;
+    let cases = json!([
+        {"name":"six-columns","rows":[[1700000000000u64,"1","3","0.5","2","4"]]},
+        {"name":"numeric-columns","rows":[[1700000000001u64,1,3,0.5,2,4]]},
+        {"name":"opaque-unused-columns","rows":[[1700000000002u64,"1","3","0.5","2","4",null,{},[],false,{},null,"extra"]]},
+        {"name":"missing-volume","rows":[[1700000000003u64,"1tail","3","0.5","2"]]},
+        {"name":"indexed-record","rows":[{"0":1700000000004u64,"1":"1","2":"3","3":"0.5","4":"2","5":null}]}
+    ]);
+    assert_eq!(cases.as_array().unwrap().len(), 5);
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/ohlcv-rows-source.cjs"
+        ))
+        .env(
+            "SAFE_CEX_TYPESCRIPT_PATH",
+            std::env::var("SAFE_CEX_TYPESCRIPT_PATH").unwrap_or_else(|_| {
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript").into()
+            }),
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&cases).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 10);
+    for (version, offset) in [("v1", 0), ("v3", 5)] {
+        let options = if version == "v3" {
+            let secret = format!("{:064x}", 1);
+            let wallet =
+                safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&secret).unwrap();
+            json!({"key":wallet.address().to_checksum(None),"secret":secret,"applicationId":"0x1111111111111111111111111111111111111111"})
+        } else {
+            json!({"key":"fixture-key","secret":"fixture-secret"})
+        };
+        let (venue, rt, _, wire) = support::fixture(options);
+        script(&wire);
+        let path = format!("/fapi/{version}/klines");
+        for (index, case) in cases.as_array().unwrap().iter().enumerate() {
+            let expected = &source[offset + index];
+            assert_eq!(expected["version"], version);
+            assert_eq!(expected["name"], case["name"]);
+            wire.responses
+                .borrow_mut()
+                .insert(path.clone(), case["rows"].clone());
+            let candles = drive(&rt, venue.fetch_ohlcv(serde_json::from_value(json!({
+                "symbol":"BTCUSDT","interval":"1m","limit":2,"from":123000,"to":999000
+            })).unwrap())).expect("real candle binding accepts source-readable rows without validating unused columns");
+            assert_eq!(candles.len(), 1);
+            let candle = &candles[0];
+            for (field, value) in [
+                ("timestamp", candle.timestamp),
+                ("open", candle.open),
+                ("high", candle.high),
+                ("low", candle.low),
+                ("close", candle.close),
+                ("volume", candle.volume),
+            ] {
+                let wanted = &expected["candles"][0][field];
+                if wanted == "NaN" {
+                    assert!(value.is_nan(), "{version} {} {field}", case["name"]);
+                } else {
+                    assert_eq!(
+                        Some(value),
+                        wanted.as_f64(),
+                        "{version} {} {field}",
+                        case["name"]
+                    );
+                }
+            }
+            let requests = wire.requests.borrow();
+            let request = requests.last().unwrap();
+            assert_eq!(request_path(request), path);
+            assert_eq!(expected["requests"][0]["url"], path);
+            let query = signed_query_params(request);
+            assert_eq!(query["symbol"], "BTCUSDT");
+            assert_eq!(query["interval"], "1m");
+            assert_eq!(query["limit"], "2");
+            assert_eq!(query["startTime"], "123000");
+            assert!(!query.contains_key("endTime"), "source ignores to");
+        }
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
 fn sparse_position_risk_rows_use_source_coercion_in_v1_and_v3() {
     for v3 in [false, true] {
         let options = if v3 {
@@ -1167,4 +1267,168 @@ fn market_leverage_applies_approved_js_number_after_source_fallback() {
             venue.dispose().unwrap();
         }
     }
+}
+
+fn mark_frame_refuses_bad_rows(wrapped: bool) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let (venue, rt, store, _) = stream_fixture();
+    let original = store.tickers()[0].clone();
+    let tickers = ["BTCUSDT", "ETHUSDT", "LTCUSDT", "ADAUSDT"]
+        .into_iter()
+        .map(|symbol| {
+            let mut ticker = original.clone();
+            ticker.id = symbol.into();
+            ticker.symbol = symbol.into();
+            ticker
+        })
+        .collect::<Vec<_>>();
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let before = store.tickers().to_vec();
+    let emitted = Rc::new(std::cell::Cell::new(0));
+    let saved = emitted.clone();
+    venue.base().on(
+        "markPrice",
+        Rc::new(move |_, _| {
+            saved.set(saved.get() + 1);
+            Ok(())
+        }),
+    );
+    let rows = json!([
+        {"e":"markPriceUpdate","s":"BTCUSDT","p":"201","i":"202","r":"0.01","T":"123"},
+        {"e":"markPriceUpdate","s":"ETHUSDT","p":"301","i":"302","r":"0.02","T":1700000100000u64},
+        {"e":"markPriceUpdate","s":"LTCUSDT","p":"401","i":"402","r":"0.03","T":true},
+        {"e":"markPriceUpdate","s":"ADAUSDT","p":"501","i":"502","r":"0.04","T":1700000200000u64}
+    ]);
+    let frame = if wrapped {
+        json!({"stream":"!markPrice@arr@1s","data":rows})
+    } else {
+        rows
+    };
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    rt.console.borrow_mut().clear();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(frame.to_string()),
+        ));
+    for _ in 0..16 {
+        rt.pump();
+    }
+    let tickers = store.tickers();
+    let get = |symbol: &str| {
+        tickers
+            .iter()
+            .find(|ticker| ticker.symbol == symbol)
+            .unwrap()
+    };
+    assert_eq!(
+        get("ETHUSDT").mark,
+        301.,
+        "valid ETH sibling survives a malformed fundingTime"
+    );
+    assert_eq!(
+        get("ADAUSDT").mark,
+        501.,
+        "later valid ADA sibling survives"
+    );
+    assert_eq!(get("ETHUSDT").funding_time, 1700000100000.);
+    assert_eq!(get("ADAUSDT").funding_time, 1700000200000.);
+    for symbol in ["BTCUSDT", "LTCUSDT"] {
+        let previous = before
+            .iter()
+            .find(|ticker| ticker.symbol == symbol)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(get(symbol)).unwrap(),
+            serde_json::to_value(previous).unwrap(),
+            "refuse the entire invalid row"
+        );
+    }
+    assert_eq!(
+        emitted.get(),
+        2,
+        "only admitted rows emit native ticker events"
+    );
+    let reports = rt.console.borrow().join("\n");
+    assert!(
+        reports.contains("BTCUSDT")
+            && reports.contains("LTCUSDT")
+            && reports.contains("fundingTime")
+            && reports.contains("\"123\"")
+            && reports.contains("true"),
+        "{reports}"
+    );
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    drop(tickers);
+    venue.dispose().unwrap();
+}
+#[test]
+fn wrapped_mark_price_frame_retains_valid_siblings() {
+    mark_frame_refuses_bad_rows(true);
+}
+#[test]
+fn bare_mark_price_frame_retains_valid_siblings() {
+    mark_frame_refuses_bad_rows(false);
+}
+
+#[test]
+fn mark_price_falsey_time_and_unknown_targets_keep_source_behavior() {
+    let (venue, rt, store, _) = stream_fixture();
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    let rows = json!([
+        {"e":"markPriceUpdate","s":"BTCUSDT","p":"200","T":1700000100000u64},
+        {"e":"markPriceUpdate","s":"BTCUSDT","p":"201","T":null},
+        {"e":"markPriceUpdate","s":"BTCUSDT","p":"202","T":false},
+        {"e":"markPriceUpdate","s":"BTCUSDT","p":"203","T":0},
+        {"e":"markPriceUpdate","s":"BTCUSDT","p":"204","T":""},
+        {"e":"markPriceUpdate","s":"MISSING","p":"999","T":"123"},
+        {"e":"markPriceUpdate","s":"constructor","p":"999","T":true}
+    ]);
+    rt.console.borrow_mut().clear();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(rows.to_string()),
+        ));
+    for _ in 0..16 {
+        rt.pump();
+    }
+    let tickers = store.tickers();
+    assert_eq!(tickers[0].mark, 204.);
+    assert_eq!(tickers[0].funding_time, 1700000100000.);
+    assert!(
+        !rt.console
+            .borrow()
+            .iter()
+            .any(|message| message.contains("typed field")),
+        "{:?}",
+        rt.console.borrow()
+    );
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    drop(tickers);
+    venue.dispose().unwrap();
 }

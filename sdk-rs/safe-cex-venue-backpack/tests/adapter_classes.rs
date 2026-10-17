@@ -1,3 +1,6 @@
+#[path = "support/private_socket.rs"]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+mod market_socket;
 #[path = "support/adapter_runtime.rs"]
 mod support;
 use safe_cex_exchange::{
@@ -27,6 +30,200 @@ fn ready<F: Future>(f: F) -> F::Output {
 fn units(s: &str) -> JsString {
     s.encode_utf16().collect()
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn native_market_frames_reach_sdk_tickers_books_and_candles() {
+    use safe_cex_exchange::{
+        exchange::{BaseExchange, ExchangeSettings},
+        websocket::WsEvent,
+    };
+    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    use safe_cex_transport::{RestResponseBody, socket::SocketFrame};
+    use std::sync::Arc;
+    let runtime = Rc::new(support::Runtime::default());
+    let wire = Arc::new(support::Wire::default());
+    let store = Rc::new(DefaultStore::new());
+    let inputs = safe_cex_venue_backpack::native_host::native_inputs(runtime.clone(), wire.clone());
+    let owner = safe_cex_venue_backpack::adapter::BackpackExchange::new(
+        BaseExchange::new(
+            safe_cex_types::ExchangeName::Backpack,
+            serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true})).unwrap(),
+            store.clone(),
+            runtime.clone(),
+            ExchangeSettings::default(),
+        ),
+        inputs.build_http,
+        inputs.install_transport,
+        inputs.runtime,
+        inputs.date_parse,
+    )
+    .unwrap();
+    let put = |path: &str, body: serde_json::Value| {
+        wire.bodies
+            .lock()
+            .unwrap()
+            .insert(path.into(), RestResponseBody::Untransformed(body));
+    };
+    put(
+        "/api/v1/markets",
+        json!([{"symbol":"BTC_USDC","marketType":"PERP","quantityIncrement":"0.25","priceIncrement":"0.125","minQuantity":"0.01","maxQuantity":"100","imfFunction":{"base":"0.05"}}]),
+    );
+    put(
+        "/api/v1/tickers",
+        json!([{"symbol":"BTC_USDC","lastPrice":"100","priceChangePercent":"0.05","volume":"2","quoteVolume":"200"}]),
+    );
+    put(
+        "/api/v1/markPrices",
+        json!([{"symbol":"BTC_USDC","markPrice":"101","indexPrice":"102","fundingRate":"0.0001","nextFundingTimestamp":7}]),
+    );
+    let markets = ready(Exchange::fetch_markets(owner.as_ref())).unwrap();
+    assert_eq!(markets[0].precision.price, 0.125);
+    assert_eq!(markets[0].limits.leverage.max, 20.0);
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let tickers = ready(Exchange::fetch_tickers(owner.as_ref())).unwrap();
+    assert_eq!(
+        (tickers[0].mark, tickers[0].index, tickers[0].percentage),
+        (101.0, 102.0, 5.0)
+    );
+    Store::update(
+        store.as_ref(),
+        StoreUpdate {
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let socket = Rc::new(market_socket::Socket::default());
+    socket.events.borrow_mut().push_back(WsEvent::Open);
+    runtime.dial_sockets.borrow_mut().push(socket.clone());
+    let public = owner.public_websocket.get().unwrap();
+    ready(
+        public
+            .base
+            .create_websocket("ws://market-fixture".into(), vec![], None),
+    )
+    .unwrap();
+    let pump = || {
+        for _ in 0..12 {
+            runtime.pump();
+        }
+    };
+    pump();
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let seen = books.clone();
+    let snapshot = json!({"lastUpdateId":100,"bids":[["98","1"]],"asks":[["102","2"],["103","1"]]});
+    put("/api/v1/depth", snapshot.clone());
+    put("/api/v1/depth?symbol=BTC_USDC", snapshot);
+    let close_book = Exchange::listen_order_book(
+        owner.as_ref(),
+        "BTC_USDC".into(),
+        Rc::new(move |book| seen.borrow_mut().push(book)),
+    )
+    .unwrap();
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let seen = candles.clone();
+    let close_candle = Exchange::listen_ohlcv(
+        owner.as_ref(),
+        serde_json::from_value(json!({"symbol":"BTC_USDC","interval":"1m"})).unwrap(),
+        Rc::new(move |candle| seen.borrow_mut().push(candle)),
+    )
+    .unwrap();
+    pump();
+    assert_eq!(books.borrow().len(), 1, "native snapshot callback");
+    let frame = |stream: &str, data: serde_json::Value| {
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({"stream":stream,"data":data}).to_string(),
+            )));
+        pump();
+        assert!(
+            runtime.errors.borrow().is_empty(),
+            "{:?}",
+            runtime.errors.borrow()
+        );
+    };
+    frame(
+        "ticker.BTC_USDC",
+        json!({"e":"ticker","s":"BTC_USDC","c":"100.5","P":"0.02","v":"3","q":"301.5"}),
+    );
+    assert_eq!(
+        (store.tickers()[0].last, store.tickers()[0].percentage),
+        (100.5, 2.0)
+    );
+    frame(
+        "kline.1m.BTC_USDC",
+        json!({"e":"kline","s":"BTC_USDC","t":"2024-01-01T00:00:00","o":"99","h":"103","l":"98","c":"101","v":"7"}),
+    );
+    assert_eq!(candles.borrow().len(), 1);
+    assert_eq!(
+        (
+            candles.borrow()[0].timestamp,
+            candles.borrow()[0].close,
+            candles.borrow()[0].volume
+        ),
+        (1704067200000.0, 101.0, 7.0)
+    );
+    frame(
+        "depth.BTC_USDC",
+        json!({"e":"depth","s":"BTC_USDC","U":101,"u":101,"b":[["98","3"]],"a":[["102","0"]]}),
+    );
+    assert_eq!(books.borrow().len(), 2);
+    assert_eq!(
+        (
+            books.borrow()[1].bids[0].amount,
+            books.borrow()[1].bids[0].total,
+            books.borrow()[1].asks[0].price
+        ),
+        (3.0, 3.0, 103.0)
+    );
+    let snapshot = json!({"lastUpdateId":102,"bids":[["97","8"]],"asks":[["104","2"]]});
+    put("/api/v1/depth", snapshot.clone());
+    put("/api/v1/depth?symbol=BTC_USDC", snapshot);
+    frame(
+        "depth.BTC_USDC",
+        json!({"e":"depth","s":"BTC_USDC","U":103,"u":103,"b":[["98","4"]],"a":[]}),
+    );
+    assert_eq!(
+        books.borrow().len(),
+        3,
+        "gap refetches and bridges the snapshot"
+    );
+    assert_eq!(
+        (
+            books.borrow()[2].bids[0].price,
+            books.borrow()[2].bids[1].total
+        ),
+        (98.0, 12.0)
+    );
+    close_book().unwrap();
+    close_candle().unwrap();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|s| s.contains("UNSUBSCRIBE") && s.contains("depth.BTC_USDC"))
+    );
+    frame(
+        "kline.1m.BTC_USDC",
+        json!({"e":"kline","s":"BTC_USDC","t":"2024-01-01T00:01:00","o":"99","h":"103","l":"98","c":"101","v":"7"}),
+    );
+    assert_eq!(candles.borrow().len(), 1);
+    owner.dispose().unwrap();
+}
+
 #[test]
 fn concrete_exchange_owns_api_and_sdk_bindings() {
     let (o, _, store, wire) = support::fixture();

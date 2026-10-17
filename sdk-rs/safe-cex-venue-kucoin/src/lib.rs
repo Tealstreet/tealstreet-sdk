@@ -1,29 +1,19 @@
 //! KuCoin futures and spot venue family.
 pub mod account_mode;
 pub mod broker;
-pub mod order_helpers;
 pub mod sizing;
 pub mod spot_types;
 pub mod types;
 
-pub mod mappers;
-
 pub mod api_helpers;
-
-pub mod formatters;
 
 pub mod ws_helpers;
 
 pub mod spot_helpers;
 
-pub mod accounts;
-
-pub mod spot_reads;
-
 pub mod api;
 
 pub mod spot_topics;
-pub mod spot_writes;
 
 pub mod message_routing;
 pub mod position_metadata;
@@ -50,8 +40,6 @@ pub mod spot_bodies;
 pub mod order_lifecycle;
 
 pub mod class_construction;
-
-mod response_default;
 
 pub mod spot_private_class;
 

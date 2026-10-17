@@ -557,11 +557,11 @@ impl Host {
             }),
             ("noteRegularOrderSubmitError", |h, a| {
                 let mut cooldown = h.cooldown()?;
-                let runtime = h.runtime.clone();
+                let clock = h.venue()?.current_time_ms.clone();
                 note_regular_order_submit_error(
                     &mut cooldown,
                     json(&arg(&a, 0))?.as_ref(),
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 )?;
                 h.set_cooldown(cooldown)?;
                 Ok(Js::Undefined)
@@ -570,10 +570,10 @@ impl Host {
                 let data = arg(&a, 0);
                 let payload = json(&data)?.map(|v| Rc::new(RefCell::new(v)));
                 let mut cooldown = h.cooldown()?;
-                let runtime = h.runtime.clone();
+                let clock = h.venue()?.current_time_ms.clone();
                 let result =
                     assert_regular_order_submit_succeeded(payload.as_ref(), &mut cooldown, &|| {
-                        runtime.now_ms()
+                        clock()
                     });
                 h.set_cooldown(cooldown)?;
                 result.map_err(|e| submit_error(e, &data))?;
@@ -588,20 +588,20 @@ impl Host {
             }),
             ("isRecentlyRejectedRegularOrder", |h, a| {
                 let venue = h.venue()?;
-                let runtime = h.runtime.clone();
+                let clock = venue.current_time_ms.clone();
                 Ok(Js::Bool(is_recently_rejected_regular_order(
                     &mut venue.rejected.borrow_mut(),
                     &text(&arg(&a, 0))?,
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 )))
             }),
             ("notePlacedStopLikeOrder", |h, a| {
                 let venue = h.venue()?;
-                let runtime = h.runtime.clone();
+                let clock = venue.current_time_ms.clone();
                 note_placed_stop_like_order(
                     &mut venue.placed.borrow_mut(),
                     &text(&arg(&a, 0))?,
-                    &|| runtime.now_ms(),
+                    &|| clock(),
                 );
                 Ok(Js::Undefined)
             }),
@@ -1080,7 +1080,7 @@ impl OrderWorkflowHost for Host {
                 .map_err(|message| Thrown::error("Error", &message))?;
                 Js::str(&id)
             }
-            "now" => Js::Number(self.runtime.now_ms()),
+            "now" => Js::Number((self.venue()?.current_time_ms)()),
             "sleep" => {
                 let runtime = self.runtime.clone();
                 let ms = delay(&a(0))?;

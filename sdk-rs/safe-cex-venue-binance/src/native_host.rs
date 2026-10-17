@@ -1420,7 +1420,7 @@ impl ListenerHost for NativeListenerOperations {
             &mut sync.borrow_mut(),
             previous,
         )
-        .map_err(|e| failure(e.message))
+        .map_err(|error| exchange_failure(error.into()))
     }
     fn total(&self, book: Book) -> Result<(), Failure> {
         safe_cex_store::orderbook::calc_order_book_total(&mut book.borrow_mut());
