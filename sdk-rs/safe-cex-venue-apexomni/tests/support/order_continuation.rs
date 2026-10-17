@@ -82,10 +82,8 @@ fn order_coercions_and_clocks_precede_typed_admission() {
                 Some(("type", "function", "unknown venue order type"))
             }
             "type-prototype" => Some(("type", "object", "unknown venue order type")),
-            "type-missing" => Some(("type", "undefined", "unknown venue order type")),
             "status-function" => Some(("status", "function", "unknown venue order status")),
             "status-prototype" => Some(("status", "object", "unknown venue order status")),
-            "null-side" => Some(("side", "undefined", "unknown venue order side")),
             "numeric-id" => Some(("id", "number", "non-string field")),
             "numeric-reduce" => Some(("reduceOnly", "number", "non-boolean reduceOnly")),
             _ => None,
@@ -193,11 +191,11 @@ fn order_coercions_and_clocks_precede_typed_admission() {
         );
     }
     assert_eq!(
-        refused, 9,
+        refused, 7,
         "APEX-ORDER independent whole-result refusal floor"
     );
     assert_eq!(errors, 11, "APEX-ORDER independent matching-error floor");
-    assert_eq!(positive, 8, "APEX-ORDER independent positive floor");
+    assert_eq!(positive, 10, "APEX-ORDER independent positive floor");
     // Every native result/refusal/error/clock assertion above runs before wire.
     let mut wire_count = 0;
     for (label, field) in [

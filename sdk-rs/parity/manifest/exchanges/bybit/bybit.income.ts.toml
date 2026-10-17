@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-byb
 ts = "toNumber"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number"
+rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::to_number"
 status = "divergent"
-note = "Native js_runtime mapping preserves source coercions, live Object.prototype lookup, three independent income terms, raw identity fields and nonfinite numbers until the existing typed public IncomeRecord projection. CHOSEN closed typed boundary: non-string symbol/asset/tradeId and inherited function/object categories remain refused by that projection (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary). The source corpus checks those refusals separately. Renamed Rust target: safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number. Production receiver and signed-client regressions now cover the HTTP composition."
+note = "Native js_runtime mapping preserves source coercions, live Object.prototype lookup, three independent income terms, raw identity fields and nonfinite numbers until the existing typed public IncomeRecord projection. CHOSEN closed typed boundary: non-string symbol/asset/tradeId and inherited function/object categories remain refused by that projection (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary). The source corpus checks those refusals separately. Renamed Rust target: safe-cex-venue-bybit/src/ledger_mapping.rs::to_number. Production receiver and signed-client regressions now cover the HTTP composition."
 
 [[symbol]]
 ts = "bybitTransactionCategory"
@@ -16,7 +16,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::bybit_transaction_category"
 status = "divergent"
-note = "Native js_runtime mapping preserves source coercions, live Object.prototype lookup, three independent income terms, raw identity fields and nonfinite numbers until the existing typed public IncomeRecord projection. CHOSEN closed typed boundary: non-string symbol/asset/tradeId and inherited function/object categories remain refused by that projection (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary). The source corpus checks those refusals separately. Renamed Rust target: safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number. Production receiver and signed-client regressions now cover the HTTP composition."
+note = "Native js_runtime mapping preserves source coercions, live Object.prototype lookup, three independent income terms, raw identity fields and nonfinite numbers until the existing typed public IncomeRecord projection. CHOSEN closed typed boundary: non-string symbol/asset/tradeId and inherited function/object categories remain refused by that projection (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary). The source corpus checks those refusals separately. Renamed Rust target: safe-cex-venue-bybit/src/ledger_mapping.rs::to_number. Production receiver and signed-client regressions now cover the HTTP composition."
 
 [[symbol]]
 ts = "mapBybitTransactionToIncomeRecords"
@@ -24,7 +24,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/ledger_mapping.rs::map_bybit_transaction_to_income_records"
 status = "divergent"
-note = "Native js_runtime mapping preserves source coercions, live Object.prototype lookup, three independent income terms, raw identity fields and nonfinite numbers until the existing typed public IncomeRecord projection. CHOSEN closed typed boundary: non-string symbol/asset/tradeId and inherited function/object categories remain refused by that projection (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary). The source corpus checks those refusals separately. Renamed Rust target: safe-cex-venue-bybit/src/ledger_mapping.rs::closed_number. Production receiver and signed-client regressions now cover the HTTP composition."
+note = "Native js_runtime mapping preserves source coercions, live Object.prototype lookup, three independent income terms, raw identity fields and nonfinite numbers until the existing typed public IncomeRecord projection. CHOSEN closed typed boundary: non-string symbol/asset/tradeId and inherited function/object categories remain refused by that projection (sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary). The source corpus checks those refusals separately. Renamed Rust target: safe-cex-venue-bybit/src/ledger_mapping.rs::to_number. Production receiver and signed-client regressions now cover the HTTP composition."
 
 [[symbol]]
 ts = "BybitIncomeContext"
