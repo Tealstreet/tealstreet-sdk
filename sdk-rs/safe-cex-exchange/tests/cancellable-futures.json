@@ -314,7 +314,7 @@
         "future-signature",
         "future-return"
       ],
-      "producer_sha256": "708e618db0b74403871200117a58c7af90abf6483b8609505bc5530696404259",
+      "producer_sha256": "8dd353d5924ef0201db81d51f340fd539249772a2939d73cf85fe739ece0c836",
       "classification": "no-owned-latch",
       "reason": "Composes owned audit futures without reserving shared running state. Reviewed integration 49a942e761: inherited/missing symbol branches append immediate done(Ok(None)) to the same local request Vec and continue; placement children remain caller-owned through join_all, with no new shared registration or latch. Dropping these caller-owned futures does not claim rollback of external work already started."
     },
@@ -324,7 +324,7 @@
         "future-signature",
         "future-return"
       ],
-      "producer_sha256": "4924189c9c4c4d6d06b543dc1305394e0e72a8655f4a3de4a1adeb4bf68d09ad",
+      "producer_sha256": "1d797b6ac657e302c080c61a313d4b5f215be51ff69f94c29c9436cb94957f2d",
       "classification": "no-owned-latch",
       "reason": "Composes owned audit futures without reserving shared running state. Reviewed integration 49a942e761: inherited/missing symbol branches append immediate done(Ok(None)) to the same local request Vec and continue; placement children remain caller-owned through join_all, with no new shared registration or latch. Dropping these caller-owned futures does not claim rollback of external work already started."
     },
@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "b3cec3b700043666bb839ff57d4e4b1dd4a04da6a8fe47dfc979fb830d8d7f75"
+          "sha256": "7d6a52cfa924a04942fcf8938a5c162a40ff124f514e5c7690b3e8f18d3ce93f"
         }
       ],
       "guards": [
@@ -2089,7 +2089,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "b3cec3b700043666bb839ff57d4e4b1dd4a04da6a8fe47dfc979fb830d8d7f75"
+          "sha256": "7d6a52cfa924a04942fcf8938a5c162a40ff124f514e5c7690b3e8f18d3ce93f"
         }
       ],
       "guards": [

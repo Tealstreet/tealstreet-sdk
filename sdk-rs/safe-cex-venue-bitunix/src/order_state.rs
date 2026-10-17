@@ -87,7 +87,7 @@ pub fn get_tpsl_leg_snapshot(
         ),
     };
     let price = match related {
-        Some(o) => o.price,
+        Some(o) => o.price.to_number(),
         None => parse_finite_number(field(price_key), f64::NAN)?,
     };
     let qty = match related {
@@ -98,8 +98,8 @@ pub fn get_tpsl_leg_snapshot(
         return Ok(None);
     }
     let trigger = related.and_then(|o| match leg {
-        TpslLeg::Tp => o.tp_trigger_type,
-        TpslLeg::Sl => o.sl_trigger_type,
+        TpslLeg::Tp => (o.tp_trigger_type).into_value(),
+        TpslLeg::Sl => o.sl_trigger_type.into_value(),
     });
     let raw_type = field(type_key);
     Ok(Some(TpslLegSnapshot {
@@ -141,8 +141,8 @@ pub fn get_position_id<'a>(
 }
 pub async fn hydrate_position_id_before_formatting<P, O, E, F1, F2>(
     symbol: &str,
-    order_type: OrderType,
-    side: safe_cex_types::OrderSide,
+    order_type: impl Into<safe_cex_types::ModelField<OrderType>>,
+    side: impl Into<safe_cex_types::ModelField<safe_cex_types::OrderSide>>,
     amount: f64,
     reduce_only: Option<bool>,
     positions: &[Position],
@@ -156,6 +156,8 @@ where
     F1: Future<Output = Result<P, E>>,
     F2: Future<Output = Result<O, E>>,
 {
+    let order_type = order_type.into();
+    let side = side.into();
     let is_tpsl = order_type == OrderType::StopLoss || order_type == OrderType::TakeProfit;
     if !is_tpsl && reduce_only != Some(true) {
         return Ok(());
