@@ -141,3 +141,23 @@ marker specifically for preserved stock inherited-name behavior, separately
 from the CHOSEN typed Store model boundary. No reviewer ran Cargo or gates.
 The marker/receipt follow-up is included before the exact-SHA sprint gate run;
 no further extractor/static sequence is claimed after the sprint bar changed.
+
+## Typed trading-copy retirement (2026-10-18)
+
+Production class dispatch uses the native mapping/formatter/helper bodies. The
+unused typed mappers, formatters, order_helpers and seven sizing functions are
+removed with five exclusive test targets, four source oracles and formatter-only
+cardinality controls. Nineteen decoder contracts owned only by those copies are
+removed; all surviving contract objects are unchanged. Live typed to_api_symbol
+and api_margin_coin stay, and the sizing source extractor retains the two methods
+needed by ws_helpers. No native implementation or shared model API changes.
+
+Before deletion, a compiled actual native amount mutation leaves all ten typed
+mapper tests green but fails constructed order_reads_binding. A compiled native
+buy/sell mutation leaves all four typed formatter tests green but fails the
+constructed futures exchange_trait request payload assertion. Both witnesses pass
+after exact byte restoration. Existing native/source helper, mapping/formatter,
+order-read and constructed exchange targets remain wired. The Order snapshot
+supplement retains every assertion while dropping an empty-Store identity call
+to the retired helper. Earlier typed-copy counts and refusal findings in this
+file are historical evidence, not coverage of the installed production route.

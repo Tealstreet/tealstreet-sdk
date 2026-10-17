@@ -391,6 +391,14 @@ The public socket subscription bodies live only in ws_emission.rs and are instal
 by public_class.rs on the production Realm. The unused ws_public prepared-value
 copy and its standalone tests/oracle were removed; real listener coverage remains.
 
+The concrete resolveHyperliquidBuilder import returns a configured native value
+unchanged and samples testnet only for a nullish fallback. The actual builder
+consumer keeps feeTenthsBps as supplied in the signed action; it lowercases the
+address at the source callsite. Configured identity, lazy default getter reads,
+fresh fallback objects and action fee types have real Realm/source witnesses.
+No shared ExchangeOptions field types or Realm carriers are widened.
+
+
 The production orderRequestToOrderWire import reads native Realm fields directly.
 It formats price, size and trigger price before the HTTP JSON boundary, so NaN
 and infinities become the maintained wire strings rather than null. floatToWire
