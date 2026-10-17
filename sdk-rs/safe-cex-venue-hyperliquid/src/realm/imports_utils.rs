@@ -10,6 +10,66 @@ fn arg(args: &[Value], i: usize) -> Value {
 }
 
 pub(crate) fn bind(realm: &Realm) {
+    // p-iteration's mapSeries: read live length/slots, await each input, then
+    // await its callback before inspecting the next slot. Keep realm identities.
+    let module = realm.singleton("pIterationModule", |r| r.new_object());
+    let module_weak = std::rc::Rc::downgrade(module.object().expect("module object"));
+    let map_series = realm.native("mapSeries", 3, move |r, _, args| {
+        let array = arg(args, 0);
+        let callback = arg(args, 1);
+        let this_arg = arg(args, 2);
+        let receiver = if this_arg.truthy() {
+            this_arg
+        } else {
+            Value::Object(
+                module_weak
+                    .upgrade()
+                    .ok_or_else(|| r.error("p-iteration module unavailable"))?,
+            )
+        };
+        let mut realm = r.clone();
+        Ok(r.spawn_value(Box::pin(async move {
+            let result = realm.new_array(vec![]);
+            let mut index = 0usize;
+            loop {
+                let length = realm.get_str(&array, "length")?;
+                if !realm
+                    .binary("<", &Value::Number(index as f64), &length)?
+                    .truthy()
+                {
+                    break;
+                }
+                let key = PropKey::str(&index.to_string());
+                if realm.has_property(&array, &key)? {
+                    // Resolve callback.call before evaluating the awaited item.
+                    let call = realm.get_str(&callback, "call")?;
+                    let value = realm.get(&array, &key)?;
+                    let value = realm.await_value(value).await?;
+                    let pending = realm.call(
+                        &call,
+                        &callback,
+                        &[
+                            receiver.clone(),
+                            value,
+                            Value::Number(index as f64),
+                            array.clone(),
+                        ],
+                    )?;
+                    let value = realm.await_value(pending).await?;
+                    realm.set_str(&result, &index.to_string(), value)?;
+                }
+                index += 1;
+            }
+            Ok(result)
+        })))
+    });
+    module.object().expect("module object").borrow_mut().put(
+        PropKey::str("mapSeries"),
+        map_series.clone(),
+        true,
+    );
+    realm.bind_import("mapSeries", map_series);
+
     // utils/get-key `v`: exact, then snake_case, then camelCase `in` checks.
     realm.bind_import(
         "v",

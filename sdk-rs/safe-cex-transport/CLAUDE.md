@@ -207,3 +207,10 @@ TypeError witness and native rejection/resend/read/write regressions live in
 `tests/signature_error_kind.rs`; `scripts/signature-error-kind-control.py`
 restores the original message-only wrapper to prove the failures, then restores
 exact source bytes and requires every witness to pass.
+
+The signature/remote-operation accepted batch observes the four retry helpers and
+the RemoteSignerRequest discriminator plus its originating response decoder.
+Native fields, stamp/callback order, failed-config replay and timeout effects
+remain distinct from wire encoding. See ACCEPTED_API_REVIEWS.md; run the nine
+source-disconnect controls serially and require named native failures with exact
+restoration. The source oracle executes the maintained helpers and actual Axios.

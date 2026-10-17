@@ -784,3 +784,116 @@ fn ethereum_sdk_accounts_and_jwt_headers_match_actual_source_sdk() {
         }
     }
 }
+
+#[test]
+fn numeric_created_at_survives_constructed_fetch_orders() {
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), |wire| {
+        private_script(wire);
+        wire.responses.borrow_mut().insert(
+            "/orders".into(),
+            json!({"results":[{
+                "id":"epoch-order", "market":"BTC-USD-PERP", "side":"BUY", "type":"LIMIT",
+                "status":"OPEN", "price":"101.5", "size":"0.006", "remaining_size":"0.003",
+                "created_at":1784505600000i64, "reduce_only":false
+            }]}),
+        );
+    });
+    drive(&runtime, venue.start())
+        .expect("numeric created_at must not abort initial order loading");
+    let orders = drive(&runtime, venue.fetch_orders(None)).expect("numeric created_at REST read");
+    assert_eq!(orders.len(), 1, "retain open row from REST");
+    assert_eq!(orders[0].id, "epoch-order");
+    assert_eq!(
+        orders[0].last_update.to_bits(),
+        1784505600000.0f64.to_bits()
+    );
+    assert_eq!(orders[0].filled.to_bits(), (0.006f64 - 0.003f64).to_bits());
+    assert_eq!(
+        orders[0].info.as_ref().unwrap()["created_at"]
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        1784505600000.0f64.to_bits()
+    );
+    assert!(
+        store.loaded().orders,
+        "startup commits the native order snapshot"
+    );
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.orders()[0].id, "epoch-order");
+    assert!(
+        wire.requests
+            .borrow()
+            .iter()
+            .any(|request| request.url.ends_with("/orders"))
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn cancel_all_orders_reaches_venue_even_when_store_is_empty() {
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    assert!(store.orders().is_empty());
+    let venue: &dyn Exchange = venue.as_ref();
+    drive(&runtime, venue.cancel_all_orders()).unwrap();
+    let requests = wire.requests.borrow();
+    let deletes: Vec<_> = requests.iter().filter(|r| r.method == "delete").collect();
+    assert_eq!(
+        deletes.len(),
+        1,
+        "cancel-all must reach venue with an empty Store"
+    );
+    assert_eq!(deletes[0].url, "/orders");
+    assert!(deletes[0].params.is_none());
+    assert!(store.orders().is_empty());
+}
+
+#[test]
+fn cancel_symbol_orders_reaches_venue_even_when_store_is_empty() {
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    assert!(store.orders().is_empty());
+    let venue: &dyn Exchange = venue.as_ref();
+    drive(&runtime, venue.cancel_symbol_orders("BTC-USD-PERP".into())).unwrap();
+    let requests = wire.requests.borrow();
+    let deletes: Vec<_> = requests.iter().filter(|r| r.method == "delete").collect();
+    assert_eq!(
+        deletes.len(),
+        1,
+        "symbol cancellation must reach venue with an empty Store"
+    );
+    assert_eq!(deletes[0].url, "/orders?market=BTC-USD-PERP");
+    assert!(deletes[0].params.is_none());
+    assert!(store.orders().is_empty());
+}
+
+#[test]
+fn venue_wide_cancellations_propagate_http_errors() {
+    for symbol_scoped in [false, true] {
+        let (venue, runtime, store, wire) =
+            support::fixture_with(private_options(), private_script);
+        drive(&runtime, venue.start()).unwrap();
+        assert!(store.orders().is_empty());
+        wire.statuses.borrow_mut().insert("/orders".into(), 400);
+        let venue: &dyn Exchange = venue.as_ref();
+        let result = if symbol_scoped {
+            drive(&runtime, venue.cancel_symbol_orders("BTC-USD-PERP".into()))
+        } else {
+            drive(&runtime, venue.cancel_all_orders())
+        };
+        assert!(
+            result.is_err(),
+            "venue cancellation must propagate a rejected DELETE"
+        );
+        assert_eq!(
+            wire.requests
+                .borrow()
+                .iter()
+                .filter(|r| r.method == "delete")
+                .count(),
+            1
+        );
+        assert!(store.orders().is_empty());
+    }
+}

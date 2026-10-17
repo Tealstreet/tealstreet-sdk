@@ -221,17 +221,17 @@ impl ExchangeHost for Host {
             })
             .collect();
         object.extend(secondary);
-        if let Some(proxy) = options
+        let mut secondary_options: ExchangeOptions =
+            serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))?;
+        // The source call supplies no otherOptions.proxyUrl. Always replace
+        // the primary override, including when the result is undefined.
+        secondary_options.override_proxy_url = options
             .secondary_proxy_url
             .as_ref()
-            .or(options.override_proxy_url.as_ref())
+            .filter(|proxy| !proxy.is_empty())
             .cloned()
-            .or_else(|| self.scope.runtime.transport().public_cors_proxy())
-        {
-            object.insert("overrideProxyUrl".into(), proxy.into());
-        }
-        let reader =
-            create(serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))?)?;
+            .or_else(|| self.scope.runtime.transport().public_cors_proxy());
+        let reader = create(secondary_options)?;
         self.configure_signing(&reader)?;
         Ok(Rc::new(super::http::Secondary { primary, reader }))
     }

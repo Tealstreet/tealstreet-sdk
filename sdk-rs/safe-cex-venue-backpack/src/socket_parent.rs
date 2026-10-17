@@ -53,9 +53,15 @@ impl WsParent for Parent {
     fn resync_coordinator(&self) -> Rc<ReopenResync> {
         self.resync.clone()
     }
-    fn fetch_and_set_private_snapshot(&self, _: usize) -> ExchangeFuture<'static, ()> {
+    fn fetch_and_set_private_snapshot(&self, tries: usize) -> ExchangeFuture<'static, ()> {
         let owner = self.live();
-        Box::pin(async move { owner?.tick().await })
+        Box::pin(async move {
+            let owner = owner?;
+            owner
+                .base
+                .fetch_and_set_private_snapshot(owner.as_ref(), tries as u32)
+                .await
+        })
     }
     fn log(&self, message: &str, severity: LogSeverity) -> Result<(), ExchangeError> {
         self.live()?.base.log(message, severity.as_str())
