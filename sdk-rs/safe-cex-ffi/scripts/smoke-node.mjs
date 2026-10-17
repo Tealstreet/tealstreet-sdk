@@ -9,5 +9,6 @@ try {
 }
 execFileSync(process.execPath, [join(crate, 'scripts/build.mjs'), 'node'], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-methods.test.mjs')], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', join(crate, 'tests/native-account-deactivation.test.mjs')], { stdio: 'inherit' });
 execFileSync('bun', ['run', join(crate, 'smoke/bun/run.mjs')], { stdio: 'inherit' });
 execFileSync('bun', ['run', join(crate, 'smoke/bun/native-exchange.mjs')], { stdio: 'inherit' });

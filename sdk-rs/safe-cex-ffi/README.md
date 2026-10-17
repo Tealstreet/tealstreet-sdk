@@ -34,6 +34,12 @@ JSON account host. Events and private Store slices are forwarded to JS; signing
 and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
+Venue `deactivate` requests clear host delivery, dispose the exchange, and post
+`{event: "deactivate-status", data: true}`, matching the TS worker. The Store
+reset performed by disposal is suppressed. The Rust `native_account_deactivation`
+suite and Node `tests/native-account-deactivation.test.mjs` drive an actual
+Orderly-family account through a loopback expired-key response and verify that
+its signer waits resolve as disposed.
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
 
 The account method table exposes `findOrderByClientOrderId` through the venue's
