@@ -39,11 +39,6 @@
     "reason": "The render_query output walker renders an already decoded QueryValue tree into URL pairs: undefined omission, null empty values, native Number spelling and bracket/repeat paths. Native query_params fixtures observe nonfinite/signed-zero/string identities before exact wire comparison. No wire/domain owner is constructed.",
     "sourceSha256": "6399a17af239660379a326ee48eb17e8f03a018e60cd6f412ad792fa0eb31ff9"
   },
-  "safe-cex-transport/src/retry.rs::LOCAL_FUNCTION:includes": {
-    "category": "non-decoder",
-    "reason": "The is_error_signature helper inspects an already decoded response member for the exact signature-error marker using string substring or array-element equality. It is a retry predicate, not model admission; absent/null values return false and non-method values preserve their source TypeError. Direct native response fixtures cover both field names, exact array-vs-string behavior, early-match/early-error ordering and error name/message.",
-    "sourceSha256": "36cd816b8e13fcf89f7d248afb7af162602dc5f60207ebe2813176dfe55cbdbd"
-  },
   "safe-cex-transport/src/query.rs::LOCAL_FUNCTION:axios_encode": {
     "category": "non-decoder",
     "reason": "The Axios buildURL byte encoder accepts an already typed string and emits URL text. The independently specified installed-Axios getUri and physical HTTP oracle plus native default-query witnesses assert bracket escaping, punctuation, Unicode, space/plus distinctions, and exact renderer apostrophe output. A compiling bracket-disconnect control fails its named native test and exact restoration passes. No inbound model is constructed.",
