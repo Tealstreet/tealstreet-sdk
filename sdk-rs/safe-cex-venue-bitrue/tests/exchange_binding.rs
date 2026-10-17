@@ -1039,3 +1039,80 @@ fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
         cleanup().unwrap();
     }
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("bitrue");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 32);
+    let f = PrivateFixture::new();
+    let template = f.store.markets()[0].clone();
+    let tickers = ticker_coercion::seed("bitrue");
+    let markets = tickers
+        .iter()
+        .map(|ticker| {
+            let mut market = template.clone();
+            market.id.clone_from(&ticker.id);
+            market.symbol.clone_from(&ticker.symbol);
+            market
+        })
+        .collect();
+    Store::update(
+        f.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            tickers: Some(tickers),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    f.venue
+        .base()
+        .emit(
+            "markets:changed",
+            json!({"added":[{"symbol":"E-ETH-USDT"},{"symbol":"E-ADA-USDT"}]}),
+        )
+        .unwrap();
+    f.runtime.pump();
+    let socket = f
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.contains("listenKey="))
+        .unwrap()
+        .1
+        .clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            f.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("bitrue")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            f.runtime.pump();
+        }
+        ticker_coercion::assert_native(&f.store.tickers(), case);
+    }
+    assert!(
+        f.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        f.runtime.reports.borrow()
+    );
+}

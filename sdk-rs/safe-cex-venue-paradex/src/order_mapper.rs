@@ -10,11 +10,27 @@ use safe_cex_num::{
 use safe_cex_types::Order;
 use serde_json::{Map, Value};
 
+#[derive(Debug)]
+pub(crate) struct OrderProjectionRefusal {
+    pub field: &'static str,
+    pub value: Option<Value>,
+    pub message: String,
+}
+
 // ts: ParadexExchange#mapOrder
 pub fn map_order(
     row: &Map<String, Value>,
     local_to_utc: impl FnOnce(f64) -> f64,
 ) -> Result<Order, String> {
+    map_order_row(row, local_to_utc)?.map_err(|refusal| refusal.message)
+}
+
+// Source evaluation errors remain distinct from the batch's strict identity
+// refusals. The standalone utility retains the original refusal error.
+pub(crate) fn map_order_row(
+    row: &Map<String, Value>,
+    local_to_utc: impl FnOnce(f64) -> f64,
+) -> Result<Result<Order, OrderProjectionRefusal>, String> {
     let text = |field| {
         row.get(field)
             .and_then(Value::as_str)
@@ -59,11 +75,44 @@ pub fn map_order(
     let amount = parse_float(&js_string(row.get("size")).map_err(|error| error.to_string())?);
     let remaining =
         parse_float(&js_string(row.get("remaining_size")).map_err(|error| error.to_string())?);
-    Ok(Order {
+    let last_update = match row.get("created_at") {
+        None => f64::NAN,
+        Some(Value::Null) => 0.0,
+        Some(Value::Bool(value)) => {
+            if *value {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        Some(value) => match js_value_as_f64(value) {
+            Some(number) => js_time_clip(number),
+            None => js_date_parse(
+                &js_string(Some(value)).map_err(|error| error.to_string())?,
+                local_to_utc,
+            ),
+        },
+    };
+    let identity = |field: &'static str| {
+        row.get(field)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| OrderProjectionRefusal {
+                field,
+                value: row.get(field).cloned(),
+                message: format!("Paradex order field {field} must be a string"),
+            })
+    };
+    let identities = (|| Ok((identity("id")?, identity("market")?)))();
+    let (id, symbol) = match identities {
+        Ok(fields) => fields,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    Ok(Ok(Order {
         client_order_id: (None).into(),
-        id: text("id")?.to_owned(),
+        id,
         parent_id: (None).into(),
-        symbol: text("market")?.to_owned(),
+        symbol,
         side: side.into(),
         r#type: (kind).into(),
         status: status.into(),
@@ -74,24 +123,7 @@ pub fn map_order(
         reduce_only: reduce_only.into(),
         time_in_force: None.into(),
         // Date distinguishes missing, null and booleans before primitive/string parsing.
-        last_update: match row.get("created_at") {
-            None => f64::NAN,
-            Some(Value::Null) => 0.0,
-            Some(Value::Bool(value)) => {
-                if *value {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            Some(value) => match js_value_as_f64(value) {
-                Some(number) => js_time_clip(number),
-                None => js_date_parse(
-                    &js_string(Some(value)).map_err(|error| error.to_string())?,
-                    local_to_utc,
-                ),
-            },
-        },
+        last_update,
         info: (Some(Value::Object(row.clone()))).into(),
         close: (None).into(),
         trigger_type: (None).into(),
@@ -100,5 +132,5 @@ pub fn map_order(
         take_profit: (None).into(),
         stop_loss: (None).into(),
         extra: (None).into(),
-    })
+    }))
 }
