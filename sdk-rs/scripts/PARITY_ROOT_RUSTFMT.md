@@ -7,3 +7,4 @@ The types bootstrap now explicitly installs `rustfmt` on default stable. The gen
 `parity-root-rustfmt.json` binds the seven passing standalone checks to the tested commit. The same checker fails on the parent workflow and on deliberate deletion of the repaired component, then passes after restoration. Additional controls reject clippy-only setup, setup in the native job alone, late setup, conditional setup and ignored bootstrap errors. This is a lexical workflow contract; successful component installation and the full parity job remain CI claims requiring an actual successful job.
 
 The existing mandatory CI-wiring suite imports the standalone check. Its Cargo-dependent full invocation was not run concurrently with active Coinbase tests. No parity rows changed. Sub-agent static review found no material blocker in the source fix; the review does not claim runtime execution.
+
