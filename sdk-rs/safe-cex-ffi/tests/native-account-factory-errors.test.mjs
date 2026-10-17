@@ -25,11 +25,11 @@ for (const [exchange, status, body, prefix] of [
       try { if (id !== undefined) await native.nativeAccountClose(id); }
       finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     });
-    id = await native.nativeAccountOpen({ exchange, optionsJson: JSON.stringify({
+    id = await native.nativeAccountOpen({ exchange, options: {
       key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tealstreetProxy: true, tealstreetTunnel: false, overrideProxyUrl: `http://127.0.0.1:${server.address().port}`,
-    }) }, event => events.push(JSON.parse(event)), () => {}, undefined, async () => token);
-    if (exchange === 'bitrue') await assert.rejects(native.nativeAccountCallMethod(id, 'validateAccount', '[]'), /Request failed with status code/);
-    else await native.nativeAccountCallMethod(id, 'validateAccount', '[]');
+    } }, event => events.push(event), () => {}, undefined, async () => token);
+    if (exchange === 'bitrue') await assert.rejects(native.nativeAccountCallMethod(id, 'validateAccount', []), /Request failed with status code/);
+    else await native.nativeAccountCallMethod(id, 'validateAccount', []);
     for (let i = 0; i < 100 && !events.some(event => event.event === 'error' && JSON.stringify(event.data).includes(prefix)); i++) await delay(10);
     assert.ok(requests.some(request => request.headers.authorization && (exchange !== 'bitrue' || request.url.includes('/fapi/v2/account'))), JSON.stringify(requests));
     assert.ok(events.some(event => event.event === 'error' && JSON.stringify(event.data).includes(`[${exchange}] ${prefix} (${status}): `)), JSON.stringify(events));
