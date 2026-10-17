@@ -220,7 +220,7 @@
         "output": false
       }
     ],
-    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:46-50 optional lowercase 0x prefix and exactly 64 ASCII hex digits. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:45,48-50 optional lowercase 0x prefix and exactly 64 ASCII hex digits. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
   },
   "safe_cex_venue_asterdex::helpers::is_aster_dex_address": {
     "category": "decoder",
@@ -293,7 +293,7 @@
         "output": false
       }
     ],
-    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:47,52-54 required lowercase 0x prefix and exactly 40 ASCII hex digits. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
+    "evidence": "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts:46,52-54 required lowercase 0x prefix and exactly 40 ASCII hex digits. Expected native values are independently authored from the maintained TS body; JSON fixtures adapt the actual typed function and add no production input API."
   },
   "safe_cex_venue_asterdex::helpers::is_aster_dex_main_wallet_error": {
     "category": "decoder",

@@ -6044,17 +6044,17 @@
     },
     {
       "input": {
-        "alphabet": "é",
-        "index": "0"
+        "alphabet": "123456789abcdef",
+        "index": "9"
       },
-      "output": "Ã"
+      "output": "a"
     },
     {
       "input": {
-        "alphabet": "é",
-        "index": "1"
+        "alphabet": "123456789abcdef",
+        "index": "14"
       },
-      "output": "©"
+      "output": "f"
     }
   ],
   "exchange_utils::d8": [

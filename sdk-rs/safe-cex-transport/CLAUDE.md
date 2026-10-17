@@ -227,3 +227,20 @@ for nested records/arrays, and applies Axios buildURL encoding. Metadata `{}`
 values retain their JSON.stringify phase. Custom serializers and HOW frame params
 keep their existing ownership. See `QUERY_PARITY_EVIDENCE.md` for executed source,
 HTTP witnesses, and the remaining reqwest apostrophe normalization.
+
+Native HTTP failures inspect connector causes before assigning a network code.
+DNS lookup refusal and expired certificates remain non-retryable under the
+maintained network-read predicate; temporary DNS and genuine connection refusal
+retain their retry eligibility. `native::network_tests` exercises the physical
+ReqwestAdapter and read retry policy with an injected resolver and a real local
+TLS handshake. Its ephemeral certificate setup needs Node and openssl; it commits
+no certificates or private keys. The installed Axios and maintained predicate
+witness is `scripts/native-network-source.cjs` with SAFE_CEX_TYPESCRIPT_PATH set.
+The connector's erased DNS context is pinned by that native regression, while
+rustls certificate failures are identified through typed nested io causes.
+Specific rustls expiry/validity/revocation/signature/purpose categories map to
+Node-style codes. Hostname mismatch keeps ERR_TLS_CERT_ALTNAME_INVALID and its
+installed retry eligibility, rather than inventing a blanket TLS retry refusal.
+Other InvalidCertificate categories use CERT_REJECTED to retain
+the certificate refusal category; rustls UnknownIssuer cannot identify every
+OpenSSL self-signed/chain/leaf label, so exact label equivalence is unclaimed.
