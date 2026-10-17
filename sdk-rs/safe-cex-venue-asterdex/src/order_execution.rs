@@ -346,7 +346,8 @@ impl OrderExecution {
                     return self.place_orders(&orders,skip).await;
                 }
             }
-            let mut params=json!({"symbol":opts.symbol,"side":if opts.side==OrderSide::Buy{"BUY"}else{"SELL"}});
+            let mut params=json!({"symbol":opts.symbol});
+            if let Some(side)=opts.side.into_value(){params["side"]=json!(match side {OrderSide::Buy=>"BUY",OrderSide::Sell=>"SELL"});}
             if let Some(kind)=kind {params["type"]=json!(kind);}
             if let Some(mode)=&input.opts.stp_mode {params["stpMode"]=serde_json::to_value(mode).unwrap();}
             if self.version==AsterDEXAPIVersion::V3 {

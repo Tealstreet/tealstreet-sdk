@@ -203,3 +203,20 @@ inherited_test!(
     "BTCUSDC".into(),
     None
 );
+
+#[test]
+fn bound_amendment_omits_undefined_side() {
+    let h = fixture();
+    let order = h.drive(h.venue().fetch_orders(None)).unwrap().remove(0);
+    let mut row = serde_json::to_value(order).unwrap();
+    row.as_object_mut().unwrap().remove("side");
+    let opts = serde_json::from_value(json!({"order":row,"update":{"price":102.129}})).unwrap();
+    assert_eq!(
+        h.drive(h.venue().update_order(opts)).unwrap(),
+        ["9007199254740993"]
+    );
+    let calls = h.http.calls("/v3/order");
+    assert_eq!(calls.len(), 1);
+    assert!(!calls[0].data.as_object().unwrap().contains_key("side"));
+    done(&h);
+}

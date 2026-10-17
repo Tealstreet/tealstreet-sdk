@@ -112,7 +112,8 @@ pub fn map_coinbase_rest_order(
         parent_id: match raw_order.get("client_order_id") {
             None | Some(Value::Null) => None,
             Some(id) => Some(id.as_str()?.to_owned()),
-        }.into(),
+        }
+        .into(),
         status: status.into(),
         symbol: market.symbol.clone(),
         r#type: (resolved.kind).into(),

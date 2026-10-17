@@ -190,3 +190,41 @@ fn model_wire_bytes_and_native_presence_match_node_corpus() {
         assert_eq!(json!(keys), case["keys"], "own-key presence {case}");
     }
 }
+
+#[test]
+fn prepared_input_reads_own_undefined_optional_fields_without_widening_public_input() {
+    use safe_cex_types::{ModelField, PlaceOrderOpts, PreparedOrderOpts};
+    let input = from_json(&json!({"symbol":"BTCUSDT", "amount":2}));
+    for key in [
+        "type",
+        "side",
+        "price",
+        "triggerPrice",
+        "stopLoss",
+        "takeProfit",
+        "reduceOnly",
+        "timeInForce",
+        "triggerType",
+        "tpTriggerType",
+        "slTriggerType",
+        "clientOrderId",
+        "maxSlippagePct",
+        "close",
+        "impliedVolatility",
+    ] {
+        input.define(key, Js::Undefined).unwrap();
+    }
+    let prepared: PreparedOrderOpts = to_typed(&input).unwrap();
+    assert!(matches!(prepared.r#type, ModelField::Undefined));
+    assert!(matches!(prepared.side, ModelField::Undefined));
+    assert!(prepared.price.is_none() && prepared.client_order_id.is_none());
+    assert!(prepared.trigger_price.is_none() && prepared.stop_loss.is_none());
+    assert!(prepared.take_profit.is_none() && prepared.reduce_only.is_none());
+    assert!(prepared.time_in_force.is_none() && prepared.trigger_type.is_none());
+    assert!(prepared.tp_trigger_type.is_none() && prepared.sl_trigger_type.is_none());
+    assert!(prepared.max_slippage_pct.is_none() && prepared.close.is_none());
+    assert!(prepared.implied_volatility.is_none());
+    assert!(to_typed::<PlaceOrderOpts>(&input).is_err());
+    input.define("price", Js::Null).unwrap();
+    assert!(to_typed::<PreparedOrderOpts>(&input).is_err());
+}

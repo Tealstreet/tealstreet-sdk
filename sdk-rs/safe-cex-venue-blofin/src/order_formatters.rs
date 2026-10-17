@@ -52,12 +52,11 @@ fn margin(mode: MarginType) -> &'static str {
         "cross"
     }
 }
-fn side(side: safe_cex_types::ModelField<OrderSide>) -> &'static str {
-    if side == OrderSide::Buy {
-        "buy"
-    } else {
-        "sell"
-    }
+fn side(side: safe_cex_types::ModelField<OrderSide>) -> Option<&'static str> {
+    side.into_value().map(|side| match side {
+        OrderSide::Buy => "buy",
+        OrderSide::Sell => "sell",
+    })
 }
 fn market<E>(opts: &PreparedOrderOpts, store: &dyn Store) -> Result<Market, ServiceError<E>> {
     store
@@ -221,7 +220,9 @@ pub async fn format_trigger_order<E>(
     insert(&mut req, "instId", market.id);
     insert(&mut req, "marginMode", margin_mode);
     insert(&mut req, "positionSide", position_side);
-    insert(&mut req, "side", side(opts.side));
+    if let Some(side) = side(opts.side) {
+        insert(&mut req, "side", side);
+    }
     insert(&mut req, "size", js_number_string(amount));
     insert(&mut req, "clientOrderId", generated_id(host)?);
     insert(&mut req, "orderPrice", js_number_string(order_price));
@@ -261,7 +262,9 @@ pub async fn format_algo_order<E>(
     if host.broker_id_enabled {
         insert(&mut req, "brokerId", BROKER_ID);
     }
-    insert(&mut req, "side", side(opts.side));
+    if let Some(side) = side(opts.side) {
+        insert(&mut req, "side", side);
+    }
     insert(&mut req, "positionSide", position_side);
     insert(
         &mut req,
@@ -301,7 +304,7 @@ pub async fn format_algo_order<E>(
             .filter(|o| {
                 o.symbol == opts.symbol
                     && o.r#type == opposite
-                    && o.side == opts.side
+                    && o.side.value() == opts.side.value()
                     && o.status == OrderStatus::Open
                     && !number_truthy(o.amount)
             })
@@ -350,17 +353,14 @@ pub async fn format_normal_order<E>(
             None => generated_id(host)?,
         },
     );
-    insert(&mut req, "side", side(opts.side));
-    insert(
-        &mut req,
-        "orderType",
-        if opts.time_in_force == Some(OrderTimeInForce::PostOnly) && opts.r#type == OrderType::Limit
-        {
-            Value::String("post_only".into())
-        } else {
-            REVERSE_ORDER_TYPE[order_type_key(opts.r#type)].clone()
-        },
-    );
+    if let Some(side) = side(opts.side) {
+        insert(&mut req, "side", side);
+    }
+    if opts.time_in_force == Some(OrderTimeInForce::PostOnly) && opts.r#type == OrderType::Limit {
+        insert(&mut req, "orderType", "post_only");
+    } else if let Some(kind) = REVERSE_ORDER_TYPE.get(order_type_key(opts.r#type)) {
+        insert(&mut req, "orderType", kind.clone());
+    }
     insert(&mut req, "size", js_number_string(amount));
     if opts.r#type == OrderType::Limit {
         insert(

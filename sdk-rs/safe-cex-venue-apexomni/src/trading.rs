@@ -258,7 +258,15 @@ impl ApexOmniExchange {
                     market.id
                 }),
             ),
-            ("side", string(side)),
+            (
+                "side",
+                opts.side.into_value().map_or(J::Undefined, |side| {
+                    string(match side {
+                        OrderSide::Buy => "BUY",
+                        OrderSide::Sell => "SELL",
+                    })
+                }),
+            ),
             ("type", mapped_type),
             ("size", string(js_number_string(amount))),
             ("price", string(execution)),

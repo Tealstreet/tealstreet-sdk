@@ -91,7 +91,6 @@ pub fn map_order(
                     local_to_utc,
                 ),
             },
-
         },
         info: (Some(Value::Object(row.clone()))).into(),
         close: (None).into(),

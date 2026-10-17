@@ -139,7 +139,7 @@ impl Exchange for BingxExchange {
         let options: Vec<_> = orders
             .orders()
             .iter()
-            .map(|o| o.options().clone())
+            .map(|o| safe_cex_types::PreparedOrderOpts::from(o.options()))
             .collect();
         Box::pin(async move { ids(self.inner.placement.place_orders(&options).await?) })
     }

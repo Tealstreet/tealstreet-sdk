@@ -553,3 +553,26 @@ fn v1_signature_rejection_resends_once_from_unsigned_parameters() {
         }
     }
 }
+
+#[test]
+fn amendment_omits_undefined_side_on_the_signed_wire() {
+    let (concrete, rt, _, wire) =
+        support::fixture(json!({"key":"fixture-key","secret":"fixture-secret"}));
+    let venue: Rc<dyn Exchange> = concrete;
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    let order = drive(&rt, venue.fetch_orders(None)).unwrap().remove(0);
+    let mut row = serde_json::to_value(order).unwrap();
+    row.as_object_mut().unwrap().remove("side");
+    let opts = serde_json::from_value(json!({"order":row,"update":{"price":96}})).unwrap();
+    take(&wire);
+    assert_eq!(drive(&rt, venue.update_order(opts)).unwrap(), ["1234567"]);
+    let requests = wire.requests.borrow();
+    let placed = requests
+        .iter()
+        .find(|r| r.method.eq_ignore_ascii_case("POST") && request_path(r) == "/fapi/v1/order")
+        .unwrap();
+    assert!(!signed_query_params(placed).contains_key("side"));
+    drop(requests);
+    venue.dispose().unwrap();
+}

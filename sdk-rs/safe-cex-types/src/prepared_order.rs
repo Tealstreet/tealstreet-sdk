@@ -113,6 +113,12 @@ impl Serialize for PreparedOrderOpts {
     }
 }
 
+fn deserialize_optional<'de, T: serde::Deserialize<'de>, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    Ok(<ModelField<T> as serde::Deserialize>::deserialize(deserializer)?.into_value())
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PreparedWire {
@@ -122,31 +128,31 @@ struct PreparedWire {
     #[serde(default)]
     side: ModelField<OrderSide>,
     amount: f64,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     price: Option<f64>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     trigger_price: Option<f64>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     stop_loss: Option<f64>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     take_profit: Option<f64>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     reduce_only: Option<bool>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     time_in_force: Option<OrderTimeInForce>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     trigger_type: Option<OrderStopTriggerType>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     tp_trigger_type: Option<OrderStopTriggerType>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     sl_trigger_type: Option<OrderStopTriggerType>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     client_order_id: Option<String>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     max_slippage_pct: Option<f64>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     close: Option<bool>,
-    #[serde(default, deserialize_with = "crate::deserialize_present")]
+    #[serde(default, deserialize_with = "deserialize_optional")]
     implied_volatility: Option<f64>,
 }
 impl<'de> serde::Deserialize<'de> for PreparedOrderOpts {
