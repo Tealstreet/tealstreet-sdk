@@ -325,31 +325,31 @@
   },
   {
     "function": "create",
-    "body": "22e3a2953c510c57",
+    "body": "cdb457b5ef1d059b",
     "call": "venue . is_public_data_only ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "22e3a2953c510c57",
+    "body": "cdb457b5ef1d059b",
     "call": "venue . fetch_and_set_private_snapshot (tries)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "22e3a2953c510c57",
+    "body": "cdb457b5ef1d059b",
     "call": "venue . fetch_and_set_orders (symbols)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "22e3a2953c510c57",
+    "body": "cdb457b5ef1d059b",
     "call": "base . dispose ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "facade",
-    "body": "c6140fadf0482da7",
+    "body": "bf904087099176c3",
     "call": "st . update_order (& id_of (& arg (& a , 0)) ? , & patch (& arg (& a , 1)) ?)",
     "file": "safe-cex-exchange/src/js_runtime/store.rs"
   },
@@ -480,14 +480,14 @@
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
   {
-    "function": "declarations",
-    "body": "93f910eccb13806d",
+    "function": "core_module_declarations",
+    "body": "23ba221d1e010b53",
     "call": "module . ident . span () . start ()",
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
   {
-    "function": "referenced",
-    "body": "9e2d7b28d91c9d95",
+    "function": "references_core_namespace",
+    "body": "f510ddc65cffa16f",
     "call": "ident . span () . start ()",
     "file": "safe-cex-parity/src/bin/accepted-source.rs"
   },
@@ -505,193 +505,223 @@
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . start ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . dispose ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . validate_account ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . get_account ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_markets ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . refresh_markets ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_tickers ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_positions (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_and_set_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . find_order_by_client_order_id (arg (& args , 0) ? , arg (& args , 1) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_and_set_private_snapshot (1)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . update_order (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . cancel_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . cancel_symbol_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . cancel_all_orders ()",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
+    "call": "venue . fetch_option_chain (arg (& args , 0) ?)",
+    "file": "safe-cex-registry/src/native_account.rs"
+  },
+  {
+    "function": "native_account_call",
+    "body": "44ca048c84f8def9",
+    "call": "venue . fetch_option_expiries (arg (& args , 0) ?)",
+    "file": "safe-cex-registry/src/native_account.rs"
+  },
+  {
+    "function": "native_account_call",
+    "body": "44ca048c84f8def9",
+    "call": "venue . fetch_account_greeks ()",
+    "file": "safe-cex-registry/src/native_account.rs"
+  },
+  {
+    "function": "native_account_call",
+    "body": "44ca048c84f8def9",
+    "call": "venue . nuke (arg :: < Option < u32 > > (& args , 0) ? . unwrap_or (0))",
+    "file": "safe-cex-registry/src/native_account.rs"
+  },
+  {
+    "function": "native_account_call",
+    "body": "44ca048c84f8def9",
+    "call": "venue . nuke_positions (arg :: < Option < u32 > > (& args , 0) ? . unwrap_or (0))",
+    "file": "safe-cex-registry/src/native_account.rs"
+  },
+  {
+    "function": "native_account_call",
+    "body": "44ca048c84f8def9",
     "call": "venue . set_leverage (arg (& args , 0) ? , arg (& args , 1) ? , arg (& args , 2) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . set_all_leverage (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . change_position_mode (arg (& args , 0) ? , arg (& args , 1) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . change_margin_type (arg (& args , 0) ? , arg (& args , 1) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_leverage_for_symbol (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_symbol_max_leverage (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . schedule_cancel (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_ohlcv (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_public_trades (arg (& args , 0) ? , arg (& args , 1) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_historical_positions (safe_cex_exchange :: journal :: HistoricalPositionOptions { account : options . account , from : options . from , to : options . to , } ,)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_historical_fills (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_income_history (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_income_history_range (arg (& args , 0) ? , arg (& args , 1) ? , arg (& args , 2) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_closed_pnl (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . fetch_historical_orders (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
   {
     "function": "native_account_call",
-    "body": "9575f9b33c16141a",
+    "body": "44ca048c84f8def9",
     "call": "venue . update_symbol_metadata (arg (& args , 0) ?)",
     "file": "safe-cex-registry/src/native_account.rs"
   },
@@ -1126,6 +1156,12 @@
     "body": "4912a257d99860ee",
     "call": "h . start (Box :: pin (async move { let h = host ; if h . truthy (& h . get (& owner , \"isDisposed\") ?) { return Ok (h . undefined ()) ; } let time = now (h . as_ref ()) ? ; let balance = due (h . as_ref () , & owner , time . clone () , \"lastBalanceReconciliationAt\" , 25000. ,) ? ; let positions = due (h . as_ref () , & owner , time . clone () , \"lastPositionSafetyReconciliationAt\" , 25000. ,) ? ; let orders = due (h . as_ref () , & owner , time , \"lastOrderSafetyReconciliationAt\" , 75000. ,) ? ; if balance { awaited (h . as_ref () , invoke ! (h . as_ref () , owner . clone () , \"reconcileBalanceAfterPrivateUpdate\" , vec ! [h . get (& owner , \"balanceStateVersion\") ?] ,) ,) . await ? ; } if positions { let version = invoke ! (h . as_ref () , owner . clone () , \"getPositionStateVersion\" , vec ! []) ? ; let attempt = async { let positions = awaited (h . as_ref () , invoke ! (h . as_ref () , owner . clone () , \"fetchPositions\" , vec ! []) ,) . await ? ; if h . truthy (& h . get (& owner , \"isDisposed\") ?) { return Ok (true) ; } if h . strict_equal (& version , & invoke ! (h . as_ref () , owner . clone () , \"getPositionStateVersion\" , vec ! []) ? ,) { let store = h . get (& owner , \"store\") ? ; invoke ! (h . as_ref () , store . clone () , \"addOrUpdatePositionsFull\" , vec ! [positions] ,) ? ; let store = h . get (& owner , \"store\") ? ; let function = h . get (& store , \"update\") ? ; let loaded = copy (h . as_ref () , h . get (& h . get (& owner , \"store\") ? , \"loaded\") ?) ? ; h . define (& loaded , \"positions\" , h . boolean (true)) ? ; h . call (function , store , vec ! [h . object (vec ! [(\"loaded\" , loaded)])]) ? ; } h . set (& owner , \"lastPositionSafetyReconciliationAt\" , now (h . as_ref ()) ? ,) ? ; Ok :: < _ , H :: Value > (false) } . await ; match attempt { Ok (true) => return Ok (h . undefined ()) , Err (error) => emit_log ! (h . as_ref () , owner . clone () , h . template (vec ! [h . text (\"Position safety reconciliation failed: \") , h . get (& error , \"message\") ?,]) ?, \"Warning\" ,) ? , _ => { } } } if orders { let attempt = async { let orders = awaited (h . as_ref () , invoke ! (h . as_ref () , owner . clone () , \"fetchOrders\" , vec ! []) ,) . await ? ; if h . truthy (& h . get (& owner , \"isDisposed\") ?) { return Ok (true) ; } update (h . as_ref () , & owner , \"orders\" , orders) ? ; h . set (& owner , \"lastOrderSafetyReconciliationAt\" , now (h . as_ref ()) ?) ? ; Ok :: < _ , H :: Value > (false) } . await ; match attempt { Ok (true) => return Ok (h . undefined ()) , Err (error) => emit_log ! (h . as_ref () , owner . clone () , h . template (vec ! [h . text (\"Order safety reconciliation failed: \") , h . get (& error , \"message\") ?,]) ?, \"Warning\" ,) ? , _ => { } } } if ! h . truthy (& h . get (& owner , \"isDisposed\") ?) { let host = h . clone () ; let ex = owner . clone () ; let callback = h . function (Rc :: new (move | _ | { invoke ! (host . as_ref () , ex . clone () , \"tick\" , vec ! []) })) ; h . import (\"loop\" , vec ! [callback , h . number (3000.)]) ? ; } Ok (h . undefined ()) }))",
     "file": "safe-cex-venue-asterdex/src/exchange_runtime.rs"
+  },
+  {
+    "function": "run",
+    "body": "4f55fd7c625fa3a8",
+    "call": "venue . dispose ()",
+    "file": "safe-cex-venue-asterdex/src/native_emitter_tests.rs"
   },
   {
     "function": "drop",
@@ -6757,19 +6793,19 @@
   },
   {
     "function": "bind",
-    "body": "de2b0235e9f6881d",
+    "body": "253cc9241ef5c7f7",
     "reference": "legacy_lifecycle :: start",
     "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
   },
   {
     "function": "bind",
-    "body": "de2b0235e9f6881d",
+    "body": "253cc9241ef5c7f7",
     "reference": "legacy_lifecycle :: fetch_historical_positions",
     "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
   },
   {
     "function": "bind",
-    "body": "de2b0235e9f6881d",
+    "body": "253cc9241ef5c7f7",
     "reference": "historical_fills :: fetch_historical_fills",
     "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
   },
