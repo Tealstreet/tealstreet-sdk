@@ -398,3 +398,10 @@ module globals. Their source String/nullish coercion runs before the existing
 account-tier classifiers; matching codes short-circuit the message read.
 Real signed-placement rejection tests cover tier, approval and ordinary errors,
 including the normalized message delivered through the native error reporter.
+
+Public ingress loops and pair patterns use the existing native IteratorRecord.
+Abrupt callbacks and early breaks invoke return once; original callback errors
+win over close errors, while normal pair completion validates the return result.
+The constructed public class and its real operation table carry the regressions.
+The native exchange target also covers account_all orders, positions, fills and
+the source-throttled signed balance refresh through the real private socket.
