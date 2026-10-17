@@ -186,7 +186,7 @@ impl NativeRuntimeHost for ProductionHost {
         (self.deps.local_to_utc)(value)
     }
     fn uuid(&self) -> String {
-        self.deps.runtime.unique_id()
+        self.deps.runtime.unique_id().replace(['-', '_'], "")
     }
     fn spawn_order(&self, future: ExchangeFuture<'static, ()>) {
         self.owned(future)

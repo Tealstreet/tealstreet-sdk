@@ -4,7 +4,7 @@
 use super::{
     client,
     rt::{Rt, Shared},
-    value::{Js, Thrown, arg, from_json, from_typed, to_json},
+    value::{Js, Thrown, arg, from_json, from_typed, to_json, to_typed},
 };
 use crate::constants;
 use safe_cex_exchange::js_runtime::{
@@ -256,6 +256,66 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
+
+    // The actual imported journal operations used by the source lifecycle body.
+    def(
+        "wooOrdersToExecutions",
+        Js::function("wooOrdersToExecutions", |_, args| {
+            let orders: Vec<safe_cex_types::HistoricalOrder> = to_typed(&arg(&args, 0))?;
+            from_typed(&crate::journal::woo_orders_to_executions(&orders))
+        }),
+    );
+    def(
+        "reconstructPositionIntervals",
+        Js::function("reconstructPositionIntervals", |_, args| {
+            use safe_cex_exchange::position_intervals::{
+                PositionIntervalOptions, reconstruct_position_intervals,
+            };
+            let executions: Vec<safe_cex_types::Execution> = to_typed(&arg(&args, 0))?;
+            let intervals = reconstruct_position_intervals(
+                &executions,
+                &mut PositionIntervalOptions::default(),
+            )
+            .map_err(|message| Thrown::error("Error", &message))?;
+            from_typed(&intervals)
+        }),
+    );
+    def(
+        "mapFoldedInterval",
+        Js::function("mapFoldedInterval", |_, args| {
+            use safe_cex_exchange::{
+                fold_position_adapter::{FoldPositionAdapterDeps, map_folded_interval},
+                position_intervals::PositionInterval,
+            };
+            let interval: PositionInterval = to_typed(&arg(&args, 0))?;
+            // The native adapter's callbacks are infallible. Evaluate the source's
+            // fallible resolver only after its refusal guards, before calling it.
+            if interval.closed_at.is_none()
+                || interval.closed_size.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
+                || interval.realized_pnl.is_none()
+            {
+                return Ok(Js::Null);
+            }
+            let deps = arg(&args, 1);
+            let account: String = to_typed(&deps.get("account")?)?;
+            let currency =
+                deps.call_method("resolveSettleCurrency", vec![Js::str(&interval.symbol)])?;
+            let currency: String = to_typed(&currency)?;
+            let mut resolve = |_: &str| currency.clone();
+            let record = map_folded_interval(
+                &interval,
+                &mut FoldPositionAdapterDeps {
+                    account: &account,
+                    resolve_settle_currency: &mut resolve,
+                    resolve_funding: None,
+                },
+            );
+            match record {
+                Some(record) => from_typed(&record),
+                None => Ok(Js::Null),
+            }
+        }),
+    );
 
     // woo.types.ts
     def("RECV_WINDOW", Js::Number(constants::RECV_WINDOW as f64));

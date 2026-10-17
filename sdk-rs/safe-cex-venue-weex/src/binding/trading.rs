@@ -52,7 +52,11 @@ pub(super) fn runtime() -> WeexTradingRuntime<Host, Js, Thrown> {
                 step.to_number()?,
             )))
         },
-        uuid: |h| Ok(Js::str(&h.0.shared.runtime.unique_id())),
+        uuid: |h| {
+            Ok(Js::str(
+                &h.0.shared.runtime.unique_id().replace(['-', '_'], ""),
+            ))
+        },
         method: |h, name| v::method(h, &h.this(), name),
         call: v::invoke,
         call_async: v::invoke_async,

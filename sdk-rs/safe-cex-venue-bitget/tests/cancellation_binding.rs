@@ -193,3 +193,86 @@ fn real_cancel_all_emits_and_swallows_venue_failure() {
         "real cancel-all refusal must emit source error"
     );
 }
+
+fn seed_symbol_orders(h: &Harness) {
+    let orders = ["BTCUSDT", "ETHUSDT"].map(|symbol| serde_json::from_value(json!({"id":format!("cancel-{symbol}"),"symbol":symbol,"side":"buy","type":"limit","status":"open","price":100,"amount":2,"filled":0,"remaining":2,"lastUpdate":1,"reduceOnly":false,"info":{}})).unwrap());
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            orders: Some(orders.into()),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+}
+
+#[test]
+fn real_symbol_cancel_emits_its_outer_error_and_rethrows_for_classic_families() {
+    const BATCH: &str = "/api/v2/mix/order/batch-cancel-orders";
+    for name in [ExchangeName::Bitget, ExchangeName::Bitgetusdc] {
+        let h = harness(name, options(), |http| {
+            classic(http);
+            http.route("POST", BATCH, 503.0, json!({"code":"50000","msg":"synthetic symbol cancel refusal","requestTime":1,"data":null}));
+        });
+        seed_symbol_orders(&h);
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let observed = errors.clone();
+        h.venue().base().on(
+            "error",
+            Rc::new(move |_, value| {
+                observed.borrow_mut().push(value.clone());
+                Ok(())
+            }),
+        );
+        let error = h
+            .drive(h.venue().cancel_symbol_orders("BTCUSDT".into()))
+            .unwrap_err();
+        assert!(!error.message.is_empty(), "{error:?}");
+        let calls = h.http.calls(BATCH);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].data["symbol"], "BTCUSDT");
+        assert_eq!(
+            calls[0].data["orderIdList"],
+            json!([{"orderId":"cancel-BTCUSDT"}])
+        );
+        assert_eq!(
+            errors.borrow().len(),
+            2,
+            "source normal-cancel and symbol-cancel catches each emit before rethrow"
+        );
+        for error in errors.borrow().iter() {
+            assert!(
+                error
+                    .to_string()
+                    .contains("synthetic symbol cancel refusal")
+            );
+        }
+    }
+}
+
+#[test]
+fn real_inverse_symbol_cancel_preserves_the_inner_swallowed_refusal() {
+    const BATCH: &str = "/api/v2/mix/order/batch-cancel-orders";
+    let h = harness(ExchangeName::Bitgetinverse, options(), |http| {
+        http.route("POST", BATCH, 503.0, json!({"code":"50000","msg":"synthetic inverse cancel refusal","requestTime":1,"data":null}));
+    });
+    seed_symbol_orders(&h);
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let observed = errors.clone();
+    h.venue().base().on(
+        "error",
+        Rc::new(move |_, value| {
+            observed.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    h.drive(h.venue().cancel_symbol_orders("BTCUSDT".into()))
+        .unwrap();
+    assert_eq!(h.http.calls(BATCH).len(), 1);
+    assert_eq!(
+        errors.borrow().len(),
+        1,
+        "inverse normal-cancel swallows the refusal before the outer catch"
+    );
+}

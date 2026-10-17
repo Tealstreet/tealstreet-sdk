@@ -38,9 +38,9 @@ note = "Production constructor assembled by classes::futures_exchange over the s
 ts = "KrakenExchange.signWsAuth"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-crypto/src/lib.rs::sign_kraken_ws_auth"
+rs = [ "safe-cex-crypto/src/lib.rs::sign_kraken_ws_auth", "safe-cex-crypto/src/lib.rs::node_base64_decode" ]
 status = "ported"
-note = "Renamed standalone override `safe-cex-crypto/src/lib.rs::sign_kraken_ws_auth`; WS-only runtime function; raw envelope preserves id across missing/unknown-format errors. Base enum dispatch remains exhaustive; Kraken ignores outputFormat."
+note = "Renamed standalone override `safe-cex-crypto/src/lib.rs::sign_kraken_ws_auth`; WS-only runtime function; raw envelope preserves id across missing/unknown-format errors. Base enum dispatch remains exhaustive; Kraken ignores outputFormat. Rename target: `safe-cex-crypto/src/lib.rs::node_base64_decode`. Split member `safe-cex-crypto/src/lib.rs::node_base64_decode`: shared Node Buffer base64 primitive used by this signer and the Polymarket imported ethers decoder; its existing algorithm is unchanged."
 
 [[symbol]]
 ts = "KrakenExchange.dispose"
