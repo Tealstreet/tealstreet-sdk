@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "210 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "214 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1715,9 +1715,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "ef909e450c22e2cce6af4a638cc5f2a6ebdb9a815ed237d930d3ad1e8ddff1cc",
+      "producer_sha256": "950defe84fd793717563be445aafae2430bc067b2ddd9bd7708ca068e4124781",
       "classification": "no-owned-latch",
-      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits. Reviewed JSON.parse repair: its synchronous closure decodes UTF-16 directly into existing Js values, without creating any future, task, registration or shared latch. The four existing Promise boundaries and their cancellation ownership are unchanged. Reviewed console.info/debug bindings: both add synchronous uses of the existing console closure, which string-coerces arguments and invokes the runtime sink. They introduce no future, registration or shared latch; the four existing Promise boundaries and ownership remain unchanged."
+      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits. Reviewed JSON.parse repair: its synchronous closure decodes UTF-16 directly into existing Js values, without creating any future, task, registration or shared latch. The four existing Promise boundaries and their cancellation ownership are unchanged. Reviewed standard Error instance repair: constructor installation delegates to the shared synchronous error factory, with optional UTF-16 messages and stock descriptor/prototype data. Prototype stringifiers capture no runtime or scope and retain no cycle. No future, registration or latch is added; the existing four Promise boundaries keep their cancellation ownership. Reviewed console.info/debug bindings: both add synchronous uses of the existing console closure, which string-coerces arguments and invokes the runtime sink. They introduce no future, registration or shared latch; the four existing Promise boundaries and ownership remain unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::install_library",
@@ -1904,6 +1904,15 @@
       "producer_sha256": "3a33833762410a3e47e96d24141addcf14718dc69671aaf5067a7523694d6e37",
       "classification": "immediate",
       "reason": "std write! formatting is synchronous; no future is constructed."
+    },
+    {
+      "owner": "src/js_runtime/value.rs::opaque-macro:thread_local:1",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "f17025fce719f16a750c4bc474449cb9e8492071d3f9bf183b522b5cf768ca5e",
+      "classification": "no-owned-latch",
+      "reason": "Reviewed this exact thread_local macro body: initialization builds only the stock Error prototype map, ordinary data descriptors and a synchronous stringifier. Prototype parent links form an acyclic graph; the stringifier captures no prototype, runtime or scope. Initialization invokes no user callback, creates no future or task, and installs no timer, waiter or in-flight slot. These are thread-local intrinsic data, not a cancellation owner. The installed-native Error corpus exercises the resulting factory and field behavior; macro expansion remains an explicit source-pinned review obligation."
     },
     {
       "owner": "src/loop_util.rs::loop_once",
