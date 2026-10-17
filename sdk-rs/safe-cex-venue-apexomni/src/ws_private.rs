@@ -494,7 +494,7 @@ impl ApexOmniPrivateWebsocket {
                 if let Some(v) = position.last_update.into_value() {
                     patch.set_number("lastUpdate", v);
                 }
-                updates.push((position.id, patch));
+                updates.push((Some(position.id), patch));
             }
         }
         self.parent

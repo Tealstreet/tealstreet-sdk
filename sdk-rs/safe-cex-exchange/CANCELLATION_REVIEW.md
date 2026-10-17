@@ -134,3 +134,18 @@ join ownership, reservations and guards are unchanged. BaseExchange changes only
 prepared input signatures and model enum reads; disposal bodies and task guards
 are unchanged. The maintained AST exporter supplies the two audit producer pins,
 and the BaseExchange guard dependencies retain their whole-file pin after review.
+
+The standard Error prototype initializer in value.rs is an explicitly reviewed,
+source-pinned opaque thread_local macro inside its sole private accessor, matching
+the parity indexer's supported storage pattern. Its initializer tokens are unchanged.
+It builds data descriptors and a pure
+stringifier, with an acyclic parent graph and no runtime/scope capture. It creates
+no future, task, timer, waiter or in-flight slot. This is intrinsic data storage;
+no discovery exemption was added. The globals constructor dispatch stays synchronous
+and preserves its four existing Promise boundaries. The native Error witness
+compares156 Node instance observations and actual Axios diagnostic descriptors.
+
+The accessor relocation is covered by the full production rust_index regression,
+which compiled and failed on the module-level macro. The opaque cancellation
+classification moves to error_prototype and retains the same boundary obligation;
+no indexer support exception or discovery exclusion was added.

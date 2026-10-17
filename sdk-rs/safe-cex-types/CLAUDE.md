@@ -188,3 +188,23 @@ what to do with them. It does not add a permissive public placement decoder.
 `tests/support/model-field-corpus.cjs` supplies the 126-case Node presence corpus
 used by the real native bridge and account encoder tests. Store merge policy is
 a separate change; Option-like read helpers do not implement patch policy.
+
+RetainedJsonInput text and own keys use UTF-16 units. Its shared iterative parser
+serves both native JSON.parse (binary64 numbers) and raw Serde capture (numeric
+lexemes). Duplicate assignment keeps the first key position; only surviving
+values receive the lexical typed-ingress depth budget. Native parsing has no
+explicit typed depth budget. Projection to serde_json::Value remains fallible
+for lone units and NaN; it never substitutes replacement text.
+The retained_utf16 target observes exact keys, both rows, numeric bits, reserved
+Serde-looking keys and all 65,536 raw/escaped code units before projection.
+`node ../safe-cex-parity/scripts/retained-json-contracts.mjs --package=safe-cex-types`
+checks nine exact compiler-owned retained APIs and their bounded native/default
+outputs. It retires the deleted ObjectVisitor and checks the shared parser's
+actual signature; the full model/local/feature/target inventories remain separate.
+
+The accepted-set ModelField visitor review executes the fixed f64 decoder through
+ordinary JSON, native Serde unit and Default paths; native presence and number
+bits are observed before serialization. PreparedOrderOpts, its private wire and
+optional decoder have independent native field witnesses in the same scoped
+`accepted-model-field-native.test.mjs` target. Generic helper delegation requires
+an exact source review and the inventoried decoder's native observations.

@@ -23,16 +23,22 @@ def run(label, failures=()):
     print(label, 'named failure' if failures else 'passed', flush=True)
 
 text = originals[globals_file].decode()
-needle = 'super::json_parse::parse(&arg(&a, 0).to_js_string()?)'
+needle = '''safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                        &arg(&a, 0).to_js_string()?,
+                    )
+                    .map(super::value::from_retained_input)'''
 assert text.count(needle) == 1
 old = '''serde_json::from_str::<serde_json::Value>(&String::from_utf16_lossy(&arg(&a, 0).to_js_string()?))
                         .map(|v| super::value::from_json(&v))
-                        .map_err(|e| Thrown::error("SyntaxError", &e.to_string()))'''
+'''
 controls = [('builtin-json', globals_file, text.replace(needle, old), ['json_builtin_retains_lone_surrogate_units_and_matches_native_parse', 'json_builtin_preserves_every_escaped_utf16_code_unit'])]
-controls.append(('raw-utf16-loss', globals_file, text.replace(needle, 'super::json_parse::parse(&String::from_utf16_lossy(&arg(&a, 0).to_js_string()?).encode_utf16().collect::<Vec<_>>())'), ['json_builtin_retains_lone_surrogate_units_and_matches_native_parse']))
+controls.append(('raw-utf16-loss', globals_file, text.replace(needle, 'safe_cex_types::retained_json::RetainedJsonInput::parse_json(&String::from_utf16_lossy(&arg(&a, 0).to_js_string()?).encode_utf16().collect::<Vec<_>>()).map(super::value::from_retained_input)'), ['json_builtin_retains_lone_surrogate_units_and_matches_native_parse']))
 text = originals[client_file].decode()
-needle = '''super::json_parse::parse(&text.encode_utf16().collect::<Vec<_>>())
-                .unwrap_or_else(|_| Js::str(&text))'''
+needle = '''safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                &text.encode_utf16().collect::<Vec<_>>(),
+            )
+            .map(super::value::from_retained_input)
+            .unwrap_or_else(|_| Js::str(&text))'''
 assert text.count(needle) == 1
 controls.append(('http-json', client_file, text.replace(needle, 'serde_json::from_str(&text).map_or_else(|_| Js::str(&text), |v| from_json(&v))'), ['real_http_json_response_retains_lone_surrogate_fields_and_rows']))
 run('baseline')

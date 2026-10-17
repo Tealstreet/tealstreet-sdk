@@ -859,7 +859,7 @@ impl StoreState {
     }
     fn update_positions(
         &mut self,
-        updates: &[(String, ModelPatch)],
+        updates: &[(Option<String>, ModelPatch)],
     ) -> Result<(), StorePatchError> {
         if updates.is_empty() || self.data.positions.is_empty() {
             return Ok(());
@@ -870,11 +870,13 @@ impl StoreState {
             .iter()
             .map(|(id, patch)| {
                 (
-                    Self::find_index_by_id(
-                        self.data.positions.iter().map(|p| p.id.clone()),
-                        id,
-                        index.as_ref(),
-                    ),
+                    id.as_ref().and_then(|id| {
+                        Self::find_index_by_id(
+                            self.data.positions.iter().map(|p| p.id.clone()),
+                            id,
+                            index.as_ref(),
+                        )
+                    }),
                     patch,
                 )
             })
@@ -1650,7 +1652,7 @@ impl DefaultStore {
     }
     pub fn update_positions(
         &self,
-        updates: &[(String, ModelPatch)],
+        updates: &[(Option<String>, ModelPatch)],
     ) -> Result<(), StoreMutationError> {
         self.mutate(|state| state.update_positions(updates))?
             .map_err(StoreMutationError::from)
@@ -1807,7 +1809,10 @@ impl Store for DefaultStore {
         self.mutate(|s| s.update_position(id, changes))?
             .map_err(StoreMutationError::from)
     }
-    fn update_positions(&self, updates: &[(String, ModelPatch)]) -> Result<(), StoreMutationError> {
+    fn update_positions(
+        &self,
+        updates: &[(Option<String>, ModelPatch)],
+    ) -> Result<(), StoreMutationError> {
         self.mutate(|s| s.update_positions(updates))?
             .map_err(StoreMutationError::from)
     }
