@@ -76,7 +76,7 @@ fn native_error_instance_descriptors_and_serialization_match_node() {
     );
     let source: Value = serde_json::from_slice(&source.stdout).unwrap();
     let cases = source["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 117);
+    assert_eq!(cases.len(), 156);
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -91,9 +91,9 @@ fn native_error_instance_descriptors_and_serialization_match_node() {
    let result=match ctor.call(Js::Undefined,args(row["tag"].as_str().unwrap())){
     Err(error)=>json!({"thrown":error.value.get("name").unwrap().to_display()}),
     Ok(error)=>{
-     match row["op"].as_str().unwrap(){"message"=>error.set("message",Js::str("changed")).unwrap(),"name"=>error.set("name",Js::str("UserError")).unwrap(),"pristine"=>{},_=>unreachable!()};
+     match row["op"].as_str().unwrap(){"message"=>error.set("message",Js::str("changed")).unwrap(),"name"=>error.set("name",Js::str("UserError")).unwrap(),"delete_message"=>error.delete(&utf16("message")),"pristine"=>{},_=>unreachable!()};
      let copy=object.call_method("assign",vec![Js::object(vec![]),error.clone()]).unwrap();
-     json!({"name":units(error.get("name").unwrap()),"message":units(error.get("message").unwrap()),"keys":to_json(&object.call_method("keys",vec![error.clone()]).unwrap()).unwrap(),"json":json.call_method("stringify",vec![error.clone()]).unwrap().to_display(),"copy":json.call_method("stringify",vec![copy]).unwrap().to_display(),"nameDescriptor":descriptor(&error,"name"),"messageDescriptor":descriptor(&error,"message"),"render":units(error)})
+     json!({"name":units(error.get("name").unwrap()),"message":units(error.get("message").unwrap()),"keys":to_json(&object.call_method("keys",vec![error.clone()]).unwrap()).unwrap(),"json":json.call_method("stringify",vec![error.clone()]).unwrap().to_display(),"copy":json.call_method("stringify",vec![copy]).unwrap().to_display(),"spread":json.call_method("stringify",vec![error.spread_object().unwrap()]).unwrap().to_display(),"nameDescriptor":descriptor(&error,"name"),"messageDescriptor":descriptor(&error,"message"),"render":units(error)})
     }
    };
    assert_eq!(result,row["result"],"ERROR {} {} {}",row["ctor"],row["tag"],row["op"]);
