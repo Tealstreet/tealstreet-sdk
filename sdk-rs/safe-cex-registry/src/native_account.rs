@@ -663,6 +663,10 @@ pub fn native_account_call(
 }
 
 #[cfg(test)]
+#[path = "native_account_events_tests.rs"]
+mod event_protocol_tests;
+
+#[cfg(test)]
 mod model_codec_tests {
     use super::encode;
     use safe_cex_exchange::js_runtime::value::{Js, from_json, to_typed};
