@@ -519,6 +519,6 @@ the maintained TS handler with the actual TS Store across sixteen changing frame
 
 
 Concrete market reads apply the approved strict-asset row policy after complete
-source REST projection. Non-string base/quote rows emit their symbol, field and
-value through the existing error path; valid siblings remain available to typed
+source REST projection. Non-string base/quote/symbol or nonnumeric leverage-max rows emit their
+field and original value through the existing error path; valid siblings remain available to typed
 fetch and Store refresh. Raw REST helpers retain their source-owned values.
