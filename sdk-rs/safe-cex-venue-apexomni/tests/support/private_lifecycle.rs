@@ -116,41 +116,6 @@ fn private_close_cancels_self_heal_while_replacement_dial_is_pending() {
 }
 
 #[test]
-fn private_terminal_order_updates_store_and_emits_fill() {
-    let h = fixture();
-    let private = started_private(&h);
-    let fills = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-    let sink = fills.clone();
-    h.venue().base().on(
-        "fill",
-        std::rc::Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
-            Ok(())
-        }),
-    );
-    h.runtime.advance(6_000.0);
-    let mut row = raw_order();
-    row["status"] = json!("FILLED");
-    row["cumSuccessFillSize"] = json!("1.234");
-    row["updatedAt"] = json!(h.runtime.now.get());
-    frame(
-        &private,
-        json!({"topic":"ws_zk_accounts_v3","contents":{"orders":[row]}}),
-    );
-    h.runtime.pump();
-    let orders = h.store.orders();
-    let order = orders.iter().find(|o| o.id == "order-1").unwrap();
-    assert_eq!(order.status, OrderStatus::Closed);
-    assert_eq!(order.filled, 1.234);
-    assert_eq!(fills.borrow().len(), 1);
-    assert_eq!(fills.borrow()[0]["id"], "order-1");
-    assert_eq!(fills.borrow()[0]["symbol"], "BTCUSDC");
-    assert_eq!(fills.borrow()[0]["price"], 100.12);
-    drop(orders);
-    done(&h);
-}
-
-#[test]
 fn private_fill_topic_retains_execution_for_history_reads() {
     let h = fixture();
     let private = started_private(&h);

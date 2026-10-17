@@ -108,12 +108,12 @@ impl ApexSocketHost for SocketHost {
             .is_ok_and(|c| c.is_connected())
     }
     fn now_ms(&self) -> f64 {
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
+    }
+    fn date_now_ms(&self) -> f64 {
         self.owner
             .upgrade()
             .map_or(0., |o| o.scope.runtime.now_ms())
-    }
-    fn date_now_ms(&self) -> f64 {
-        self.now_ms()
     }
     fn monotonic_now_ms(&self) -> f64 {
         self.owner

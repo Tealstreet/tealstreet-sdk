@@ -1226,6 +1226,15 @@ real private-frame witnesses cover the production caller and final fill ordering
 OKX's business socket defines it, so a business-only re-open runs the private
 snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
 
+Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
+JavaScript callbacks need not define a Rust total order: NaN comparison results
+mean equality, and inconsistent callbacks must not panic. The first source throw
+stops comparisons immediately. Default Array sorting compares original UTF-16
+units, puts undefined before holes and rejects a present non-callable comparator.
+The native-host `js_sort` target checks the compiled master panic and error count,
+plus Node ordering across merge boundaries. Ordering under an inconsistent
+comparator remains implementation-dependent under ECMAScript.
+
 Ordinary numeric conversion of live objects/functions calls `valueOf` before
 `toString`, reading each member only when reached and retaining the original
 receiver and thrown value. String conversion uses the same private primitive
