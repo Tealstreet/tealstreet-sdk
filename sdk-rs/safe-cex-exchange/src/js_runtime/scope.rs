@@ -205,8 +205,7 @@ impl<X> Scope<X> {
                 let outcome = match slept {
                     // A host timer that fails never fires; say so rather than run early.
                     Err(error) => Err((error, "setTimeout sleep")),
-                    Ok(()) => super::jobs::callback(reporter.clone(), || callback())
-                        .map_err(|error| (error.to_exchange_error(), "setTimeout")),
+                    Ok(()) => callback().map_err(|error| (error.to_exchange_error(), "setTimeout")),
                 };
                 if let Err((error, source)) = outcome {
                     reporter.report_exception(&error, &serde_json::json!({ "source": source }));

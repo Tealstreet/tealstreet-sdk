@@ -197,30 +197,28 @@ impl JsProtocol {
     }
     fn emit(&self, event: &str, payload: Js) -> Result<(), ExchangeError> {
         let core = self.core()?;
-        super::jobs::callback(core.context.runtime.clone(), || {
-            let current = core.listeners.borrow().clone();
-            let listeners: Vec<Js> = current
-                .borrow()
-                .iter()
-                .filter(|(e, _)| e == event)
-                .map(|(_, f)| f.clone())
-                .collect();
-            let skip = core.on_close_member.borrow().clone();
-            for listener in listeners {
-                if event == "close" && skip.as_ref().is_some_and(|s| s.same_reference(&listener)) {
-                    continue;
-                }
-                let result = listener
-                    .call(Js::Undefined, vec![payload.clone()])
-                    .map_err(core_error)?;
-                if let Js::Promise(p) = result
-                    && let Some(Err(e)) = p.result()
-                {
-                    return Err(core_error(e));
-                }
+        let current = core.listeners.borrow().clone();
+        let listeners: Vec<Js> = current
+            .borrow()
+            .iter()
+            .filter(|(e, _)| e == event)
+            .map(|(_, f)| f.clone())
+            .collect();
+        let skip = core.on_close_member.borrow().clone();
+        for listener in listeners {
+            if event == "close" && skip.as_ref().is_some_and(|s| s.same_reference(&listener)) {
+                continue;
             }
-            Ok(())
-        })
+            let result = listener
+                .call(Js::Undefined, vec![payload.clone()])
+                .map_err(core_error)?;
+            if let Js::Promise(p) = result
+                && let Some(Err(e)) = p.result()
+            {
+                return Err(core_error(e));
+            }
+        }
+        Ok(())
     }
 }
 

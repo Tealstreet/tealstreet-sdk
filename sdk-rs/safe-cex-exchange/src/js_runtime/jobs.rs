@@ -18,7 +18,7 @@ type Work = Pin<Box<dyn Future<Output = ()>>>;
 type Queues = Vec<(Weak<dyn ExchangeRuntime>, Weak<Jobs>)>;
 thread_local! {
     static QUEUES: RefCell<Queues> = const { RefCell::new(Vec::new()) };
-    static CURRENT: RefCell<Option<Rc<Jobs>>> = const { RefCell::new(None) };
+    static CURRENT: RefCell<Option<(Rc<Jobs>, Waker)>> = const { RefCell::new(None) };
 }
 
 #[derive(Default)]
@@ -95,7 +95,7 @@ pub(super) fn for_runtime(runtime: &Rc<dyn ExchangeRuntime>) -> Rc<Jobs> {
     })
 }
 
-struct Enter(Option<Rc<Jobs>>);
+struct Enter(Option<(Rc<Jobs>, Waker)>);
 impl Drop for Enter {
     fn drop(&mut self) {
         CURRENT.with(|current| *current.borrow_mut() = self.0.take());
@@ -107,21 +107,28 @@ impl Jobs {
         work: Pin<&mut F>,
         cx: &mut Context<'_>,
     ) -> Poll<F::Output> {
-        let previous = CURRENT.with(|current| current.borrow_mut().replace(self.clone()));
+        let previous = CURRENT.with(|current| {
+            current
+                .borrow_mut()
+                .replace((self.clone(), cx.waker().clone()))
+        });
         let _enter = Enter(previous);
         work.poll(cx)
     }
     pub(super) fn spawn(self: &Rc<Self>, work: Work) {
-        self.enqueue(work, None);
+        self.enqueue(work, None, false);
+    }
+    pub(super) fn start(self: &Rc<Self>, work: Work) {
+        self.enqueue(work, None, true);
     }
     pub(super) fn timer(self: &Rc<Self>, deadline: f64, work: Work) -> Box<dyn ExchangeTask> {
-        let job = self.enqueue(work, Some(deadline));
+        let job = self.enqueue(work, Some(deadline), false);
         Box::new(Task {
             owner: Rc::downgrade(self),
             job: Rc::downgrade(&job),
         })
     }
-    fn enqueue(self: &Rc<Self>, work: Work, deadline: Option<f64>) -> Rc<Job> {
+    fn enqueue(self: &Rc<Self>, work: Work, deadline: Option<f64>, eager: bool) -> Rc<Job> {
         let ready = Arc::new(Ready {
             order: Mutex::new(None),
             signal: self.signal.clone(),
@@ -133,8 +140,12 @@ impl Jobs {
             cancelled: Cell::new(false),
         });
         self.jobs.borrow_mut().push(job.clone());
-        ready.enqueue();
-        if !self.running.replace(true) {
+        if eager {
+            self.run(job.clone());
+        } else {
+            ready.enqueue();
+        }
+        if !self.jobs.borrow().is_empty() && !self.running.replace(true) {
             OwnedTasks::start_detached(self.runtime.as_ref(), Box::pin(Driver(self.clone())));
         }
         job
@@ -193,6 +204,16 @@ impl Jobs {
         }
     }
     pub(super) fn wake(self: &Rc<Self>, waker: Waker) {
+        let active = CURRENT.with(|current| {
+            current
+                .borrow()
+                .as_ref()
+                .is_some_and(|(jobs, active)| Rc::ptr_eq(jobs, self) && active.will_wake(&waker))
+        });
+        if active {
+            waker.wake();
+            return;
+        }
         self.spawn(Box::pin(async move {
             waker.wake();
         }));
@@ -247,34 +268,35 @@ impl ExchangeTask for Task {
                 .borrow_mut()
                 .retain(|entry| !Rc::ptr_eq(entry, &job));
             drop(work);
+            let driver = owner
+                .signal
+                .driver
+                .lock()
+                .expect("microtask driver lock")
+                .clone();
+            if let Some(driver) = driver {
+                driver.wake();
+            }
         }
     }
 }
 
-pub(super) fn callback<T>(runtime: Rc<dyn ExchangeRuntime>, callback: impl FnOnce() -> T) -> T {
+pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
     let jobs = for_runtime(&runtime);
     let nested = CURRENT.with(|current| {
         current
             .borrow()
             .as_ref()
-            .is_some_and(|current| Rc::ptr_eq(current, &jobs))
+            .is_some_and(|(current, _)| Rc::ptr_eq(current, &jobs))
     });
     if !nested {
         jobs.drain();
     }
-    let previous = CURRENT.with(|current| current.borrow_mut().replace(jobs.clone()));
-    let enter = Enter(previous);
-    let result = callback();
-    drop(enter);
-    if !nested {
-        jobs.drain();
-    }
-    result
 }
 
 pub(super) async fn yield_current() {
     let jobs = CURRENT.with(|current| current.borrow().clone());
-    if let Some(jobs) = jobs {
+    if let Some((jobs, _)) = jobs {
         let mut queued = false;
         std::future::poll_fn(|cx| {
             if queued {

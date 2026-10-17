@@ -69,26 +69,9 @@ impl Promise {
     /// A fulfilled promise value is adopted, as an async function's return is.
     pub fn spawn(runtime: &Rc<dyn ExchangeRuntime>, body: JsFuture<'static>) -> Self {
         let promise = Promise::pending(runtime);
-        let mut body: JsFuture<'static> = Box::pin(adopt(body));
-        let jobs = promise.0.borrow().jobs.clone();
-        if let Poll::Ready(result) =
-            jobs.poll(body.as_mut(), &mut Context::from_waker(Waker::noop()))
-        {
-            promise.settle(result);
-            return promise;
-        }
-        let driver = promise.clone();
-        jobs.spawn(Box::pin(async move {
-            let result = body.await;
-            driver.settle(result);
-        }));
-        promise
-    }
-    pub(super) fn deferred(runtime: &Rc<dyn ExchangeRuntime>, body: JsFuture<'static>) -> Self {
-        let promise = Self::pending(runtime);
         let driver = promise.clone();
         let jobs = promise.0.borrow().jobs.clone();
-        jobs.spawn(Box::pin(async move {
+        jobs.start(Box::pin(async move {
             driver.settle(adopt(body).await);
         }));
         promise
