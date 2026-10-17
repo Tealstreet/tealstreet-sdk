@@ -171,3 +171,11 @@ Do not use ModelField::or for this merge: its value-only fallback has a separate
 meaning. The production JS facade's position_model_merge regression compares
 81 outcomes with the maintained TypeScript Store across single, batch and full
 upserts; the shared carrier API remains unchanged.
+
+Position patch batches carry `Option<String>` keys across the Store trait and
+concrete Store API. `None` means the source selector cannot match a native string
+ID, and preserves that row's place in the original batch. Retaining those rows
+keeps the source single-versus-indexed lookup threshold and duplicate-ID choice;
+no synthetic ID or filtered batch substitutes for an unmatched selector. Typed
+venue callers supply `Some(id)`. The native facade's168-case maintained Store
+comparison observes selection, duplicate rows and the position update counter.

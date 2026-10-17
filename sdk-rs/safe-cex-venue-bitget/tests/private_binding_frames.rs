@@ -193,3 +193,35 @@ fn real_private_account_frame_updates_native_balance() {
     drop(balance);
     s.h.venue().dispose().unwrap();
 }
+
+struct ResetClock;
+impl Drop for ResetClock {
+    fn drop(&mut self) {
+        let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+        clock.sync_from_server_time((clock.now)());
+    }
+}
+
+#[test]
+fn synced_clock_keeps_fresh_private_position_during_rest_reconciliation() {
+    let _reset = ResetClock;
+    let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    clock.sync_from_server_time((clock.now)() + 40_000.0);
+    let s = Scene::connect();
+    let before = s.h.http.calls("/api/v2/mix/position/all-position").len();
+    s.send("positions", json!([position("0.25")]));
+    for _ in 0..40 {
+        s.h.runtime.advance(50.0);
+    }
+    assert!(
+        s.h.http.calls("/api/v2/mix/position/all-position").len() > before,
+        "private frame must trigger actual REST position reconciliation"
+    );
+    assert_eq!(
+        s.h.store.positions()[0].contracts,
+        0.25,
+        "fresh private position must survive the older REST payload under the synced clock"
+    );
+    assert!(s.h.runtime.reports.borrow().is_empty());
+    s.h.venue().dispose().unwrap();
+}

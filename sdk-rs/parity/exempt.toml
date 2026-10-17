@@ -2089,22 +2089,6 @@ rs = "safe-cex-store/src/notification.rs::StoreNotificationError::from_subscribe
 reason = "External Store implementors construct notification-origin failures with their assigned subscriber identity and original callback cause; no standalone TypeScript declaration."
 
 [[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionError"
-reason = "Adapted fallible subscription sender boundary retains shared coercion and injected ExchangeError without flattening; source throws synchronously, no separate TS error declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::active_subscriptions"
-reason = "Owned native inspection of source private activeSubscriptions Set for caller state/effect witnesses; not a new protocol operation."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput"
-reason = "Adapted caller input evaluation boundary for separate source key/envelope stringify reads; prepared JsJsonValue remains supported, general JS getter/toJSON objects are not a native JSON carrier."
-
-[[exempt]]
-rs = "safe-cex-venue-hyperliquid/src/ws_public.rs::SubscriptionInput::evaluate"
-reason = "Fallible captured JSON-data read per source stringify evaluation; native adapters expose independent effects without a venue-local serializer or implicit JSON projection."
-
-[[exempt]]
 rs = "safe-cex-types/src/validation_error.rs::AccountValidationError"
 reason = "Shared runtime validation error carrier preserves source non-string JSON values without coercion; static declaration projection is recorded on ValidateAccountResult."
 
@@ -3882,7 +3866,7 @@ reason = "Native value, receiver/callee and JS language-operation binding for ei
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::clock_now"
-reason = "Native value, receiver/callee and JS language-operation binding for eight private-topic bodies; actual helper, not a source symbol. Clone preserves identity, primitives bind JS semantics and host owns launched work. Concrete WebSocket/native binding remains pending; eight source body targets mapped separately."
+reason = "Native virtualClock.getCurrentTimeMs host operation used by mapped markWsPositions, not an independent TS declaration. The concrete binding delegates to the shared clock; private_binding_frames proves a fresh WS snapshot survives older REST reconciliation after native clock synchronization."
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/private_topics.rs::PrivateTopicsHost::set_of"
