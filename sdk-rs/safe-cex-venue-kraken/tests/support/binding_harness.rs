@@ -33,6 +33,7 @@ pub struct Runtime {
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub console: RefCell<Vec<(String, String)>>,
+    pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -159,7 +160,10 @@ impl WsSocket for Socket {
 }
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
-        Arc::new(safe_cex_transport::DirectTransport)
+        self.provider
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| Arc::new(safe_cex_transport::DirectTransport))
     }
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("Kraken binding E2E never tunnels")
@@ -303,7 +307,26 @@ pub fn harness(
     options: ExchangeOptions,
     script: impl FnOnce(&Http),
 ) -> Harness {
-    let runtime = Rc::new(Runtime::default());
+    harness_with(name, options, Extras::default(), script)
+}
+
+/// Optional production dependencies the default harness leaves unset.
+#[derive(Default)]
+pub struct Extras {
+    pub provider: Option<Arc<dyn TransportProvider>>,
+    pub journal: Option<Rc<dyn safe_cex_exchange::journal::JournalFolder>>,
+}
+
+pub fn harness_with(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    extras: Extras,
+    script: impl FnOnce(&Http),
+) -> Harness {
+    let runtime = Rc::new(Runtime {
+        provider: RefCell::new(extras.provider),
+        ..Runtime::default()
+    });
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
     *http.runtime.borrow_mut() = Some(runtime.clone());
@@ -318,7 +341,7 @@ pub fn harness(
             runtime: runtime.clone(),
             http: http.clone(),
             external_public_data: None,
-            journal: None,
+            journal: extras.journal,
             futures_nonces: std::rc::Rc::new(safe_cex_venue_kraken::api::FuturesModule::default()),
             spot_client_ids: Some(spot_client_ids(move |bytes| {
                 for b in bytes.iter_mut() {

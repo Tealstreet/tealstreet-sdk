@@ -17,9 +17,12 @@ traits borrow). The Exchange trait's sixteen methods call the assembled members;
 the five members Kraken inherits from base.ts reject with its `Not implemented`.
 The host supplies two module-scoped values, never per instance: the Futures nonce
 counter (`api::FuturesModule`) and the Spot client-ID generator (`spot_client_ids`).
-The binding never owns transport: `JsHttpHost` sends, so `installTransportAdapter`
-is a no-op here. Axios's rejected response handler is reproduced by wrapping the
-client verbs, because the shared client runs fulfilled interceptors only.
+REST clients come from the shared `client::factory` over the runtime provider:
+`create_client` applies provider routing and the 20 s timeout, and keyed Futures
+clients install the provider adapter (HOW when tunnelled); Spot never does.
+`--test transport_binding` drives both through a scripted provider. Axios's
+rejected response handler is reproduced by wrapping the client verbs, because
+the shared client runs fulfilled interceptors only.
 
 Gates: `--test exchange_binding` (scripted transport, every trait method, start
 through private-socket auth), and `scripts/binding-controls.py` from `sdk-rs/`,
