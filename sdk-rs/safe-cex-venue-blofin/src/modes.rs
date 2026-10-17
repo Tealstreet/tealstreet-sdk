@@ -57,10 +57,10 @@ fn prepare_confirmed_mode_update(
                         let mut position = position.clone();
                         position.id = create_position_id(
                             &position.symbol,
-                            Some(position.side),
+                            position.side.into_value(),
                             Some(position_mode),
                         );
-                        position.position_mode = Some(position_mode);
+                        position.position_mode = (Some(position_mode)).into();
                         position
                     })
                     .filter(|position| ids.insert(position.id.clone()))
@@ -112,7 +112,7 @@ pub fn apply_confirmed_margin_type(
                     .map(|position| {
                         let mut position = position.clone();
                         if position.contracts == 0.0 {
-                            position.margin_type = Some(margin_type);
+                            position.margin_type = (Some(margin_type)).into();
                         }
                         position
                     })
@@ -170,8 +170,8 @@ pub fn after_method_called_in_worker(
 
 pub struct PositionSideOptions<'a> {
     pub symbol: &'a str,
-    pub side: OrderSide,
-    pub order_type: OrderType,
+    pub side: safe_cex_types::ModelField<OrderSide>,
+    pub order_type: safe_cex_types::ModelField<OrderType>,
     pub reduce_only: bool,
 }
 
@@ -188,8 +188,8 @@ pub async fn get_position_side<E, F: Future<Output = Result<Option<PositionMode>
         "short"
     };
     if matches!(
-        options.order_type,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+        options.order_type.into_value(),
+        Some(OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss)
     ) || options.reduce_only
     {
         side = if side == "long" { "short" } else { "long" };

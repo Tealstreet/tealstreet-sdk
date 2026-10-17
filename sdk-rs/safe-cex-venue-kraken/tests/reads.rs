@@ -166,7 +166,7 @@ fn position(v: &Position) -> Value {
             && v.last_update.is_none(),
         "Spot absent native position fields"
     );
-    json!({"id":v.id,"symbol":v.symbol,"side":match v.side{PositionSide::Long=>"long",PositionSide::Short=>"short"},
+    json!({"id":v.id,"symbol":v.symbol,"side":match v.side.value().expect("present source enum in fixture"){PositionSide::Long=>"long",PositionSide::Short=>"short"},
  "entryPrice":number(v.entry_price),"notional":number(v.notional),"leverage":number(v.leverage),"unrealizedPnl":number(v.unrealized_pnl),"contracts":number(v.contracts),"liquidationPrice":number(v.liquidation_price),
  "marginType":match v.margin_type.unwrap(){MarginType::Isolated=>"isolated",MarginType::Cross=>"cross"},"positionMode":match v.position_mode.unwrap(){PositionMode::OneWay=>"oneway",PositionMode::Hedged=>"hedged"},"info":v.info})
 }
