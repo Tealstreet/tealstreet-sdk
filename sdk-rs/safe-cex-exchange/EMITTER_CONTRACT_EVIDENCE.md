@@ -62,3 +62,19 @@ future witnesses, replaces only the production native code capture with a JSON
 projection, and requires the compiled own-Undefined assertion to fail. Exact
 source restoration must pass both witnesses again. This control executed against
 the retained account boundary; it does not stand in for a full-package gate.
+
+
+Raw error reporting carries `ExchangeErrorInput::Raw(Js)` directly through the
+production facade. Five native regressions cover original Error/message identity,
+unread code getters, UTF-16, console-before-coercion, primitive formatting and own
+undefined metadata. The first two compile and fail on the prior implementation.
+`tests/raw-error-source.cjs` executes thirty worker/main profiles from the maintained
+reporter and formatter. `core_error_reporting` retains its four typed/source checks;
+its finite observer mirrors the oracle's explicit Error name/message replacer.
+
+The reporter's optional message remains UTF-8 and extra data remains JSON. Main-thread
+exception hosts retain their explicit terminal JSON ABI; object console diagnostics
+use a non-coercing type label at the existing string-only console capability. Worker
+posts and local emitter listeners receive original native values. Hyperliquid's
+separate realm still uses its existing owned typed-snapshot bridge; it does not gain
+shared-realm accessor or object-reference identity from this API migration.

@@ -12,14 +12,17 @@ import {aliasTargetIdentity} from '../../safe-cex-parity/scripts/accepted-aliase
 
 const workspace = fileURLToPath(new URL('../..', import.meta.url));
 const registry = process.argv.includes('--registry');
+const raw = process.argv.includes('--raw');
+assert(!(raw && registry), 'select one package/profile');
 const packageName = registry ? 'safe-cex-registry' : 'safe-cex-exchange';
-const owners = registry ? ['safe_cex_registry::native_account::host_error'] : [
+const owners = registry ? ['safe_cex_registry::native_account::host_error'] : raw ?
+  ['safe_cex_exchange::error_reporting::raw_formatted_context'] : [
   'safe_cex_exchange::exchange::BaseExchange',
   'safe_cex_exchange::exchange::emit_listeners',
   'safe_cex_exchange::error_reporting::raw_formatted_context',
   'safe_cex_exchange::runtime::ExchangeError',
 ];
-const aliases = registry ? ['safe_cex_registry::native_account::NativeAccountFuture'] :
+const aliases = registry ? ['safe_cex_registry::native_account::NativeAccountFuture'] : raw ? [] :
   ['safe_cex_exchange::runtime::Listener', 'safe_cex_exchange::runtime::ArgsListener'];
 function cargo(args, extra = {}) {
   const result = spawnSync('cargo', ['+1.99.0', ...args], {
@@ -29,7 +32,7 @@ function cargo(args, extra = {}) {
   assert.equal(result.status, 0, `emitter probe compiler failure\n${result.error ?? ''}\n${result.stderr}`);
   return result.stdout;
 }
-const source = spawnSync('node', [fileURLToPath(new URL('../tests/core-emitter-source.cjs', import.meta.url))], {
+const source = spawnSync('node', [fileURLToPath(new URL(raw ? '../tests/raw-error-source.cjs' : '../tests/core-emitter-source.cjs', import.meta.url))], {
   encoding: 'utf8', timeout: 30_000,
   env: {...process.env, SAFE_CEX_TYPESCRIPT_PATH: process.env.SAFE_CEX_TYPESCRIPT_PATH ??
     path.join(workspace, 'target/asterdex-oracle-deps/node_modules/typescript')},
@@ -41,6 +44,11 @@ assert.ok(pkg && metadata.workspace_members.includes(pkg.id), 'actual production
 cargo(['rustdoc', '--locked', '--jobs=1', '-p', pkg.name, '--lib', '--', '-Z', 'unstable-options',
   '--output-format=json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], {RUSTC_BOOTSTRAP: '1'});
 const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, `doc/${packageName.replaceAll('-', '_')}.json`)));
+if (raw) {
+  const actual = Object.values(doc.index).find(item => item.name === 'Exchange' && item.inner?.trait);
+  const fixture = JSON.parse(fs.readFileSync(path.join(workspace, 'safe-cex-parity/accepted-set/exchange-defaults-fixture.json')));
+  assert.deepEqual(actual.span, fixture.span, 'independent Exchange declaration span matches fresh compiler');
+}
 const found = inventory(doc, {
   defaultTraits: loadPolicy('default-traits'), receiverTraits: loadPolicy('receiver-traits'),
   readSource: filename => fs.readFileSync(path.join(workspace, filename)),

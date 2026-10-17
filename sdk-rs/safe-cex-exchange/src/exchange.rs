@@ -1124,6 +1124,8 @@ impl BaseExchange {
                             let message = source.get("message")?;
                             if message.truthy() {
                                 message
+                            } else if matches!(source, Js::SymbolIterator) {
+                                Js::str("Symbol(Symbol.iterator)")
                             } else {
                                 Js::String(source.to_js_string()?)
                             }

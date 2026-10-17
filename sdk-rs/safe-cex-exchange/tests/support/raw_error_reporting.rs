@@ -174,3 +174,33 @@ fn raw_reporter_preserves_native_error_before_any_metadata_projection() {
             .strict_equals(&Js::str("TypeError"))
     );
 }
+
+#[test]
+fn raw_reporter_uses_source_falsy_and_string_constructor_rules() {
+    for (input, expected) in [
+        (Js::Undefined, "Unknown Exchange Error"),
+        (Js::Null, "Unknown Exchange Error"),
+        (Js::Bool(false), "Unknown Exchange Error"),
+        (Js::Number(-0.0), "Unknown Exchange Error"),
+        (Js::Number(f64::NAN), "Unknown Exchange Error"),
+        (Js::str(""), "Unknown Exchange Error"),
+        (Js::Bool(true), "true"),
+        (Js::Number(17.0), "17"),
+        (Js::Number(f64::INFINITY), "Infinity"),
+        (Js::Number(f64::NEG_INFINITY), "-Infinity"),
+        (Js::str("plain"), "Exchange Error: plain"),
+        (Js::SymbolIterator, "Symbol(Symbol.iterator)"),
+    ] {
+        let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
+        assembled.runtime.worker.set(true);
+        let observed = observe_errors(&assembled);
+        assembled
+            .this
+            .call_method("emitAndLogError", vec![input])
+            .unwrap();
+        assert!(
+            observed.borrow()[0][0].strict_equals(&Js::str(expected)),
+            "RAW-REPORT source primitive formatting: {expected}"
+        );
+    }
+}

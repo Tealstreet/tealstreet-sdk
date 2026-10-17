@@ -46,6 +46,17 @@ for (const worker of [false, true]) {
   assert(Object.hasOwn(options, 'testnet') && options.testnet === undefined);
   assert(Object.hasOwn(options, 'publicDataOnly') && options.publicDataOnly === undefined);
   cases++;
+  for (const [input, expected] of [
+    [undefined, 'Unknown Exchange Error'], [null, 'Unknown Exchange Error'],
+    [false, 'Unknown Exchange Error'], [-0, 'Unknown Exchange Error'],
+    [NaN, 'Unknown Exchange Error'], ['', 'Unknown Exchange Error'],
+    [true, 'true'], [17, '17'], [Infinity, 'Infinity'], [-Infinity, '-Infinity'],
+    ['plain', 'Exchange Error: plain'], [Symbol.iterator, 'Symbol(Symbol.iterator)'],
+  ]) {
+    report.call(host, input, undefined, {suppressConsoleLog: true});
+    assert.equal(events.at(-1)[1], expected);
+    cases++;
+  }
   const message = {native: Infinity, missing: undefined};
   const raw = {message, get code() { throw new Error('reporter must not eagerly read code'); }};
   report.call(host, raw, undefined, {suppressConsoleLog: true});
@@ -62,5 +73,5 @@ for (const worker of [false, true]) {
   assert.equal(events.at(-1)[1], 'source object');
   cases++;
 }
-assert.equal(cases, 6);
-console.log('RAW-ERROR actual source: 6 worker/main profiles preserve own undefined/order, native message/error identity, lazy code and console-before-coercion.');
+assert.equal(cases, 30);
+console.log('RAW-ERROR actual source: 30 worker/main profiles preserve own undefined/order, native message/error identity, lazy code and console-before-coercion.');
