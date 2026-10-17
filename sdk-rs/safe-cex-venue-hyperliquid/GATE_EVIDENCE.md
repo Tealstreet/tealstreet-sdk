@@ -1,3 +1,60 @@
+# Twenty-two required-field record reviews
+
+This cohort reviews 22 concrete records individually against their maintained TS
+field declarations, native fields, private remote renames and required-field
+attributes. Every selected member is a required, non-nullable String, f64 or bool.
+The existing JsNumberInput capture and OnlyMap admission remain unchanged.
+`tests/fixtures/accepted_flat_record_schema.json` records the manually reviewed
+field mappings and exact public decoder body pins; it grants no policy permission.
+
+| Native owner | Maintained TS declaration | Required wire fields |
+| --- | --- | --- |
+| `ClearinghouseStateAssetPositionsItemPositionCumFunding` | `ClearinghouseState.assetPositions[].position.cumFunding` | `allTime`, `sinceChange`, `sinceOpen` |
+| `ClearinghouseStateAssetPositionsItemPositionLeverage` | `ClearinghouseState.assetPositions[].position.leverage` | `rawUsd`, `type`, `value` |
+| `ClearinghouseStateCrossMarginSummary` | `ClearinghouseState.crossMarginSummary` | `accountValue`, `totalMarginUsed`, `totalNtlPos`, `totalRawUsd` |
+| `ClearinghouseStateMarginSummary` | `ClearinghouseState.marginSummary` | `accountValue`, `totalMarginUsed`, `totalNtlPos`, `totalRawUsd` |
+| `OrderResponseStatusCase2` | `OrderResponseStatus error branch` | `error` |
+| `WsTrade` | `WsTrade` | `coin`, `side`, `px`, `sz`, `hash`, `time`, `tid` |
+| `WsLevel` | `WsLevel` | `px`, `sz`, `n` |
+| `WsOrderOrder` | `WsOrder.order` | `coin`, `side`, `limitPx`, `sz`, `oid`, `timestamp`, `origSz` |
+| `WsUserFunding` | `WsUserFunding` | `time`, `coin`, `usdc`, `szi`, `fundingRate` |
+| `WsLiquidation` | `WsLiquidation` | `lid`, `liquidator`, `liquidated_user`, `liquidated_ntl_pos`, `liquidated_account_value` |
+| `WsNonUserCancel` | `WsNonUserCancel` | `coin`, `oid` |
+| `L2BookLevelsItem0Item` | `L2Book.levels[0][]` | `px`, `sz`, `n` |
+| `L2BookLevelsItem1Item` | `L2Book.levels[1][]` | `px`, `sz`, `n` |
+| `FundingHistoryEntry` | `FundingHistoryEntry` | `coin`, `fundingRate`, `premium`, `time` |
+| `SpotTokenEvmContract` | `SpotToken.evmContract concrete object branch` | `address`, `evm_extra_wei_decimals` |
+| `UserOpenOrder` | `UserOpenOrder` | `coin`, `limitPx`, `oid`, `side`, `sz`, `timestamp` |
+| `CancelOrderRequest` | `CancelOrderRequest` | `coin`, `o` |
+| `CancelOrderRequestsItem` | `CancelOrderRequests[]` | `a`, `o` |
+| `Signature` | `Signature` | `r`, `s`, `v` |
+| `Notification` | `Notification` | `notification`, `user` |
+| `BuilderInfo` | `BuilderInfo` | `b`, `f` |
+| `BuilderFeeApprovalResult` | `BuilderFeeApprovalResult` | `success`, `message` |
+
+The permanent typed projections read every native member before owner serialization.
+Distinct values catch swapped field mappings. The 549 independently authored cases
+include changed Unicode/boolean/number values, reversed object keys, ignored extra
+keys, omission/null/wrong primitive for every required member, negative-zero,
+overflow and negative-underflow bits for every numeric member, complete valid
+Serde-declaration-order arrays and invalid scalar roots. All six native ingress
+routes are checked for each case. The typed fixture passes 22 tests, and the actual
+installed contract expressions independently pass 22 tests / 549 cases / 3294
+native route observations. `OrderResponseStatusCase2` additionally reads the actual
+error string's UTF-16 units; native fields are never success/count placeholders.
+
+Each of the 22 public map-only guards was removed independently while retaining numeric capture and private wire metadata. Every compiled mutation failed its named complete-valid-array assertion; exact source restoration then passed all 22 native tests.
+
+Integrated native tests pass 22/22; strict native all-target clippy and formatting pass. parity:check passes with 7459 rows and 17214 public Rust items. Static compiler checks confirm exact scalar field identities, reviewed decoder bodies and all existing master rows.
+
+The current compiler inventory contains 534 owners, 36 aliases and two construction obligations (572 total). This branch reviews 73 owners, six aliases and two construction obligations: 81 reviewed, 491 remaining. Every original census key is retained.
+
+The ordinary package gate retains the AccountFuture refusal (`fixed local future alias probe: lifetime then output parameter required`). This cohort changes only the
+22 reviewed contracts and their evidence; private helpers, other records, aliases,
+local scopes, dependencies and the feature/target matrix retain separate reviews.
+No whole-package acceptance is claimed.
+
+
 # Six fixed Realm associated-projection contracts
 
 Six accepted contracts classify only `PrivateValue<Realm>`, `PrivateError<Realm>`,
