@@ -44,3 +44,60 @@ pub(crate) fn fetch_closed_pnl(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         _ => crate::ledger_history::fetch_closed_pnl(Rc::new(rt.clone()), rt.this.clone(), opts),
     })
 }
+
+pub(crate) fn fetch_income_history(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
+    Ok(match venue(rt)?.base.name {
+        ExchangeName::Bybitspot => Js::array(vec![]),
+        ExchangeName::Bybitinverse => {
+            let inner = rt.clone();
+            rt.spawn(Box::pin(async move {
+                crate::inverse_read_surface::fetch_income_history(&inner, inner.this.clone(), opts)
+                    .await
+            }))
+        }
+        _ => {
+            crate::ledger_history::fetch_income_history(Rc::new(rt.clone()), rt.this.clone(), opts)
+        }
+    })
+}
+pub(crate) fn fetch_income_history_range(
+    rt: &Rt,
+    start: Js,
+    end: Js,
+    kind: Js,
+) -> Result<Js, Thrown> {
+    Ok(match venue(rt)?.base.name {
+        ExchangeName::Bybitspot => Js::array(vec![]),
+        ExchangeName::Bybitinverse => {
+            let inner = rt.clone();
+            rt.spawn(Box::pin(async move {
+                crate::inverse_read_surface::fetch_income_history_range(
+                    &inner,
+                    inner.this.clone(),
+                    start,
+                    end,
+                    kind,
+                )
+                .await
+            }))
+        }
+        _ => crate::ledger_history::fetch_income_history_range(
+            Rc::new(rt.clone()),
+            rt.this.clone(),
+            start,
+            end,
+            kind,
+        ),
+    })
+}
+
+pub(crate) fn fetch_historical_orders(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
+    Ok(match venue(rt)?.base.name {
+        ExchangeName::Bybitspot | ExchangeName::Bybitinverse => Js::array(vec![]),
+        _ => crate::ledger_history::fetch_historical_orders(
+            Rc::new(rt.clone()),
+            rt.this.clone(),
+            opts,
+        ),
+    })
+}

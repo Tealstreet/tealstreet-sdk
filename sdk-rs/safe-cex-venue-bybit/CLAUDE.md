@@ -708,3 +708,14 @@ rearms existing handlers, and final cleanup cancels the primary timer/retry.
 Dedicated Spot/Inverse retain their delayed-retry and topic/stats cleanup quirks.
 The sequence oracle replays 72 maintained source frames through actual bindings;
 the wired kline mapper retains its 2172-outcome source corpus.
+
+Income history and range reads now bind primary/demo and dedicated inverse to the
+maintained transaction-log helpers. Spot retains inherited empty history. Keep
+linear/inverse context order, source combined-category sort/limit rules, inclusive
+windows and repeated IDs. The mapper stays native until the typed public output;
+its ordinary lookup tables retain actual Object.prototype members.
+
+Historical order reads now bind primary/demo to the native mapper and signed
+history client. Dedicated Spot/Inverse keep Base's empty method. Keep ascending
+inclusive windows, category order and first-seen ID deduplication before sorting
+and limits. All three ledger mappers share native numeric coercion.

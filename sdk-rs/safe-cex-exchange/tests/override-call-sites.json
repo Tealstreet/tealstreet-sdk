@@ -6076,6 +6076,59 @@
     ]
   },
   {
+    "file": "safe-cex-venue-bybit/src/binding/members/history.rs",
+    "function": "fetch_historical_orders",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_historical_orders",
+        "callee": "crate :: ledger_history :: fetch_historical_orders",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bybit/src/binding/members/history.rs",
+    "function": "fetch_income_history",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history",
+        "callee": "crate :: inverse_read_surface :: fetch_income_history",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history",
+        "callee": "crate :: ledger_history :: fetch_income_history",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-bybit/src/binding/members/history.rs",
+    "function": "fetch_income_history_range",
+    "edges": [
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history_range",
+        "callee": "crate :: inverse_read_surface :: fetch_income_history_range",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history_range",
+        "callee": "crate :: ledger_history :: fetch_income_history_range",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-venue-bybit/src/binding/members/inverse.rs",
     "function": "install",
     "edges": [
@@ -6232,6 +6285,27 @@
         "kind": "reference",
         "hook": "fetch_closed_pnl",
         "callee": "members :: history :: fetch_closed_pnl",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_historical_orders",
+        "callee": "members :: history :: fetch_historical_orders",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history",
+        "callee": "members :: history :: fetch_income_history",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_income_history_range",
+        "callee": "members :: history :: fetch_income_history_range",
         "count": 1
       },
       {

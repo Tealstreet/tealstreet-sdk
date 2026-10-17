@@ -1,5 +1,16 @@
 # WOO venue port
 
+The canonical spread, lifecycle for-of and array-pattern slots consume the shared
+iterator protocol. Spread retains native values and UTF-16 code points; loops
+observe collection mutation during the body. Array patterns advance only their
+selected length, skip value getters for elisions and close an unfinished iterator.
+Body throws win over close failures, while step/value failures do not close.
+`woo_host_*` tests use the constructed exchange’s actual operation tables; four
+regressions compiled and failed on master. The source private socket subscribes
+only to executionreport/algoexecutionreportv2: fills trigger REST position refresh,
+and balance remains a REST read. `binding_streams` and `binding_reads` retain those
+real signed-client paths; no balance socket topic is introduced.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/woo/CLAUDE.md).
 Composition: [exchange core contract](../safe-cex-exchange/CLAUDE.md).
 
