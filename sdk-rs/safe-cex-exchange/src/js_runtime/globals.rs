@@ -701,7 +701,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 Js::function("all", move |_, a| {
                     let rt = scope_of(&promise_rt)?;
                     let values = arg(&a, 0).array_values().unwrap_or_default();
-                    Ok(rt.spawn(Box::pin(promise::all(values))))
+                    Ok(Js::Promise(promise::all(&rt.exchange_runtime(), values)))
                 }),
             ),
             (
@@ -709,7 +709,10 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 Js::function("allSettled", move |_, a| {
                     let rt = scope_of(&settled_rt)?;
                     let values = arg(&a, 0).array_values().unwrap_or_default();
-                    Ok(rt.spawn(Box::pin(promise::all_settled(values))))
+                    Ok(Js::Promise(promise::all_settled(
+                        &rt.exchange_runtime(),
+                        values,
+                    )))
                 }),
             ),
             (

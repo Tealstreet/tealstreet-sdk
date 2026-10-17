@@ -282,7 +282,17 @@ impl ExchangeTask for Task {
 }
 
 pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
-    let jobs = for_runtime(&runtime);
+    let jobs = QUEUES.with(|queues| {
+        queues.borrow().iter().find_map(|(owner, jobs)| {
+            owner
+                .upgrade()
+                .filter(|owner| Rc::ptr_eq(owner, &runtime))
+                .and_then(|_| jobs.upgrade())
+        })
+    });
+    let Some(jobs) = jobs else {
+        return;
+    };
     let nested = CURRENT.with(|current| {
         current
             .borrow()

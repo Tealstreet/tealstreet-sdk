@@ -365,3 +365,197 @@ fn native_cleared_timer_releases_its_callback_and_idle_driver() {
         );
     });
 }
+
+#[test]
+fn native_combinator_reactions_match_node_for_empty_ready_and_pending_inputs() {
+    let output = Command::new("node").args(["-e", r#"
+(async()=>{const rows=[];for(const method of ['all','allSettled'])for(const kind of ['empty','scalar','ready','pending']){
+let resolve;const p=new Promise(r=>resolve=r);const values=kind==='empty'?[]:[kind==='scalar'?1:kind==='ready'?Promise.resolve(1):p,2];
+const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const b=Promise.resolve().then(()=>trace.push('single'));resolve(1);await Promise.all([a,b]);rows.push(trace);
+}let a,b;const trace=[];const p=Promise.all([new Promise((_,r)=>a=r),new Promise((_,r)=>b=r)]).catch(e=>trace.push(e));b('second');a('first');await p;rows.push(trace);console.log(JSON.stringify(rows))})()
+"#]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Vec<Vec<String>> = serde_json::from_slice(&output.stdout).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&rt, async {
+        let native = native_runtime();
+        let http = client::rest_http_host(
+            native.clone(),
+            Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+        );
+        let shared = Rc::new(ScopeShared::new(
+            native.clone(),
+            http,
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Js::object(vec![]),
+            (),
+        ));
+        globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+        let runtime: Rc<dyn ExchangeRuntime> = native;
+        let promise_global = shared.globals.get("Promise").unwrap();
+        let mut rows = Vec::new();
+        for settled in [false, true] {
+            for kind in ["empty", "scalar", "ready", "pending"] {
+                let pending = Promise::pending(&runtime);
+                let values = if kind == "empty" {
+                    vec![]
+                } else {
+                    vec![
+                        match kind {
+                            "scalar" => Js::Number(1.0),
+                            "ready" => Js::Promise(Promise::settled(&runtime, Ok(Js::Number(1.0)))),
+                            _ => Js::Promise(pending.clone()),
+                        },
+                        Js::Number(2.0),
+                    ]
+                };
+                let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+                let callback = trace.clone();
+                let combined = promise_global
+                    .call_method(
+                        if settled { "allSettled" } else { "all" },
+                        vec![Js::array(values)],
+                    )
+                    .unwrap();
+                let a = combined
+                    .call_method(
+                        "then",
+                        vec![Js::function("all", move |_, _| {
+                            callback.borrow_mut().push("all".into());
+                            Ok(Js::Undefined)
+                        })],
+                    )
+                    .unwrap();
+                let callback = trace.clone();
+                let b = Js::Promise(Promise::settled(&runtime, Ok(Js::Undefined)))
+                    .call_method(
+                        "then",
+                        vec![Js::function("single", move |_, _| {
+                            callback.borrow_mut().push("single".into());
+                            Ok(Js::Undefined)
+                        })],
+                    )
+                    .unwrap();
+                pending.settle(Ok(Js::Number(1.0)));
+                await_js(a).await.unwrap();
+                await_js(b).await.unwrap();
+                rows.push(trace.borrow().clone());
+            }
+        }
+        let first = Promise::pending(&runtime);
+        let second = Promise::pending(&runtime);
+        let combined = promise_global
+            .call_method(
+                "all",
+                vec![Js::array(vec![
+                    Js::Promise(first.clone()),
+                    Js::Promise(second.clone()),
+                ])],
+            )
+            .unwrap();
+        second.settle(Err(safe_cex_exchange::js_runtime::value::Thrown::new(
+            Js::str("second"),
+        )));
+        first.settle(Err(safe_cex_exchange::js_runtime::value::Thrown::new(
+            Js::str("first"),
+        )));
+        rows.push(vec![
+            await_js(combined).await.unwrap_err().value.to_display(),
+        ]);
+        assert_eq!(rows, expected);
+    });
+}
+
+#[test]
+fn native_host_task_checkpoint_preserves_callback_batches() {
+    let output = Command::new("node").args(["-e", r#"
+const trace=[];let resolve;new Promise(r=>resolve=r).then(()=>trace.push('reaction'));
+setImmediate(()=>{trace.push('first');resolve();trace.push('second');setImmediate(()=>{trace.push('next-host');console.log(JSON.stringify(trace))})});
+"#]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&rt, async {
+        let runtime: Rc<dyn ExchangeRuntime> = native_runtime();
+        let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+        let pending = Promise::pending(&runtime);
+        let callback = trace.clone();
+        Js::Promise(pending.clone())
+            .call_method(
+                "then",
+                vec![Js::function("reaction", move |_, _| {
+                    callback.borrow_mut().push("reaction".into());
+                    Ok(Js::Undefined)
+                })],
+            )
+            .unwrap();
+        let fired = Rc::new(tokio::sync::Notify::new());
+        let ready = fired.clone();
+        let task_runtime = runtime.clone();
+        let callback = trace.clone();
+        drop(runtime.spawn_local(Box::pin(async move {
+            callback.borrow_mut().push("first".into());
+            pending.settle(Ok(Js::Undefined));
+            callback.borrow_mut().push("second".into());
+            drop(task_runtime.spawn_local(Box::pin(async move {
+                callback.borrow_mut().push("next-host".into());
+                ready.notify_one();
+            })));
+        })));
+        tokio::time::timeout(Duration::from_secs(5), fired.notified())
+            .await
+            .unwrap();
+        assert_eq!(*trace.borrow(), expected);
+    });
+}
+
+#[test]
+fn native_host_discard_releases_polled_and_unpolled_promise_jobs() {
+    for polled in [false, true] {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let local = tokio::task::LocalSet::new();
+        let weak = local.block_on(&rt, async {
+            let runtime: Rc<dyn ExchangeRuntime> = native_runtime();
+            let pending = Promise::pending(&runtime);
+            let probe = Rc::new(());
+            let weak = Rc::downgrade(&probe);
+            drop(Promise::spawn(
+                &runtime,
+                Box::pin(async move {
+                    let _keep = probe;
+                    await_js(Js::Promise(pending)).await
+                }),
+            ));
+            if polled {
+                tokio::task::yield_now().await;
+            }
+            weak
+        });
+        assert!(
+            weak.upgrade().is_some(),
+            "pending jobs remain owned after observer drop"
+        );
+        drop(local);
+        assert!(
+            weak.upgrade().is_none(),
+            "host discard releases job captures; polled={polled}"
+        );
+    }
+}
