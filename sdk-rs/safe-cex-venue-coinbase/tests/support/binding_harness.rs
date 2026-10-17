@@ -18,17 +18,33 @@ use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
-    rc::Rc,
-    sync::Arc,
-    task::{Context, Poll, Waker},
+    rc::{Rc, Weak},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    task::{Context, Poll, Wake, Waker},
 };
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
+type Sleeper = (f64, Weak<RefCell<Option<Waker>>>);
+
+#[derive(Default)]
+struct PumpWake(AtomicBool);
+impl Wake for PumpWake {
+    fn wake(self: Arc<Self>) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
 
 #[derive(Default)]
 pub struct Runtime {
     pub now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
+    sleepers: RefCell<Vec<Sleeper>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
 }
@@ -40,12 +56,29 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
+        let mut ready = vec![];
+        self.sleepers.borrow_mut().retain(|(deadline, sleeper)| {
+            let Some(sleeper) = sleeper.upgrade() else {
+                return false;
+            };
+            if self.now.get() >= *deadline
+                && let Some(waker) = sleeper.borrow_mut().take()
+            {
+                ready.push(waker);
+            }
+            true
+        });
+        for waker in ready {
+            waker.wake();
+        }
         for _ in 0..64 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let signal = Arc::new(PumpWake::default());
+            let waker = Waker::from(signal.clone());
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -60,7 +93,7 @@ impl Runtime {
             }
             let added = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !added {
+            if !progressed && !added && !signal.0.load(Ordering::Relaxed) {
                 return;
             }
         }
@@ -80,10 +113,15 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        let sleeper = Rc::new(RefCell::new(None));
+        self.sleepers
+            .borrow_mut()
+            .push((at, Rc::downgrade(&sleeper)));
+        Box::pin(std::future::poll_fn(move |cx| {
             if now.get() >= at {
                 Poll::Ready(Ok(()))
             } else {
+                *sleeper.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
