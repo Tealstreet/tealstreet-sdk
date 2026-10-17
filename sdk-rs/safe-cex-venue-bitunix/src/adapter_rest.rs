@@ -280,12 +280,12 @@ impl BitunixVenue {
                     async move { f.await.map_err(Fault) }
                 },
                 |updates| {
-                    let rows: Vec<(String, ModelPatch)> = updates
+                    let rows: Vec<(Option<String>, ModelPatch)> = updates
                         .into_iter()
                         .map(|(id, leverage)| {
                             let mut patch = ModelPatch::default();
                             patch.set_number("leverage", leverage);
-                            (id, patch)
+                            (Some(id), patch)
                         })
                         .collect();
                     me.base

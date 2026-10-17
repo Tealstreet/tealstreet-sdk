@@ -1,6 +1,24 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
+export function reviewedGenericDecoderHelper(local, helpers, source, owners, contracts) {
+  if (!local.ident.startsWith('UNSUPPORTED_GENERIC:')) return false;
+  const helper = helpers[local.label];
+  if (!helper) return false;
+  const label = `${local.label}: accepted-set assertion`;
+  assert.equal(helper.category, 'private-generic-decoder', `${label}: unsupported generic helper category`);
+  assert.deepEqual([local.line, local.column], helper.declarationEnd, `${label}: helper lexical declaration changed`);
+  assert.equal(createHash('sha256').update(source).digest('hex'), helper.sourceSha256, `${label}: reviewed generic helper source changed`);
+  assert.ok(helper.reason?.trim(), `${label}: generic helper needs reviewed evidence`);
+  const owner = owners.find(owner => owner.name === helper.runtimeOwner);
+  assert.ok(owner?.deserialize && owner.generics?.params?.length, `${label}: generic helper needs its production generic Deserialize owner`);
+  const contract = contracts[helper.runtimeOwner];
+  assert.ok(contract?.instantiation?.trim() && contract.monomorphization?.trim(), `${label}: generic helper needs a fixed decoder monomorphization`);
+  requireNativeDecoderObservations(owner, contract, local.label);
+  assert.deepEqual(contract.nativeObservation.nativeFields, helper.nativeFields, `${label}: generic helper native fields changed`);
+  return true;
+}
+
 export function reviewedLocalHelper(local, helpers, source, owners, contracts) {
   const helper = helpers[local.label];
   if (!helper) return false;

@@ -681,7 +681,7 @@ impl BingxAmendment {
             let replacement = map_order(
                 &raw,
                 &self.reads.base.store.orders(),
-                self.reads.base.runtime.now_ms(),
+                safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
             )?;
             self.reads
                 .base
