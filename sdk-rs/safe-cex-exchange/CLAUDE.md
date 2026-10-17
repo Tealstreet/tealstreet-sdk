@@ -1329,3 +1329,12 @@ transforms and fulfilled response interceptors run; default native HTTP response
 still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
 the actual native runtime, factory, transport and HOW protocol against scripted
 socket I/O and compares four statuses with the maintained HOW adapter and Axios.
+
+Plain JS socket dispatch follows the DOM listener snapshot and per-registration
+removed flag: removal before a callback's turn skips it, and readding the same
+function cannot revive its old registration. ReconnectingWebSocket retains its
+vendored captured-array removal behavior. The native TCP
+`js_socket_listener_removal` witness compares 16 open/message cases with Node
+EventTarget and the actual vendored class, using only shared Node/DOM outcomes.
+The browser rule is https://dom.spec.whatwg.org/#concept-event-listener-inner-invoke;
+Node's additions-during-dispatch quirk is outside this removal comparison.

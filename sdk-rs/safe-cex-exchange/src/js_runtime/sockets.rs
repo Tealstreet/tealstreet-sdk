@@ -45,7 +45,7 @@ impl JsSocketContext {
 }
 
 /// Event listeners registered on one `ws` handle, in registration order.
-pub type ListenerList = Rc<RefCell<Vec<(String, Js)>>>;
+pub type ListenerList = Rc<RefCell<Vec<(String, Js, Rc<Cell<bool>>)>>>;
 
 pub struct SocketCore {
     pub context: Rc<JsSocketContext>,
@@ -204,14 +204,17 @@ impl JsProtocol {
             .get()
             .is_some_and(|base| base.grouped_listener_dispatch());
         let current = core.listeners.borrow().clone();
-        let listeners: Vec<Js> = current
+        let listeners: Vec<_> = current
             .borrow()
             .iter()
-            .filter(|(e, _)| e == event)
-            .map(|(_, f)| f.clone())
+            .filter(|(e, _, _)| e == event)
+            .map(|(_, f, removed)| (f.clone(), removed.clone()))
             .collect();
         let skip = core.on_close_member.borrow().clone();
-        for listener in listeners {
+        for (listener, removed) in listeners {
+            if !grouped && removed.get() {
+                continue;
+            }
             if event == "close" && skip.as_ref().is_some_and(|s| s.same_reference(&listener)) {
                 continue;
             }
@@ -381,7 +384,7 @@ impl WsProtocol for JsProtocol {
         !listeners
             .borrow()
             .iter()
-            .any(|(event, listener)| event == "close" && listener.same_reference(&base_member))
+            .any(|(event, listener, _)| event == "close" && listener.same_reference(&base_member))
     }
     fn watchdog_stale_threshold_ms(&self) -> Option<f64> {
         self.receiver_threshold("getWatchdogStaleThresholdMs")
@@ -836,9 +839,9 @@ fn ws_handle(core: &Rc<SocketCore>) -> Js {
                 // EventTarget ignores a second registration of the same listener.
                 if !list
                     .iter()
-                    .any(|(e, f)| *e == event && f.same_reference(&listener))
+                    .any(|(e, f, _)| *e == event && f.same_reference(&listener))
                 {
-                    list.push((event, listener));
+                    list.push((event, listener, Rc::new(Cell::new(false))));
                 }
                 Ok(Js::Undefined)
             }),
@@ -849,9 +852,13 @@ fn ws_handle(core: &Rc<SocketCore>) -> Js {
             "removeEventListener",
             Js::function("removeEventListener", move |_, a| {
                 let (event, listener) = (arg(&a, 0).to_display(), arg(&a, 1));
-                listeners
-                    .borrow_mut()
-                    .retain(|(e, f)| !(*e == event && f.same_reference(&listener)));
+                listeners.borrow_mut().retain(|(e, f, removed)| {
+                    let keep = !(*e == event && f.same_reference(&listener));
+                    if !keep {
+                        removed.set(true);
+                    }
+                    keep
+                });
                 Ok(Js::Undefined)
             }),
         );
