@@ -58,6 +58,36 @@ fn capture_error(env: &Env, value: Unknown<'_>) -> napi::Result<NativeValue> {
     Ok(NativeValue::object(fields))
 }
 
+fn capture_rejection(env: &Env, mut value: Unknown<'_>) -> napi::Result<NativeValue> {
+    for _ in 0..8 {
+        match capture_error(env, value) {
+            Ok(error) => return Ok(error),
+            Err(error) => {
+                let mut pending = false;
+                check_status!(unsafe { sys::napi_is_exception_pending(env.raw(), &mut pending) })?;
+                if !pending {
+                    return Ok(NativeValue::object([
+                        ("name", NativeValue::string("Error")),
+                        ("message", NativeValue::string(&error.reason)),
+                    ]));
+                }
+                let mut exception = std::ptr::null_mut();
+                check_status!(unsafe {
+                    sys::napi_get_and_clear_last_exception(env.raw(), &mut exception)
+                })?;
+                value = unsafe { Unknown::from_napi_value(env.raw(), exception)? };
+            }
+        }
+    }
+    Ok(NativeValue::object([
+        ("name", NativeValue::string("Error")),
+        (
+            "message",
+            NativeValue::string("callback rejection inspection exceeds 8 nested exceptions"),
+        ),
+    ]))
+}
+
 pub fn wrap(env: &Env, callback: Callback<'_>) -> napi::Result<Request> {
     let reference = callback.create_ref()?;
     let wrapper = env.create_function_from_closure::<JsData, Unknown<'static>, _>(
@@ -76,7 +106,7 @@ pub fn wrap(env: &Env, callback: Callback<'_>) -> napi::Result<Request> {
                     let value = unsafe { napi::Error::to_napi_value(context.env.raw(), error)? };
                     let value = unsafe { Unknown::from_napi_value(context.env.raw(), value)? };
                     envelope.set(0, false)?;
-                    envelope.set(1, JsData(capture_error(context.env, value)?))?;
+                    envelope.set(1, JsData(capture_rejection(context.env, value)?))?;
                 }
             }
             unsafe { Unknown::from_napi_value(context.env.raw(), envelope.raw()) }
@@ -128,14 +158,15 @@ impl FromNapiValue for CallbackFuture {
                         Ok(())
                     })?
                     .catch(move |context: CallbackContext<Unknown>| {
-                        let outcome = capture_error(&context.env, context.value).map_err(|error| {
-                            NativeValue::object([
-                                ("name", NativeValue::string("Error")),
-                                ("message", NativeValue::string(&error.reason)),
-                            ])
-                        });
+                        let outcome = capture_rejection(&context.env, context.value)
+                            .unwrap_or_else(|error| {
+                                NativeValue::object([
+                                    ("name", NativeValue::string("Error")),
+                                    ("message", NativeValue::string(&error.reason)),
+                                ])
+                            });
                         if let Some(sender) = sender.borrow_mut().take() {
-                            drop(sender.send(Err(outcome.unwrap_or_else(|error| error))));
+                            drop(sender.send(Err(outcome)));
                         }
                         Ok(())
                     })?;
