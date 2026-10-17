@@ -671,8 +671,7 @@ fn hyro_reconnect_ignores_old_acks_and_retired_socket_frames() {
         .sockets
         .borrow()
         .iter()
-        .filter(|(url, _)| url.contains("/private"))
-        .next_back()
+        .rfind(|(url, _)| url.contains("/private"))
         .unwrap()
         .1
         .clone();
