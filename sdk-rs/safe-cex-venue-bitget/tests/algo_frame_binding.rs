@@ -223,3 +223,91 @@ fn real_algo_unmapped_status_still_evaluates_mapper() {
     );
     s.h.venue().dispose().unwrap();
 }
+
+#[test]
+fn real_algo_missing_side_retains_native_undefined_before_store_projection() {
+    let s = Scene::connect();
+    let mut absent = algo("algo-missing-side", "live", "profit_plan");
+    absent.as_object_mut().unwrap().remove("side");
+    s.send(
+        "orders-algo",
+        json!([absent, algo("algo-known-side", "live", "profit_plan")]),
+    );
+    let orders = s.h.store.orders();
+    assert_eq!(
+        orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        ["algo-missing-side", "algo-known-side"]
+    );
+    assert!(
+        orders[0].side.is_undefined(),
+        "source assignment is own undefined in actual Store"
+    );
+    assert!(
+        !orders[0].side.is_absent(),
+        "own undefined is distinct from absent"
+    );
+    assert_eq!(
+        orders[1].side.value(),
+        Some(&safe_cex_types::OrderSide::Buy)
+    );
+    assert!(
+        serde_json::to_value(&orders[0])
+            .unwrap()
+            .get("side")
+            .is_none(),
+        "JSON projection alone would hide the distinction"
+    );
+    drop(orders);
+    s.h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_rest_missing_side_retains_undefined_but_unknown_raw_side_refuses() {
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        for unknown_raw in [false, true] {
+            let mut row = algo("rest-side", "live", "profit_plan");
+            if unknown_raw {
+                row["side"] = json!("unmapped-side");
+            } else {
+                row.as_object_mut().unwrap().remove("side");
+            }
+            let h = harness(name.clone(), options(), |http| {
+                script(http);
+                http.routes
+                    .borrow_mut()
+                    .retain(|(_, path, _)| path != "/api/v2/mix/order/orders-pending");
+                http.ok(
+                    "GET",
+                    "/api/v2/mix/order/orders-pending",
+                    json!({"entrustedList":[row],"endId":null}),
+                );
+            });
+            let actual = h.drive(h.venue().fetch_orders(None));
+            if unknown_raw {
+                let error =
+                    actual.expect_err("unknown raw side cannot enter the closed shared enum");
+                assert_eq!(error.name, "RepresentationError");
+                assert!(error.message.contains("side"), "{}", error.message);
+            } else {
+                let rows = actual.expect("missing raw side is representable own undefined");
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].id, "rest-side");
+                assert!(
+                    rows[0].side.is_undefined(),
+                    "native REST property before JSON"
+                );
+                assert!(!rows[0].side.is_absent());
+                assert!(
+                    serde_json::to_value(&rows[0])
+                        .unwrap()
+                        .get("side")
+                        .is_none()
+                );
+            }
+        }
+    }
+}

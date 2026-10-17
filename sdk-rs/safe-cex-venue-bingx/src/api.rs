@@ -229,9 +229,7 @@ impl ReadTransport for BingxApi {
             let view =
                 serde_json::to_value(&data).map_err(|e| ExchangeError::new(e.to_string()))?;
             let predicate: IsSignatureRejection = Rc::new(is_bingx_signature_rejection);
-            if resend_on_rejected_data(&view, &retry, &predicate)
-                .map_err(|e| ExchangeError::new(e.message))?
-            {
+            if resend_on_rejected_data(&view, &retry, &predicate).map_err(ExchangeError::from)? {
                 // The resend runs the whole chain again, re-signing what was sent.
                 return self
                     .client
