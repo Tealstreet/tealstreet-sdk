@@ -534,7 +534,7 @@ Scoped ratchet logs and exact native/WASM receipts are preserved as `/tmp/port-t
 
 ## Publication recheck (2026-10-18 SGT)
 
-Current master `aa3c9302a1615f948ebb03ce3211b28621df6676` was normally merged before publication. The exact
+Current master `e352e84bf9e63ccc02376307a1fffe19f3d2dfbe` was normally merged before publication. The exact
 123 exchange +108 types exemption rows remain unchanged from `f759dc8be2`.
 All26 Rust source files containing those declarations are byte-identical to the
 reviewed baseline, and the ledger has exactly one row for every current entry.
@@ -550,8 +550,14 @@ unchanged production ratchet rejects the old89-owner/1004-fingerprint types debt
 and accepts its removal. Production history validation is removal-only, and the
 remaining9 owners/28 fingerprints are byte-for-byte unchanged from current master.
 
-Phase2 #696 remains open at this publication check (latest checkpoint supplied by
-its owner: e8cabc8b3f). Its marked body/transport consumers remain owned/deferred;
+Phase2 #696 remains open at this publication check (checked head: fc987325b9e0a18aa2faa937f60aa9ac7475a310). Its marked body/transport consumers remain owned/deferred;
 this PR changes no body, model, API, exemption or scalar representation decision.
 All final shared-type decisions remain under their designated implementation
 owners; they are not implied implemented by this metadata cleanup.
+
+Publication gates after that merge:
+
+- Production accepted-set ratchet: old types debt RED, its removal GREEN on both native and WASM receipts; removal-only ancestry validation PASS.
+- Full-resolution scoped parity: PASS, 7,459 rows / 813 exchange public items and 7,459 rows / 253 types public items.
+- Required all-features cancellation inventory (`--jobs 1`): PASS, six tests and one intentional discovery-export ignore.
+- Extractor dependency check: PASS. Global extraction check reports one pre-existing Lighter manifest serialization drift on the merged master, with zero added/orphaned symbols; reported to the overseer. Neither PR file changes extraction inputs.
