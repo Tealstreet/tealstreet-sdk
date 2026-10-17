@@ -1,4 +1,8 @@
 use super::*;
+use crate::api::truthy;
+use safe_cex_exchange::js_runtime::value::{from_json, to_typed};
+use safe_cex_types::Execution;
+use serde_json::Value;
 fn normalize(value: &Value) -> Value {
     match value {
         Value::Number(n) => serde_json::json!(n.as_f64().unwrap()),
@@ -25,26 +29,30 @@ fn history_rows_match_live_source() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    let globals = Js::object(vec![]);
+    safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&globals, std::rc::Weak::new());
     let mut typed_differences = 0;
     let mut surrogate_differences = 0;
     for (index, case) in cases.iter().enumerate() {
         let rows = case["rows"].as_array().unwrap();
         let opts = &case["opts"];
         let result = map_order_history_rows_to_executions(
-            rows,
-            "fallback",
-            opts["orderId"].as_str(),
-            opts["from"].as_f64(),
-            opts["to"].as_f64(),
+            &globals,
+            &from_json(&case["rows"]),
+            Js::str("fallback"),
+            opts.get("orderId").map(from_json).unwrap_or(Js::Undefined),
+            opts.get("from").map(from_json).unwrap_or(Js::Undefined),
+            opts.get("to").map(from_json).unwrap_or(Js::Undefined),
         );
         if let Some(error) = case.get("error") {
             assert_eq!(
-                result.unwrap_err(),
+                result.unwrap_err().to_exchange_error().message,
                 error.as_str().unwrap(),
                 "case{index}: {case}"
             );
             continue;
         }
+        let result = result.and_then(|v| to_typed::<Vec<Execution>>(&v));
         let raw = &rows[0];
         if let Some(key) = ["symbol", "feeCurrency"]
             .into_iter()
@@ -55,15 +63,16 @@ fn history_rows_match_live_source() {
             } else {
                 "commissionAsset"
             };
-            assert_eq!(
-                result.unwrap_err(),
-                format!("Bybit typed Execution requires string {field}")
+            assert!(
+                result.is_err(),
+                "typed Execution must refuse the non-string {field}"
             );
             assert!(!case["result"][0][field].is_string());
             typed_differences += 1;
             continue;
         }
-        let result = result.unwrap_or_else(|e| panic!("case{index}: {e}: {case}"));
+        let result = result
+            .unwrap_or_else(|e| panic!("case{index}: {}: {case}", e.to_exchange_error().message));
         let mut actual = serde_json::to_value(&result).unwrap();
         for (value, execution) in actual.as_array_mut().unwrap().iter_mut().zip(&result) {
             if execution.commission == Some(f64::INFINITY) {
