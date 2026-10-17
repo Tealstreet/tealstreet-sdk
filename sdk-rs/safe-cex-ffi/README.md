@@ -42,6 +42,10 @@ JSON account host. Events and private Store slices are forwarded to JS; signing
 and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
+Rejections are JavaScript Error objects with the source `name`, plain `message`
+and optional `code`. An absent source code stays absent; callers do not parse
+error messages as JSON. `tests/native-account-errors.test.mjs` checks this
+through the actual registry and native transport.
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
 
 Streaming uses the same command channel: call `listenOHLCV([options])`,
