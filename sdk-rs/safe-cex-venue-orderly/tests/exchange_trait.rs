@@ -691,3 +691,88 @@ fn private_algo_execution_report_updates_the_real_store() {
     drop(orders);
     venue.dispose().unwrap();
 }
+
+#[test]
+fn trait_set_all_leverage_updates_account_once_and_clamps_without_positions() {
+    let (venue, rt, store, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    wire.responses
+        .borrow_mut()
+        .insert("/v1/client/leverages".into(), json!({"success":true}));
+    assert!(store.positions().is_empty());
+    drive(&rt, venue.set_all_leverage(20.0)).unwrap();
+    assert!(
+        sent(&wire, "POST", "/v1/client/leverages"),
+        "account leverage updates even with no positions"
+    );
+    drive(&rt, venue.set_all_leverage(20.0)).unwrap();
+    assert_eq!(
+        wire.requests.borrow().len(),
+        1,
+        "unchanged account leverage is skipped"
+    );
+    drive(&rt, venue.set_all_leverage(125.0)).unwrap();
+    drive(&rt, venue.set_all_leverage(0.2)).unwrap();
+    drive(&rt, venue.set_all_leverage(1.0)).unwrap();
+    let requests = wire.requests.borrow();
+    assert_eq!(requests.len(), 3);
+    for (request, leverage) in requests.iter().zip([20.0, 100.0, 1.0]) {
+        let payload = request.body.as_ref().unwrap().untransformed().unwrap();
+        assert_eq!(payload["leverage"].as_f64(), Some(leverage));
+        assert_eq!(payload["margin_mode"], "CROSS");
+        assert!(payload.get("symbol").is_none());
+    }
+    drop(requests);
+    assert_eq!(
+        drive(&rt, venue.set_all_leverage(f64::NAN))
+            .unwrap_err()
+            .message,
+        "Orderly leverage must be a finite number"
+    );
+    assert_eq!(wire.requests.borrow().len(), 3);
+}
+
+#[test]
+fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
+    use std::{cell::RefCell, rc::Rc};
+    let (venue, rt, _, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    wire.responses.borrow_mut().insert(
+        "/v1/client/leverages".into(),
+        json!({"success":false,"message":"account leverage denied"}),
+    );
+    let errors = Rc::new(RefCell::new(vec![]));
+    let seen = errors.clone();
+    venue.base().on(
+        "error",
+        Rc::new(move |_, error| {
+            seen.borrow_mut().push(error.clone());
+            Ok(())
+        }),
+    );
+    drive(&rt, venue.set_all_leverage(20.0)).unwrap();
+    assert_eq!(
+        wire.requests.borrow().len(),
+        1,
+        "failed account leverage still attempted the venue write"
+    );
+    assert_eq!(errors.borrow().len(), 1);
+    assert!(
+        errors.borrow()[0]
+            .to_string()
+            .contains("account leverage denied")
+    );
+    wire.responses
+        .borrow_mut()
+        .insert("/v1/client/leverages".into(), json!({"success":true}));
+    drive(&rt, venue.set_all_leverage(20.0)).unwrap();
+    assert_eq!(
+        wire.requests.borrow().len(),
+        2,
+        "failed write did not advance the account leverage cache"
+    );
+}

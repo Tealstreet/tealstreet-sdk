@@ -669,3 +669,5 @@ closed instead of shrinking the compared fields.
 Command dispatch rejects missing, null and primitive payloads before looking up
 or calling its executor; arrays retain the source object admission. Position
 failure replies use JavaScript Error string rules for empty names and messages.
+
+OHLCV fetch and subscription requests decode the shared AnyTimeframe interval. The exact 27 source literals are checked against the live type AST; both real handlers forward every interval, and native listeners must deliver each candle. Monthly, extended and seconds intervals must never disappear at worker decoding.
