@@ -1,4 +1,4 @@
-//! Scripted Paradex transport and deterministic scheduler.
+// Scripted Paradex transport and deterministic scheduler.
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},

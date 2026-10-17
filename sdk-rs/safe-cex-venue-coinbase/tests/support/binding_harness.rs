@@ -33,6 +33,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub reported_errors: RefCell<Vec<ExchangeError>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -108,6 +109,7 @@ impl ExchangeRuntime for Runtime {
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.message.clone());
+        self.reported_errors.borrow_mut().push(error.clone());
     }
     fn report_raw_exception(&self, error: &Value, _: &Value) {
         self.reports.borrow_mut().push(error.to_string());

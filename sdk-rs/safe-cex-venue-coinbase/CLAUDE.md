@@ -141,8 +141,9 @@ float output and every present numeric `info` field before JSON erases -0; both
 take-market `take_profit` and stop-market `stop_loss` trigger branches are
 covered by tagged negative-zero witnesses.
 The Store notification reachability audit follows the TypeScript call graph.
-The three private-health handlers return `StoreMutationError` unchanged,
-preserving Store-local subscriber identity and source error cause. Their
+The three private-health handlers preserve the original `StoreMutationError`,
+including Store-local subscriber identity and source error cause. Degraded/auth
+handlers use the existing `PortfolioFailure` carrier for Store and callback errors. Their
 regression test pins commit-before-error, ordered fanout stopping at the first
 failure, and skipped log/warning effects. Other Coinbase Store writers remain
 pending or divergent with a `FINDING` note until their handlers propagate the
@@ -171,18 +172,13 @@ No DTO production caller was found, and this evidence excludes shared numeric
 record graphs listed in MANIFEST-SPEC section 17.
 
 `private_health.rs` ports the private-stream message-received, degraded, and
-auth-failed transitions against the production `DefaultStore`. All three rows
-remain `divergent` with `FINDING` notes: TypeScript commits a health update and then
-can surface a subscriber throw, which skips later subscribers and (for the
-degraded path) prevents logging and the once-only warning. Rust's current Store
-notification API returns `StoreMutationError`; the remaining divergence is the
-different subscriber and subsequent-effect behavior pinned by the live-source
-test. Keep subscriber identity and commit-before-error semantics intact.
-
-are `ported` with `MIXED` notes: Store notification failures propagate after
-commit, retaining subscriber identity and cause; the degraded path reports the
-failure before logging and the once-only warning. The live-source test pins
-update state, notification snapshots, and effect ordering.
+auth-failed transitions against the production `DefaultStore`. Store failure
+propagates after commit and before logging. Log and warning callbacks are fallible:
+a log failure prevents the warning latch and emission; a warning failure escapes
+after setting the latch. Constructed private-write timers and an authentication
+error frame retain the original native callback cause and source retry behavior.
+The three existing health rows remain ported; other notification findings retain
+their independent scope.
 
 The Store notification reachability audit follows the TypeScript call graph and
 allows only the three health rows whose Rust handlers propagate the fallible
@@ -260,9 +256,16 @@ the source formatOrder object literal. The production transport regression
 observes exact encoded POST bytes for Coinbase and CoinbaseSpot; it drives the
 real class graph, signers, client factory and installed transport adapter.
 
+CDP key-name validation requires exactly one organization segment and one key-ID
+segment, matching the source regex. Slashes inside either segment are refused
+before local JWT signing or HTTP dispatch; Unicode and interior spaces stay
+accepted. The constructed credential binding witness checks eight actual-source
+profiles through WS signing and rejects an invalid REST key before transport.
+
 Concrete order generation, client-ID minting and JWT nonce capabilities use the
 shared source UUID helper (`safe_cex_crypto::uuid::uuid_with_entropy`) with runtime
 entropy: generate nanoid21, then remove both separators. Generic runtime.unique_id
 has a separate host contract. Constructed UUID regressions exercise both variants,
 exact POST client IDs, optimistic parent IDs, mint entropy consumption and signed
 JWT headers; Node-derived Ed25519 public keys verify the actual wire token.
+
