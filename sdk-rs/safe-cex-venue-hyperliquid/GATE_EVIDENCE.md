@@ -1,3 +1,49 @@
+# Production TP/SL, fills and serial placement imports
+
+The production Realm now registers `hasSeenFill`, `markFillSeen`,
+`isFinitePositiveNumber`, `mapSeries` and
+`hyperliquidOrderResponseHasDeferredOrderStatus`. The fill wrappers share the
+same existing per-Realm cross-cache module as `getCrossCache`. The numeric
+predicate delegates only actual finite numbers to the existing native helper;
+non-number objects are never serialized or coerced. The deferred-status wrapper
+uses the ordinary native REST response DTO boundary.
+
+`mapSeries` keeps Realm values, receiver/error identity and promises intact.
+It reads live length and present slots, resolves `callback.call` before reading
+and awaiting an item, invokes that member with the callback as receiver, then
+awaits the result before moving on. Its default receiver is the retained module
+object, with a weak function capture. The installed p-iteration implementation
+independently agrees on the accessor/own-call order and serial live-length cases.
+
+Six `production_import_` regressions in `tests/binding.rs` construct the real
+production Exchange and Realm. Only external HTTP, sockets and runtime clocks
+are scripted. They observe signed zero-size position and partial TP/SL requests,
+a posted waiting trigger returning no IDs and scheduling a refresh without a
+duplicate POST, two ordered signed batch requests, first-error short-circuit,
+and real private userFills notifications. The fill case checks all three emitter
+events, the later BTC position update, replay deduplication and actual HIP-3
+clearinghouse HTTP after debounce and shared limiter pacing. Four additional
+Realm tests check the shared cache, strict numeric inputs, serial input/callback
+awaits, live length, module/custom receivers, own-call access order and original
+rejection identity. Unknown imports remain ReferenceErrors. The finite placement
+semantics host now refuses unreviewed names; its source-level stubs provide no
+production registration evidence.
+
+The compiled baseline fails all six production regressions. Five separate
+registration-name removals preserve helper bodies but fail the named production
+binding test for each missing import. The fill removals yield zero events; the
+numeric and mapping removals yield their named ReferenceErrors; the deferred
+removal fails after the trigger has already been posted. Each source is restored
+byte-for-byte before the next control. A restored replay runs the complete Realm,
+binding and placement-dispatch test targets: 39 library tests, 24 production
+binding tests and one native/source placement oracle, all passing.
+
+This slice covers these five imports and production paths. Cancellation,
+history and remaining static-name reachability, browser-only boundaries and
+missing perpetual trait wiring remain separate follow-up work. The current
+accepted-set preflight/refusals and contract backlog are unchanged; this is no
+whole-venue parity claim.
+
 # Request-weight nested helper ownership
 
 The local-functions policy previously delegated `rate_limit.rs::LOCAL_FUNCTION:text`

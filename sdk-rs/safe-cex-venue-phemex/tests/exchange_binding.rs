@@ -61,6 +61,150 @@ fn order() -> PlaceOrderOpts {
 fn existing() -> Order {
     serde_json::from_value(json!({"id":"o-old","symbol":SYMBOL,"side":"buy","type":"limit","status":"open","amount":0.01,"filled":0,"remaining":0.01,"price":99.9,"reduceOnly":false,"lastUpdate":1700000000000.0,"info":{"posSide":"Long"}})).unwrap()
 }
+
+fn chart_venue() -> Harness {
+    let opts = serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true})).unwrap();
+    harness(ExchangeName::Phemex, opts, |http| {
+        http.ok("GET", "/public/products", instruments());
+        http.ok("GET", "/md/v3/ticker/24hr/all", tickers());
+        http.ok("GET", "/md/v2/fullbook", json!({"result":{"sequence":100,"orderbook_p":{"bids":[["100","2"]],"asks":[["102","3"]]}}}));
+    })
+}
+fn chart_options() -> OHLCVOptions {
+    serde_json::from_value(
+        json!({"symbol":SYMBOL,"interval":"1m","from":1700000000000_f64,"to":1700000060000_f64}),
+    )
+    .unwrap()
+}
+fn public_frame(h: &Harness, frame: Value) {
+    h.runtime.sockets.borrow()[0]
+        .1
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(frame.to_string()),
+        ));
+    h.runtime.pump();
+}
+#[test]
+fn bound_chart_history_fetches_and_maps_real_rest_rows() {
+    let h = chart_venue();
+    seed(&h);
+    h.http.ok(
+        "GET",
+        "/exchange/public/md/v2/kline/list",
+        json!({"data":{"rows":[[1700000000,60,0,"10","15","9","12","3"]]}}),
+    );
+    let candles = h.drive(h.venue().fetch_ohlcv(chart_options())).unwrap();
+    assert_eq!(
+        candles.len(),
+        1,
+        "trait must dispatch to the venue candle reader"
+    );
+    assert_eq!(
+        (
+            candles[0].timestamp,
+            candles[0].open,
+            candles[0].high,
+            candles[0].low,
+            candles[0].close,
+            candles[0].volume
+        ),
+        (1700000000.0, 10.0, 15.0, 9.0, 12.0, 3.0)
+    );
+    let calls = h.http.calls("/exchange/public/md/v2/kline/list");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].params,
+        json!({"symbol":SYMBOL,"resolution":"60","from":1700000000_f64,"to":1700000060_f64})
+    );
+}
+#[test]
+fn bound_chart_candles_subscribe_deliver_and_unsubscribe() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = chart_venue();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let received = Rc::new(RefCell::new(Vec::<Candle>::new()));
+    let seen = received.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(chart_options(), Rc::new(move |c| seen.borrow_mut().push(c)))
+        .unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|m| m.contains("kline_p.subscribe")),
+        "trait must subscribe the production public socket"
+    );
+    let frame = json!({"symbol":SYMBOL,"kline_p":[[1700000060,60,0,12,16,11,14,5],[1700000000,60,0,10,15,9,12,3]]});
+    public_frame(&h, frame.clone());
+    assert_eq!(received.borrow().len(), 2);
+    assert_eq!(received.borrow()[0].timestamp, 1700000000.0);
+    assert_eq!(received.borrow()[1].close, 14.0);
+    cleanup().unwrap();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|m| m.contains("kline_p.unsubscribe"))
+    );
+    public_frame(&h, frame);
+    assert_eq!(
+        received.borrow().len(),
+        2,
+        "cleanup removes the actual parser"
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn bound_chart_book_subscribes_snapshots_and_unsubscribes() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = chart_venue();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let received = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let seen = received.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(SYMBOL.into(), Rc::new(move |b| seen.borrow_mut().push(b)))
+        .unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|m| m.contains("orderbook_p.subscribe")),
+        "trait must subscribe the production public socket"
+    );
+    let frame =
+        json!({"symbol":SYMBOL,"orderbook_p":{"sequence":101,"bids":[["100","4"]],"asks":[]}});
+    public_frame(&h, frame.clone());
+    assert_eq!(h.http.calls("/md/v2/fullbook").len(), 1);
+    assert_eq!(received.borrow().len(), 1);
+    assert_eq!(received.borrow()[0].bids[0].amount, 4.0);
+    assert_eq!(received.borrow()[0].bids[0].total, 4.0);
+    assert_eq!(received.borrow()[0].asks[0].price, 102.0);
+    cleanup().unwrap();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|m| m.contains("orderbook_p.unsubscribe"))
+    );
+    public_frame(&h, frame);
+    assert_eq!(received.borrow().len(), 1);
+    h.venue().dispose().unwrap();
+}
+
 #[test]
 fn fetch_markets_preserves_distinct_steps_and_filters_products() {
     let h = venue();
@@ -545,5 +689,139 @@ fn dispose_runs_source_super_cleanup() {
         observed.get(),
         0,
         "source super call removes inherited listeners"
+    );
+}
+
+fn one_way_account() -> Value {
+    let mut reply = account();
+    let p = &mut reply["data"]["positions"][0];
+    p["posMode"] = json!("OneWay");
+    p["posSide"] = json!("Merged");
+    reply
+}
+fn one_way_venue() -> Harness {
+    harness(ExchangeName::Phemex, options(), |http| {
+        http.ok("GET", "/public/products", instruments());
+        http.ok("GET", "/md/v3/ticker/24hr/all", tickers());
+        http.ok("GET", "/g-accounts/accountPositions", one_way_account());
+        http.ok("PUT", "/g-orders/create", created());
+        http.ok("DELETE", "/g-orders", json!({"code":0,"data":[]}));
+    })
+}
+#[test]
+fn cached_position_controls_placement_without_account_reads() {
+    let h = one_way_venue();
+    seed(&h);
+    let positions = h
+        .drive(h.venue().fetch_positions(Some(vec![SYMBOL.into()])))
+        .unwrap();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.http.requests.borrow_mut().clear();
+    let mut opts = order();
+    opts.reduce_only = Some(true);
+    h.drive(h.venue().base().place_order(h.venue(), opts))
+        .unwrap();
+    let calls = h.http.calls("/g-orders/create");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["posSide"], "Merged");
+    assert_eq!(calls[0].params["reduceOnly"], "true");
+    assert!(
+        h.http.calls("/g-accounts/accountPositions").is_empty(),
+        "both order-side and reduceOnly lookups must use the cache"
+    );
+}
+#[test]
+fn cancel_without_info_uses_cached_position_side_without_account_reads() {
+    let h = one_way_venue();
+    seed(&h);
+    let positions = h
+        .drive(h.venue().fetch_positions(Some(vec![SYMBOL.into()])))
+        .unwrap();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.http.requests.borrow_mut().clear();
+    let mut first = existing();
+    first.info = None;
+    let mut second = first.clone();
+    second.id = "second-order".into();
+    h.drive(h.venue().cancel_orders(vec![first, second]))
+        .unwrap();
+    assert_eq!(h.http.calls("/g-orders")[0].params["posSide"], "Merged");
+    assert!(
+        h.http.calls("/g-accounts/accountPositions").is_empty(),
+        "cancel side lookup must use the store"
+    );
+}
+#[test]
+fn unloaded_positions_omit_reduce_only_after_raw_mode_lookup() {
+    // Hosted startup deliberately leaves loaded.positions false. Only the raw
+    // mode recovery may read REST; it must not populate the positions cache.
+    let h = one_way_venue();
+    seed(&h);
+    assert!(!h.store.loaded().positions);
+    let mut opts = order();
+    opts.reduce_only = Some(true);
+    h.drive(h.venue().base().place_order(h.venue(), opts))
+        .unwrap();
+    let calls = h.http.calls("/g-orders/create");
+    assert_eq!(calls[0].params["posSide"], "Merged");
+    assert!(
+        calls[0].params.get("reduceOnly").is_none(),
+        "TS omits reduceOnly when the unloaded position helper returns []"
+    );
+    assert_eq!(
+        h.http.calls("/g-accounts/accountPositions").len(),
+        1,
+        "only raw mode recovery reads the account"
+    );
+    assert!(h.store.positions().is_empty());
+}
+#[test]
+fn loaded_missing_position_is_fetched_once_and_cached_for_formatting() {
+    let h = one_way_venue();
+    seed(&h);
+    let mut loaded = h.store.loaded().clone();
+    loaded.positions = true;
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            loaded: Some(loaded),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let mut opts = order();
+    opts.reduce_only = Some(true);
+    h.drive(h.venue().base().place_order(h.venue(), opts))
+        .unwrap();
+    assert_eq!(
+        h.http.calls("/g-accounts/accountPositions").len(),
+        1,
+        "order-side fetch must be reused by reduceOnly formatting"
+    );
+    assert_eq!(
+        h.store.positions().len(),
+        1,
+        "recovery commits the fetched row"
+    );
+    assert_eq!(
+        h.http.calls("/g-orders/create")[0].params["reduceOnly"],
+        "true"
     );
 }

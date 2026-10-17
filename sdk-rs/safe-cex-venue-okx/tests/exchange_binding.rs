@@ -195,6 +195,91 @@ fn fetch_orders_reads_normal_and_algo_pages() {
 }
 
 #[test]
+fn fetch_orders_retains_all_five_groups_for_symbol_cancellation() {
+    const CANCEL_ALGO: &str = "/api/v5/trade/cancel-algos";
+    let h = harness(ExchangeName::Okx, options(), |http| {
+        okx(http);
+        http.routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != ALGO_ORDERS);
+        // Source loads OCO, conditional, trigger, trailing; output moves trailing
+        // ahead of conditional/trigger. Give every branch a distinct native ID.
+        for (kind, id) in [
+            ("oco", "oco"),
+            ("conditional", "conditional"),
+            ("trigger", "trigger"),
+            ("move_order_stop", "trailing"),
+        ] {
+            http.ok(
+                "GET",
+                ALGO_ORDERS,
+                json!([{
+                    "instId":"BTC-USDT-SWAP","algoId":id,"ordType":kind,
+                    "side":"sell","sz":"10","reduceOnly":"true",
+                    "slTriggerPx":"48000","triggerPx":"48000","ordPx":"-1",
+                    "last":"50000","callbackSpread":"100","moveTriggerPx":"100"
+                }]),
+            );
+        }
+        http.ok("POST", CANCEL_ALGO, json!([]));
+    });
+    loaded(&h);
+    let orders = h.drive(h.venue().fetch_orders(None)).expect("fetchOrders");
+    assert_eq!(
+        orders.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+        [
+            "o1",
+            "oco_sl",
+            "trailing_tsl",
+            "conditional_sl",
+            "trigger_sl"
+        ],
+        "OKX production retains all five order groups in source order"
+    );
+    assert_eq!(
+        orders.iter().map(|o| o.r#type).collect::<Vec<_>>(),
+        [
+            OrderType::Limit,
+            OrderType::StopLoss,
+            OrderType::TrailingStopLoss,
+            OrderType::StopLoss,
+            OrderType::StopLoss
+        ],
+        "OKX production distinct native order variants"
+    );
+    Store::update(
+        &*h.store,
+        StoreUpdate {
+            orders: Some(orders),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.drive(h.venue().cancel_symbol_orders("BTCUSDT".into()))
+        .expect("cancelSymbolOrders");
+    assert_eq!(
+        h.http.calls(CANCEL).len(),
+        1,
+        "OKX cancellation normal batch"
+    );
+    assert_eq!(h.http.calls(CANCEL)[0].data[0]["ordId"], "o1");
+    let calls = h.http.calls(CANCEL_ALGO);
+    assert_eq!(calls.len(), 1, "OKX cancellation algo batch");
+    assert_eq!(
+        calls[0]
+            .data
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["algoId"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["oco", "trailing", "conditional", "trigger"],
+        "OKX cancellation includes trailing conditional and trigger orders"
+    );
+}
+
+#[test]
 fn place_order_batches_a_broker_tagged_limit() {
     let h = harness(ExchangeName::Okx, options(), okx);
     loaded(&h);

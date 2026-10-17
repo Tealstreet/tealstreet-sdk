@@ -9,6 +9,17 @@ shared string-hint coercion; its source witness compares all 22 outcomes, includ
 custom hooks and getter throws. Older pending notes below describe standalone
 extraction stages.
 
+The concrete HTTP globals use the shared client factory and the runtime's transport
+provider for routing and optional tunnel-adapter installation. A provider with no
+adapter retains the original HTTP host. Network read retries delegate string-code
+eligibility to the shared transport predicate, preserving GET/HEAD gating, response
+truthiness and strict non-string code behavior. `tests/transport_retry_binding.rs`
+drives real constructors and Exchange calls over scripted I/O; its live TS witness
+checks 54 retry cases and three installer scenes. Run
+`scripts/transport-retry-controls.py` to independently revert provider routing,
+tunnel installation, code exclusions and response truthiness: each must compile,
+fail its named real-host assertion and pass after exact restoration.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bitget/CLAUDE.md).
 Variants remain modules inside this crate. The source variants are USDT, USDC,
 and inverse; the disabled inverse variant is still part of the parity scope.
