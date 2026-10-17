@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 type LegResolver<'a> = &'a mut dyn FnMut(&Execution) -> Option<PositionRecordLeg>;
 
 const FLAT_EPSILON: f64 = 1e-9;
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PositionInterval {
     pub symbol: String,
@@ -29,6 +29,49 @@ pub struct PositionInterval {
     pub realized_pnl_partial: Option<bool>,
     pub fees: f64,
     pub fee_currencies: Vec<String>,
+}
+// Private metadata companion: decode only objects into the canonical interval.
+#[derive(serde::Deserialize)]
+#[serde(remote = "PositionInterval", rename_all = "camelCase")]
+struct PositionIntervalWire {
+    symbol: String,
+    position_side: PositionRecordLeg,
+    side: PositionSide,
+    opened_at: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    closed_at: Option<f64>,
+    max_size: f64,
+    closed_size: f64,
+    complete: bool,
+    closed_by_flip: bool,
+    avg_entry_price: f64,
+    avg_exit_price: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    realized_pnl: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    realized_pnl_partial: Option<bool>,
+    fees: f64,
+    fee_currencies: Vec<String>,
+}
+impl<'de> serde::Deserialize<'de> for PositionInterval {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        <safe_cex_num::numeric_ingress::JsNumberInput as serde::Deserialize>::deserialize(
+            deserializer,
+        )?
+        .decode_with(|decoder| {
+            PositionIntervalWire::deserialize(safe_cex_types::strict_decode::object(decoder))
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+impl safe_cex_num::numeric_ingress::JsNumberOutput for PositionInterval {
+    fn check_number_output(&self) {
+        safe_cex_num::js_number_output!(self, struct {
+            symbol, position_side, side, opened_at, closed_at, max_size, closed_size,
+            complete, closed_by_flip, avg_entry_price, avg_exit_price, realized_pnl,
+            realized_pnl_partial, fees, fee_currencies
+        });
+    }
 }
 #[derive(Default)]
 pub struct PositionIntervalOptions<'a> {

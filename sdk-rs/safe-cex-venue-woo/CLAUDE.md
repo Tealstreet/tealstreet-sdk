@@ -18,7 +18,18 @@ oracle pins all eight false gates, endpoint order and route ownership metadata.
 Each gate has been independently flipped to true and rejected by a Rust test.
 
 `journal` projects filled historical orders into one synthetic execution per
-order. It does not import journal grading or implement the shared interval fold.
+order. The production Exchange trait dispatches `fetchHistoricalPositions` to the
+existing lifecycle body, with imports bound to that order adapter and the shared
+`position_intervals`/`fold_position_adapter` implementations. The canonical interval
+uses its native camelCase Serde bridge, retaining native numbers and optional-field
+absence. It does not import journal grading or duplicate interval arithmetic.
+`tests/binding_streams.rs` drives the constructed exchange through signed legacy
+order reads, reported-PnL folding, missing-PnL/open/window refusal and runtime-clock
+defaults. `scripts/journal-binding-controls.py` independently disconnects the trait,
+each of the three imports and the interval field spelling; each compiled mutation
+must fail the named production regression and pass after exact byte restoration.
+Its `--interval-only` mode separately proves the canonical object guard using the
+shared native bridge regression, including NaN, infinity, signed zero and absence.
 See the [source adapter and its rationale](../../packages/safe-cex/src/journal/woo.position-adapter.ts)
 and its [existing tests](../../packages/safe-cex/src/journal/woo.position-adapter.test.ts).
 

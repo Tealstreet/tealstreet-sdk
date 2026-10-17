@@ -32677,5 +32677,179 @@
         }
       }
     ]
+  },
+  "safe_cex_exchange::position_intervals::PositionInterval": {
+    "shape": "map",
+    "sample": {
+      "symbol": "BTCUSDT",
+      "positionSide": "long",
+      "side": "long",
+      "openedAt": 11.25,
+      "closedAt": 27.5,
+      "maxSize": 3.25,
+      "closedSize": 2.5,
+      "complete": true,
+      "closedByFlip": false,
+      "avgEntryPrice": 101.5,
+      "avgExitPrice": 107.75,
+      "realizedPnl": 15.625,
+      "realizedPnlPartial": false,
+      "fees": 0.125,
+      "feeCurrencies": [
+        "USDT",
+        "USDC"
+      ]
+    },
+    "evidence": "Canonical shared interval native JS bridge: independently authored closed and open intervals inspect every native field, enum identity, numeric bits and optional absence. The WOO production journal regression separately executes the actual fold and mapping. Root arrays are refused before the private remote companion.",
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(n)=>serde_json::json!({\"ok\":true,\"symbol\":n.symbol,\"positionSide\":match n.position_side { safe_cex_types::PositionRecordLeg::Long=>\"long\",safe_cex_types::PositionRecordLeg::Short=>\"short\",safe_cex_types::PositionRecordLeg::Both=>\"both\" },\"side\":match n.side {safe_cex_types::PositionSide::Long=>\"long\",safe_cex_types::PositionSide::Short=>\"short\"},\"openedAtBits\":n.opened_at.to_bits().to_string(),\"closedAtBits\":n.closed_at.map(|v|v.to_bits().to_string()),\"maxSizeBits\":n.max_size.to_bits().to_string(),\"closedSizeBits\":n.closed_size.to_bits().to_string(),\"complete\":n.complete,\"closedByFlip\":n.closed_by_flip,\"avgEntryPriceBits\":n.avg_entry_price.to_bits().to_string(),\"avgExitPriceBits\":n.avg_exit_price.to_bits().to_string(),\"realizedPnlBits\":n.realized_pnl.map(|v|v.to_bits().to_string()),\"realizedPnlPartial\":n.realized_pnl_partial,\"feesBits\":n.fees.to_bits().to_string(),\"feeCurrencies\":n.fee_currencies}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "symbol",
+        "positionSide",
+        "side",
+        "openedAtBits",
+        "closedAtBits",
+        "maxSizeBits",
+        "closedSizeBits",
+        "complete",
+        "closedByFlip",
+        "avgEntryPriceBits",
+        "avgExitPriceBits",
+        "realizedPnlBits",
+        "realizedPnlPartial",
+        "feesBits",
+        "feeCurrencies"
+      ],
+      "cases": [
+        {
+          "input": {
+            "symbol": "BTCUSDT",
+            "positionSide": "long",
+            "side": "long",
+            "openedAt": 11.25,
+            "closedAt": 27.5,
+            "maxSize": 3.25,
+            "closedSize": 2.5,
+            "complete": true,
+            "closedByFlip": false,
+            "avgEntryPrice": 101.5,
+            "avgExitPrice": 107.75,
+            "realizedPnl": 15.625,
+            "realizedPnlPartial": false,
+            "fees": 0.125,
+            "feeCurrencies": [
+              "USDT",
+              "USDC"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "symbol": "BTCUSDT",
+            "positionSide": "long",
+            "side": "long",
+            "complete": true,
+            "closedByFlip": false,
+            "realizedPnlPartial": false,
+            "feeCurrencies": [
+              "USDT",
+              "USDC"
+            ],
+            "openedAtBits": "4622522805030748160",
+            "closedAtBits": "4628433779541671936",
+            "maxSizeBits": "4614500768194494464",
+            "closedSizeBits": "4612811918334230528",
+            "avgEntryPriceBits": "4636842844470902784",
+            "avgExitPriceBits": "4637282649122013184",
+            "realizedPnlBits": "4624985711076966400",
+            "feesBits": "4593671619917905920"
+          }
+        },
+        {
+          "input": {
+            "symbol": "ETHUSDC",
+            "positionSide": "both",
+            "side": "short",
+            "openedAt": -0.0,
+            "maxSize": 4.5,
+            "closedSize": 0.0,
+            "complete": false,
+            "closedByFlip": true,
+            "avgEntryPrice": 201.25,
+            "avgExitPrice": 0.0,
+            "fees": 0.375,
+            "feeCurrencies": []
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETHUSDC",
+            "positionSide": "both",
+            "side": "short",
+            "complete": false,
+            "closedByFlip": true,
+            "realizedPnlPartial": null,
+            "feeCurrencies": [],
+            "openedAtBits": "9223372036854775808",
+            "closedAtBits": null,
+            "maxSizeBits": "4616752568008179712",
+            "closedSizeBits": "0",
+            "avgEntryPriceBits": "4641284871447117824",
+            "avgExitPriceBits": "0",
+            "realizedPnlBits": null,
+            "feesBits": "4600427019358961664"
+          }
+        },
+        {
+          "input": [
+            "BTCUSDT",
+            "long",
+            "long",
+            11.25,
+            27.5,
+            3.25,
+            2.5,
+            true,
+            false,
+            101.5,
+            107.75,
+            15.625,
+            false,
+            0.125,
+            [
+              "USDT",
+              "USDC"
+            ]
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "BTCUSDT",
+            "positionSide": "long",
+            "side": "long",
+            "openedAt": 11.25,
+            "closedAt": 27.5,
+            "maxSize": null,
+            "closedSize": 2.5,
+            "complete": true,
+            "closedByFlip": false,
+            "avgEntryPrice": 101.5,
+            "avgExitPrice": 107.75,
+            "realizedPnl": 15.625,
+            "realizedPnlPartial": false,
+            "fees": 0.125,
+            "feeCurrencies": [
+              "USDT",
+              "USDC"
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "entrypoints": []
   }
 }

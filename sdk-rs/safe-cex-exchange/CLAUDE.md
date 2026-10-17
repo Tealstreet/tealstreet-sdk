@@ -872,7 +872,11 @@ Factory profiles are copied before the venue interceptor; no global array format
 is assumed. Query JSON diagnostic projection is separate from URL rendering.
 
 Shared journal intervals and fold projection live in position_intervals and
-fold_position_adapter. Reconstruction is path-dependent: seeds remain incomplete,
+fold_position_adapter. PositionInterval's camelCase Serde bridge lets production
+venue bindings pass the canonical interval through native JS values; optional
+fields omit absence and the shared native serializer retains floating-point values.
+No second interval model or fold implementation is introduced.
+Reconstruction is path-dependent: seeds remain incomplete,
 partial missing reducing PnL refuses a total, and crossing fills split fees by
 size while assigning all realized PnL to the closing interval. Funding includes
 both endpoints and remains unattributed for hedges/incomplete/open intervals.
