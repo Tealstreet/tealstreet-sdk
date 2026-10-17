@@ -1,5 +1,9 @@
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 // Virtual-clock runtime and scripted REST transport for the concrete Bitunix venue.
 // Kept include-compatible for native accepted-set probes of concrete host adapters.
 use safe_cex_exchange::{

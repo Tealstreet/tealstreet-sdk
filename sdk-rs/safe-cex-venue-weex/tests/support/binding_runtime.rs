@@ -1,5 +1,9 @@
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 // Scripted native HTTP and WS host; no venue operation is mocked.
 use safe_cex_exchange::{
     exchange::Exchange,

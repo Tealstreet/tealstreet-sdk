@@ -1,5 +1,9 @@
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use super::*;
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask};
 use safe_cex_venue_bybit::private_snapshot_refresh::{

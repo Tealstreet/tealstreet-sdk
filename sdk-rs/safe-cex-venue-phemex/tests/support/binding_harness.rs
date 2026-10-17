@@ -1,8 +1,16 @@
 //! Scripted transport and runtime for driving the production PhemexExchange.
-#[path = "../../../test-support/release.rs"]
-mod release;
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod release {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/release.rs"
+    ));
+}
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,

@@ -1,5 +1,9 @@
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 // Scripted I/O support; callers allow unused helpers at module scope.
 use safe_cex_exchange::{
     exchange::ExchangeSettings,

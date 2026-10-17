@@ -1,7 +1,11 @@
 //! A scripted host for the production binding: a local executor with a
 //! virtual clock, scripted sockets, and a REST adapter answering by route.
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},

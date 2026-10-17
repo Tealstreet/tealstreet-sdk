@@ -1,6 +1,10 @@
 //! Deterministic runtime and sockets for the production Bitrue binding.
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},

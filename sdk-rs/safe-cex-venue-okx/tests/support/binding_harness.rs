@@ -1,8 +1,12 @@
 //! Scripted transport and runtime for driving the production OkxExchange.
 #[path = "../../../test-support/release.rs"]
 pub mod release;
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,
