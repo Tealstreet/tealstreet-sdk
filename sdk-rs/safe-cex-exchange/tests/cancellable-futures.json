@@ -1906,13 +1906,13 @@
       "reason": "std write! formatting is synchronous; no future is constructed."
     },
     {
-      "owner": "src/js_runtime/value.rs::opaque-macro:thread_local:1",
+      "owner": "src/js_runtime/value.rs::error_prototype",
       "boundaries": [
         "opaque-macro-review"
       ],
-      "producer_sha256": "f17025fce719f16a750c4bc474449cb9e8492071d3f9bf183b522b5cf768ca5e",
+      "producer_sha256": "376fc1e11771113491a717cc2080b3426b58dfab44fcb5425532e7d6a7bfa8f4",
       "classification": "no-owned-latch",
-      "reason": "Reviewed this exact thread_local macro body: initialization builds only the stock Error prototype map, ordinary data descriptors and a synchronous stringifier. Prototype parent links form an acyclic graph; the stringifier captures no prototype, runtime or scope. Initialization invokes no user callback, creates no future or task, and installs no timer, waiter or in-flight slot. These are thread-local intrinsic data, not a cancellation owner. The installed-native Error corpus exercises the resulting factory and field behavior; macro expansion remains an explicit source-pinned review obligation."
+      "reason": "Reviewed the function-scoped thread_local initializer and synchronous lookup in this exact accessor. The initializer tokens are unchanged from the prior explicit opaque-macro review: only stock Error prototype data descriptors and a pure stringifier are built. Parent links form an acyclic graph; no runtime or scope is captured. Initialization and lookup create no future, task, timer, waiter or in-flight slot and invoke no user callback. Storage remains source-pinned opaque intrinsic data, with no discovery or parity-indexing exemption. The real production workspace index and installed-native Error instance corpus cover this placement."
     },
     {
       "owner": "src/loop_util.rs::loop_once",
