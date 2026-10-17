@@ -489,3 +489,7 @@ the same native mapper as the actual exchange. Keep the canonical history source
 corpus in `history_native` and the production private-topic regressions in
 `private_classes --features native`; do not restore a parallel typed mapper to
 make a test host easier to implement.
+
+Signature-predicate coercion failures retain their TypeError name and unprefixed
+message through the shared ExchangeError conversion. The real native receiver
+regressions cover both resolved and rejected HTTP responses without a resend.

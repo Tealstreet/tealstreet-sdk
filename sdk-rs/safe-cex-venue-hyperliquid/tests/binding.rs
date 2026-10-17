@@ -637,7 +637,7 @@ fn set_leverage_and_margin_type_post_update_leverage() {
 #[test]
 fn schedule_cancel_arms_and_clears() {
     let f = started();
-    let at = 1_700_000_000_000.0 + 60_000.0;
+    let at = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms() + 60_000.0;
     f.host
         .block_on(f.exchange.schedule_cancel(Some(Some(at))))
         .unwrap_or_else(|e| panic!("{e:?}"));

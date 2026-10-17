@@ -11190,6 +11190,50 @@
                 {
                   "type": {
                     "resolved_path": {
+                      "path": "safe_cex_types::js_coercion::JsCoercionError",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Typed coercion-error projection preserves the supplied native name, unprefixed message and typed origin; it does not parse or validate an input DTO. Executes both contrasting native error kinds.",
+        "call": "{ let cause=match $value.as_str().expect(\"case\") {\"type\"=>safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"Cannot convert object to primitive value\"},\"range\"=>safe_cex_num::JsCoercionError{name:\"RangeError\",message:\"outside range\"},_=>panic!(\"unknown native fixture\")}; let decoded=<$type as From<safe_cex_num::JsCoercionError>>::from(cause); let native=decoded.origin.as_ref().expect(\"typed origin\").error().downcast_ref::<safe_cex_num::JsCoercionError>().expect(\"typed cause\"); serde_json::json!({\"name\":decoded.name.clone(),\"message\":decoded.message.clone(),\"causeName\":native.name,\"causeMessage\":native.message}) }",
+        "cases": [
+          {
+            "input": "type",
+            "output": {
+              "name": "TypeError",
+              "message": "Cannot convert object to primitive value",
+              "causeName": "TypeError",
+              "causeMessage": "Cannot convert object to primitive value"
+            }
+          },
+          {
+            "input": "range",
+            "output": {
+              "name": "RangeError",
+              "message": "outside range",
+              "causeName": "RangeError",
+              "causeMessage": "outside range"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
                       "path": "safe_cex_transport::provider::RestFailure",
                       "args": null
                     }
@@ -11201,8 +11245,8 @@
           }
         },
         "input": "observed",
-        "reason": "Actual REST failure conversion parses encoded JSON response bytes, preserves non-JSON text fallback and keeps authoritative typed origin/request/raw bytes; no owner serialization.",
-        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:None,message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.clone(),\"context\":decoded.context.clone(),\"response\":decoded.response.clone(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
+        "reason": "Actual REST failure conversion parses encoded JSON response bytes, preserves non-JSON text fallback and keeps authoritative typed origin/request/raw bytes; no owner serialization. The JavaScript transport-kind case additionally observes TypeError name while retaining the complete native request/response origin.",
+        "call": "{ let raw=$value[\"body\"].as_str().expect(\"body\"); let response=safe_cex_transport::RestResponse {status:$value[\"status\"].as_u64().expect(\"status\") as u16,reason:Some(\"reason\".into()),headers:std::collections::BTreeMap::from([(\"x-proof\".into(),\"header-A\".into())]),body:safe_cex_transport::RestResponseBody::Encoded(raw.as_bytes().to_vec())}; let failure=safe_cex_transport::RestFailure {code:Some(\"CODE\".into()),transport_error:if $value[\"js\"].as_bool().unwrap_or(false){Some(Box::new(safe_cex_transport::TransportError::JavaScript(safe_cex_num::JsCoercionError{name:\"TypeError\",message:\"native failure\"})))}else{None},message:\"native failure\".into(),response:Some(Box::new(response)),request:Box::new(safe_cex_transport::RestRequest {url:\"/original\".into(),..Default::default()}),context:Some(Box::new(serde_json::json!({\"retained\":7})))}; let decoded=<$type as From<safe_cex_transport::RestFailure>>::from(failure); let origin=decoded.origin.as_ref().expect(\"origin\").error().downcast_ref::<safe_cex_transport::RestFailure>().expect(\"actual typed failure\"); let origin_body=match &origin.response.as_ref().expect(\"origin response\").body {safe_cex_transport::RestResponseBody::Encoded(bytes)=>String::from_utf8_lossy(bytes).into_owned(),_=>panic!(\"origin body reprojected\")}; serde_json::json!({\"name\":decoded.name,\"message\":decoded.message,\"code\":decoded.code.clone(),\"context\":decoded.context.clone(),\"response\":decoded.response.clone(),\"originRequestUrl\":origin.request.url,\"originBody\":origin_body}) }",
         "cases": [
           {
             "input": {
@@ -11253,6 +11297,35 @@
               },
               "originRequestUrl": "/original",
               "originBody": "not JSON"
+            }
+          },
+          {
+            "input": {
+              "body": "{\"code\":{\"toString\":0}}",
+              "status": 422,
+              "js": true
+            },
+            "output": {
+              "name": "TypeError",
+              "message": "native failure",
+              "code": "CODE",
+              "context": {
+                "retained": 7
+              },
+              "response": {
+                "status": 422,
+                "statusText": "reason",
+                "headers": {
+                  "x-proof": "header-A"
+                },
+                "data": {
+                  "code": {
+                    "toString": 0
+                  }
+                }
+              },
+              "originRequestUrl": "/original",
+              "originBody": "{\"code\":{\"toString\":0}}"
             }
           }
         ]
