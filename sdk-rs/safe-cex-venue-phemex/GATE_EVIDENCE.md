@@ -1168,3 +1168,12 @@ SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" node sdk-rs/safe-cex-ven
 Review scope also traced source symbol formatting, parent timeframe/xhr selection,
 REST field mapping and the snapshot await/delta boundary from #418. The daily UTC
 normalization gap is already owned by #825; this PR makes no date changes.
+
+Final gates: native and wasm all-target Clippy -D warnings and fmt pass. The
+unchanged REST and WS actual-source suites each pass8 (16 total). Scoped parity
+passes7459 rows/547 public items with zero Phemex exemptions, and extractor
+changes zero manifests. All-features cancellation inventory6PASS/1exportignore;
+override contracts7PASS/1live-sourceignore. Both changed bodies are synchronous
+and neither has a cancellation/override body pin; the inventories pass unchanged.
+Logs: `/tmp/port-txflow-phemex-warning-{green,oracles,source,clippy-native,clippy-wasm,parity,extract,inventory}.log`
+(source output is `.json`). No shared body/transport API changed.
