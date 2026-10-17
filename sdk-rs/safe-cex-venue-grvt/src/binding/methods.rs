@@ -120,8 +120,8 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
         ) {
             safe_cex_num::TableHit::Mapped(v) => from_typed(&v),
             safe_cex_num::TableHit::Missing => Ok(Js::Undefined),
-            safe_cex_num::TableHit::Inherited(_) => Err(Thrown::type_error(
-                "Inherited GRVT interval cannot enter native wire request",
+            safe_cex_num::TableHit::Inherited(member) => Ok(Js::Builtin(
+                safe_cex_num::PrototypeRealm::current().reference(member),
             )),
         },
         "mapOrderStatus" => from_typed(&crate::order_semantics::map_order_status(Some(&to_json(

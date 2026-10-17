@@ -503,3 +503,61 @@ fn journal_build_native_source_parity() {
     }
     assert_eq!(compared, 12, "BUILD native comparison floor");
 }
+
+#[test]
+fn position_interval_native_bridge_retains_numbers_and_absence() {
+    use safe_cex_exchange::js_runtime::value::{from_typed, to_typed};
+    let original = PositionInterval {
+        symbol: "BTCUSDT".into(),
+        position_side: PositionRecordLeg::Both,
+        side: PositionSide::Short,
+        opened_at: -0.0,
+        closed_at: None,
+        max_size: 2.5,
+        closed_size: 0.0,
+        complete: false,
+        closed_by_flip: true,
+        avg_entry_price: f64::INFINITY,
+        avg_exit_price: f64::NAN,
+        realized_pnl: Some(-0.0),
+        realized_pnl_partial: None,
+        fees: 0.125,
+        fee_currencies: vec!["USDT".into()],
+    };
+    let native = from_typed(&original).unwrap();
+    assert!(native.has_own("openedAt"));
+    assert!(!native.has_own("closedAt"));
+    assert!(!native.has_own("realizedPnlPartial"));
+    let restored: PositionInterval = to_typed(&native).unwrap();
+    assert_eq!(restored.opened_at.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(restored.avg_entry_price, f64::INFINITY);
+    assert!(restored.avg_exit_price.is_nan());
+    assert_eq!(
+        restored.realized_pnl.unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert_eq!(restored.closed_at, None);
+    assert_eq!(restored.position_side, PositionRecordLeg::Both);
+    assert_eq!(restored.side, PositionSide::Short);
+    assert_eq!(restored.fee_currencies, ["USDT"]);
+
+    let positional = serde_json::json!([
+        "BTCUSDT",
+        "both",
+        "short",
+        11.25,
+        27.5,
+        3.25,
+        2.5,
+        true,
+        false,
+        101.5,
+        107.75,
+        15.625,
+        false,
+        0.125,
+        ["USDT", "USDC"]
+    ]);
+    assert!(serde_json::from_value::<PositionInterval>(positional.clone()).is_err());
+    assert!(<PositionInterval as serde::Deserialize>::deserialize(&positional).is_err());
+}

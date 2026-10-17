@@ -48,7 +48,13 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     def(
         "safeCexAxiosCreate",
         func("safeCexAxiosCreate", |rt, a| {
-            Ok(client::create(rt.shared.http.clone(), arg(&a, 0)))
+            client::factory::create(
+                rt.shared.http.clone(),
+                &*rt.shared.runtime.transport(),
+                arg(&a, 0),
+                &arg(&a, 1),
+                rt.base(),
+            )
         }),
     );
     def(
