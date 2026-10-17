@@ -872,6 +872,86 @@ mod js_sockets {
         );
     }
 
+    struct UnusedHttp(Rc<Runtime>);
+    impl safe_cex_exchange::js_runtime::client::JsHttpHost for UnusedHttp {
+        fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+            self.0.clone()
+        }
+        fn send(&self, _: Js) -> safe_cex_exchange::js_runtime::promise::JsFuture<'static> {
+            panic!("socket timeout witness does not issue HTTP")
+        }
+    }
+
+    #[test]
+    fn source_timeout_handles_cancel_owned_core_timers_without_stale_aliases() {
+        use safe_cex_exchange::js_runtime::scope::{Scope, ScopeShared};
+        let (venue, runtime, store, _) = fixture();
+        let scope = Scope {
+            shared: Rc::new(ScopeShared::new(
+                runtime.clone(),
+                Rc::new(UnusedHttp(runtime.clone())),
+                store,
+                Js::object(vec![]),
+                (),
+            )),
+            this: Js::Undefined,
+        };
+        let context = scope.shared.sockets.clone();
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let receiver = base_websocket(&context, Js::object(vec![]));
+        let pings = Rc::new(Cell::new(0));
+        receiver.define("ping", counter(&pings)).unwrap();
+        let base = core_of(&context, &receiver).unwrap().base().unwrap();
+        base.handle_pong_event(100).unwrap();
+        let first = receiver.get("pingTimeoutId").unwrap();
+        assert!(
+            first.truthy(),
+            "source fields must expose the actual native timeout"
+        );
+        assert!(
+            first.same_reference(&receiver.get("pingTimeoutId").unwrap()),
+            "reads preserve handle identity"
+        );
+        base.handle_pong_event(200).unwrap();
+        let replacement = receiver.get("pingTimeoutId").unwrap();
+        assert!(!first.same_reference(&replacement));
+        scope.clear_timeout(&first);
+        runtime.advance(200.0);
+        assert_eq!(
+            pings.get(),
+            1,
+            "a stale handle must not cancel the replacement"
+        );
+        base.handle_pong_event(300).unwrap();
+        let ping = receiver.get("pingTimeoutId").unwrap();
+        let pong = receiver.get("pongMissTimeoutId").unwrap();
+        base.track_last_received().unwrap();
+        let receive = receiver.get("lastReceivedTimer").unwrap();
+        assert!(pong.truthy() && receive.truthy());
+        for (field, handle) in [
+            ("pingTimeoutId", ping),
+            ("pongMissTimeoutId", pong),
+            ("lastReceivedTimer", receive),
+        ] {
+            scope.clear_timeout(&handle);
+            scope.clear_timeout(&handle);
+            receiver.set(field, Js::Undefined).unwrap();
+            assert!(receiver.get(field).unwrap().is_undefined());
+        }
+        runtime.advance(10_000.0);
+        assert_eq!(
+            pings.get(),
+            1,
+            "source cleanup cancels both heartbeat and receive work"
+        );
+        assert_eq!(
+            scope.shared.timers.borrow().len(),
+            0,
+            "native aliases do not allocate duplicate runtime tasks"
+        );
+        base.dispose();
+    }
+
     fn live_socket(runtime: &Rc<Runtime>) -> Rc<Io> {
         runtime.pump();
         runtime.io.borrow().last().expect("dialed").clone()
