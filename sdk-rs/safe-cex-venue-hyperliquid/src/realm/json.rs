@@ -254,26 +254,4 @@ impl Realm {
             }
         })
     }
-    pub(crate) fn from_js_json(&self, value: &safe_cex_num::JsJsonValue) -> Value {
-        use safe_cex_num::JsJsonValue as J;
-        match value {
-            J::Undefined => Value::Undefined,
-            J::Null => Value::Null,
-            J::Bool(b) => Value::Bool(*b),
-            J::Number(n) => Value::Number(*n),
-            J::String(s) => Value::str(s),
-            J::BigInt(b) => Value::str(&b.to_string()),
-            J::Array(items) => self.new_array(items.iter().map(|v| self.from_js_json(v)).collect()),
-            J::Object(entries) => {
-                let o = self.new_object();
-                {
-                    let mut d = o.object().unwrap().borrow_mut();
-                    for (k, v) in entries {
-                        d.put(PropKey::str(k), self.from_js_json(v), true);
-                    }
-                }
-                o
-            }
-        }
-    }
 }
