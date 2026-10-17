@@ -929,9 +929,17 @@ fn retry(family: &str) {
                     "REST native original orders payload identity"
                 );
                 assert_eq!(o.len(), 2, "REST native independently authored order count");
-                number(o[0].price, 12.3, "REST native decoded first price");
+                number(
+                    (o[0].price).to_number(),
+                    12.3,
+                    "REST native decoded first price",
+                );
                 number(o[0].amount, 3.6, "REST native decoded first amount");
-                number(o[1].price, 14.2, "REST native decoded second price");
+                number(
+                    (o[1].price).to_number(),
+                    14.2,
+                    "REST native decoded second price",
+                );
                 number(o[1].amount, 2.1, "REST native decoded second amount");
                 assert_eq!(o[0].id, "first");
                 assert_eq!(o[1].id, "second");

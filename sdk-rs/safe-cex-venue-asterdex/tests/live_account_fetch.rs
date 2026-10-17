@@ -225,7 +225,7 @@ fn assert_native_models<T>(
     actual: &[T],
     source: &Value,
     name: &str,
-    info: impl Fn(&mut T) -> &mut Option<Value>,
+    info: impl Fn(&mut T) -> safe_cex_types::ModelField<Value>,
 ) where
     T: Clone + PartialEq + std::fmt::Debug + serde::de::DeserializeOwned,
 {
@@ -234,8 +234,10 @@ fn assert_native_models<T>(
     for (actual, expected) in actual.iter().zip(expected) {
         let mut actual = actual.clone();
         let mut expected = expected;
-        match (info(&mut actual).take(), info(&mut expected).take()) {
-            (Some(a), Some(b)) => assert_native_json(&a, &b, name),
+        match (info(&mut actual), info(&mut expected)) {
+            (safe_cex_types::ModelField::Value(a), safe_cex_types::ModelField::Value(b)) => {
+                assert_native_json(&a, &b, name)
+            }
             (a, b) => assert_eq!(a, b, "{name} native info presence"),
         }
         assert_eq!(actual, expected, "{name}");
@@ -250,7 +252,7 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 "{name} native position floor"
             );
             assert_native_models(v, source, &format!("{name} native positions"), |v| {
-                &mut v.info
+                v.info.take()
             });
         }
         Output::Orders(v) => {
@@ -259,7 +261,9 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 LENGTHS[index].unwrap(),
                 "{name} native order floor"
             );
-            assert_native_models(v, source, &format!("{name} native orders"), |v| &mut v.info);
+            assert_native_models(v, source, &format!("{name} native orders"), |v| {
+                v.info.take()
+            });
         }
         Output::Markets(v) => {
             assert_eq!(
@@ -268,7 +272,7 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 "{name} native market floor"
             );
             assert_native_models(v, source, &format!("{name} native markets"), |v| {
-                &mut v.info
+                v.info.take().into()
             });
         }
         Output::Tickers(v) => {
@@ -278,7 +282,7 @@ fn assert_native_output(output: &Output, source: &Value, index: usize, name: &st
                 "{name} native ticker floor"
             );
             assert_native_models(v, source, &format!("{name} native tickers"), |v| {
-                &mut v.info
+                v.info.take().into()
             });
         }
         Output::Applied(v) => assert_eq!(*v, source.as_bool().unwrap(), "{name} native applied"),
@@ -459,7 +463,7 @@ fn account_fetch_matches_source() {
             &store.positions(),
             &c["state"]["positions"],
             &format!("{name} native stored positions"),
-            |v| &mut v.info,
+            |v| v.info.take(),
         );
         assert_eq!(
             account.balance_state_version.get(),
