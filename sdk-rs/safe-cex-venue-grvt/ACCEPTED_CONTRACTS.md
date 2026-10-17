@@ -311,3 +311,61 @@ crate formatting, and the parity invention/status gate (7,459 rows and 17,214
 public Rust items). The remaining 89 compiler nominal/function owners still need
 individual review; this batch does not claim whole-package clearance or broader
 generic, feature, local-owner or executable-host coverage.
+
+## Configured Store and response helper batch
+
+Twenty-two further function contracts execute 158 independently authored cases:
+nine data-read helpers, three snapshot delegates, three market helpers and seven
+order-control helpers. Each retains its complete compiler-selected function API.
+The fixture supplies native values, ready futures, field projections and callback
+observers; every adapter invokes its indexed production function directly.
+
+Native observations include all produced market and ticker fields, Number bits,
+Option/Cow variants, borrowed slice pointers, ordered cache contents, input-slice
+identity, retained callback/cleanup capabilities and original error origins.
+Eager callback effects are captured before polling and compared with completed
+request, logging, emission and notification events. These are explicit native
+callback and owned Store domains; they do not establish arbitrary executable
+JavaScript objects, concrete SDK/routing behavior or wider generic lifetimes.
+
+Market projection distinguishes source evaluation errors from the existing
+closed typed-output refusal. A later null row must take precedence over an
+earlier representation refusal, while an isolated representation refusal follows
+successful fetched logging. Refresh captures its old set before the fetch hook,
+replaces metadata even when membership is unchanged, and commits Store state
+before change emission and logging. Reentrant replacement and separate callback
+failures observe both the returned error and already committed native state.
+
+Leverage limits retain the borrowed original slice on skipped or caught paths;
+a valid unmatched response still produces an owned vector. Default leverage
+reads and cache notifications remain independently visible. The setter reads
+account identity twice and notifies its cache update before looking up the first
+position afresh. A subscriber replaces the original positions during that
+notification; the patch must target the new live position. The standalone
+cache_notification_precedes_fresh_position_lookup regression additionally checks
+actual Store fields, account reads and worker flags before fixture projection.
+
+Cancellation guards, endpoint waits and emitted errors run through each actual
+entrypoint. Batch cancellation continues after ordinary request failure; batch
+placement stops on the authentic native Builder variant and preserves its reason
+and cap bits. A spoofed error name remains ordinary. Retained order-book callbacks
+and the exact returned Rc cleanup capability are invoked after the delegate
+returns. The finite native C/R witnesses grant no permission to other generic
+instantiations.
+
+The existing data_reads, markets, snapshots and order_controls integration suites
+compare their maintained source corpora with native fields and effects. They are
+separate evidence from the newly authored contract cases and do not expand their
+bounded input domains. Run those witnesses and the direct Store regression with:
+
+```sh
+SAFE_CEX_TYPESCRIPT_PATH=/absolute/isolated/node_modules/typescript \
+  CARGO_INCREMENTAL=0 cargo +1.99.0 test --manifest-path sdk-rs/Cargo.toml \
+  --locked -p safe-cex-venue-grvt --test accepted_store_helpers \
+  --test data_reads --test markets --test snapshots --test order_controls
+```
+
+Use the TypeScript package directory with axios and axios-retry installed beside
+it: the complete fetchMarkets source oracle executes the real request factories.
+All 34 targeted native/source tests pass, including the direct reentrant Store
+regression; these are separate from the 22-function contract baseline.
