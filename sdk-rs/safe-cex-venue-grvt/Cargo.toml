@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 indexmap = "=2.14.2"
+num-bigint = "0.4"
 safe-cex-exchange.workspace = true
 safe-cex-store.workspace = true
 safe-cex-crypto.workspace = true

@@ -336,6 +336,25 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         members::controls::change_margin_type(rt, arg(&a, 0), arg(&a, 1))
     });
 
+    this.define(
+        "DEFAULT_EXECUTIONS_LOOKBACK_MS",
+        Js::Number(typed.default_executions_lookback_ms),
+    )?;
+    method(
+        &this,
+        rt,
+        "getExecutionQueryWindows",
+        members::history::query_windows,
+    );
+    method(
+        &this,
+        rt,
+        "refuseOptionSymbol",
+        members::history::refuse_option_symbol,
+    );
+    method(&this, rt, "fetchClosedPnl", |rt, a| {
+        members::history::fetch_closed_pnl(rt, arg(&a, 0))
+    });
     method(&this, rt, "fetchOHLCV", |rt, a| {
         members::ohlcv::fetch_ohlcv(rt, arg(&a, 0))
     });
