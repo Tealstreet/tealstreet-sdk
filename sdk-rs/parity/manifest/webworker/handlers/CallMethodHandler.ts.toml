@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/webworker/handlers/CallMethodHandler.ts"
-rust_files = [ "safe-cex-webworker/src/call_method.rs", "safe-cex-webworker/src/data_post.rs", "safe-cex-webworker/src/data_post/browser.rs" ]
+rust_files = [ "safe-cex-webworker/src/call_method.rs", "safe-cex-webworker/src/data_post.rs", "safe-cex-webworker/src/data_post/browser.rs", "safe-cex-exchange/src/throttle.rs" ]
 
 [[symbol]]
 ts = "CallMethodHandler"
@@ -14,9 +14,9 @@ note = "Renamed to safe-cex-webworker/src/call_method.rs::CallMethodHandler."
 ts = "CallMethodHandler.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = [ "safe-cex-webworker/src/call_method.rs::CallMethodHandler::new", "safe-cex-webworker/src/data_post.rs::WorkerDataPost", "safe-cex-webworker/src/data_post.rs::WorkerDataPost::new", "safe-cex-webworker/src/data_post.rs::WorkerDataPost::send", "safe-cex-webworker/src/data_post.rs::WorkerDataPost::for_browser", "safe-cex-webworker/src/data_post.rs::SendWorkerData", "safe-cex-webworker/src/data_post/browser.rs::BrowserDataPost" ]
+rs = [ "safe-cex-webworker/src/call_method.rs::CallMethodHandler::new", "safe-cex-webworker/src/data_post.rs::WorkerDataPost", "safe-cex-webworker/src/data_post.rs::WorkerDataPost::new", "safe-cex-webworker/src/data_post.rs::WorkerDataPost::send", "safe-cex-webworker/src/data_post.rs::WorkerDataPost::for_browser", "safe-cex-webworker/src/data_post.rs::SendWorkerData", "safe-cex-webworker/src/data_post/browser.rs::BrowserDataPost", "safe-cex-exchange/src/throttle.rs::symbol_metadata_throttler" ]
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/call_method.rs::CallMethodHandler::new. Split members `safe-cex-webworker/src/data_post.rs::WorkerDataPost`, `safe-cex-webworker/src/data_post.rs::WorkerDataPost::new`, `safe-cex-webworker/src/data_post.rs::WorkerDataPost::send`, `safe-cex-webworker/src/data_post.rs::WorkerDataPost::for_browser`, `safe-cex-webworker/src/data_post.rs::SendWorkerData`, `safe-cex-webworker/src/data_post/browser.rs::BrowserDataPost`; required fallible ctx.postMessage dependency shared by callMethod and candle handlers. The concrete browser adapter materializes existing runtime Js values without JSON. There is no default or JSON-backed DATA post capability."
+note = "Renamed to safe-cex-webworker/src/call_method.rs::CallMethodHandler::new. Split members `safe-cex-webworker/src/data_post.rs::WorkerDataPost`, `safe-cex-webworker/src/data_post.rs::WorkerDataPost::new`, `safe-cex-webworker/src/data_post.rs::WorkerDataPost::send`, `safe-cex-webworker/src/data_post.rs::WorkerDataPost::for_browser`, `safe-cex-webworker/src/data_post.rs::SendWorkerData`, `safe-cex-webworker/src/data_post/browser.rs::BrowserDataPost`; required fallible ctx.postMessage dependency shared by callMethod and candle handlers. The concrete browser adapter materializes existing runtime Js values without JSON. There is no default or JSON-backed DATA post capability. Split member `safe-cex-exchange/src/throttle.rs::symbol_metadata_throttler` is the extracted existing 500ms keyed metadata throttle construction and detached update/error reporting callback, shared with the native account host; its timing and ownership algorithm is unchanged by relocation."
 
 [[symbol]]
 ts = "CallMethodHandler.handleCallMethod"
