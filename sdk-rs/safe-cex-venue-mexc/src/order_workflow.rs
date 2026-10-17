@@ -1,7 +1,7 @@
 //! Order workflow bodies over the existing bound exchange and task owners.
 use crate::{
     exchange_runtime::ExchangeRuntimeHost,
-    private_session::{MethodObserver, observe, start},
+    method_tasks::{MethodObserver, observe, start},
 };
 use std::rc::Rc;
 pub type Arguments<V, E> = Rc<dyn Fn(Vec<V>) -> Result<V, E>>;
