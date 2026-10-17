@@ -700,16 +700,16 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 "all",
                 Js::function("all", move |_, a| {
                     let rt = scope_of(&promise_rt)?;
-                    let values = arg(&a, 0).array_values().unwrap_or_default();
-                    Ok(rt.spawn(Box::pin(promise::all(values))))
+                    let values = arg(&a, 0).iterable_values();
+                    Ok(rt.spawn(Box::pin(async move { promise::all(values?).await })))
                 }),
             ),
             (
                 "allSettled",
                 Js::function("allSettled", move |_, a| {
                     let rt = scope_of(&settled_rt)?;
-                    let values = arg(&a, 0).array_values().unwrap_or_default();
-                    Ok(rt.spawn(Box::pin(promise::all_settled(values))))
+                    let values = arg(&a, 0).iterable_values();
+                    Ok(rt.spawn(Box::pin(async move { promise::all_settled(values?).await })))
                 }),
             ),
             (
