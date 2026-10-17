@@ -15,11 +15,9 @@ const registry = process.argv.includes('--registry');
 const raw = process.argv.includes('--raw');
 assert(!(raw && registry), 'select one package/profile');
 const packageName = registry ? 'safe-cex-registry' : 'safe-cex-exchange';
-const owners = registry ? ['safe_cex_registry::native_account::host_error'] : raw ?
-  ['safe_cex_exchange::error_reporting::raw_formatted_context'] : [
+const owners = registry ? ['safe_cex_registry::native_account::host_error'] : [
   'safe_cex_exchange::exchange::BaseExchange',
   'safe_cex_exchange::exchange::emit_listeners',
-  'safe_cex_exchange::error_reporting::raw_formatted_context',
   'safe_cex_exchange::runtime::ExchangeError',
 ];
 const aliases = registry ? ['safe_cex_registry::native_account::NativeAccountFuture'] : raw ? [] :
@@ -53,6 +51,24 @@ const found = inventory(doc, {
   defaultTraits: loadPolicy('default-traits'), receiverTraits: loadPolicy('receiver-traits'),
   readSource: filename => fs.readFileSync(path.join(workspace, filename)),
 });
+if (raw) {
+  const name = 'safe_cex_exchange::error_reporting::raw_formatted_context';
+  assert(found.declarations.some(item => item.name === name), 'formatter remains declared');
+  assert(!found.types.some(item => item.name === name), 'Js formatter is outside raw-input candidate census');
+  const item = Object.values(doc.index).find(item => item.name === 'raw_formatted_context' && item.crate_id === 0);
+  const fn = item.inner.function;
+  assert.equal(fn.sig.inputs.length, 1);
+  const input = fn.sig.inputs[0][1].borrowed_ref;
+  assert.equal(input.is_mutable, false);
+  const identity = type => doc.paths[type.resolved_path.id].path.join('::');
+  assert.equal(identity(input.type), 'safe_cex_exchange::js_runtime::value::Js');
+  assert.equal(identity(fn.sig.output), 'core::result::Result');
+  assert.deepEqual(fn.sig.output.resolved_path.args.angle_bracketed.args.map(arg => identity(arg.type)),
+    ['safe_cex_exchange::js_runtime::value::Js', 'safe_cex_exchange::runtime::ExchangeError']);
+  assert.deepEqual(fn.generics, {params: [], where_predicates: []});
+  console.log('Raw formatter production compiler API and candidate retirement verified; runtime evidence is separate.');
+  process.exit(0);
+}
 const artifacts = cargo(['check', '--locked', '--jobs=1', '-p', pkg.name, '--lib', '--message-format=json'])
   .trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(item => item.reason === 'compiler-artifact');
 assert.ok(artifacts.some(item => item.package_id === pkg.id), 'actual selected package artifact required');
