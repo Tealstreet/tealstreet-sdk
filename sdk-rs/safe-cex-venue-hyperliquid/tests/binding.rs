@@ -1558,3 +1558,37 @@ fn production_reconcile_clears_undefined_tif_and_then_stops_rewriting() {
         "an identical REST refresh must not rewrite the reconciled order"
     );
 }
+
+#[test]
+fn native_nonfinite_order_size_reaches_the_signed_order_post() {
+    for (amount, expected) in [
+        (f64::NAN, "NaN"),
+        (f64::INFINITY, "Infinity"),
+        (f64::NEG_INFINITY, "-Infinity"),
+    ] {
+        let f = started();
+        let mut opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+            "symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.01,"price":60000
+        }))
+        .unwrap();
+        opts.amount = amount;
+        let result = f
+            .host
+            .block_on(f.exchange.base().place_order(&*f.exchange, opts));
+        assert!(
+            result.is_ok(),
+            "{expected} wire must reach the actual signed order request: {result:?}"
+        );
+        let body = last_body(&f, "exchange:order");
+        assert_eq!(body["action"]["orders"][0]["s"], expected);
+        assert_eq!(body["action"]["orders"][0]["p"], "60000");
+        assert_eq!(body["action"]["orders"][0]["b"], true);
+        assert_eq!(body["action"]["orders"][0]["a"], 0);
+        assert!(
+            body["signature"]["r"]
+                .as_str()
+                .is_some_and(|s| s.len() == 66)
+        );
+        assert_eq!(f.routes.count("exchange:order"), 1);
+    }
+}

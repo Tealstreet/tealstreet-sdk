@@ -354,9 +354,11 @@ fn bound_fetch_public_trades() {
 
 #[test]
 fn signature_refusal_replays_serialized_write_once() {
+    let _clock = ResetModelClock::acquire();
     for status in [200.0, 400.0] {
         let h = fixture();
-        h.http.advance_ms.set(1.0);
+        // VirtualClock ignores corrections below one second.
+        h.http.advance_ms.set(2_000.0);
         *h.http
             .routes
             .borrow_mut()
@@ -377,6 +379,12 @@ fn signature_refusal_replays_serialized_write_once() {
         let calls = h.http.calls(ORDER);
         assert_eq!(calls.len(), 2);
         assert_ne!(calls[0].data["timestamp"], calls[1].data["timestamp"]);
+        assert!(
+            calls[1].data["timestamp"].as_f64().unwrap()
+                - calls[0].data["timestamp"].as_f64().unwrap()
+                >= 2_000.0,
+            "retry signing must observe the deterministic two-second clock step"
+        );
         assert_ne!(calls[0].data["signature"], calls[1].data["signature"]);
         for call in calls {
             assert!(call.data_raw.is_string());
@@ -437,8 +445,10 @@ fn ambiguous_write_failure_is_not_replayed() {
 
 #[test]
 fn retryable_read_gets_a_fresh_signature() {
+    let _clock = ResetModelClock::acquire();
     let h = fixture();
-    h.http.advance_ms.set(1.0);
+    // VirtualClock ignores corrections below one second.
+    h.http.advance_ms.set(2_000.0);
     let original = h
         .http
         .routes
@@ -462,6 +472,14 @@ fn retryable_read_gets_a_fresh_signature() {
     let calls = h.http.calls(BALANCE);
     assert_eq!(calls.len(), 2);
     assert_ne!(calls[0].params["timestamp"], calls[1].params["timestamp"]);
+    let timestamp = |index: usize| match &calls[index].params["timestamp"] {
+        Value::String(value) => value.parse::<f64>().unwrap(),
+        value => value.as_f64().unwrap(),
+    };
+    assert!(
+        timestamp(1) - timestamp(0) >= 2_000.0,
+        "read retry signing must observe the deterministic two-second clock step"
+    );
     assert_ne!(calls[0].params["signature"], calls[1].params["signature"]);
     done(&h);
 }
@@ -790,7 +808,18 @@ fn rejected_signature_type_error_reaches_the_bingx_exchange() {
     signature_type_error(400.0);
 }
 
-struct ResetModelClock;
+struct ResetModelClock {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+impl ResetModelClock {
+    fn acquire() -> Self {
+        // The three tests that change the process-wide signing clock cannot overlap.
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        Self {
+            _guard: LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+        }
+    }
+}
 impl Drop for ResetModelClock {
     fn drop(&mut self) {
         let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
@@ -800,7 +829,7 @@ impl Drop for ResetModelClock {
 
 #[test]
 fn native_synced_clock_reaches_all_order_mapping_paths() {
-    let _reset = ResetModelClock;
+    let _reset = ResetModelClock::acquire();
     let clock = &safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
     clock.sync_from_server_time((clock.now)() + 40_000.0);
     let h = started_private_fixture();
