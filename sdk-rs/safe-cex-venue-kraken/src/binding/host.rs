@@ -763,11 +763,11 @@ impl TradingHost for Rt {
         let promise = self.this.call_method("fetchPositions", vec![])?;
         Ok(async move { Ok(h(await_js(promise).await?)) })
     }
+    // ts: `this.store.addOrUpdatePositions(positions)` — an upsert, not a replacement.
     fn add_positions(&self, positions: Handle<Self>) -> ReadResult<Self, ()> {
-        self.this.get("store")?.call_method(
-            "update",
-            vec![Js::object(vec![("positions", (*positions).clone())])],
-        )?;
+        self.this
+            .get("store")?
+            .call_method("addOrUpdatePositions", vec![(*positions).clone()])?;
         Ok(())
     }
 }
