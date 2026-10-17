@@ -91,9 +91,10 @@ if(selected==='attachedAmendmentRecovery') {
   if(label==='limitTp'||label==='limitSl')parent.info={...parent.info,[label==='limitTp'?'tpOrderType':'slOrderType']:'LIMIT',[label==='limitTp'?'tpOrderPrice':'slOrderPrice']:'119.5'};
   const initial=[parent,{...parent,id:'R__tp',type:'take_profit_market',price:120.5},{...parent,id:'R__sl',type:'stop_market',price:80},{...parent,id:'R4'},{...parent,id:'R4__tp',type:'take_profit_market'}];
   const input={orders:initial,order:initial[label==='ordinary'?0:label==='sl'?2:1],update:{price:110.25}};
-  const modify={code:7,msg:label==='nonmatching'?'ordinary venue rejection':'ORDER DOES NOT SUPPORT THIS OPERATION'};
-  const cancel=label==='cancelFailure'?{code:9,msg:'cancel refused'}:{code:0};
-  const placement=label==='replacementFailure'?{code:8,msg:'replacement refused'}:{code:0,data:{orderId:'NEW'}};
+  // Keep the API's independent msg-without-data diagnostic outside the method catch observation.
+  const modify={code:7,data:{},msg:label==='nonmatching'?'ordinary venue rejection':'ORDER DOES NOT SUPPORT THIS OPERATION'};
+  const cancel=label==='cancelFailure'?{code:9,data:{},msg:'cancel refused'}:{code:0};
+  const placement=label==='replacementFailure'?{code:8,data:{},msg:'replacement refused'}:{code:0,data:{orderId:'NEW'}};
   const store=new DefaultStore();store.update({markets:[activeMarket],orders:initial,positions:[]});
   const calls=[],errors=[];
   const post=lane=>async(endpoint,payload)=>{calls.push({lane,endpoint,payload});return {data:endpoint===constants.ENDPOINTS.MODIFY_ORDER?modify:endpoint===constants.ENDPOINTS.CANCEL_ORDER?cancel:placement};};

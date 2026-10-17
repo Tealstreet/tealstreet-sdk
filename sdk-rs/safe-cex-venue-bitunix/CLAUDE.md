@@ -175,3 +175,13 @@ This is the explicit strict placement-input ruling; TS may format a NaN/-Infinit
 quantity or produce no payload. It does not justify coercing an input to zero,
 leaking a JSON decode error, or widening the placement carrier. The real native
 identity test keeps the maintained-source observations alongside all6 refusals.
+
+
+Attached virtual TP/SL amendments fall back only on the source unsupported-order
+message. The reconciled payload is validated before cancel, including refusal of
+LIMIT protection semantics. Cancel uses the limited xhr; only an accepted cancel
+marks the exact parent and parent__children canceled in the real Store, before
+calling existing placement. A failed replacement leaves that canceled status.
+`native_identity` compares8 actual-source/public-binding paths, including both
+legs, nonmatching/ordinary-parent errors, LIMIT preflight and cancel/place failures.
+The existing retained snapshot/UTF-8 boundaries remain; placement inputs stay strict.
