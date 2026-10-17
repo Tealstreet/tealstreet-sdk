@@ -82,7 +82,8 @@ fn signatures_match_original_hash_boundary_captures() {
             ))
         }
         .unwrap();
-        let config_view = safe_cex_exchange::js_runtime::value::to_json(&signed.config).unwrap();
+        let config_view =
+            oracle_view(safe_cex_exchange::js_runtime::value::to_json(&signed.config).unwrap());
         assert_eq!(signed.preimage, case["preimage"], "{}", case["name"]);
         assert_eq!(
             config_view["headers"]["x-api-signature"], case["signature"],
@@ -177,8 +178,9 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                     }
                     if index == 5 && version == 3 {
                         assert_eq!(
-                            config_view["data"]["body"], 37,
-                            "WOO-AUDIT native retained body"
+                            config_view["data"]["body"].as_f64().unwrap().to_bits(),
+                            37.0_f64.to_bits(),
+                            "WOO-AUDIT native retained body bits"
                         );
                     }
                     if version == 1 {
@@ -221,10 +223,16 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                     request.url, "https://example.invalid/x",
                     "WOO-AUDIT native provider URL before rewrite"
                 );
+                let params = request.params.as_ref().unwrap().as_object().unwrap();
                 assert_eq!(
-                    request.params.as_ref(),
-                    Some(&json!({"query":41})),
-                    "WOO-AUDIT native provider params"
+                    params.len(),
+                    1,
+                    "WOO-AUDIT native provider params field floor"
+                );
+                assert_eq!(
+                    params["query"].as_f64().unwrap().to_bits(),
+                    41.0_f64.to_bits(),
+                    "WOO-AUDIT native provider params bits"
                 );
                 assert!(
                     matches!(request.body, Some(RestBody::Untransformed(_))),
@@ -258,7 +266,7 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
                     Some(71),
                     "WOO-AUDIT native proxy timeout"
                 );
-                observed_context(request)
+                oracle_view(observed_context(request))
             };
             entry["proxy"] = proxy;
             entry["proxyCalls"] = json!(proxy_calls);
@@ -342,6 +350,14 @@ fn ordinary_json_signer_shapes_and_proxy_context() {
         }
     }
 }
+// The maintained oracle returns a JSON.stringify report; native assertions run above.
+fn oracle_view(value: Value) -> Value {
+    let text = safe_cex_num::js_json_stringify(&safe_cex_num::JsJsonValue::from(value))
+        .unwrap()
+        .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
 fn observed_context(request: &RestRequest) -> Value {
     let RestRequest {
         method,
