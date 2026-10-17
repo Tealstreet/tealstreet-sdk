@@ -213,11 +213,11 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                 exchange.xhr = failure.clone();
                 let events = Rc::new(RefCell::new(Vec::<Value>::new()));
                 let observed = events.clone();
-                exchange.base.on(
+                exchange.base.on_args(
                     "error",
                     Rc::new(move |event, value| {
                         assert_eq!(event, "error", "native actual reporting event");
-                        observed.borrow_mut().push(value.clone());
+                        observed.borrow_mut().push(serde_json::json!(value));
                         Ok(())
                     }),
                 );
@@ -474,7 +474,7 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
             let first_calls = first.clone();
             let trace = runtime.trace.clone();
             let thrown = original.clone();
-            exchange.base.on(
+            exchange.base.on_args(
                 "error",
                 Rc::new(move |_, args| {
                     first_calls.set(first_calls.get() + 1);

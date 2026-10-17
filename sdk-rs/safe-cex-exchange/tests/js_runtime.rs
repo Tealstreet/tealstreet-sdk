@@ -1588,7 +1588,9 @@ fn rest_http_host_carries_config_to_the_terminal_adapter() {
         let seen = terminal.seen.lock().unwrap();
         assert_eq!(seen[0].method, "get");
         assert_eq!(seen[0].base_url.as_deref(), Some("https://www.okx.com"));
-        assert_eq!(seen[0].params, Some(json!({"instId": "BTC-USDT-SWAP"})));
+        // query_in_url marks this adapter as a physical URL-consuming terminal.
+        assert_eq!(seen[0].url, "/ok?instId=BTC-USDT-SWAP");
+        assert_eq!(seen[0].params, None);
         assert_eq!(seen[0].timeout_ms, Some(20000));
         assert_eq!(seen[0].headers.get("X-A").map(String::as_str), Some("1"));
         assert_eq!(seen[1].method, "post");
@@ -2966,7 +2968,7 @@ mod http_factory {
                 &provider,
                 config,
                 &opts(json!({"key":"","secret":""})),
-                ExchangeName::Polymarket,
+                &factory_owner(runtime.clone()),
             )
             .unwrap();
             let trace = events.clone();
@@ -3033,7 +3035,7 @@ mod http_factory {
             &DirectTransport,
             opts(json!({"baseURL":"https://venue","timeout":999})),
             &options,
-            ExchangeName::Polymarket,
+            &factory_owner(http.runtime()),
         )
         .unwrap();
         settle(
@@ -3051,7 +3053,7 @@ mod http_factory {
                 &DirectTransport,
                 opts(json!({"baseURL":"https://venue"})),
                 &opts(json!({"key":"","secret":"",flag:true})),
-                ExchangeName::Polymarket,
+                &factory_owner(http.runtime()),
             )
             .unwrap_err();
             assert!(error.message().contains("direct transport is active"));
@@ -3088,7 +3090,7 @@ mod http_factory {
             &provider,
             opts(json!({"baseURL":"https://venue"})),
             &options,
-            ExchangeName::Polymarket,
+            &factory_owner(direct.runtime()),
         )
         .unwrap();
         let variants = [
@@ -3258,7 +3260,7 @@ mod http_factory {
                 ),
             ]),
             &options,
-            ExchangeName::Polymarket,
+            &factory_owner(host.runtime()),
         )
         .unwrap();
         factory::install_transport_adapter(
@@ -3623,3 +3625,100 @@ mod string_coercion;
 
 #[path = "support/js_raw_socket_close.rs"]
 mod raw_socket_close;
+
+#[test]
+fn virtual_clock_global_preserves_synced_time_without_changing_date_now() {
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    let (runtime, shared) = scoped_globals();
+    runtime.wall_clock.set(123.0);
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 40_000.0);
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
+    let actual = shared
+        .globals
+        .get("virtualClock")
+        .unwrap()
+        .call_method("getCurrentTimeMs", vec![])
+        .unwrap()
+        .as_f64()
+        .unwrap();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
+    assert!(
+        actual >= before && actual <= after,
+        "JS virtualClock must retain server offset"
+    );
+    assert_eq!(
+        shared
+            .globals
+            .get("Date")
+            .unwrap()
+            .call_method("now", vec![])
+            .unwrap()
+            .as_f64(),
+        Some(123.0)
+    );
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
+}
+
+/// The BaseExchange a safeCexAxiosCreate client reports outcomes and errors to.
+fn factory_owner(
+    runtime: Rc<dyn ExchangeRuntime>,
+) -> Rc<safe_cex_exchange::exchange::BaseExchange> {
+    Rc::new(safe_cex_exchange::exchange::BaseExchange::new(
+        safe_cex_types::ExchangeName::Polymarket,
+        serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        runtime,
+        safe_cex_exchange::exchange::ExchangeSettings::default(),
+    ))
+}
+
+#[test]
+fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_identity() {
+    use safe_cex_exchange::js_runtime::client::factory;
+    use safe_cex_transport::DirectTransport;
+    let runtime = Rc::new(Runtime::default());
+    let owner = factory_owner(runtime.clone());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = factory::create(
+        http,
+        &DirectTransport,
+        Js::object(vec![("baseURL", Js::str("https://venue"))]),
+        &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]),
+        &owner,
+    )
+    .unwrap();
+    for capture in [false, true] {
+        let config = Js::object(vec![("__tealstreetSigningCapture", Js::Bool(capture))]);
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/ok"), config])
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    assert_eq!(owner.store.request_stats().unwrap().ok, 1.0);
+    let error =
+        safe_cex_exchange::js_runtime::value::error_object("AxiosError", "connection refused");
+    error.define("response", Js::Null).unwrap();
+    let original = error.clone();
+    let adapter = Js::function("networkFailure", move |_, args| {
+        error.define("config", arg(&args, 0))?;
+        Err(Thrown::new(error.clone()))
+    });
+    let config = Js::object(vec![("adapter", adapter)]);
+    let rejected = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/network"), config])
+            .unwrap(),
+    )
+    .unwrap_err();
+    assert!(
+        rejected.value.strict_equals(&original),
+        "the same error reaches venue handlers"
+    );
+    assert_eq!(owner.store.request_stats().unwrap().network, 1.0);
+    assert_eq!(owner.store.request_stats().unwrap().other, 0.0);
+}

@@ -73,10 +73,12 @@ The store contract is `safe-cex-store`'s port of
 that trait directly; it never defines a projection or another store shape.
 `ExchangeRuntime` supplies clock, local task/timer cancellation, runtime logging
 and worker requests. Runtime signing handles stay outside serializable options.
-The native wall clock supplies integer epoch milliseconds for Date.now timestamps
-and signing nonces; its monotonic clock retains fractional milliseconds. The shared
-JS Date.now facade also rounds down an injected wall clock, while performance.now
-keeps the host's fractional precision.
+The native wall clock supplies integer epoch milliseconds for Date.now timestamps;
+its monotonic clock retains fractional milliseconds. Source virtualClock reads,
+including the shared JS facade, use safe-cex-store's VIRTUAL_CLOCK instead so
+server offsets and its native/worker policies remain authoritative for signing.
+The shared JS Date.now facade rounds down an injected wall clock, while
+performance.now keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
@@ -498,8 +500,9 @@ The override contract has two independent gates in `tests/override_contract.rs`:
 `override-inventory.cjs` resolves TypeScript class ancestry and inventories every
 callable override of a BaseExchange member; each must have a dynamic hook (or the
 explicit typed-placement binding). The Rust source audit rejects direct base
-bypasses and captured base method references, and pins hook call sites plus their
-enclosing function token fingerprints in `override-call-sites.json`. This is a
+bypasses and captured base method references, and pins each function's hook call
+edges (kind, hook, receiver base/dynamic/path, count) in `override-call-sites.json`;
+unrelated body edits keep the pin, edge changes fail. This is a
 syntax/alias audit with review-required inventory changes, not Rust type inference.
 It sees local receiver/alias syntax, not ambient type-alias or field-type changes
 outside the function; macros are unexpanded. Those still need semantic review.
@@ -744,6 +747,11 @@ already-decoded string. Constructors must state the response representation.
 
 
 Listener callbacks and `BaseExchange::emit`, `log`, and `emit_and_log_error`
+use one variadic dispatch operation. `emit_args`/`on_args` retain the argument
+list; `emit` sends one value and `on`/`once` observe its first argument. Array
+values are never interpreted as argument lists. The JS facade and worker log
+bridge use the full list, while native fill listeners receive the fill object.
+Callbacks and emission methods
 return `Result<(), ExchangeError>`. TinyEmitter snapshots the current listener
 list, removes a once listener before invoking it, and stops on the first throw;
 Rust retains that order and invokes callbacks outside all listener-map borrows.
@@ -1191,3 +1199,22 @@ callable factories retain specific non-decoder classifications; `Collection`'s
 native `Deref` view and the added `Js` protocol APIs have executed output
 observations. Independently authored Node fixtures and per-owner compiled
 controls supplement these bounded native/default receipts.
+
+The JS Store facade exposes `markOrdersTerminal` by delegating to the existing
+native terminal-memory operation. It remembers IDs even when the Store has no
+orders, and preserves committed-state subscriber errors through the existing
+mutation bridge. IDs cross the declared typed string boundary without lossy
+surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
+snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
+real private-frame witnesses cover the production caller and final fill ordering.
+
+`JsProtocol::resyncs_private_state_on_reopen` reads the receiver's
+`resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
+OKX's business socket defines it, so a business-only re-open runs the private
+snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
+
+The JS Number `toFixed` builtin delegates to `safe_cex_num::js_to_fixed` after
+ordinary digits coercion. Exact binary ties round away from zero; negative zero,
+nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
+`tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
+Polymarket's concrete binding witness checks the resulting signed order amounts.

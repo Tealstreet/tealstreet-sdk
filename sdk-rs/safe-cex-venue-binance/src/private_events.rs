@@ -7,6 +7,22 @@ use crate::{
 };
 use safe_cex_types::{MarginType, OrderStatus, OrderType, PositionMode, PositionSide};
 use std::{cell::Cell, rc::Rc};
+/// The production private socket rejection classifier over native values.
+pub fn get_order_reject_reason(data: &EventValue) -> Result<EventValue, Failure> {
+    let code = fallback(data.read("r")?, string("")).text()?.to_uppercase();
+    Ok(
+        if ["POST_ONLY", "GTX", "MAKER"]
+            .iter()
+            .any(|s| code.contains(s))
+        {
+            EventValue::enum_value(PrivateEnum::Reject(
+                safe_cex_types::OrderRejectReason::PostOnly,
+            ))
+        } else {
+            EventValue::Undefined
+        },
+    )
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrivateOperation {
     Fill,

@@ -218,10 +218,10 @@ fn run_cases(precision_supplement: bool) {
         );
         let emissions = Rc::new(RefCell::new(Vec::new()));
         let capture = emissions.clone();
-        base.on(
+        base.on_args(
             "error",
             Rc::new(move |_, message| {
-                capture.borrow_mut().push(message.clone());
+                capture.borrow_mut().push(serde_json::json!(message));
                 Ok(())
             }),
         );

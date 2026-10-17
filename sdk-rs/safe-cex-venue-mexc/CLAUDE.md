@@ -3,6 +3,14 @@
 Behavioral reference: [TypeScript MEXC guidance](../../packages/safe-cex/src/exchanges/mexc/CLAUDE.md).
 Use the [shared exchange contract](../safe-cex-exchange/CLAUDE.md); variants stay within this crate.
 
+REST signing and private WebSocket login take `current_time_ms` from their
+construction dependencies. The native registry passes the same shared
+`VIRTUAL_CLOCK.get_current_time_ms` getter to both; host wall time remains for
+runtime accounting and retry/rate-limit timing. Do not derive authentication
+time from `ExchangeRuntime::now_ms`. The native registry regression
+`native_host_mexc_clock` applies a 90-second sync offset and checks both signed
+wire timestamps and HMACs over real loopback HTTP/WebSocket transports.
+
 Regular-order `externalOid` generation uses the shared crypto `uuid_with_entropy`
 helper with runtime entropy: generate 21 nanoid characters, then strip `-` and
 `_`, as `utils/uuid.ts` does. The runtime's generic `unique_id` contract does not
@@ -307,3 +315,9 @@ values/keys/entries and raw Map, including insertion/deletion, native numeric bi
 and reference identity. `scripts/iterator-consumer-controls.py` compiles an
 iterator-object rejection, requires both named failures and restores exact bytes.
 Its Cargo subprocesses have deadlines and private temporary logs.
+
+The production private asset handler debounces `fetchBalance` for 1000ms and
+swallows both fetch and Store-update failures, matching the TypeScript callback's
+empty catch. `socket_assembly::registered_private_asset_refresh_swallows_balance_fetch_failure`
+drives a real registered private frame, advances the host monotonic timer, and
+requires one attempted balance read with no host exception report.

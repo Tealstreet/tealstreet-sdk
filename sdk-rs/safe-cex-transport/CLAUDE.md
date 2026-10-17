@@ -214,3 +214,10 @@ Native fields, stamp/callback order, failed-config replay and timeout effects
 remain distinct from wire encoding. See ACCEPTED_API_REVIEWS.md; run the nine
 source-disconnect controls serially and require named native failures with exact
 restoration. The source oracle executes the maintained helpers and actual Axios.
+
+Default HTTP query rendering uses `query::axios_default_query` before physical
+I/O. It preserves native NaN/infinities until pair conversion, uses bracket paths
+for nested records/arrays, and applies Axios buildURL encoding. Metadata `{}`
+values retain their JSON.stringify phase. Custom serializers and HOW frame params
+keep their existing ownership. See `QUERY_PARITY_EVIDENCE.md` for executed source,
+HTTP witnesses, and the remaining reqwest apostrophe normalization.

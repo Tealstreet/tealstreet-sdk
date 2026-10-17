@@ -13,13 +13,17 @@ Both variants remain in this family crate. `types.rs` maps `kraken.types.ts`;
 in `binding/members.rs`, to its ported body; the host traits are implemented
 over `Js` in `binding/host*.rs` (REST family on the receiver scope) and
 `binding/sockets.rs` (one `SocketHost` per socket object, owning the slots the
-traits borrow). The Exchange trait's sixteen methods call the assembled members;
+traits borrow). Every Exchange trait method either source class overrides calls
+its assembled member (`--test trait_dispatch` drives each through the trait);
 the five members Kraken inherits from base.ts reject with its `Not implemented`.
 The host supplies two module-scoped values, never per instance: the Futures nonce
 counter (`api::FuturesModule`) and the Spot client-ID generator (`spot_client_ids`).
-The binding never owns transport: `JsHttpHost` sends, so `installTransportAdapter`
-is a no-op here. Axios's rejected response handler is reproduced by wrapping the
-client verbs, because the shared client runs fulfilled interceptors only.
+REST clients come from the shared `client::factory` over the runtime provider:
+`create_client` applies provider routing and the 20 s timeout, and keyed Futures
+clients install the provider adapter (HOW when tunnelled); Spot never does.
+`--test transport_binding` drives both through a scripted provider. Axios's
+rejected response handler is reproduced by wrapping the client verbs, because
+the shared client runs fulfilled interceptors only.
 
 Gates: `--test exchange_binding` (scripted transport, every trait method, start
 through private-socket auth), and `scripts/binding-controls.py` from `sdk-rs/`,
@@ -380,3 +384,23 @@ all four tests must pass after each exact restoration. The production gate
 separately inspects complete compiler companion implementations. New traits,
 conversions or inherent APIs require review; private companion syntax alone is
 not proof. Other owners, aliases and receiver refusals remain independent.
+
+REST signing nonces use the shared `VIRTUAL_CLOCK.get_current_time_ms()` for
+both Futures and Spot. The shared JS virtualClock facade reads that same owner;
+Date.now and transport timing keep their runtime clocks. Futures cliOrdId uses
+the source utils/uuid separator removal, independently of Spot's existing
+client-ID generator. `tests/native_clock.rs` checks actual signed Futures/Spot
+requests under a pushed server offset and a different host wall clock;
+`tests/native_identity.rs` checks both nanoid separators in the native cliOrdId.
+The shared Bitunix native audit control runner checks both regressions.
+
+
+Unused `construction::futures_constructor` / `spot_constructor` wrappers and
+their generic constructor-only corpus are removed. Production construction stays
+on `classes::futures_exchange` / `spot_exchange`, sharing `construct_with` for the
+actual API-client assignments. Constructor manifest rows target those live class
+factories. `exchange_binding` covers startup plus production private orders,
+fills, positions and balance frames with native Store/event assertions.
+A compiled xhr-assignment mutation fails the production startup regression;
+exact restoration passes. Retained composition tests cover live class factories
+and polling rather than the deleted wrappers.

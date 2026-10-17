@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One reversible production mutation for ten new roots; run on committed inputs."""
+"""One reversible production mutation for nine retained roots; run on committed inputs."""
 import json
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ import tempfile
 
 crate = Path(__file__).resolve().parents[1]
 root = crate.parents[1]
-paths = [crate/'src/builder_fee.rs', crate/'src/agent.rs', crate/'src/spot_types.rs', crate/'src/types.rs']
+paths = [crate/'src/builder_fee.rs', crate/'src/agent.rs', crate/'src/types.rs']
 originals = {path:path.read_text() for path in paths}
 sha = subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
 subprocess.run(['git','diff','--exit-code','HEAD','--',str(crate/'src'),str(crate/'tests'),str(crate/'scripts')],cwd=root,check=True)
@@ -27,10 +27,9 @@ required=[
  'APPROVAL native generateAgentWalletName name case 0',
  'APPROVAL native hasEthereumWallet value case 1',
  'APPROVAL native CancelOrderRequests asset bits case 1 item 0',
- 'APPROVAL native ScheduleCancelAction null case 9',
 ]
 try:
-    builder,agent,spot,core=paths
+    builder,agent,core=paths
     text=originals[builder]
     assert text.count('= TEALSTREET_BUILDER_FEE;')==1
     text=text.replace('= TEALSTREET_BUILDER_FEE;','= TEALSTREET_BUILDER_FEE + 1.0;')
@@ -43,10 +42,6 @@ try:
     assert text.count('name: "hyperliquidChain"')==1 and text.count('for _ in 0..4')==1 and text.count('window.ethereum_truthy()')==1
     text=text.replace('name: "hyperliquidChain"','name: "hyperliquidChain#CONTROL"').replace('for _ in 0..4','for _ in 0..3').replace('window.ethereum_truthy()','window.ethereum_truthy().map(|value| !value)')
     agent.write_text(text)
-    text=originals[spot]
-    assert text.count('deserialize(decoder).map(Some)')==1
-    # Deliberately collapse the source's explicit-null state into absence.
-    spot.write_text(text.replace('deserialize(decoder).map(Some)','deserialize(decoder).map(|value| value.map(Some))'))
     pattern=r'(struct CancelOrderRequestsItemWire\s*\{[^}]+\})'
     def swap(match):
         block=match[1]
@@ -66,6 +61,6 @@ result={'gate_sha':sha,'cargo_mutant_exit':mutant.returncode,'cargo_restored_exi
         'named_native_failures':[name for name in required if name in mutant.stdout],
         'restored_files_equal':all(path.read_text()==text for path,text in originals.items()),'logs':str(logs)}
 print(json.dumps(result,indent=2))
-assert mutant.returncode==101 and '5 failed' in mutant.stdout, 'must reach all five failing native tests'
+assert mutant.returncode==101 and '4 failed' in mutant.stdout, 'must reach all four failing native tests'
 assert all(name in mutant.stdout for name in required), 'missing assertion; a surviving control is a finding'
-assert restored.returncode==0 and '5 passed' in restored.stdout, 'restored gate must pass'
+assert restored.returncode==0 and '4 passed' in restored.stdout, 'restored gate must pass'

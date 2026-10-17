@@ -488,7 +488,7 @@ impl RateLimitClock for ApiClock {
 }
 impl crate::api::ApiRuntime for ApiClock {
     fn timestamp(&self) -> f64 {
-        self.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time()
     }
     fn nonce(&self) -> String {
         uuid()
@@ -751,6 +751,12 @@ impl PublicStreamHost for PublicHost {
         Ok(())
     }
     fn send(&self, frame: &str) -> Result<(), ExchangeError> {
+        if frame == "ping" {
+            // Share the exact timestamp sampled by the venue ping body with
+            // BaseWebSocket, which owns pong latency and its next-ping timer.
+            self.socket
+                .set_ping_at(owner(&self.stream)?.core.ping_at.get());
+        }
         self.socket.send(frame)
     }
     fn performance_now(&self) -> f64 {
@@ -812,9 +818,9 @@ impl PublicStreamHost for PublicHost {
         self.base()?.log(message, "warning")
     }
     fn emit_warning(&self, message: &str, force_toast: bool) -> Result<(), ExchangeError> {
-        self.base()?.emit(
+        self.base()?.emit_args(
             "warning",
-            json!({"message": message, "forceToast": force_toast}),
+            &[json!(message), json!({"forceToast": force_toast})],
         )
     }
 }
@@ -929,6 +935,12 @@ impl pc::PrivateStreamHost for PrivateHost {
         })))
     }
     fn send_with_log(&self, frame: &str) -> Result<(), ExchangeError> {
+        if frame == "ping" {
+            // Share the exact timestamp sampled by the venue ping body with
+            // BaseWebSocket, which owns pong latency and its next-ping timer.
+            self.socket
+                .set_ping_at(owner(&self.stream)?.core.ping_at.get());
+        }
         self.socket.send_with_log(frame)
     }
     fn performance_now(&self) -> f64 {
@@ -938,7 +950,7 @@ impl pc::PrivateStreamHost for PrivateHost {
         uuid()
     }
     fn timestamp_ms(&self) -> f64 {
-        self.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn remote_signer_present(&self) -> bool {
         self.base

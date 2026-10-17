@@ -238,12 +238,12 @@ fn base_error_events_match_live_typescript_oracle() {
         );
         let events = Rc::new(RefCell::new(Vec::new()));
         let captured = events.clone();
-        let _listener = base.on(
+        let _listener = base.on_args(
             "error",
             Rc::new(move |event, data| {
                 {
                     let mut row = vec![json!(event)];
-                    row.extend(data.as_array().unwrap().iter().cloned());
+                    row.extend(data.iter().cloned());
                     captured.borrow_mut().push(serde_json::Value::Array(row));
                 };
                 Ok(())

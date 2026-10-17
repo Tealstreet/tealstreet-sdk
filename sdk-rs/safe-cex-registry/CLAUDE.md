@@ -109,6 +109,19 @@ order removal accepts `{id}` objects; socket logs and active ticker selection us
 the shared BaseExchange methods. `tests/native_account_methods.rs` exercises the
 public JSON entrypoints on real native registry accounts over loopback HTTP;
 the FFI crate's Node tests cover the same calls through the actual napi addon.
+The hosted `HostSigner` and js_runtime `TransportSigner` forward `sign_query`; the
+transport default refuses, so a wrapper that drops it breaks hosted MEXC/Bybit GETs.
+
+Native `listenOHLCV`, `listenOHLCVs` and `listenOrderBook` calls retain their real
+venue callbacks and return a registration handle; `unlisten` runs the returned
+venue cleanup, and disposal closes all registrations. Stream notifications carry
+`{subscriptionId, data}` through the existing event watch. Binance gateway tests
+in `native_account_streams` verify live frames and actual unsubscribe traffic.
+
+Every native HTTP host an account host builds shares one emitter slot;
+`open_native_account` binds the constructed exchange with `bind_http_events`, so
+safeCexAxiosCreate's proxy auth/5xx `error` reaches the account's event watch.
+`tests/native_account_proxy_errors.rs` drives all three messages over a loopback proxy.
 
 GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
 terminal HTTP host and the common public-data provider. Its HTTP clients receive
@@ -147,7 +160,10 @@ both HTTP clients and BaseExchange availability. Private WS uses its HTTP
 bullet-private token, as in TypeScript. `native_host_kucoin_hosted` verifies
 account and unlimited HTTP plus real private subscriptions without a local secret.
 MEXC shares the hosted account with HTTP, BaseExchange availability and private
-WS login; preserve the private socket account name. `native_host_mexc_hosted`
+WS login; preserve the private socket account name. The same native-host
+`current_time_ms` dependency reads the shared synced VirtualClock for local REST
+signing and both local/hosted WS login. `native_host_mexc_clock` checks the
+90-second server-clock correction on both wire paths. `native_host_mexc_hosted`
 compares actual source success/error/missing-signature outcomes over native HTTP
 and WS.
 

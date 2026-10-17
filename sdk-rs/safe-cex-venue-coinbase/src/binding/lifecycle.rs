@@ -276,7 +276,13 @@ impl LifecycleHost for Host {
                     let _ = self.base().log(message, severity);
                 },
                 |message| {
-                    let _ = self.base().emit("warning", serde_json::json!([message]));
+                    let _ = self.base().emit_args(
+                        "warning",
+                        &[
+                            serde_json::json!(message),
+                            serde_json::json!({"forceToast": true}),
+                        ],
+                    );
                 },
             )
             .map_err(|error| Rc::new(error.into()))

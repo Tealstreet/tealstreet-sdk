@@ -12,8 +12,21 @@ SRC = "safe-cex-venue-cryptocom/src/binding/exchange.rs"
 GLOBALS = "safe-cex-venue-cryptocom/src/binding/globals.rs"
 # Whole-file controls for the module-scope helpers the trait methods depend on.
 GLOBAL_MUTATIONS = [
-    ("onRejected replay", "with_rejected_handlers(&rt, client::create(rt.shared.http.clone(), arg(&a, 0)))",
-     "{ let _ = with_rejected_handlers; Ok(client::create(rt.shared.http.clone(), arg(&a, 0))) }", "a_non_2xx_signature_rejection_retries_through_axios_retry"),
+    ("onRejected replay", "with_rejected_handlers(&rt, xhr)",
+     "{ let _ = with_rejected_handlers; Ok(xhr) }", "a_non_2xx_signature_rejection_retries_through_axios_retry"),
+    ("safeCexAxiosCreate routing", """let xhr = client::factory::create(
+                rt.shared.http.clone(),
+                rt.shared.runtime.transport().as_ref(),
+                arg(&a, 0),
+                &arg(&a, 1),
+                to_typed(&arg(&a, 2).get("name")?)?,
+            )?;""", "let xhr = client::create(rt.shared.http.clone(), arg(&a, 0));",
+     "create_api_routes_through_the_provider_and_tunnel_adapter"),
+    ("installTransportAdapter", """            let rt = scope(&w)?;
+            client::factory::install_transport_adapter(""", """            let rt = scope(&w)?;
+            if true { return Ok(Js::Undefined); }
+            client::factory::install_transport_adapter(""",
+     "create_api_routes_through_the_provider_and_tunnel_adapter"),
     ("resendOnSignatureRejection", 'xhr.call_method("request", vec![resend])', '{ let _ = (xhr, resend); Ok(Js::Undefined) }',
      "a_signature_rejection_in_a_200_envelope_resends_once_resigned"),
     ("signatureRejectedResponse", "config.set(SIGNATURE_RETRY_CONFIG_KEY, Js::Bool(true))?;\n                Ok(Js::Bool(true))",
@@ -38,6 +51,11 @@ MUTATIONS = [
     ("change_margin_type", '"changeMarginType"', '"changePositionMode"', "change_position_mode_only_warns_and_change_margin_type_rejects"),
     ("update_order", '"updateOrder"', '"cancelOrders"', "update_order_amends_price_and_quantity"),
     ("cancel_orders", '"cancelOrders"', '"updateOrder"', "cancel_orders_routes_triggers_to_the_advanced_endpoint"),
+    ("cancel_symbol_orders", '"cancelSymbolOrders"', '"cancelAllOrders"', "cancel_symbol_and_all_orders_post_the_venue_cancel_all"),
+    ("cancel_all_orders", '"cancelAllOrders"', '"cancelOrders"', "cancel_symbol_and_all_orders_post_the_venue_cancel_all"),
+    ("fetch_ohlcv", '"fetchOHLCV"', '"fetchTickers"', "fetch_ohlcv_reads_venue_candlesticks"),
+    ("listen_ohlcv", '"listenOHLCV"', '"listenOrderBook"', "listen_ohlcv_subscribes_and_delivers_candles"),
+    ("listen_order_book", '"listenOrderBook"', '"listenOHLCV"', "listen_order_book_subscribes_and_delivers_snapshots"),
     ("schedule_cancel", "not_implemented()", "Box::pin(async { Ok(()) })", INHERITED),
     ("fetch_public_trades", "not_implemented()", "Box::pin(async { Ok(vec![]) })", INHERITED),
     ("fetch_historical_fills", "Ok(vec![])", 'Err(ExchangeError::new("mutant"))', INHERITED),

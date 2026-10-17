@@ -12,11 +12,7 @@ use std::{
     rc::Rc,
     task::{Context, Poll, Waker},
 };
-fn type_error(message: impl Into<String>) -> Failure {
-    let mut e = ExchangeError::new(message);
-    e.name = "TypeError".into();
-    Rc::new(e)
-}
+
 fn settle<F: Future>(f: F) -> F::Output {
     let w = Waker::noop().clone();
     let mut cx = Context::from_waker(&w);
@@ -62,25 +58,6 @@ fn wire(v: &EventValue) -> Value {
         _ => panic!(
             "authored REST-history fixture excludes non-data outputs; native referents are asserted in history_native"
         ),
-    }
-}
-/// INPUT adapter into the existing JSON-domain order helper; outputs are native
-/// HistoricalOrder fields, never encoded and decoded to manufacture a proof.
-fn input_json(v: &EventValue) -> Value {
-    match v {
-        EventValue::Undefined => Value::Null,
-        EventValue::Null => Value::Null,
-        EventValue::Bool(v) => json!(v),
-        EventValue::Number(v) => json!(v),
-        EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
-        EventValue::Array(v) => array_values(v).iter().map(input_json).collect(),
-        EventValue::Object(_) => v
-            .spread()
-            .iter()
-            .filter(|(_, v)| !matches!(v, EventValue::Undefined))
-            .map(|(k, v)| (k.clone(), input_json(v)))
-            .collect(),
-        _ => panic!("legacy helper input domain"),
     }
 }
 fn error(name: &str) -> Failure {
@@ -159,59 +136,12 @@ fn native_enum(v: &EventValue, want: PrivateEnum, l: &str) {
         "{l}"
     );
 }
-fn optional_number(v: Option<f64>) -> EventValue {
-    v.map(number).unwrap_or(EventValue::Undefined)
-}
-fn typed_order(raw: EventValue) -> Result<EventValue, Failure> {
-    if raw.nullish() {
-        return Err(type_error(format!(
-            "Cannot read properties of {} (reading 'orderId')",
-            if matches!(raw, EventValue::Null) {
-                "null"
-            } else {
-                "undefined"
-            }
-        )));
-    }
-    let j = input_json(&raw);
-    let Some(o) = j.as_object() else {
-        return Ok(EventValue::Null);
-    };
-    let mapped = safe_cex_venue_binance::order_history::map_binance_historical_order_typed(o)
-        .map_err(|e| type_error(e.to_string()))?;
-    let Some(o) = mapped else {
-        return Ok(EventValue::Null);
-    };
-    let pos = match o.position_side {
-        Some(ExecutionPositionSide::Both(_)) => EventValue::enum_value(PrivateEnum::Execution(
-            &ExecutionPositionSide::Both(safe_cex_types::BothPositionSide::Both),
-        )),
-        Some(ExecutionPositionSide::Side(PositionSide::Long)) => EventValue::enum_value(
-            PrivateEnum::Execution(&ExecutionPositionSide::Side(PositionSide::Long)),
-        ),
-        Some(ExecutionPositionSide::Side(PositionSide::Short)) => EventValue::enum_value(
-            PrivateEnum::Execution(&ExecutionPositionSide::Side(PositionSide::Short)),
-        ),
-        None => EventValue::Undefined,
-    };
-    Ok(record([
-        ("id", string(o.id)),
-        ("symbol", string(o.symbol)),
-        ("side", EventValue::enum_value(PrivateEnum::Side(o.side))),
-        ("type", EventValue::enum_value(PrivateEnum::Type(o.r#type))),
-        (
-            "status",
-            EventValue::enum_value(PrivateEnum::Status(o.status)),
-        ),
-        ("price", optional_number(o.price)),
-        ("averagePrice", optional_number(o.average_price)),
-        ("amount", number(o.amount)),
-        ("filled", number(o.filled)),
-        ("reduceOnly", EventValue::Bool(o.reduce_only.unwrap())),
-        ("positionSide", pos),
-        ("createdTime", number(o.created_time)),
-        ("updatedTime", optional_number(o.updated_time)),
-    ]))
+fn native_order(raw: EventValue) -> Result<EventValue, Failure> {
+    safe_cex_venue_binance::order_history::map_binance_historical_order(
+        &raw,
+        &safe_cex_num::PrototypeRealm::current(),
+    )
+    .map(|value| value.unwrap_or(EventValue::Null))
 }
 #[derive(Clone)]
 enum Notice {
@@ -380,7 +310,7 @@ impl HistoryBindings for Bind {
             return Err(s.error.clone());
         }
         drop(s);
-        typed_order(raw)
+        native_order(raw)
     }
     fn page_resolver(&mut self, method: IncomePageMethod) -> PageResolver {
         self.0.borrow_mut().method = Some(method);

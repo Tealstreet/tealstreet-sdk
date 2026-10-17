@@ -1,9 +1,9 @@
 # Crypto.com helper contract batch
 
-This reviews twenty original native/default census owners individually. Three
+This reviews seventeen original native/default census owners individually. Three
 order mappings return concrete venue enums and require actual decoder probes.
-Seventeen other functions compare already captured primitives, assemble outbound
-text, dispatch supplied host operations, or mutate/send subscription state. Each
+Fourteen other functions compare already captured primitives, assemble outbound
+text or dispatch supplied host operations. Each
 has its own body-specific role review and direct native witness; none receives a
 privacy, generic-host, parent-receiver or downstream-decoder exemption.
 
@@ -35,9 +35,6 @@ remain unchanged. Cite the canonical boundary definitions in
 | api_error::append | Outbound message assembly | Existing prefix, Unicode pairs, empty append and separator order |
 | api_error::optional_get | Optional property access | Nullish short circuit; child/getter-error identity and falsey non-nullish access |
 | api_error::http_message | Outbound HTTP diagnostic | Original status/body carriers, coercion order, separator/UTF16 output and both failures |
-| public_lifecycle::channel | Outbound channel construction | Four independent prefix/instrument cases and actual String variant/UTF16 units |
-| public_lifecycle::is_channel | Strict primitive comparison | Twenty-two independent code-unit comparisons |
-| private_lifecycle::subscribe_one | Native state/send control flow | Eight auth/duplicate/disposed/failure cases; retained set, native frame fields, prepared/error identities and signed-zero bits |
 
 The enum expectations were authored from the source switches before execution.
 Each observer matches actual native enum variants, independently of Serde names.
@@ -52,24 +49,20 @@ and explicit SocketOps callbacks. They call each actual private helper directly.
 They do not replace a parseFloat implementation contract with a dispatcher test
 or prove arbitrary host/Clone behavior. Error formatting similarly uses an
 explicit ApiErrorHost with native carriers and independently specified template
-results. The private subscription witness reads retained native set contents,
-frame fields, event order and id bits, including state after errors. It does not
-roundtrip an encoded frame or claim a transport implementation.
-
-The maintained control runner has twenty distinct body mutations and six
+results. 
+The maintained control runner has seventeen distinct body mutations and three
 truncated fixture-walk mutations. Each must compile, fail the named runtime
 assertion with exit 101, restore exact source bytes and pass again. A compile
 failure is not proof. No expected native value is revised from mutant output.
-The count controls cover all six new loop patterns: enum mappings, private
-comparison, parsed fallback, channel construction, channel comparison and private
-subscription cases.
+The count controls cover all three loop patterns: enum mappings, private
+comparison and parsed fallback cases.
 
 Run sequentially from sdk-rs:
 
 ```sh
 cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --lib accepted_helpers
 cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --lib accepted_equals
-cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --test accepted_mapping_variants --test order_mappings --test socket_handlers --test api_error --test public_lifecycle --test private_lifecycle
+cargo test --locked --jobs 1 -p safe-cex-venue-cryptocom --test accepted_mapping_variants --test order_mappings --test socket_handlers --test api_error
 python3 safe-cex-venue-cryptocom/scripts/helper-batch-controls.py
 node safe-cex-venue-cryptocom/scripts/helper-batch-contracts.mjs
 ```
@@ -84,3 +77,9 @@ for every one of the twenty owners; classification receipts alone are not runtim
 evidence. Other original/new owners, aliases, construction, local scopes, feature
 configurations and WASM contract execution remain separate obligations. No
 full-package completion is claimed.
+
+The test-only `public_lifecycle.rs` and `private_lifecycle.rs` modules had no
+production caller and were removed with their owners (wave2-vacuous-tests). The
+validation paragraphs above record the larger batch as it passed before that
+removal; the selector, control runner and contract shard now hold the seventeen
+owners in the table.

@@ -14,7 +14,7 @@ use safe_cex_exchange::js_runtime::{
     promise::await_js,
     scope::scope_of,
     sockets,
-    value::{Js, Thrown, arg, from_json, to_json},
+    value::{Js, Thrown, arg, from_json, to_json, to_typed},
 };
 use std::{
     cell::RefCell,
@@ -597,7 +597,14 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
         "safeCexAxiosCreate",
         Js::function("safeCexAxiosCreate", move |_, a| {
             let rt = scope(&w)?;
-            with_rejected_handlers(&rt, client::create(rt.shared.http.clone(), arg(&a, 0)))
+            let xhr = client::factory::create(
+                rt.shared.http.clone(),
+                rt.shared.runtime.transport().as_ref(),
+                arg(&a, 0),
+                &arg(&a, 1),
+                rt.base(),
+            )?;
+            with_rejected_handlers(&rt, xhr)
         }),
     );
     def(
@@ -635,13 +642,20 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
             )))
         }),
     );
+    let w = weak.clone();
     def(
         "installTransportAdapter",
-        Js::function("installTransportAdapter", |_, _| {
-            Err(Thrown::error(
-                "Error",
-                "Tealstreet tunnel transport is not available in the Rust Crypto.com binding",
-            ))
+        Js::function("installTransportAdapter", move |_, a| {
+            let rt = scope(&w)?;
+            client::factory::install_transport_adapter(
+                rt.shared.http.clone(),
+                rt.shared.runtime.transport().as_ref(),
+                &arg(&a, 0),
+                &arg(&a, 1),
+                to_typed(&arg(&a, 2))?,
+                safe_cex_transport::RestAdapterVariant::Default,
+            )?;
+            Ok(Js::Undefined)
         }),
     );
 
