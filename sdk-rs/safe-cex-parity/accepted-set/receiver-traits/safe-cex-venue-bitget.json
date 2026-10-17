@@ -20,38 +20,38 @@
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::property for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
-    "reason": "Individually reviewed private_topics::PrivateTopicsHost::property: Forwards existing private-topic VM handles through shared property lookup.",
-    "itemSha256": "55b0a06a9098fd342f661e891b93484afc74ff69e3ac6e208cb5ae6b2e88cdc7"
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::property: Forwards existing private-topic VM handles through shared property lookup. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
-    "reason": "Individually reviewed private_topics::PrivateTopicsHost::receiver: Selects the existing private-topic receiver path by internal name.",
-    "itemSha256": "55b0a06a9098fd342f661e891b93484afc74ff69e3ac6e208cb5ae6b2e88cdc7"
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::receiver: Selects the existing private-topic receiver path by internal name. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::set_receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
-    "reason": "Individually reviewed private_topics::PrivateTopicsHost::set_receiver: Updates the selected private-topic receiver field with an already carried VM handle.",
-    "itemSha256": "55b0a06a9098fd342f661e891b93484afc74ff69e3ac6e208cb5ae6b2e88cdc7"
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::set_receiver: Updates the selected private-topic receiver field with an already carried VM handle. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::call for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
-    "reason": "Individually reviewed private_topics::PrivateTopicsHost::call: Invokes the named existing topic/runtime capability with original arguments.",
-    "itemSha256": "55b0a06a9098fd342f661e891b93484afc74ff69e3ac6e208cb5ae6b2e88cdc7"
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::call: Invokes the named existing topic/runtime capability with original arguments. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::object for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
-    "reason": "Individually reviewed private_topics::PrivateTopicsHost::object: Constructs an outgoing private-topic object from existing VM field values.",
-    "itemSha256": "55b0a06a9098fd342f661e891b93484afc74ff69e3ac6e208cb5ae6b2e88cdc7"
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::object: Constructs an outgoing private-topic object from existing VM field values. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
   },
   "safe_cex_venue_bitget::private_topics::PrivateTopicsHost::define for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
     "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
-    "reason": "Individually reviewed private_topics::PrivateTopicsHost::define: Defines an own property on an existing private-topic object without data normalization.",
-    "itemSha256": "55b0a06a9098fd342f661e891b93484afc74ff69e3ac6e208cb5ae6b2e88cdc7"
+    "reason": "Individually reviewed private_topics::PrivateTopicsHost::define: Defines an own property on an existing private-topic object without data normalization. Reviewed the complete impl changes in cabe86efad and 6bafdc102f: iterator/next now use native iterator objects and clock_now reads the synchronized virtualClock. This capability-forwarding method is unchanged; its non-decoder role remains valid. The shared item pin covers the entire impl, including those changed methods.",
+    "itemSha256": "b8e64a45cf5449b2fd526892780163f2c056a8555dc72e1870c8320140900ea5"
   },
   "safe_cex_venue_bitget::public_data::PublicDataHost::receiver for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_bitget::binding::rt::BitgetExtra>": {
     "category": "non-decoder",
