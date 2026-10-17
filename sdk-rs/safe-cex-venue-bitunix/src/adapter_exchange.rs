@@ -36,21 +36,7 @@ impl BitunixVenue {
 impl Exchange for BitunixVenue {
     type PlaceOpts = PlaceOrderOpts;
     fn validate_order_capabilities(&self, options: &Self::PlaceOpts) -> Result<(), ExchangeError> {
-        if options.amount.is_finite() {
-            return Ok(());
-        }
-        let message = format!(
-            "Bitunix placement amount must be finite (received {})",
-            safe_cex_num::js_number_string(options.amount)
-        );
-        self.base.emit_and_log_error(
-            safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(message.clone()),
-            None,
-            None,
-        )?;
-        let mut error = ExchangeError::new(message);
-        error.name = "TypeError".into();
-        Err(error)
+        self.validate_placement_input(options)
     }
     fn base(&self) -> &BaseExchange {
         &self.base

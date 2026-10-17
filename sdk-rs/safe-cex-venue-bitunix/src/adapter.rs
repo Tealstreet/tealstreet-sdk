@@ -180,6 +180,26 @@ impl ExchangeConstructorHost<(), ExchangeOptions, ()> for Constructor {
 }
 
 impl BitunixVenue {
+    pub(crate) fn validate_placement_input(
+        &self,
+        options: &safe_cex_types::PlaceOrderOpts,
+    ) -> Result<(), ExchangeError> {
+        if options.amount.is_finite() {
+            return Ok(());
+        }
+        let message = format!(
+            "Bitunix placement amount must be finite (received {})",
+            safe_cex_num::js_number_string(options.amount)
+        );
+        self.base.emit_and_log_error(
+            safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(message.clone()),
+            None,
+            None,
+        )?;
+        let mut error = ExchangeError::new(message);
+        error.name = "TypeError".into();
+        Err(error)
+    }
     /// The caller builds `base` with `BaseExchange::new(name, options, store, runtime, settings)`.
     pub fn new(
         base: BaseExchange,
