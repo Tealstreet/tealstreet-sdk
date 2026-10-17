@@ -78,7 +78,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 
     if matches!(
         typed.base.name,
-        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+        safe_cex_types::ExchangeName::Bybit
+            | safe_cex_types::ExchangeName::Bybitdemo
+            | safe_cex_types::ExchangeName::Hyrotrader
     ) {
         method(&this, rt, "fetchClosedPositionRows", |r, a| {
             Ok(crate::ledger_history::fetch_closed_position_rows(
@@ -459,6 +461,18 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     });
 
     // Order placement and the local order lifecycle (members/orders.rs, lifecycle.rs).
+    method(&this, rt, "submitCreateOrders", |rt, a| {
+        let rt = rt.clone();
+        let payloads = arg(&a, 0)
+            .array_values()
+            .ok_or_else(|| Thrown::type_error("payloads is not an array"))?;
+        let opts = arg(&a, 1);
+        Ok(rt.clone().spawn(Box::pin(async move {
+            members::orders::submit_create_orders_body(&rt, payloads, &opts)
+                .await
+                .map(Js::array)
+        })))
+    });
     method(&this, rt, "placeOrder", |rt, a| {
         members::orders::place_order(rt, arg(&a, 0))
     });
@@ -632,6 +646,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     }
     if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitinverse {
         members::inverse::install(rt)?;
+    }
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Hyrotrader {
+        members::hyro::install(rt)?;
     }
     Ok(())
 }
