@@ -745,3 +745,9 @@ numeric coercion, duplicate-symbol joins and sorting against live Store markets.
 Dedicated Spot/Inverse retain the base options refusals. The actual HTTP/source
 comparison has 69 cases; its four tied-right cases require the shared
 String.prototype.localeCompare implementation and remain red until it lands.
+
+Dynamic history capabilities delegate to the same live Exchange methods: fills,
+income/range and closed PnL for primary/demo/inverse, historical orders for
+primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
+order history. `history_capability_binding` exercises the actual capability calls
+and signed HTTP; direct trait coverage alone does not witness this dispatch path.
