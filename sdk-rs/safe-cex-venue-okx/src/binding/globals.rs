@@ -68,6 +68,79 @@ fn optional_text(f: &Js, args: Vec<Js>) -> Option<String> {
     if v.is_nullish() { None } else { text(&v).ok() }
 }
 
+// The installed is-retry-allowed Set membership is strict: no code coercion.
+// The real-client source witness covers every denial plus allowed socket codes.
+fn network_code_denied(code: &Js) -> bool {
+    code.as_str().is_some_and(|code| {
+        [
+            "ENOTFOUND",
+            "ENETUNREACH",
+            "UNABLE_TO_GET_ISSUER_CERT",
+            "UNABLE_TO_GET_CRL",
+            "UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+            "UNABLE_TO_DECRYPT_CRL_SIGNATURE",
+            "UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+            "CERT_SIGNATURE_FAILURE",
+            "CRL_SIGNATURE_FAILURE",
+            "CERT_NOT_YET_VALID",
+            "CERT_HAS_EXPIRED",
+            "CRL_NOT_YET_VALID",
+            "CRL_HAS_EXPIRED",
+            "ERROR_IN_CERT_NOT_BEFORE_FIELD",
+            "ERROR_IN_CERT_NOT_AFTER_FIELD",
+            "ERROR_IN_CRL_LAST_UPDATE_FIELD",
+            "ERROR_IN_CRL_NEXT_UPDATE_FIELD",
+            "OUT_OF_MEM",
+            "DEPTH_ZERO_SELF_SIGNED_CERT",
+            "SELF_SIGNED_CERT_IN_CHAIN",
+            "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+            "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+            "CERT_CHAIN_TOO_LONG",
+            "CERT_REVOKED",
+            "INVALID_CA",
+            "PATH_LENGTH_EXCEEDED",
+            "INVALID_PURPOSE",
+            "CERT_UNTRUSTED",
+            "CERT_REJECTED",
+            "HOSTNAME_MISMATCH",
+        ]
+        .iter()
+        .any(|denied| code.iter().copied().eq(denied.encode_utf16()))
+    })
+}
+
+fn network_error_on_read(is_read: Js) -> Js {
+    Js::function("onlyReads", move |_, a| {
+        let error = arg(&a, 0);
+        let config = error.get("config")?;
+        if config.is_undefined() {
+            return Ok(Js::Bool(false));
+        }
+        let read = if is_read.is_undefined() {
+            let method = config.get("method")?;
+            let method = if method.is_nullish() {
+                Js::Undefined
+            } else {
+                method.call_method("toLowerCase", vec![])?
+            };
+            method.strict_equals(&Js::str("get")) || method.strict_equals(&Js::str("head"))
+        } else {
+            is_read.call(Js::Undefined, vec![config])?.truthy()
+        };
+        if !read || error.get("response")?.truthy() || !error.get("code")?.truthy() {
+            return Ok(Js::Bool(false));
+        }
+        let code = error.get("code")?;
+        if code.strict_equals(&Js::str("ERR_CANCELED"))
+            || code.strict_equals(&Js::str("ECONNABORTED"))
+        {
+            return Ok(Js::Bool(false));
+        }
+        // axios-retry delegates its third code read to is-retry-allowed.
+        Ok(Js::Bool(!network_code_denied(&error.get("code")?)))
+    })
+}
+
 fn tables(g: &Js) {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
@@ -351,29 +424,8 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     );
     def(
         "networkErrorOnRead",
-        Js::function("networkErrorOnRead", |_, _| {
-            Ok(Js::function("onlyReads", |_, a| {
-                let error = arg(&a, 0);
-                let config = error.get("config")?;
-                if config.is_undefined() {
-                    return Ok(Js::Bool(false));
-                }
-                let method = config.get("method")?;
-                let method = if method.is_nullish() {
-                    String::new()
-                } else {
-                    text(&method)?.to_lowercase()
-                };
-                if method != "get" && method != "head" {
-                    return Ok(Js::Bool(false));
-                }
-                let code = error.get("code")?;
-                Ok(Js::Bool(
-                    error.get("response")?.is_undefined()
-                        && code.truthy()
-                        && text(&code)? != "ECONNABORTED",
-                ))
-            }))
+        Js::function("networkErrorOnRead", |_, a| {
+            Ok(network_error_on_read(arg(&a, 0)))
         }),
     );
     def(
