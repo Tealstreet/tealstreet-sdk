@@ -285,3 +285,44 @@ fn live_algo_filter_error_and_clock_order_match_all_12_source_cases() {
         }
     }
 }
+
+#[test]
+fn real_client_id_rule_matches_source_safe_integer_limits() {
+    let h = setup(|_| {});
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/client-id-rule-source.cjs"
+        ))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["rows"].as_array().unwrap().len(), 26);
+    let rule = h.exchange.rt.this.get("clientOrderIdRule").unwrap();
+    assert_eq!(
+        rule.get("label").unwrap().to_display(),
+        source["label"].as_str().unwrap()
+    );
+    assert_eq!(
+        rule.get("requirement").unwrap().to_display(),
+        source["requirement"].as_str().unwrap()
+    );
+    for row in source["rows"].as_array().unwrap() {
+        let actual = rule
+            .call_method("isValid", vec![Js::str(row["input"].as_str().unwrap())])
+            .expect(
+                "real constructed WOO client-ID rule must call the shared safe-integer builtin",
+            );
+        assert!(
+            actual.strict_equals(&Js::Bool(row["valid"].as_bool().unwrap())),
+            "source client-ID rule {row}"
+        );
+    }
+    h.exchange.dispose().unwrap();
+}
