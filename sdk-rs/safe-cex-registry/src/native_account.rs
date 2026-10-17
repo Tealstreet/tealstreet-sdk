@@ -21,7 +21,7 @@ use safe_cex_transport::{
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts};
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,

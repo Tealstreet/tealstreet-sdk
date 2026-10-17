@@ -121,7 +121,10 @@ impl WsParent for Parent {
         self.live()?.base.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.base.emit(event, safe_cex_exchange::js_runtime::value::Js::str(message))
+        self.live()?.base.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.base.sync_socket_health_to_store()
@@ -765,7 +768,9 @@ impl Socket {
         let id = venue.base.on(
             event,
             Rc::new(move |_, payload| match weak.upgrade() {
-                Some(s) => s.on_markets_changed(&safe_cex_exchange::js_runtime::value::to_json(payload)?),
+                Some(s) => {
+                    s.on_markets_changed(&safe_cex_exchange::js_runtime::value::to_json(payload)?)
+                }
                 None => Ok(()),
             }),
         );
@@ -1424,10 +1429,10 @@ impl ConnectionHost for Conn {
             .map(|(_, u)| (*u).to_owned()))
     }
     fn proxy_info(&mut self, message: Vec<u16>) -> Result<(), ExchangeError> {
-        self.socket
-            .venue()?
-            .base
-            .emit("grafana-info", safe_cex_exchange::js_runtime::value::Js::String(message.into()))
+        self.socket.venue()?.base.emit(
+            "grafana-info",
+            safe_cex_exchange::js_runtime::value::Js::String(message.into()),
+        )
     }
     fn create(&mut self, url: &Option<String>) -> Result<(), ExchangeError> {
         let url = url

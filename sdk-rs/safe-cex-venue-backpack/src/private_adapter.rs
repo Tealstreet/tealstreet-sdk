@@ -504,14 +504,17 @@ impl events::UpdateHost<Value> for PrivateFrame {
     }
     fn emit_fill(&mut self, _: (), u: events::FillUpdate) -> Result<(), ExchangeError> {
         use safe_cex_exchange::js_runtime::value::{Js, from_typed};
-        self.owner.parent()?.base.emit("fill", Js::object(vec![
-            ("orderId", Js::str(&text(&u.order_id)?)),
-            ("symbol", Js::str(&text(&u.symbol)?)),
-            ("side", from_typed(&u.side)?),
-            ("price", Js::Number(u.price)),
-            ("amount", Js::Number(u.amount)),
-            ("timestamp", Js::Number(u.timestamp)),
-        ]))
+        self.owner.parent()?.base.emit(
+            "fill",
+            Js::object(vec![
+                ("orderId", Js::str(&text(&u.order_id)?)),
+                ("symbol", Js::str(&text(&u.symbol)?)),
+                ("side", from_typed(&u.side)?),
+                ("price", Js::Number(u.price)),
+                ("amount", Js::Number(u.amount)),
+                ("timestamp", Js::Number(u.timestamp)),
+            ]),
+        )
     }
     fn fetch_positions_throttled(&mut self) -> Result<(), ExchangeError> {
         self.owner.throttled_fetch_positions()

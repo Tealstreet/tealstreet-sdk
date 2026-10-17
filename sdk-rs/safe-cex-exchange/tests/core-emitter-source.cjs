@@ -55,3 +55,25 @@ for (const code of [undefined, null, NaN, Infinity, -Infinity, -0, '\ud800', sha
 }
 assert.equal(codes, 8);
 console.log('CORE-EMITTER source: 8 retained arguments, missing arity, identity/UTF16, once/reentry/throw order, 8 native error codes');
+
+const formatFile = path.join(root, 'packages/safe-cex/src/utils/axiosErrorEnhancer.ts');
+const formatAst = ts.createSourceFile(formatFile, fs.readFileSync(formatFile, 'utf8'), ts.ScriptTarget.Latest, true);
+const formatNode = formatAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatErrorForSentry');
+assert(formatNode, 'maintained formatter');
+const formatSource = ts.transpileModule(formatNode.getText(formatAst).replace(/^export /, ''), {
+  compilerOptions: {target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS},
+}).outputText;
+const format = vm.runInNewContext(`${formatSource}; formatErrorForSentry`);
+for (const code of values) {
+  const input = {code, context: {errorCode: 0}, config: {headers: {authorization: 'hidden'}}};
+  const formatted = format(input);
+  assert.deepEqual(Array.from(Object.keys(formatted.tags)), ['errorType','errorCode','statusCode','isTimeout','isCORS']);
+  assert.deepEqual(Array.from(Object.keys(formatted.extra)), ['url','method','statusText','enhancedMessage','originalMessage','timestamp','config']);
+  assert(Object.is(formatted.tags.errorCode, code));
+  assert(Object.hasOwn(formatted.tags, 'statusCode'));
+  assert.equal(formatted.tags.statusCode, undefined);
+  assert(Object.hasOwn(formatted.extra.config, 'baseURL'));
+  assert.equal(formatted.extra.config.baseURL, undefined);
+  assert.deepEqual(Array.from(formatted.extra.config.headers), ['authorization']);
+}
+console.log('CORE-EMITTER formatter: 8 native codes, own undefined fields, source property order');

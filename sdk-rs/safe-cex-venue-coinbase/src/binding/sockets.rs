@@ -633,10 +633,16 @@ impl PrivateStreamHost for SocketHost {
                     let _ = self.host.base().log(message, severity);
                 },
                 |message| {
-                    let _ = self
-                        .host
-                        .base()
-                        .emit_args("warning", &[safe_cex_exchange::js_runtime::value::Js::str(message), safe_cex_exchange::js_runtime::value::Js::object(vec![("forceToast", safe_cex_exchange::js_runtime::value::Js::Bool(true))])]);
+                    let _ = self.host.base().emit_args(
+                        "warning",
+                        &[
+                            safe_cex_exchange::js_runtime::value::Js::str(message),
+                            safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                                "forceToast",
+                                safe_cex_exchange::js_runtime::value::Js::Bool(true),
+                            )]),
+                        ],
+                    );
                 },
             )
             .map_err(|error| Rc::new(error.into()))

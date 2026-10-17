@@ -402,6 +402,18 @@ impl WorkerBootstrapHost for Host {
     fn post_payload(&self, p: StoreWorkerPayload) -> Result<(), ExchangeError> {
         self.forward(p)
     }
+    fn post_event(
+        &self,
+        payload: safe_cex_webworker::data_post::WorkerDataPayload,
+    ) -> Result<(), ExchangeError> {
+        self.forward(StoreWorkerPayload {
+            op: payload.op,
+            instance_id: None,
+            data: Some(safe_cex_exchange::js_runtime::value::to_json(
+                &payload.data,
+            )?),
+        })
+    }
     fn spawn_start_task(&self, f: ExchangeFuture<'static, ()>) {
         self.state.tasks.borrow_mut().push(f)
     }

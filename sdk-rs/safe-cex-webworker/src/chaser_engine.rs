@@ -1,4 +1,3 @@
-use safe_cex_exchange::js_runtime::value::{Js, to_typed};
 //! Actual placement, reconciliation, completion and monitoring bodies. Missing
 //! partial-cancel and optional-fill ABI are explicit venue leaf dependencies.
 use crate::{
@@ -7,6 +6,7 @@ use crate::{
     task_types::{CHASER_UNCONFIRMED_ORDER_STOP_REASON, ChaserCompleteEvent},
     worker_ports::WorkerPortTimers,
 };
+use safe_cex_exchange::js_runtime::value::{Js, to_typed};
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     exchange::Exchange,
@@ -76,10 +76,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
         Rc::new(Self { host, manager })
     }
     fn emit_error(instance: &ChaserOrderInstance, message: &str) -> Result<(), ExchangeError> {
-        instance
-            .exchange
-            .base()
-            .emit("error", safe_cex_exchange::js_runtime::value::Js::str(message))
+        instance.exchange.base().emit(
+            "error",
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn cancel_input(instance: &ChaserOrderInstance, id: &str) -> ChaserCancel {
         let order = instance
@@ -579,10 +579,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
                     instance.options().borrow().symbol
                 );
                 chaser_manager::log(&message, &instance)?;
-                instance
-                    .exchange
-                    .base()
-                    .emit("warning", safe_cex_exchange::js_runtime::value::Js::str(&message))?;
+                instance.exchange.base().emit(
+                    "warning",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                )?;
             }
             if instance.is_stopped() {
                 engine.cleanup_instance(instance).await?;
@@ -656,10 +656,10 @@ impl<H: ChaserHost> ChaserEngine<H> {
                     "Chaser for {} could not start - no order was placed",
                     instance.options().borrow().symbol
                 );
-                instance
-                    .exchange
-                    .base()
-                    .emit("warning", safe_cex_exchange::js_runtime::value::Js::str(&message))?;
+                instance.exchange.base().emit(
+                    "warning",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                )?;
                 instance.mark_complete(Some("No order placed"));
             }
             engine.cleanup_instance(instance).await
@@ -894,10 +894,10 @@ impl<H: ChaserHost> ChaserMonitor<H> {
                     "Chaser for {} stopped: its order left the order book (filled or cancelled externally); any resting remainder was cancelled",
                     self.instance.options().borrow().symbol
                 );
-                self.instance
-                    .exchange
-                    .base()
-                    .emit("warning", safe_cex_exchange::js_runtime::value::Js::str(&message))?;
+                self.instance.exchange.base().emit(
+                    "warning",
+                    safe_cex_exchange::js_runtime::value::Js::str(&message),
+                )?;
                 self.cleanup();
                 return Ok(Some(self.engine.cleanup_instance(self.instance.clone())));
             }
@@ -1071,7 +1071,10 @@ impl<H: ChaserHost> ChaserMonitor<H> {
             let positions_id = ids.get("positions")?;
             let position_update = !positions_id.strict_equals(&self.last_positions_id.borrow());
             *self.last_positions_id.borrow_mut() = positions_id;
-            let decode = || to_typed::<Vec<Order>>(&data.get("orders")?).map_err(Into::into);
+            let decode = || {
+                to_typed::<Vec<Order>>(&data.get("orders")?)
+                    .map_err(|error| error.to_exchange_error())
+            };
             if order_update || position_update {
                 self.clear_timer(&self.price_timer);
                 self.clear_timer(&self.queued_timer);
@@ -1095,10 +1098,16 @@ impl<H: ChaserHost> ChaserMonitor<H> {
     fn on_fill(self: &Rc<Self>, data: &Js) {
         let result: Result<(), ExchangeError> = (|| {
             let id = data.get("orderId")?;
-            let Some(id) = id.as_str().filter(|id| !id.is_empty()) else { return Ok(()) };
-            let id = String::from_utf16(id).map_err(|_| ExchangeError::new("fill orderId requires UTF-8"))?;
+            let Some(id) = id.as_str().filter(|id| !id.is_empty()) else {
+                return Ok(());
+            };
+            let id = String::from_utf16(id)
+                .map_err(|_| ExchangeError::new("fill orderId requires UTF-8"))?;
             if !self.instance.current_order_ids().iter().any(|i| i == &id)
-                || !data.get("symbol")?.strict_equals(&Js::str(&self.instance.options().borrow().symbol)) {
+                || !data
+                    .get("symbol")?
+                    .strict_equals(&Js::str(&self.instance.options().borrow().symbol))
+            {
                 return Ok(());
             }
             let amount = data.get("amount")?.to_number()?;
@@ -1140,4 +1149,3 @@ fn prime_future<T: 'static>(mut future: ExchangeFuture<'static, T>) -> ExchangeF
         std::task::Poll::Pending => future,
     }
 }
-

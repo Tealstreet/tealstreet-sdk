@@ -280,7 +280,10 @@ impl LifecycleHost for Host {
                         "warning",
                         &[
                             safe_cex_exchange::js_runtime::value::Js::str(message),
-                            safe_cex_exchange::js_runtime::value::Js::object(vec![("forceToast", safe_cex_exchange::js_runtime::value::Js::Bool(true))]),
+                            safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                                "forceToast",
+                                safe_cex_exchange::js_runtime::value::Js::Bool(true),
+                            )]),
                         ],
                     );
                 },

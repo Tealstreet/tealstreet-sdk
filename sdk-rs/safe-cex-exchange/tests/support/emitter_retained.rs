@@ -223,3 +223,62 @@ fn native_error_code_writes_override_only_code_metadata() {
         f64::INFINITY
     );
 }
+
+#[test]
+fn native_emitter_once_reentry_and_throw_order_retain_payload() {
+    let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
+    let base = assembled.base.clone();
+    let shared = Js::object(vec![("present", Js::Undefined)]);
+    let trace = Rc::new(RefCell::new(Vec::new()));
+    let weak = Rc::downgrade(&base);
+    let sink = trace.clone();
+    base.once(
+        "reentry",
+        Rc::new(move |_, data| {
+            sink.borrow_mut().push(data.clone());
+            weak.upgrade().unwrap().emit("reentry", data.clone())
+        }),
+    );
+    base.emit("reentry", shared.clone()).unwrap();
+    base.emit("reentry", shared.clone()).unwrap();
+    assert_eq!(trace.borrow().len(), 1);
+    assert!(trace.borrow()[0].same_reference(&shared));
+    let marker = ExchangeError::new("listener sentinel");
+    let cause = marker.clone();
+    base.once("throw", Rc::new(move |_, _| Err(cause.clone())));
+    let tail = trace.clone();
+    base.on(
+        "throw",
+        Rc::new(move |_, data| {
+            tail.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    assert_eq!(base.emit("throw", shared.clone()).unwrap_err(), marker);
+    assert_eq!(
+        trace.borrow().len(),
+        1,
+        "EMITTER-RETAINED stop on first throw"
+    );
+    base.emit("throw", shared.clone()).unwrap();
+    assert_eq!(
+        trace.borrow().len(),
+        2,
+        "EMITTER-RETAINED once removed before throw"
+    );
+    assert!(trace.borrow()[1].same_reference(&shared));
+    let missing = Rc::new(RefCell::new(Vec::new()));
+    let sink = missing.clone();
+    base.on(
+        "missing",
+        Rc::new(move |_, data| {
+            sink.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    base.emit_args("missing", &[]).unwrap();
+    assert!(
+        missing.borrow()[0].is_undefined(),
+        "EMITTER-RETAINED missing scalar is undefined"
+    );
+}

@@ -91,11 +91,16 @@ fn command_failure(
     if let Some(id) = &req_id {
         log["reqId"] = json!(id);
     }
-    exchange.base().emit("exec-log", safe_cex_exchange::js_runtime::value::from_json(&log))?;
+    exchange.base().emit(
+        "exec-log",
+        safe_cex_exchange::js_runtime::value::from_json(&log),
+    )?;
     if let Some(id) = req_id {
         exchange.base().emit(
             "exec-result",
-            safe_cex_exchange::js_runtime::value::from_json(&json!({"reqId":id,"handled":handled,"success":false,"error":message})),
+            safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"reqId":id,"handled":handled,"success":false,"error":message}),
+            ),
         )?;
     }
     Ok(())
