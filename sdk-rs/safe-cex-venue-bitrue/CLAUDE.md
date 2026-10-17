@@ -98,8 +98,8 @@ source distinction instead of adding rounding.
 Balance parsing takes a borrow of the production Store balance for the falsy
 input fallback. It uses shared JsObjectMap insertion order and math_max, and
 coerces only fields explicitly Number-coerced by source. Nonnumeric upnl is a
-CHOSEN shared-model refusal, after the entire source reduction (including
-replacements and later coercion failures). The witness inspects native fields,
+maintainer-approved per-row refusal: warn with currency, Balance.upnl and its
+original value, and preserve valid rows even when the rejected row repeats a coin. The witness inspects native fields,
 not serialized Balance bytes; every maximum candidate can independently win.
 
 Cardinality is asserted at source totals/subcorpora, per-case arrays, independent

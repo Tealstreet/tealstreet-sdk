@@ -470,10 +470,13 @@ impl ApexOmniExchange {
         let reduce_only = match raw_reduce_only {
             J::Bool(value) => *value,
             value if !truthy(value) => false,
-            _ => {
-                return Err(failure(
-                    "shared typed Order refuses non-boolean reduceOnly".into(),
-                ));
+            value => {
+                self.host.console(
+                    "warn",
+                    &format!("[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got {value:?}"),
+                    None,
+                )?;
+                return Ok(Vec::new());
             }
         };
         let order = Order {

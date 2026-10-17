@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "224 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "226 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -2951,6 +2951,43 @@
       "producer_sha256": "ddd323bd834a008d7baa700bb3404901644a96ea74def6564d12f302a8762f1f",
       "classification": "no-owned-latch",
       "reason": "The rate-limit request interceptor returns an eager runtime-owned Promise. Its future owns config and client state, awaits the existing throttle, then returns config to the interceptor chain. No RefCell borrow spans the wait; window capacity is recorded only at successful dequeue. Dropping the JS waiter delegates to PromiseWait cleanup while the source Promise remains runtime-owned."
+    },
+    {
+      "owner": "src/throttle.rs::ThrottleManager < T >::call",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "48daf09e9220d855256146620632c77e84404de838d9d12ed030a22a2df3d2db",
+      "classification": "guarded",
+      "reason": "Relocated existing keyed throttle: TimerGuard is constructed before spawn and drops only its matching entry/task when a timer future is discarded; callbacks retain Weak manager references. Existing source orphan-tail behavior and clear/Drop cancellation are unchanged.",
+      "witnesses": [
+        "tests/keyed_throttle.rs::discarded_timer_tasks_release_the_key_without_firing_a_tail"
+      ],
+      "source_dependencies": [
+        {
+          "file": "src/throttle.rs",
+          "sha256": "a80784314e8d780e863755f7a40dda5960af32ec519845a6ed23434c05d2c23c"
+        }
+      ],
+      "guards": [
+        {
+          "type": "TimerGuard",
+          "file": "src/throttle.rs"
+        }
+      ]
+    },
+    {
+      "owner": "src/throttle.rs::symbol_metadata_throttler",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "fc9533e3f3ed154f8c5b8f4ea7e585e1408a0b0a3f4d1a71be8c9e77d8ec6b93",
+      "classification": "no-owned-latch",
+      "reason": "Relocated existing worker metadata callback spawns and awaits the venue operation without installing a waiter or reservation. Callers acknowledge immediately; detached errors are reported visibly through the exchange runtime."
     }
   ]
 }

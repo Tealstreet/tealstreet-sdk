@@ -55,6 +55,7 @@ fn ticker_notification_retains_subscriber_identity_after_committed_patch() {
             &store,
             &serde_json::json!({"data":{"symbol":"BTCUSDT","lastPrice":last}}),
             is_spot,
+            false,
         )
         .unwrap_err();
         let TickerEventError::Store(StoreMutationError::Notification(notification)) = error else {
@@ -115,7 +116,7 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
     );
     assert_eq!(
         fixtures["cases"].as_array().unwrap().len(),
-        1458,
+        1944,
         "TICKER-CARDINALITY source total"
     );
     let mut comparisons = 0;
@@ -142,7 +143,12 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
                 Ok(())
             }),
         );
-        let result = handle_tickers_event(&store, &case["frame"], case["variant"] == "bybitspot");
+        let result = handle_tickers_event(
+            &store,
+            &case["frame"],
+            case["variant"] == "bybitspot",
+            case["variant"] == "bybit" && case["category"] == "inverse",
+        );
         let symbol = case["frame"]["data"]["symbol"].as_str();
         if matches!(symbol, Some("constructor" | "__proto__" | "toString")) {
             // Source lookup reaches Object.prototype, then tries to parse the
@@ -217,6 +223,6 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
         retained_nonfinite > 0,
         "source nonfinite overwrite witness disappeared"
     );
-    assert_eq!(inherited_key_differences, 9);
-    assert_eq!(comparisons, 16038, "TICKER-CARDINALITY native comparisons");
+    assert_eq!(inherited_key_differences, 12);
+    assert_eq!(comparisons, 21384, "TICKER-CARDINALITY native comparisons");
 }
