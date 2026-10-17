@@ -1043,3 +1043,29 @@ The shared remote ref advanced during fetch; a standalone fetch retry exited 0
 and the next merge reported already up to date. The same standalone scoped
 byte-preservation command against `d879bbb561ae4a29b05b07a32b856ddf663596a8`
 again exited 0 after this merge. Native and mutation gates remain applicable.
+
+## Visible strict placement amount refusal (2026-10-18)
+
+Overseer shared decision3 keeps nonfinite order amounts outside the admitted
+placement-input domain. The maintained formatCreateOrder still produces quantity
+"NaN", an empty positive-infinity payload list, or quantity"-Infinity"; those
+actual-source observations remain in the existing oracle's optional
+nativePlacementNumbers mode, without changing original corpus inputs or floors.
+
+Previously the constructed public typed entry projected the amount to JSON null
+and returned a generic decode Error with no field report. The native body
+BitunixVenue::validate_placement_input, invoked by the existing typed capability
+hook after caller-ID preflight, now emits the amount/original value and returns
+TypeError before hydration or HTTP. Six single/batch cases cover all3 nonfinite
+values without a caller-ID confound. Existing caller-ID rejection priority stays
+intact. No carrier widening or zero substitution occurs.
+
+The final regression compiles/fails against the old behavior; a control admitting
+NaN through the final guard also compiles/fails at the field-error assertion.
+Exact production source bytes are restored. Final constructed identity/dispatch7
+tests pass, alongside the earlier9 unchanged source/orchestration tests. Required
+all-feature cancellation7/override8/binding25, strict native/Wasm all-target
+Clippy, formatting/diff, parity7459/16613 and extraction0 pass. Logs
+/tmp/bitunix-visible-{amount-control-red,amount-fixed,final-native,
+final-inventories,final-native-clippy,final-wasm-clippy,final-parity,
+final-extract}.log. This accepted input residual is recorded in known-residuals.md.

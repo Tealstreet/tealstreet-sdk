@@ -968,3 +968,84 @@ fn production_lighter_helpers_read_only_sparse_source_fields() {
     }
     assert_eq!(actual, source.as_array().unwrap().clone());
 }
+
+#[test]
+fn transaction_client_preserves_source_nullish_and_unknown_enum_defaults() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/signer-parameters-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained TransactionClient parameter defaults");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 31);
+    let w = World::new();
+    let init = w
+        .realm
+        .global("initWasm")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    w.settle(init).unwrap();
+    let crypto = w
+        .realm
+        .global("getCryptoApi")
+        .unwrap()
+        .call(Js::Undefined, vec![])
+        .unwrap();
+    let client = w.realm.global("TransactionClient").unwrap().call(Js::Undefined,vec![Js::object(vec![
+        ("chainId",Js::Number(304.)),("accountIndex",big(42)),("apiKeyIndex",Js::Number(3.)),
+        ("privateKey",Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+        ("httpClient",w.client.clone()),("crypto",crypto),
+    ])]).unwrap();
+    w.reply(json!({"code":200,"nonce":7}));
+    let mut actual = vec![];
+    for case in cases {
+        let params = Js::object(vec![
+            ("orderId", big(1)),
+            ("marketId", Js::Number(1.)),
+            ("isBuy", Js::Bool(true)),
+            ("price", big(100)),
+            ("amount", big(1)),
+        ]);
+        params
+            .set(case["field"].as_str().unwrap(), from_json(&case["value"]))
+            .unwrap();
+        let result = w.settle(
+            client
+                .call_method("getCreateOrderTransaction", vec![params])
+                .unwrap(),
+        );
+        let observation = match result {
+            Ok(tx) => {
+                assert!(!tx.get("signature").unwrap().as_str().unwrap().is_empty());
+                let details = tx.get("orderDetails").unwrap();
+                let text = |value: Js| String::from_utf16(&value.to_js_string().unwrap()).unwrap();
+                json!({"data":text(tx.get("data").unwrap()),"expiredAt":text(tx.get("expiredAt").unwrap()),
+                    "orderTypeValue":text(details.get("orderTypeValue").unwrap()),"timeInForceValue":text(details.get("timeInForceValue").unwrap()),
+                    "triggerPrice":text(details.get("triggerPrice").unwrap()),"orderExpiry":text(details.get("orderExpiry").unwrap())})
+            }
+            Err(error) => json!({"error":error.message()}),
+        };
+        actual.push(observation);
+    }
+    let sent = w.sent();
+    assert_eq!(sent.len(), 1, "source nonce cache serves later builds");
+    assert_eq!(sent[0]["url"], "/api/v1/nextNonce");
+    assert_eq!(sent[0]["params"]["account_index"], "42");
+    assert_eq!(sent[0]["params"]["api_key_index"], 3.);
+    assert_eq!(
+        actual,
+        cases
+            .iter()
+            .map(|case| case["expected"].clone())
+            .collect::<Vec<_>>()
+    );
+}
