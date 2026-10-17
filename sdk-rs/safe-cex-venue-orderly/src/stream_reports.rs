@@ -1,6 +1,12 @@
 //! Source stream/report bodies over original runtime values, mappers and stores.
 use crate::ws_controls::{Result, Value, WsHost};
 pub trait ReportHost: WsHost {
+    fn ticker_patch_refusal(
+        &self,
+        symbol: &[u16],
+        fields: &[(&str, Value<Self>)],
+    ) -> Result<Self, Option<String>>;
+    fn ticker_refusal_error(&self, messages: Vec<String>) -> Self::Error;
     fn nullish(&self, value: &Self::Value) -> bool;
     fn undefined(&self) -> Value<Self>;
     fn text_eq(&self, value: &Self::Value, expected: &str) -> bool;
@@ -70,6 +76,7 @@ fn public_stream<H: ReportHost>(
     data: Value<H>,
     mode: u8,
 ) -> Result<H, ()> {
+    let mut refusals = Vec::new();
     h.for_each(data, |row| {
         if !h.starts_with(get(h, &row, "symbol")?, "PERP_")? {
             return Ok(());
@@ -100,11 +107,20 @@ fn public_stream<H: ReportHost>(
                     ),
                 ],
             };
+            if let Some(message) = h.ticker_patch_refusal(&symbol, &fields)? {
+                refusals.push(message);
+                return Ok(());
+            }
             let patch = h.object(fields)?;
             h.call(function, Some(store), vec![ticker, patch])?;
         }
         Ok(())
-    })
+    })?;
+    if refusals.is_empty() {
+        Ok(())
+    } else {
+        Err(h.ticker_refusal_error(refusals))
+    }
 }
 pub fn tickers<H: ReportHost>(h: &H, receiver: Value<H>, data: Value<H>) -> Result<H, ()> {
     public_stream(h, receiver, data, 0)

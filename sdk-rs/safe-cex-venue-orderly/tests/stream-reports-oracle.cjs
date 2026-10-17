@@ -5,7 +5,7 @@ function source(file){const s=fs.readFileSync(path.join(src,file),'utf8');hashes
 const asts={public:source('exchanges/orderly/orderly.ws-public.ts'),private:source('exchanges/orderly/orderly.ws-private.ts')};
 function evaluate(code,bindings={}){const r=ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS},reportDiagnostics:true});assert.equal((r.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error).length,0);return vm.runInNewContext(r.outputText+';make',{exports:{},...bindings});}
 function constant(ast,name,bindings){const d=ast.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).find(d=>d.name.getText(ast)===name);assert.ok(d);return evaluate('function make(){return ('+d.initializer.getText(ast)+')}',bindings)();}
-const lodash=name=>require(path.join(root,'node_modules/lodash',name));
+const lodash=name=>require('lodash/'+name);
 const v=constant(source('utils/get-key.ts'),'v',{s:lodash('memoize')(lodash('snakeCase')),c:lodash('memoize')(lodash('camelCase'))});
 const normalizeSymbol=constant(source('exchanges/orderly/orderly.utils.ts'),'normalizeSymbol',{memoize:lodash('memoize')});
 const types=source('types.ts');const enums={};for(const name of ['OrderStatus','OrderSide']){const d=types.statements.find(s=>ts.isEnumDeclaration(s)&&s.name.text===name);assert.ok(d);enums[name]=evaluate(d.getText(types)+';function make(){return '+name+';}')();}
