@@ -70,10 +70,11 @@ allowlist are not user-visible and are exempt.
 `cli-release.yml` derives brand, binary name and repo from the tag prefix and
 skips the npm and Homebrew steps for anything but tealstreet; the Windows smoke
 job skips disrupt tags because its install path is npm. Both brands share
-`package.json`'s version. The `TEALSTREET_CLI_RELEASE_TOKEN` secret must be
-able to create releases in `DisruptTrade/cli` — it is the owner's PAT and the
-owner is an org admin there, but that was not exercised until the first
-disrupt tag.
+`package.json`'s version. The release step publishes with
+`DISRUPT_CLI_RELEASE_TOKEN` for disrupt and `TEALSTREET_CLI_RELEASE_TOKEN`
+for tealstreet: the latter is scoped to the Tealstreet org and 403s on
+`DisruptTrade/cli`, which is how v0.10.17 ended up published by hand from a
+local `build.sh disrupt` of the tagged commit.
 
 ## Runtime
 
