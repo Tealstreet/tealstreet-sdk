@@ -11,6 +11,12 @@ time from `ExchangeRuntime::now_ms`. The native registry regression
 `native_host_mexc_clock` applies a 90-second sync offset and checks both signed
 wire timestamps and HMACs over real loopback HTTP/WebSocket transports.
 
+REST ticker funding timestamps use the required host local-wall-time converter,
+just like other MEXC readers. A constructed REST regression compares the actual
+TypeScript normalizer under America/Los_Angeles for offset-less dates, explicit
+UTC, date-only and numeric times. Only offset-less date-times invoke conversion;
+UTC/date-only/numeric inputs retain their source bypass behavior.
+
 Regular-order `externalOid` generation uses the shared crypto `uuid_with_entropy`
 helper with runtime entropy: generate 21 nanoid characters, then strip `-` and
 `_`, as `utils/uuid.ts` does. The runtime's generic `unique_id` contract does not

@@ -1190,7 +1190,7 @@ impl MexcExchange {
                 for market in self.base.store.markets().iter() {
                     if let Some(raw) = rows.get(&market.id) {
                         tickers.push(
-                            normalize_ticker(raw, market, &|value| value)
+                            normalize_ticker(raw, market, self.local_to_utc.as_ref())
                                 .map_err(|error| error.message.to_string())?,
                         );
                     }
