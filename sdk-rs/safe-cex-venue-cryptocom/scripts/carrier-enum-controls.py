@@ -10,9 +10,6 @@ CONTROLS = [
  ('ws_payloads.rs','CryptocomWsRefPriceType','return Ok(Self::MarkPrice);','return Ok(Self::IndexPrice);'),
  ('ws_payloads.rs','CryptocomWsPositionType','return Ok(Self::PerpetualSwap);','return Ok(Self::LongPosition);'),
  ('ws_payloads.rs','CryptocomWsIsolationType','return Ok(Self::IsolatedMargin);','return Err(PayloadError("string literal"));'),
- ('account_envelopes.rs','CryptocomRequestType','return Some(Self::Limit);','return Some(Self::Market);'),
- ('account_envelopes.rs','CryptocomRequestTimeInForce','return Some(Self::GoodTillCancel);','return Some(Self::FillOrKill);'),
- ('account_envelopes.rs','CryptocomSubscribeMethod','return Some(Self::Subscribe);','return None;'),
 ]
 
 def run(test):

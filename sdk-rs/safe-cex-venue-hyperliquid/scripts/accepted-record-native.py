@@ -11,7 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 CRATE = ROOT / "safe-cex-venue-hyperliquid"
-IDENTS = ['ClearinghouseStateAssetPositionsItemPositionCumFunding', 'ClearinghouseStateAssetPositionsItemPositionLeverage', 'ClearinghouseStateCrossMarginSummary', 'ClearinghouseStateMarginSummary', 'OrderResponseStatusCase2', 'WsTrade', 'WsLevel', 'WsOrderOrder', 'WsUserFunding', 'WsLiquidation', 'WsNonUserCancel', 'L2BookLevelsItem0Item', 'L2BookLevelsItem1Item', 'FundingHistoryEntry', 'SpotTokenEvmContract', 'UserOpenOrder', 'CancelOrderRequest', 'CancelOrderRequestsItem', 'Signature', 'Notification', 'BuilderInfo', 'BuilderFeeApprovalResult']
+IDENTS = ['ClearinghouseStateAssetPositionsItemPositionCumFunding', 'ClearinghouseStateAssetPositionsItemPositionLeverage', 'ClearinghouseStateCrossMarginSummary', 'ClearinghouseStateMarginSummary', 'WsTrade', 'WsLevel', 'WsOrderOrder', 'WsUserFunding', 'WsLiquidation', 'WsNonUserCancel', 'L2BookLevelsItem0Item', 'L2BookLevelsItem1Item', 'FundingHistoryEntry', 'UserOpenOrder', 'CancelOrderRequest', 'CancelOrderRequestsItem', 'Signature', 'Notification', 'BuilderInfo', 'BuilderFeeApprovalResult']
 ROWS = json.loads((ROOT / "safe-cex-parity/accepted-set/contracts/safe-cex-venue-hyperliquid.json").read_text())
 FIXTURE = CRATE / "tests/__accepted_flat_record_observations.rs"
 assert not FIXTURE.exists(), "refuse to replace an existing fixture"

@@ -1,10 +1,9 @@
 use indexmap::IndexMap;
 use safe_cex_venue_coinbase::{
     exchange_lifecycle::*,
-    portfolios_balances::{Portfolio, PortfolioFailure, PortfolioThrown},
+    portfolios_balances::{Portfolio, PortfolioFailure, PortfolioState, PortfolioThrown},
     starbase_auth::CoinbaseStarbasePromise as Promise,
     starbase_public_frames::CoinbaseStarbaseFrameValue as Frame,
-    types::ListPortfoliosResponsePortfoliosItem,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -44,11 +43,13 @@ fn frame(v: Value) -> Frame {
     Frame::from_json(&v)
 }
 fn portfolio(id: &str) -> Portfolio {
-    Rc::new(RefCell::new(ListPortfoliosResponsePortfoliosItem {
-        name: "named".into(),
+    Rc::new(RefCell::new(PortfolioState {
         uuid: id.into(),
         r#type: "SPOT".into(),
-        deleted: false,
+        metadata: serde_json::Map::from_iter([
+            ("name".into(), json!("named")),
+            ("deleted".into(), json!(false)),
+        ]),
     }))
 }
 impl Host {

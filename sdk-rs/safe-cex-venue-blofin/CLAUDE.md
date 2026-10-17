@@ -1,5 +1,9 @@
 # BloFin Rust venue
 
+The public connection-failure notice emits two listener arguments: the notice
+text and `{forceToast: true}`. `tests/native_warning.rs` drives the real native
+venue and its twenty-second timer, checking the argument shape and one-shot notice.
+
 The maintained behavioral source is
 [`blofin/CLAUDE.md`](../../packages/safe-cex/src/exchanges/blofin/CLAUDE.md)
 and its seven TypeScript files. `src/types.rs` is the first slice: constants,

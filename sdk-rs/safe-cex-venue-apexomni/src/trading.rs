@@ -227,7 +227,7 @@ impl ApexOmniExchange {
             Some(OrderType::StopLoss | OrderType::TakeProfit)
         ) {
             present(trigger)
-                .or(present(price))
+                .or(price)
                 .map_or_else(|| string("null"), |v| string(js_number_string(v)))
         } else {
             J::Undefined
@@ -292,13 +292,14 @@ impl ApexOmniExchange {
             0.
         };
         let lot_size = adjust((amount - rest) / lots, p_amount);
-        if !lots.is_finite() || lots < 0. {
-            return Err(failure(
-                "typed lot iteration requires a finite nonnegative count".into(),
-            ));
-        }
+        // lodash times returns [] for counts outside 1..=MAX_SAFE_INTEGER.
+        let count = if (1. ..=9_007_199_254_740_991.).contains(&lots) {
+            lots as usize
+        } else {
+            0
+        };
         let mut payloads = Vec::new();
-        for _ in 0..lots as usize {
+        for _ in 0..count {
             let mut payload = req.clone();
             let J::Object(fields) = &mut payload else {
                 unreachable!()
@@ -316,7 +317,7 @@ impl ApexOmniExchange {
                 string(js_number_string(rest));
             payloads.push(payload);
         }
-        let mut ids = Vec::new();
+        let mut responses = Vec::new();
         for (index, mut payload) in payloads.into_iter().enumerate() {
             let config = self
                 .base
@@ -438,19 +439,23 @@ impl ApexOmniExchange {
                     unlimited: true,
                 })
                 .await?;
-            if !matches!(response, J::Undefined) {
-                let id = get(get(&response, "data"), "id");
-                if let J::String(id) = id {
-                    ids.push(id.clone());
-                } else {
-                    return Err(failure(
-                        "typed order ID refuses a non-string response field".into(),
-                    ));
-                }
-            }
+            responses.push(response);
         }
+        // The source maps IDs only after mapSeries finishes all submissions.
+        let ids = responses
+            .iter()
+            .filter(|response| !matches!(response, J::Undefined))
+            .map(|response| crate::data::property(get(response, "data"), "id").cloned())
+            .collect::<Result<Vec<_>, _>>()?;
         services.throttle_fetch_orders()?;
-        Ok(ids)
+        ids.into_iter()
+            .map(|id| match id {
+                J::String(id) => Ok(id),
+                _ => Err(failure(
+                    "typed order ID refuses a non-string response field".into(),
+                )),
+            })
+            .collect()
     }
     // ts: ApexOmniExchange.updateOrder
     pub async fn update_order(&self, opts: &UpdateOrderOpts) -> Result<Vec<String>, ExchangeError> {

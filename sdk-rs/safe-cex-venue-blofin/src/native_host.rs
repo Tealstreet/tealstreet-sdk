@@ -812,9 +812,9 @@ impl PublicStreamHost for PublicHost {
         self.base()?.log(message, "warning")
     }
     fn emit_warning(&self, message: &str, force_toast: bool) -> Result<(), ExchangeError> {
-        self.base()?.emit(
+        self.base()?.emit_args(
             "warning",
-            json!({"message": message, "forceToast": force_toast}),
+            &[json!(message), json!({"forceToast": force_toast})],
         )
     }
 }

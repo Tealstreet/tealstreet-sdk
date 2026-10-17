@@ -261,6 +261,13 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.mapPosition
     pub fn map_position(&self, row: &J) -> Result<Option<Position>, ExchangeError> {
+        self.map_position_with_log(row, |message| self.base.log(message, "warning"))
+    }
+    pub(crate) fn map_position_with_log(
+        &self,
+        row: &J,
+        log: impl FnOnce(&str) -> Result<(), ExchangeError>,
+    ) -> Result<Option<Position>, ExchangeError> {
         let entry = if truthy(data::v(row, "avgPrice")?) {
             data::v(row, "avgPrice")?.clone()
         } else {
@@ -276,10 +283,7 @@ impl ApexOmniExchange {
         let unrealized_pnl = float(&or_zero(data::v(row, "unrealisedPnl")?))?;
         let symbol = text(get(row, "symbol"))?;
         let Some(market) = self.base.store.markets_by_id().get(&symbol).cloned() else {
-            self.base.log(
-                &format!("Market not found for position symbol: {symbol}"),
-                "warning",
-            )?;
+            log(&format!("Market not found for position symbol: {symbol}"))?;
             return Ok(None);
         };
         let id = safe_cex_types::model_utils::create_position_id(
