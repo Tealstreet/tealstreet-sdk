@@ -1000,7 +1000,8 @@ fn mixed_market_asset_refusals_keep_fresh_siblings() {
                 .map_or_else(|| "undefined".into(), Value::to_string);
             let reports = errors.borrow();
             assert_eq!(reports.len(), 1, "one visible refusal per bad row");
-            let report = reports[0].as_str().unwrap();
+            let report = String::from_utf16(reports[0].as_str().unwrap())
+                .expect("market refusal is a scalar Unicode message");
             assert!(
                 report.contains("BAD-USDT") && report.contains(&format!("{field}={expected}")),
                 "{report}"
