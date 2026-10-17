@@ -10,7 +10,7 @@ use safe_cex_transport::{
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
-use support::{Harness, harness_with_provider};
+use support::{Extras, Harness, harness_with};
 
 fn accounts() -> Value {
     json!({"result": "success", "accounts": {"flex": {
@@ -89,10 +89,13 @@ fn provider(adapter: Option<Arc<Adapter>>) -> Arc<Provider> {
 }
 
 fn futures(provider: Arc<Provider>, options: Value) -> Harness {
-    harness_with_provider(
+    harness_with(
         ExchangeName::Kraken,
         serde_json::from_value(options).unwrap(),
-        Some(provider),
+        Extras {
+            provider: Some(provider),
+            ..Extras::default()
+        },
         |http| http.ok("GET", "/v3/accounts", accounts()),
     )
 }
@@ -134,10 +137,13 @@ fn real_kraken_futures_private_rest_leaves_through_the_provider_adapter() {
 fn real_kraken_factory_consults_provider_routing_for_both_venues() {
     for name in [ExchangeName::Kraken, ExchangeName::Krakenspot] {
         let provider = provider(None);
-        let _h = harness_with_provider(
+        let _h = harness_with(
             name.clone(),
             serde_json::from_value(keyed()).unwrap(),
-            Some(provider.clone()),
+            Extras {
+                provider: Some(provider.clone()),
+                ..Extras::default()
+            },
             |_| {},
         );
         let routes = provider.routes.lock().unwrap();
@@ -160,10 +166,13 @@ fn real_kraken_without_an_adapter_keeps_the_terminal_host() {
 #[test]
 fn real_kraken_spot_and_public_data_only_never_select_an_adapter() {
     let spot = provider(None);
-    harness_with_provider(
+    harness_with(
         ExchangeName::Krakenspot,
         serde_json::from_value(keyed()).unwrap(),
-        Some(spot.clone()),
+        Extras {
+            provider: Some(spot.clone()),
+            ..Extras::default()
+        },
         |_| {},
     );
     assert!(spot.selections.lock().unwrap().is_empty());
