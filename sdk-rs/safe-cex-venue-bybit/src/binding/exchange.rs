@@ -489,6 +489,9 @@ impl Exchange for BybitExchange {
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
         self.invoke("fetchMarkets", vec![])
     }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        self.invoke("fetchOHLCV", args!(js(&options)))
+    }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
         self.invoke("fetchTickers", vec![])
     }

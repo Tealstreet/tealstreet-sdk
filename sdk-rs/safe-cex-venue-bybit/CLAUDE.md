@@ -644,6 +644,13 @@ Spot retains its existing spot-only body. Retirement consumes only `id` and
 without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
 four production constructors and the real retained receiver/HTTP client path.
 
+The Exchange candle-read override reaches the concrete receiver for all four bound
+families. `binding/members/ohlcv.rs` preserves primary validation/errors and the
+dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
+`candle_read_binding` supplies four compiled master-fail controls and six HTTP
+witnesses. `private_frame_binding` sends order/fill/position/balance-related frames
+through each family's real private protocol and Store bridge.
+
 The unused `inverse_socket_bodies` adapter and its fake realm/oracle are removed.
 Inverse socket manifest rows point to the live `ws_private` and `ws_public`
 bodies. The real inverse socket witness replays a cumulative fill frame and then
