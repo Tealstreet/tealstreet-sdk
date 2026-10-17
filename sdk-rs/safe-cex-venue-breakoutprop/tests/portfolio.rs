@@ -361,19 +361,24 @@ fn inherited_closed_output_boundary() {
                 expected,
                 "inherited_formatOpenPositions_{key}"
             );
-            assert_eq!(
-                format_balance(&input, &store, &|ms| ms, &|_| Ok(()))
-                    .unwrap_err()
-                    .message,
-                expected,
-                "inherited_formatBalance_{key}"
+            assert!(
+                format_balance(&input, &store, &|ms| ms, &|_| Ok(())).is_ok(),
+                "inherited side is unread by balance"
+            );
+            assert!(
+                format_positions(&input, &store, Some(&[]), &|ms| ms, &|_| Ok(()))
+                    .unwrap()
+                    .is_empty(),
+                "unselected inherited side never crosses the public Position boundary"
             );
             assert_eq!(
-                format_positions(&input, &store, None, &|ms| ms, &|_| Ok(()))
-                    .unwrap_err()
-                    .message,
+                format_positions(&input, &store, Some(&["BTCUSD".into()]), &|ms| ms, &|_| Ok(
+                    ()
+                ))
+                .unwrap_err()
+                .message,
                 expected,
-                "inherited_formatPositions_{key}"
+                "inherited selected position remains an explicit output refusal"
             );
         } else {
             assert_eq!(case["methodsSucceed"], json!(["formatOrders"]));
@@ -435,7 +440,7 @@ fn source_only_fields_and_unread_collections_match_typescript() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.as_array().unwrap().len(), 68);
+    assert_eq!(cases.as_array().unwrap().len(), 82);
     for case in cases.as_array().unwrap() {
         let input: JsNumberInput = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
         let store = DefaultStore::new();
