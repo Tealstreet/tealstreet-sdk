@@ -208,7 +208,8 @@ impl SocketHost {
             .map(|order| {
                 let order = order.borrow();
                 let mut fields = order.fields.clone();
-                fields.info = Some(to_json(&to_js(&order.info)).expect("parsed private frame"));
+                fields.info =
+                    (Some(to_json(&to_js(&order.info)).expect("parsed private frame"))).into();
                 fields
             })
             .collect()

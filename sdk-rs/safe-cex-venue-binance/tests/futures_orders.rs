@@ -164,9 +164,9 @@ fn run_cases(precision_supplement: bool) {
             Some("wrong-symbol") => position.symbol = "OTHER".into(),
             Some("wrong-side") => {
                 position.side = if opts.side == OrderSide::Buy {
-                    PositionSide::Long
+                    safe_cex_types::ModelField::Value(PositionSide::Long)
                 } else {
-                    PositionSide::Short
+                    safe_cex_types::ModelField::Value(PositionSide::Short)
                 }
             }
             Some("zero") => position.contracts = 0.0,

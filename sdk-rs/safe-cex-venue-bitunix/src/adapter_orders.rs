@@ -10,7 +10,8 @@ use safe_cex_num::{
     js_number_string, js_string, js_truthy,
 };
 use safe_cex_types::{
-    Order, OrderStatus, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position, UpdateOrderOpts,
+    Order, OrderStatus, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position,
+    PreparedOrderOpts, UpdateOrderOpts,
 };
 use serde_json::{Value, json};
 use std::{cell::RefCell, future::Future, rc::Rc};
@@ -83,7 +84,7 @@ impl BitunixVenue {
 impl crate::order_models::OrderModelHost for OrderFrame {
     type Error = Fault;
     fn caller_id(&mut self, options: &Value) -> Result<Option<String>, Fault> {
-        let opts: PlaceOrderOpts = from_value(options.clone())?;
+        let opts: PreparedOrderOpts = from_value(options.clone())?;
         Ok(self.venue.base.resolve_caller_client_order_id(&opts)?)
     }
     fn market(&mut self, symbol: &Value) -> Result<Option<Value>, Fault> {
@@ -288,13 +289,13 @@ struct PlaceFrame {
     venue: Rc<BitunixVenue>,
 }
 impl crate::order_placement::PlaceOrderHost for PlaceFrame {
-    type Options = PlaceOrderOpts;
+    type Options = PreparedOrderOpts;
     type Payloads = Vec<JsJsonValue>;
     type Positions = Vec<Position>;
     type Result = Vec<String>;
     type Message = String;
     type Error = ExchangeError;
-    fn resolve_caller(&mut self, options: &PlaceOrderOpts) -> Result<(), ExchangeError> {
+    fn resolve_caller(&mut self, options: &PreparedOrderOpts) -> Result<(), ExchangeError> {
         self.venue
             .base
             .resolve_caller_client_order_id(options)
@@ -302,11 +303,11 @@ impl crate::order_placement::PlaceOrderHost for PlaceFrame {
     }
     fn hydrate(
         &mut self,
-        options: &PlaceOrderOpts,
+        options: &PreparedOrderOpts,
     ) -> impl Future<Output = Result<(), ExchangeError>> {
         self.venue.hydrate(options.clone())
     }
-    fn format(&mut self, options: &PlaceOrderOpts) -> Result<Vec<JsJsonValue>, ExchangeError> {
+    fn format(&mut self, options: &PreparedOrderOpts) -> Result<Vec<JsJsonValue>, ExchangeError> {
         crate::order_models::format_create_order(&mut self.venue.order_frame(), &to_value(options)?)
             .map_err(|e| e.0)
     }
@@ -337,7 +338,7 @@ impl crate::order_placement::PlaceOrderHost for PlaceFrame {
         self.venue.runtime.console("warn", &utf8(&message)?);
         Ok(())
     }
-    fn symbol(&mut self, options: &PlaceOrderOpts) -> Result<Vec<u16>, ExchangeError> {
+    fn symbol(&mut self, options: &PreparedOrderOpts) -> Result<Vec<u16>, ExchangeError> {
         Ok(units(&options.symbol))
     }
     fn delete_position_id(&mut self, key: Vec<u16>) -> Result<(), ExchangeError> {
@@ -504,7 +505,7 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
     type Input = Vec<Order>;
     type Order = Order;
     type Body = JsJsonValue;
-    type Options = PlaceOrderOpts;
+    type Options = PreparedOrderOpts;
     type Error = ExchangeError;
     fn input(&mut self, input: &Vec<Order>) -> Result<Vec<Order>, ExchangeError> {
         Ok(input.clone())
@@ -527,7 +528,7 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
         )))
     }
     fn kind(&mut self, order: &Order) -> Result<Option<&'static str>, ExchangeError> {
-        Ok(Some(kind_name(order.r#type)))
+        Ok(order.r#type.into_value().map(kind_name))
     }
     fn symbol(&mut self, order: &Order) -> Result<Vec<u16>, ExchangeError> {
         Ok(units(&order.symbol))
@@ -584,32 +585,24 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
         parent: &Order,
         tp: Option<&Order>,
         sl: Option<&Order>,
-    ) -> Result<PlaceOrderOpts, ExchangeError> {
-        let mut opts = json!({
-            "symbol": parent.symbol,
-            "type": parent.r#type,
-            "side": parent.side,
-            "price": parent.price,
-            "amount": parent.amount,
-            "reduceOnly": parent.reduce_only,
-        });
-        if let Some(tp) = tp {
-            opts["takeProfit"] = json!(tp.price);
-            if let Some(trigger) = tp.tp_trigger_type {
-                opts["tpTriggerType"] = to_value(&trigger)?;
-            }
-        }
-        if let Some(sl) = sl {
-            opts["stopLoss"] = json!(sl.price);
-            if let Some(trigger) = sl.sl_trigger_type {
-                opts["slTriggerType"] = to_value(&trigger)?;
-            }
-        }
-        from_value(opts)
+    ) -> Result<PreparedOrderOpts, ExchangeError> {
+        Ok(PreparedOrderOpts {
+            symbol: parent.symbol.clone(),
+            r#type: parent.r#type.into_property(),
+            side: parent.side.into_property(),
+            price: parent.price.into_value(),
+            amount: parent.amount,
+            reduce_only: Some(parent.reduce_only),
+            take_profit: tp.and_then(|order| order.price.into_value()),
+            stop_loss: sl.and_then(|order| order.price.into_value()),
+            tp_trigger_type: tp.and_then(|order| order.tp_trigger_type.into_value()),
+            sl_trigger_type: sl.and_then(|order| order.sl_trigger_type.into_value()),
+            ..Default::default()
+        })
     }
     fn place(
         &mut self,
-        options: PlaceOrderOpts,
+        options: PreparedOrderOpts,
     ) -> impl Future<Output = Result<(), ExchangeError>> {
         let f = self.venue.place_order(options);
         async move { f.await.map(drop) }
@@ -620,7 +613,11 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
 }
 
 impl BitunixVenue {
-    pub(crate) fn hydrate(self: &Rc<Self>, opts: PlaceOrderOpts) -> ExchangeFuture<'static, ()> {
+    pub(crate) fn hydrate(
+        self: &Rc<Self>,
+        opts: impl Into<PreparedOrderOpts>,
+    ) -> ExchangeFuture<'static, ()> {
+        let opts = opts.into();
         let me = self.clone();
         Box::pin(async move {
             let positions = me.base.store.positions().to_vec();
@@ -665,8 +662,9 @@ impl BitunixVenue {
     /// placeOrder: the caller clientOrderId guard is the body's first statement.
     pub(crate) fn place_order(
         self: &Rc<Self>,
-        opts: PlaceOrderOpts,
+        opts: impl Into<PreparedOrderOpts>,
     ) -> ExchangeFuture<'static, Vec<String>> {
+        let opts = opts.into();
         let mut frame = PlaceFrame {
             venue: self.clone(),
         };

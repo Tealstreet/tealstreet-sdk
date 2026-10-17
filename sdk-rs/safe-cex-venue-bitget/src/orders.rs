@@ -84,7 +84,7 @@ struct PendingOrder {
 }
 fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
     Ok(Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: order
             .id
             .as_ref()
@@ -96,26 +96,26 @@ fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
                 )
             })?
             .into(),
-        parent_id: None,
-        status: typed(order.status, "status")?,
+        parent_id: (None).into(),
+        status: (typed(order.status, "status")?).into(),
         symbol: order.symbol,
-        r#type: typed(order.kind, "type")?,
-        side: typed(order.side, "side")?,
-        price: order.price,
+        r#type: (typed(order.kind, "type")?).into(),
+        side: (typed(order.side, "side")?).into(),
+        price: (order.price).into(),
         amount: order.amount,
         filled: order.filled,
         remaining: order.remaining,
         reduce_only: order.reduce_only,
-        close: None,
-        info: Some(info.clone()),
-        time_in_force: Some(typed(order.time_in_force, "timeInForce")?),
+        close: (None).into(),
+        info: (Some(info.clone())).into(),
+        time_in_force: (Some(typed(order.time_in_force, "timeInForce")?)).into(),
         last_update: order.last_update,
-        trigger_type: None,
-        tp_trigger_type: order.tp,
-        sl_trigger_type: order.sl,
-        take_profit: None,
-        stop_loss: None,
-        extra: order.remaining_native.map(|remaining_native| OrderExtra {
+        trigger_type: (None).into(),
+        tp_trigger_type: (order.tp).into(),
+        sl_trigger_type: (order.sl).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (order.remaining_native.map(|remaining_native| OrderExtra {
             remaining_native: Some(remaining_native),
             filled_in_placement_units: None,
             remaining_notional: None,
@@ -125,7 +125,8 @@ fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
             chaser_id: None,
             chaser_attempts: None,
             chaser_max_attempts: None,
-        }),
+        }))
+        .into(),
     })
 }
 

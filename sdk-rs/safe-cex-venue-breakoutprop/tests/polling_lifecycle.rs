@@ -1150,7 +1150,7 @@ fn final_place_native_numeric_payload_and_failures() {
     );
     assert_eq!(payload.stop_price, None);
     assert_eq!(payload.position_effect, "CLOSE");
-    assert_eq!(payload.side, "BUY");
+    assert_eq!(payload.side, Some("BUY"));
     assert_eq!(payload.tif, "GTC");
     assert_eq!(payload.order_code, "tealstreet-fixed");
     let mut stop = opts.clone();

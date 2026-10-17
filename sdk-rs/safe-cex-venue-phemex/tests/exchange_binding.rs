@@ -612,7 +612,7 @@ fn cancel_without_info_uses_cached_position_side_without_account_reads() {
     .unwrap();
     h.http.requests.borrow_mut().clear();
     let mut first = existing();
-    first.info = None;
+    first.info = safe_cex_types::ModelField::Absent;
     let mut second = first.clone();
     second.id = "second-order".into();
     h.drive(h.venue().cancel_orders(vec![first, second]))

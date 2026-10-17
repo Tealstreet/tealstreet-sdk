@@ -8,7 +8,7 @@ use safe_cex_exchange::{
 use safe_cex_num::{adjust, js_number_string, js_string};
 use safe_cex_transport::{RestAdapter, RestBody, RestRequest};
 use safe_cex_types::{
-    Order, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PlaceOrderOpts,
+    Order, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PreparedOrderOpts,
     UpdateOrderOpts, UpdateOrderOptsUpdate,
 };
 use serde_json::{Map, Value, json};
@@ -26,6 +26,39 @@ pub struct ExecutionOrder {
     pub opts: AsterDEXPlaceOrderOpts,
     #[serde(rename = "postOnly", default)]
     pub post_only: Option<bool>,
+}
+/// Venue-only fields decorate the shared prepared carrier; the public extended
+/// PlaceOrderOpts and its decoder retain their strict validation contract.
+#[derive(Clone)]
+pub struct PreparedExecutionOrder {
+    pub opts: PreparedExecutionOptions,
+    pub post_only: Option<bool>,
+}
+#[derive(Clone)]
+pub struct PreparedExecutionOptions {
+    pub order: PreparedOrderOpts,
+    pub stp_mode: Option<AsterDEXStpMode>,
+}
+impl From<&ExecutionOrder> for PreparedExecutionOrder {
+    fn from(input: &ExecutionOrder) -> Self {
+        Self {
+            opts: PreparedExecutionOptions {
+                order: (&input.opts.order).into(),
+                stp_mode: input.opts.stp_mode.clone(),
+            },
+            post_only: input.post_only,
+        }
+    }
+}
+impl From<ExecutionOrder> for PreparedExecutionOrder {
+    fn from(input: ExecutionOrder) -> Self {
+        Self::from(&input)
+    }
+}
+impl From<&PreparedExecutionOrder> for PreparedExecutionOrder {
+    fn from(input: &PreparedExecutionOrder) -> Self {
+        input.clone()
+    }
 }
 /// Insertion-ordered JS Map<string, number>, including nonfinite Numbers.
 #[derive(Default, Clone)]
@@ -178,9 +211,10 @@ impl OrderExecution {
     // ts: AsterDEXExchange.placeOrder
     pub fn place_order<'a>(
         &'a self,
-        input: &'a ExecutionOrder,
+        input: impl Into<PreparedExecutionOrder> + 'a,
         skip: bool,
     ) -> ExchangeFuture<'a, Vec<String>> {
+        let input = input.into();
         Box::pin(async move {
             let opts = &input.opts.order;
             self.owner.resolve_caller_client_order_id(opts)?;
@@ -196,7 +230,10 @@ impl OrderExecution {
             }
             let truthy = |v: Option<f64>| v.is_some_and(|v| v != 0.0 && !v.is_nan());
             if (truthy(opts.take_profit) || truthy(opts.stop_loss))
-                && matches!(opts.r#type, OrderType::Limit | OrderType::Market)
+                && matches!(
+                    opts.r#type.into_value(),
+                    Some(OrderType::Limit | OrderType::Market)
+                )
             {
                 let fmt = |v: Option<f64>| {
                     if truthy(v) {
@@ -239,13 +276,13 @@ impl OrderExecution {
                     if !truthy(trigger) {
                         continue;
                     }
-                    let new = PlaceOrderOpts {
+                    let new = PreparedOrderOpts {
                         symbol: opts.symbol.clone(),
-                        r#type: kind,
+                        r#type: kind.into(),
                         side: if opts.side == OrderSide::Buy {
-                            OrderSide::Sell
+                            OrderSide::Sell.into()
                         } else {
-                            OrderSide::Buy
+                            OrderSide::Buy.into()
                         },
                         amount: opts.amount,
                         price: None,
@@ -270,8 +307,8 @@ impl OrderExecution {
                         max_slippage_pct: None,
                         implied_volatility: None,
                     };
-                    orders.push(ExecutionOrder {
-                        opts: AsterDEXPlaceOrderOpts {
+                    orders.push(PreparedExecutionOrder {
+                        opts: PreparedExecutionOptions {
                             order: new,
                             stp_mode: None,
                         },
@@ -280,14 +317,19 @@ impl OrderExecution {
                 }
                 return self.place_orders(&orders, true).await;
             }
-            if !skip && matches!(opts.r#type, OrderType::StopLoss | OrderType::TakeProfit) {
+            if !skip
+                && matches!(
+                    opts.r#type.into_value(),
+                    Some(OrderType::StopLoss | OrderType::TakeProfit)
+                )
+            {
                 self.capacity(&opts.symbol, 1.0)?;
             }
             let result=async {
-            let kind=h::map_order_type(opts.r#type).map_err(ExchangeError::new)?;
+            let kind=opts.r#type.into_value().map(h::map_order_type).transpose().map_err(ExchangeError::new)?;
             let market=self.owner.store.markets_by_symbol().get(&opts.symbol).cloned().ok_or_else(||ExchangeError::new(format!("Market {} not found",opts.symbol)))?;
             let max=market.limits.amount.max;
-            if matches!(opts.r#type,OrderType::Limit|OrderType::Market)&&max.is_finite()&&max>0.0&&opts.amount>max {
+            if matches!(opts.r#type.into_value(), Some(OrderType::Limit|OrderType::Market))&&max.is_finite()&&max>0.0&&opts.amount>max {
                 let total=adjust(opts.amount,market.precision.amount);let max=adjust(max,market.precision.amount);
                 if total>max {
                     // Source loops forever when adjusted max is zero. Refuse that
@@ -304,23 +346,24 @@ impl OrderExecution {
                     return self.place_orders(&orders,skip).await;
                 }
             }
-            let mut params=json!({"symbol":opts.symbol,"side":if opts.side==OrderSide::Buy{"BUY"}else{"SELL"},"type":kind});
+            let mut params=json!({"symbol":opts.symbol,"side":if opts.side==OrderSide::Buy{"BUY"}else{"SELL"}});
+            if let Some(kind)=kind {params["type"]=json!(kind);}
             if let Some(mode)=&input.opts.stp_mode {params["stpMode"]=serde_json::to_value(mode).unwrap();}
             if self.version==AsterDEXAPIVersion::V3 {
                 if let Some(config)=builder::resolve_aster_builder_fee_config(&self.owner.options()).map_err(ExchangeError::new)? {
-                    if let Some(rate)=builder::get_aster_builder_fee_rate_for_order(opts,input.post_only,kind,&config){params["builder"]=json!(config.builder_address);params["feeRate"]=json!(rate);}
+                    if let Some(rate)=builder::get_aster_builder_fee_rate_for_order(opts,input.post_only,kind.unwrap_or(""),&config){params["builder"]=json!(config.builder_address);params["feeRate"]=json!(rate);}
                 }
             }
             let position_side=h::get_order_position_side(opts,self.owner.store.options().is_hedged);
             if position_side!="BOTH"{params["positionSide"]=json!(position_side);}
-            if opts.amount==0.0&&matches!(opts.r#type,OrderType::TakeProfit|OrderType::StopLoss){params["closePosition"]=json!("true");}else {
+            if opts.amount==0.0&&matches!(opts.r#type.into_value(), Some(OrderType::TakeProfit|OrderType::StopLoss)){params["closePosition"]=json!("true");}else {
                 params["quantity"]=json!(js_number_string(adjust(opts.amount,market.precision.amount)));
                 if opts.reduce_only==Some(true)&&!self.owner.store.options().is_hedged{params["reduceOnly"]=json!("true");}
             }
-            if matches!(kind,"LIMIT"|"STOP"|"TAKE_PROFIT") {params["timeInForce"]=json!(match opts.time_in_force.unwrap_or(OrderTimeInForce::GoodTillCancel){OrderTimeInForce::GoodTillCancel=>"GTC",OrderTimeInForce::ImmediateOrCancel=>"IOC",OrderTimeInForce::FillOrKill=>"FOK",OrderTimeInForce::PostOnly=>"GTX"});}
+            if matches!(kind,Some("LIMIT"|"STOP"|"TAKE_PROFIT")) {params["timeInForce"]=json!(match opts.time_in_force.unwrap_or(OrderTimeInForce::GoodTillCancel){OrderTimeInForce::GoodTillCancel=>"GTC",OrderTimeInForce::ImmediateOrCancel=>"IOC",OrderTimeInForce::FillOrKill=>"FOK",OrderTimeInForce::PostOnly=>"GTX"});}
             let tick=h::get_tick_size(&market).map_err(coercion)?;
             if opts.r#type==OrderType::Limit&&truthy(opts.price){params["price"]=json!(js_number_string(adjust(opts.price.unwrap(),tick)));}
-            if matches!(opts.r#type,OrderType::StopLoss|OrderType::TakeProfit)&&truthy(opts.trigger_price){
+            if matches!(opts.r#type.into_value(), Some(OrderType::StopLoss|OrderType::TakeProfit))&&truthy(opts.trigger_price){
                 params["stopPrice"]=json!(js_number_string(adjust(opts.trigger_price.unwrap(),tick)));
                 params["workingType"]=json!(if opts.r#type==OrderType::TakeProfit {if opts.tp_trigger_type==Some(OrderStopTriggerType::MarkPrice){"MARK_PRICE"}else{"CONTRACT_PRICE"}}else if opts.sl_trigger_type==Some(OrderStopTriggerType::LastPrice){"CONTRACT_PRICE"}else{"MARK_PRICE"});
             }
@@ -341,9 +384,10 @@ impl OrderExecution {
     // ts: AsterDEXExchange.placeOrders
     pub async fn place_orders(
         &self,
-        orders: &[ExecutionOrder],
+        orders: &[impl Clone + Into<PreparedExecutionOrder>],
         skip: bool,
     ) -> Result<Vec<String>, ExchangeError> {
+        let orders: Vec<PreparedExecutionOrder> = orders.iter().cloned().map(Into::into).collect();
         self.owner.assert_caller_client_order_ids(
             &orders
                 .iter()
@@ -352,7 +396,7 @@ impl OrderExecution {
         )?;
         let mut ids = Vec::new();
         let mut error = String::new();
-        for opts in orders {
+        for opts in &orders {
             match self.place_order(opts, skip).await {
                 Ok(v) => ids.extend(v),
                 Err(e) => {
@@ -379,25 +423,29 @@ impl OrderExecution {
     pub async fn update_order(&self, opts: &UpdateOrderOpts) -> Result<Vec<String>, ExchangeError> {
         let old = &opts.order;
         let (amount, price) = match &opts.update {
-            UpdateOrderOptsUpdate::Variant0(v) => (v.amount, v.price.unwrap_or(old.price)),
-            UpdateOrderOptsUpdate::Variant1(v) => (v.amount.unwrap_or(old.amount), v.price),
+            UpdateOrderOptsUpdate::Variant0(v) => (v.amount, v.price.or(old.price.into_value())),
+            UpdateOrderOptsUpdate::Variant1(v) => (v.amount.unwrap_or(old.amount), Some(v.price)),
         };
-        let algo = matches!(old.r#type, OrderType::TakeProfit | OrderType::StopLoss);
-        let new = ExecutionOrder {
-            opts: AsterDEXPlaceOrderOpts {
-                order: PlaceOrderOpts {
+        let algo = matches!(
+            old.r#type,
+            safe_cex_types::ModelField::Value(OrderType::TakeProfit)
+                | safe_cex_types::ModelField::Value(OrderType::StopLoss)
+        );
+        let new = PreparedExecutionOrder {
+            opts: PreparedExecutionOptions {
+                order: PreparedOrderOpts {
                     symbol: old.symbol.clone(),
-                    r#type: old.r#type,
-                    side: old.side,
+                    r#type: old.r#type.into_property(),
+                    side: old.side.into_property(),
                     amount,
                     reduce_only: Some(old.reduce_only),
-                    price: (!algo).then_some(price),
-                    trigger_price: algo.then_some(price),
+                    price: (!algo).then_some(price).flatten(),
+                    trigger_price: algo.then_some(price).flatten(),
                     take_profit: None,
                     stop_loss: None,
-                    tp_trigger_type: old.tp_trigger_type,
-                    sl_trigger_type: old.sl_trigger_type,
-                    time_in_force: old.time_in_force,
+                    tp_trigger_type: (old.tp_trigger_type).into_value(),
+                    sl_trigger_type: (old.sl_trigger_type).into_value(),
+                    time_in_force: (old.time_in_force).into_value(),
                     trigger_type: None,
                     client_order_id: None,
                     close: None,

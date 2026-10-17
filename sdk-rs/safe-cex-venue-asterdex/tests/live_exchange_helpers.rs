@@ -1543,7 +1543,7 @@ fn exchange_helpers_match_typescript() {
             .map(|value| {
                 let mut p = base.clone();
                 p.id = value["id"].as_str().unwrap().to_owned();
-                p.realized_pnl = value["realizedPnl"].as_f64();
+                p.realized_pnl = (value["realizedPnl"].as_f64()).into();
                 p
             })
             .collect::<Vec<_>>();
@@ -1655,7 +1655,8 @@ fn exchange_helpers_match_typescript() {
         );
     }
     for c in data["side"].as_array().unwrap() {
-        let opts = serde_json::from_value(c["opts"].clone()).unwrap();
+        let opts: safe_cex_types::PlaceOrderOpts =
+            serde_json::from_value(c["opts"].clone()).unwrap();
         assert_eq!(
             json!(get_order_position_side(
                 &opts,
@@ -2165,7 +2166,7 @@ fn account_mode_oracle_rejects_inverted_flag() {
 fn tagged_order(order: &safe_cex_types::Order) -> Value {
     let mut value = json!(order);
     for (key, number_value) in [
-        ("price", order.price),
+        ("price", order.price.to_number()),
         ("amount", order.amount),
         ("filled", order.filled),
         ("remaining", order.remaining),

@@ -117,7 +117,7 @@ impl Host {
                 .map(|position| {
                     let mut fields = position.fields.clone();
                     if let Some(info) = &position.info {
-                        fields.info = Some(info.borrow().clone());
+                        fields.info = (Some(info.borrow().clone())).into();
                     }
                     fields
                 })

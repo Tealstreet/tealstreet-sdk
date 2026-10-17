@@ -229,7 +229,7 @@ impl AccountFetch {
                     result.push(Position {
                         id,
                         symbol: market.symbol.clone(),
-                        side,
+                        side: side.into(),
                         entry_price: 0.0,
                         notional: 0.0,
                         leverage: leverage_by_symbol
@@ -239,14 +239,14 @@ impl AccountFetch {
                         unrealized_pnl: 0.0,
                         contracts: 0.0,
                         liquidation_price: 0.0,
-                        margin_type: Some(MarginType::Cross),
-                        position_mode: Some(mode),
-                        info: Some(json!({})),
-                        realized_pnl: None,
-                        margin_size: None,
-                        last_update: None,
-                        extra: None,
-                        option: None,
+                        margin_type: (Some(MarginType::Cross)).into(),
+                        position_mode: (Some(mode)).into(),
+                        info: (Some(json!({}))).into(),
+                        realized_pnl: (None).into(),
+                        margin_size: (None).into(),
+                        last_update: (None).into(),
+                        extra: (None).into(),
+                        option: (None).into(),
                     });
                 }
             }

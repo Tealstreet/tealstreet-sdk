@@ -303,7 +303,7 @@ fn run(privacy: &str, name: &str) {
         if ["positions", "accounts"].contains(&name) {
             let mut p = store.positions()[0].clone();
             p.id = "BTC-USDC:short".into();
-            p.side = PositionSide::Short;
+            p.side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
                 store.as_ref(),
                 StoreUpdate {

@@ -14,7 +14,7 @@ use num_bigint::BigUint;
 use safe_cex_exchange::{error_reporting::ExchangeErrorInput, runtime::ExchangeError};
 use safe_cex_num::{JsJsonValue as J, adjust, js_number_string};
 use safe_cex_types::{
-    Order, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PlaceOrderOpts,
+    Order, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PreparedOrderOpts,
     UpdateOrderOpts, UpdateOrderOptsUpdate,
 };
 fn number(value: f64) -> J {
@@ -41,13 +41,13 @@ fn add(record: &mut J, key: &str, value: J) {
     };
     fields.push((key.into(), value));
 }
-fn from_order(order: &Order) -> PlaceOrderOpts {
-    PlaceOrderOpts {
+fn from_order(order: &Order) -> PreparedOrderOpts {
+    PreparedOrderOpts {
         symbol: order.symbol.clone(),
-        r#type: order.r#type,
-        side: order.side,
+        r#type: order.r#type.into_property(),
+        side: order.side.into_property(),
         amount: order.amount,
-        price: Some(order.price),
+        price: order.price.into_value(),
         trigger_price: None,
         stop_loss: None,
         take_profit: None,
@@ -132,8 +132,12 @@ impl ApexOmniExchange {
             .map_err(failure)
     }
     // ts: ApexOmniExchange.placeOrder
-    pub async fn place_order(&self, opts: &PlaceOrderOpts) -> Result<Vec<String>, ExchangeError> {
-        let caller = self.base.resolve_caller_client_order_id(opts)?;
+    pub async fn place_order(
+        &self,
+        opts: impl Into<PreparedOrderOpts>,
+    ) -> Result<Vec<String>, ExchangeError> {
+        let opts = opts.into();
+        let caller = self.base.resolve_caller_client_order_id(&opts)?;
         let market = self
             .base
             .store
@@ -171,9 +175,9 @@ impl ApexOmniExchange {
             "SELL"
         };
         let trigger = present(opts.trigger_price).map(|v| adjust(v, p_price));
-        let execution = match opts.r#type {
-            OrderType::Limit => price.map_or_else(|| "null".into(), js_number_string),
-            OrderType::Market => {
+        let execution = match opts.r#type.into_value() {
+            Some(OrderType::Limit) => price.map_or_else(|| "null".into(), js_number_string),
+            Some(OrderType::Market) => {
                 let ticker = self
                     .base
                     .store
@@ -191,7 +195,7 @@ impl ApexOmniExchange {
                     p_price,
                 ))
             }
-            OrderType::StopLoss | OrderType::TakeProfit => {
+            Some(OrderType::StopLoss | OrderType::TakeProfit) => {
                 let effective = present(trigger).or(present(price)).unwrap_or_else(|| {
                     self.base
                         .store
@@ -218,22 +222,25 @@ impl ApexOmniExchange {
             .rev()
             .find(|(_, t)| *t == tif)
             .map_or(J::Undefined, |(s, _)| string(*s));
-        let trigger_price = if matches!(opts.r#type, OrderType::StopLoss | OrderType::TakeProfit) {
+        let trigger_price = if matches!(
+            opts.r#type.into_value(),
+            Some(OrderType::StopLoss | OrderType::TakeProfit)
+        ) {
             present(trigger)
                 .or(present(price))
                 .map_or_else(|| string("null"), |v| string(js_number_string(v)))
         } else {
             J::Undefined
         };
-        let trigger_type = match opts.r#type {
-            OrderType::StopLoss => string(
+        let trigger_type = match opts.r#type.into_value() {
+            Some(OrderType::StopLoss) => string(
                 if opts.sl_trigger_type == Some(OrderStopTriggerType::LastPrice) {
                     "MARKET"
                 } else {
                     "INDEX"
                 },
             ),
-            OrderType::TakeProfit => string(
+            Some(OrderType::TakeProfit) => string(
                 if opts.tp_trigger_type == Some(OrderStopTriggerType::IndexPrice) {
                     "INDEX"
                 } else {
@@ -460,21 +467,21 @@ impl ApexOmniExchange {
                 .iter()
                 .find(|o| o.id == format!("{base_id}__stop_loss"))
             {
-                next.stop_loss = Some(sl.price);
-                next.sl_trigger_type = sl.sl_trigger_type;
+                next.stop_loss = sl.price.into_value();
+                next.sl_trigger_type = (sl.sl_trigger_type).into_value();
             }
             if let Some(tp) = orders
                 .iter()
                 .find(|o| o.id == format!("{base_id}__take_profit"))
             {
-                next.take_profit = Some(tp.price);
-                next.tp_trigger_type = tp.tp_trigger_type;
+                next.take_profit = tp.price.into_value();
+                next.tp_trigger_type = (tp.tp_trigger_type).into_value();
             }
             (base, next)
         } else {
             let mut next = from_order(order);
-            next.tp_trigger_type = order.tp_trigger_type;
-            next.sl_trigger_type = order.sl_trigger_type;
+            next.tp_trigger_type = (order.tp_trigger_type).into_value();
+            next.sl_trigger_type = (order.sl_trigger_type).into_value();
             (order.clone(), next)
         };
         let (price, amount) = match &opts.update {
@@ -539,14 +546,15 @@ impl ApexOmniExchange {
                 .iter()
                 .map(|o| {
                     let mut p = from_order(o);
-                    p.side = if o.side == OrderSide::Buy {
+                    p.side = (if o.side == OrderSide::Buy {
                         OrderSide::Sell
                     } else {
                         OrderSide::Buy
-                    };
-                    p.time_in_force = o.time_in_force;
-                    p.tp_trigger_type = o.tp_trigger_type;
-                    p.sl_trigger_type = o.sl_trigger_type;
+                    })
+                    .into();
+                    p.time_in_force = (o.time_in_force).into_value();
+                    p.tp_trigger_type = (o.tp_trigger_type).into_value();
+                    p.sl_trigger_type = (o.sl_trigger_type).into_value();
                     p
                 })
                 .collect();

@@ -237,11 +237,15 @@ fn assert_order(order: &Order, source: &Value) {
         source_field(source, "symbol"),
         "order_native_symbol",
     );
-    let side = match order.side {
+    let side = match order.side.value().expect("present source enum in fixture") {
         OrderSide::Buy => "buy",
         OrderSide::Sell => "sell",
     };
-    let kind = match order.r#type {
+    let kind = match order
+        .r#type
+        .value()
+        .expect("present source enum in fixture")
+    {
         OrderType::Market => "market",
         OrderType::Limit => "limit",
         OrderType::Conditional => "conditional",
@@ -249,7 +253,11 @@ fn assert_order(order: &Order, source: &Value) {
         OrderType::TakeProfit => "take_profit_market",
         OrderType::TrailingStopLoss => "trailing_stop_market",
     };
-    let status = match order.status {
+    let status = match order
+        .status
+        .value()
+        .expect("present source enum in fixture")
+    {
         OrderStatus::Open => "open",
         OrderStatus::Closed => "closed",
         OrderStatus::Canceled => "canceled",
@@ -265,7 +273,7 @@ fn assert_order(order: &Order, source: &Value) {
         "order_native_status",
     );
     for (key, value) in [
-        ("price", order.price),
+        ("price", order.price.to_number()),
         ("amount", order.amount),
         ("filled", order.filled),
         ("remaining", order.remaining),

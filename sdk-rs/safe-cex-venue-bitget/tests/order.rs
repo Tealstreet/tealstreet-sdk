@@ -61,10 +61,10 @@ fn encoded_position(p: Position) -> Value {
         "positionMode":p.position_mode,"marginType":p.margin_type,
         "lastUpdate":encoded(p.last_update.unwrap())
     });
-    if let Some(info) = p.info {
+    if let Some(info) = p.info.into_value() {
         value["info"] = encode_json_numbers(&info);
     }
-    if let Some(margin) = p.margin_size {
+    if let Some(margin) = p.margin_size.into_value() {
         value["marginSize"] = encoded(margin);
     }
     value
@@ -152,7 +152,7 @@ fn check_mapped_orders(oracle: &Value) {
             .map(|order| {
                 let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
                 for (key, n) in [
-                    ("price", order.price),
+                    ("price", order.price.to_number()),
                     ("amount", order.amount),
                     ("filled", order.filled),
                     ("remaining", order.remaining),
@@ -337,7 +337,7 @@ fn check_inverse_orders(oracle: &Value) {
             .map(|order| {
                 let mut value = encode_json_numbers(&serde_json::to_value(&order).unwrap());
                 for (key, n) in [
-                    ("price", order.price),
+                    ("price", order.price.to_number()),
                     ("amount", order.amount),
                     ("filled", order.filled),
                     ("remaining", order.remaining),
@@ -514,7 +514,7 @@ fn check(oracle: Value) {
         .enumerate()
     {
         let mut position: Position=serde_json::from_value(json!({"id":"p","symbol":"BTCUSDT","side":"long","contracts":1,"entryPrice":1,"notional":1,"leverage":1,"unrealizedPnl":0,"liquidationPrice":0})).unwrap();
-        position.info = c.get("info").map(decode);
+        position.info = (c.get("info").map(decode)).into();
         let result = get_position_payload_update_time(&position)
             .map(encoded)
             .unwrap_or_else(|| json!({"$undefined":true}));
@@ -851,7 +851,7 @@ fn check(oracle: Value) {
         input["price"] = json!(0);
         input["amount"] = json!(0);
         let mut order: safe_cex_types::Order = serde_json::from_value(input).unwrap();
-        order.price = number(&c["input"]["price"]);
+        order.price = (number(&c["input"]["price"])).into();
         order.amount = number(&c["input"]["amount"]);
         let opts = build_uta_strategy_place_opts_from_order(&order);
         let mut actual = serde_json::to_value(&opts).unwrap();

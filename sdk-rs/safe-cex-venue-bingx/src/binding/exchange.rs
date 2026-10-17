@@ -125,7 +125,11 @@ impl Exchange for BingxExchange {
             .assert_caller_client_order_ids(std::slice::from_ref(order.options()));
         Box::pin(async move {
             preflight?;
-            ids(self.inner.placement.place_order(order.options()).await?)
+            ids(self
+                .inner
+                .placement
+                .place_order(&safe_cex_types::PreparedOrderOpts::from(order.options()))
+                .await?)
         })
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {

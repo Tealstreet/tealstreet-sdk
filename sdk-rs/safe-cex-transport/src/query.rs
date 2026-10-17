@@ -230,6 +230,7 @@ fn from_wire_capture_at(value: RetainedJsonInput, depth: usize) -> Result<QueryV
         return Err("Query wire nesting exceeds the canonical 128-depth budget".into());
     }
     Ok(match value {
+        RetainedJsonInput::Undefined => QueryValue::Undefined,
         RetainedJsonInput::Null => QueryValue::Null,
         RetainedJsonInput::Bool(value) => QueryValue::Bool(value),
         RetainedJsonInput::Text(value) => QueryValue::String(value),

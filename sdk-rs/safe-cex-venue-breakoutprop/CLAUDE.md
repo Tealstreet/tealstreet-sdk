@@ -59,9 +59,11 @@ UTC conversion in a host whose local timezone differs.
 Typed response validation is an explicit chosen boundary: malformed records
 refuse instead of reproducing arbitrary JavaScript property accesses. The live
 witness includes an omitted unused account field to demonstrate this difference.
-Unknown side/type/status strings cannot enter the closed shared Position/Order
-models. Order refusals are staged until the source mapping completes: a later
-missing leg must still log and return stored orders. Missing first portfolios
+Unknown side/type/status strings map to own undefined shared ModelField values,
+matching the source lookup tables; JSON omits those fields. Inherited table
+results that are functions or objects remain outside the enum representation.
+Those refusals are staged until mapping completes: a later missing leg must
+still log and return stored orders. Missing first portfolios
 remain undefined (`None`) for open positions and orders, distinct from `[]`.
 Balance catches its resulting reduce error; positions propagates its filter error.
 

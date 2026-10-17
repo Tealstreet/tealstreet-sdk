@@ -108,38 +108,39 @@ pub fn map_limit_order(
     let order_type = text(or(row.get("type"), row.get("order_type")))?;
     let side = text(row.get("side"))?;
     Ok(Some(Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: text(order_id)?,
-        parent_id: None,
+        parent_id: (None).into(),
         status: if row.get("status").and_then(Value::as_str) == Some("CANCELLED") {
-            OrderStatus::Canceled
+            safe_cex_types::ModelField::Value(OrderStatus::Canceled)
         } else {
-            OrderStatus::Open
+            safe_cex_types::ModelField::Value(OrderStatus::Open)
         },
         symbol,
-        r#type: required(js_table_lookup(ORDER_TYPE, &order_type), "type")?,
-        side: required(js_table_lookup(ORDER_SIDE, &side), "side")?,
-        price: number(or(row.get("price"), row.get("order_price")), "price")?,
+        r#type: (required(js_table_lookup(ORDER_TYPE, &order_type), "type")?).into(),
+        side: (required(js_table_lookup(ORDER_SIDE, &side), "side")?).into(),
+        price: (number(or(row.get("price"), row.get("order_price")), "price")?).into(),
         amount: quantity,
         filled,
         remaining: safe_cex_num::subtract(quantity, filled),
         reduce_only: boolean(field(row, "reduce_only")?)?,
-        time_in_force: Some(
+        time_in_force: (Some(
             if row.get("type").and_then(Value::as_str) == Some("POST_ONLY") {
                 OrderTimeInForce::PostOnly
             } else {
                 OrderTimeInForce::GoodTillCancel
             },
-        ),
+        ))
+        .into(),
         last_update: now(),
-        info: Some(Value::Object(row.clone())),
-        close: None,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        info: (Some(Value::Object(row.clone()))).into(),
+        close: (None).into(),
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     }))
 }
 // ts: WOOXExchange#mapAlgoOrder
@@ -218,28 +219,36 @@ pub fn map_algo_order(
             let trigger_type = trigger_type?;
             let side = required(side_hit, "side")?;
             Ok(Order {
-                client_order_id: None,
+                client_order_id: (None).into(),
                 id,
-                parent_id: Some(parent_id),
-                status: OrderStatus::Open,
+                parent_id: (Some(parent_id)).into(),
+                status: safe_cex_types::ModelField::Value(OrderStatus::Open),
                 symbol: symbol.clone(),
-                r#type: order_type,
-                side,
-                price,
+                r#type: (order_type).into(),
+                side: side.into(),
+                price: price.into(),
                 amount: quantity,
                 reduce_only,
                 filled,
                 remaining,
                 last_update,
-                info: Some(Value::Object(row.clone())),
-                sl_trigger_type: if stop { trigger_type } else { None },
-                tp_trigger_type: if stop { None } else { trigger_type },
-                time_in_force: None,
-                close: None,
-                trigger_type: None,
-                take_profit: None,
-                stop_loss: None,
-                extra: None,
+                info: (Some(Value::Object(row.clone()))).into(),
+                sl_trigger_type: if stop {
+                    (trigger_type).into()
+                } else {
+                    (None).into()
+                },
+                tp_trigger_type: if stop {
+                    (None).into()
+                } else {
+                    (trigger_type).into()
+                },
+                time_in_force: (None).into(),
+                close: (None).into(),
+                trigger_type: (None).into(),
+                take_profit: (None).into(),
+                stop_loss: (None).into(),
+                extra: (None).into(),
             })
         })();
         match mapped {

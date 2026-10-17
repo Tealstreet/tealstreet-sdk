@@ -821,3 +821,51 @@ fn listen_ohlcv_streams_kline_candles_and_ignores_older_ones() {
         ]
     );
 }
+
+#[test]
+fn shared_order_boundary_new_ioc_must_be_stored() {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":991,"side":"BUY","type":"IOC","status":"NEW","quantity":2,"price":101,"reduceOnly":false}}),
+    );
+    assert!(
+        order(&h, "991").is_some(),
+        "NEW IOC must reach store through actual mapper"
+    );
+}
+#[test]
+fn shared_order_boundary_new_zero_price_market_must_be_stored() {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":992,"side":"BUY","type":"MARKET","status":"NEW","quantity":2,"price":0,"reduceOnly":false}}),
+    );
+    assert!(
+        order(&h, "992").is_some(),
+        "NEW MARKET undefined price must reach store through actual mapper"
+    );
+}
+#[test]
+fn shared_order_boundary_partial_ioc_must_emit_fill() {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    let fills = listen(&h, "fill");
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":{"symbol":"PERP_BTC_USDT","orderId":993,"side":"BUY","type":"IOC","status":"PARTIAL_FILLED","quantity":2,"price":101,"reduceOnly":false,"executedQuantity":0.1,"executedPrice":100.5}}),
+    );
+    assert_eq!(
+        fills.borrow().len(),
+        1,
+        "PARTIAL IOC must pass shared Store before emitting fill"
+    );
+}

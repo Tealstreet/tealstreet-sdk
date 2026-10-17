@@ -153,21 +153,21 @@ fn position(symbol: String) -> Position {
     Position {
         id: create_position_id(&symbol, None, None),
         symbol,
-        side: PositionSide::Long,
+        side: safe_cex_types::ModelField::Value(PositionSide::Long),
         entry_price: 0.0,
         notional: 0.0,
         leverage: 10.0,
-        margin_type: Some(MarginType::Cross),
-        position_mode: Some(PositionMode::OneWay),
+        margin_type: (Some(MarginType::Cross)).into(),
+        position_mode: (Some(PositionMode::OneWay)).into(),
         unrealized_pnl: 0.0,
-        realized_pnl: None,
+        realized_pnl: (None).into(),
         contracts: 0.0,
         liquidation_price: 0.0,
-        margin_size: None,
-        info: None,
-        extra: None,
-        last_update: None,
-        option: None,
+        margin_size: (None).into(),
+        info: (None).into(),
+        extra: (None).into(),
+        last_update: (None).into(),
+        option: (None).into(),
     }
 }
 fn all<T: Clone + 'static>(
@@ -498,14 +498,14 @@ pub fn fetch_open_positions_cfm<H: MarketPositionHost + 'static>(
                 };
                 let p = item.borrow();
                 let mut fields = position(p["product_id"].as_str().expect("typed product_id").into());
-                fields.side = if p["side"] == "LONG" {PositionSide::Long} else {PositionSide::Short};
+                fields.side = if p["side"] == "LONG" {safe_cex_types::ModelField::Value(PositionSide::Long)} else {safe_cex_types::ModelField::Value(PositionSide::Short)};
                 fields.entry_price = float(p.get("avg_entry_price"))?;
                 let mark = float(p.get("current_price"))?;
                 let size = float(p.get("number_of_contracts"))?.abs();
                 fields.unrealized_pnl = float(p.get("unrealized_pnl"))?;
                 fields.notional = size * mark * contract;
                 fields.contracts = multiply(size, contract);
-                fields.extra = Some(PositionExtra {contracts_native: Some(size), unrealized_pnl_native: None});
+                fields.extra = (Some(PositionExtra {contracts_native: Some(size), unrealized_pnl_native: None})).into();
                 positions.push(Rc::new(ReadPosition {fields, info: Some(item.clone())}));
             }
             Ok(Rc::new(RefCell::new(positions)))
@@ -546,9 +546,9 @@ pub fn fetch_open_positions_intx<H: MarketPositionHost + 'static>(
                     let p = item.borrow();
                     let mut fields = position(p["symbol"].as_str().expect("typed symbol").into());
                     fields.side = if p["position_side"] == "POSITION_SIDE_LONG" {
-                        PositionSide::Long
+                        safe_cex_types::ModelField::Value(PositionSide::Long)
                     } else {
-                        PositionSide::Short
+                        safe_cex_types::ModelField::Value(PositionSide::Short)
                     };
                     fields.entry_price = float(p["entry_vwap"].get("value"))?;
                     let mark = float(p["mark_price"].get("value"))?;

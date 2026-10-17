@@ -1517,7 +1517,7 @@ fn opposite_position_matches_source_signed_contracts() {
                 position.extra = row[2].as_f64().map(|native| safe_cex_types::PositionExtra {
                     contracts_native: Some(native),
                     unrealized_pnl_native: None,
-                });
+                }).into();
                 position
             })
             .collect::<Vec<_>>();

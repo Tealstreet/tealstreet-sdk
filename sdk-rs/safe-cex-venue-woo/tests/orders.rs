@@ -259,7 +259,7 @@ fn mapper_numeric_bits_are_observed_before_wire_projection() {
             map_algo_order(&row, &store, || 1234.0).unwrap().remove(0)
         };
         for (name, value) in [
-            ("price", order.price),
+            ("price", order.price.to_number()),
             ("amount", order.amount),
             ("filled", order.filled),
             ("remaining", order.remaining),
