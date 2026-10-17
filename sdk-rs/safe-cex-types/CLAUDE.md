@@ -197,3 +197,7 @@ explicit typed depth budget. Projection to serde_json::Value remains fallible
 for lone units and NaN; it never substitutes replacement text.
 The retained_utf16 target observes exact keys, both rows, numeric bits, reserved
 Serde-looking keys and all 65,536 raw/escaped code units before projection.
+`node ../safe-cex-parity/scripts/retained-json-contracts.mjs --package=safe-cex-types`
+checks nine exact compiler-owned retained APIs and their bounded native/default
+outputs. It retires the deleted ObjectVisitor and checks the shared parser's
+actual signature; the full model/local/feature/target inventories remain separate.

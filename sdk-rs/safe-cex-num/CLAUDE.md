@@ -367,3 +367,7 @@ with Node JSON.stringify. It also observes the retained input after rendering.
 string refusal, former key replacement, writer text replacement and a truncated
 writer array. Each compiled fault must fail its named production boundary or
 Node comparison and pass again after exact source restoration.
+`node ../safe-cex-parity/scripts/retained-json-contracts.mjs --package=safe-cex-num`
+checks the six compiler-owned writer APIs: one native prepared-value conversion
+and five specific outbound classifications. Those classifications are separate
+from the executed Node comparisons and corruption controls above.
