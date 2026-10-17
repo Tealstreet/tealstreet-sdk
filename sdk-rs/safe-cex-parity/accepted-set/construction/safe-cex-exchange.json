@@ -73,9 +73,8 @@
   },
   "safe_cex_exchange::js_runtime::library::DayjsState": {
     "traits": [
-      "core::clone::Clone",
-      "core::marker::Copy"
+      "core::clone::Clone"
     ],
-    "reason": "Reviewed js_runtime/library.rs::DayjsState: Copy duplicates four scalar dayjs utc-plugin fields (wall clock, offset, utc flag, local offset) that each facade method closure captures by value. Every dayjs operation returns a new facade, matching dayjs clone()/Utils.w immutability; no handle, registry, task or validation token is shared or consumed. tests/js_builtins.rs compares 420 installed-dayjs chains. This is not a decoder-domain claim."
+    "reason": "Reviewed js_runtime/library.rs::DayjsState: Clone duplicates the wall-clock, utc and local-offset scalar fields and shallow-clones the optional Js offset. The source utc plugin can retain a raw offset value, so reference-valued offsets retain their existing identity; this is not a deep-copy claim. Each dayjs operation constructs a new facade from this reusable state, with no new task, registry or one-use validation authority. tests/js_builtins.rs compares installed-dayjs offset coercions and 420 chains. This private construction classification is not a decoder-domain claim."
   }
 }
