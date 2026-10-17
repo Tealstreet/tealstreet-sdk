@@ -330,6 +330,10 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         members::controls::change_margin_type(rt, arg(&a, 0), arg(&a, 1))
     });
 
+    method(&this, rt, "fetchOHLCV", |rt, a| {
+        members::ohlcv::fetch_ohlcv(rt, arg(&a, 0))
+    });
+
     // Public data (members/markets.rs).
     method(&this, rt, "fetchFees", |rt, a| {
         members::markets::fetch_fees(rt, arg(&a, 0))
