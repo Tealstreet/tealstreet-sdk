@@ -5,7 +5,6 @@ pub mod base_exchange;
 pub mod builtins;
 pub mod client;
 pub mod globals;
-mod json_parse;
 pub mod library;
 mod number_radix;
 pub mod ops;
