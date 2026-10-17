@@ -1503,3 +1503,26 @@ Hyperliquid base_exchange_class body hashes from master; all39 BingX rows match.
 Control receipts precede this master integration; positive suites reran afterward.
 Logs /tmp/bingx-hosted-{before,after,controls,full,native-final,clippy,wasm,fmt,
 parity,audits}.txt. No live credentials, venue requests or deployment used.
+
+## Native NaN configuration POST producer
+
+The retained transport-body checkpoint c41f1660e1 still refused NaN leverage in
+BingxDataReads::set_leverage before HTTP. Compiled real-binding regression
+(d0d706040f, preserved from69a7361f28) failed with adapter calls0 versus1 and the
+named `typed RestBody refuses NaN leverage` TypeError. The direct producer cutover
+uses canonical RetainedJsonInput in post and all three callers. The same regression
+then passes: maintained setLeverage/createAPI plus installed Axios/qs observe the
+same complete wire body and HMAC, signing `leverage=NaN` before JSON emits null.
+The HTTP retry fixture now advances the actual shared signing clock when asked
+to advance time, preserving its existing distinct-timestamp/signature assertions.
+This fixes the fixture's old wall-clock-only advancement after the clock cutover.
+No request/response carrier or shared API is introduced here.
+
+After normal-merging retained-body head a89ecd8527 and current master, all48
+binding tests (the only importer of the shared HTTP recorder), completion10,
+positions6 and signature-resend1 pass. The overseer-authorized recorder resolution
+keeps deterministic sync_from_server_time(current+advance_ms) and2000ms retry
+steps; no parent path requires real sleep, and timestamp/HMAC assertions remain.
+Strict native and Wasm all-target Clippy pass. Required all-feature inventories
+pass7 cancellation/8 override/25 binding; full parity7459/16625 and extraction
+freshness0 pass. The body carrier remains owned by the parent PR.
