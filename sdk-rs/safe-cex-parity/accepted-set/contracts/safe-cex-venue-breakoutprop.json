@@ -13962,7 +13962,7 @@
         ]
       }
     },
-    "evidence": "Quote reading decodes events to native Tickers, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "evidence": "Quote reading projects only source-consumed symbol/bid/ask through native property reads and retains its mapping catch/fallback, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
     "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let logger = |_:serde_json::Value| Ok(()); let future = super::fetch_tickers_for_symbols(vec![\"ETHUSD\".into()],||async {Ok(\"token\".into())},||async {Ok(\"account\".into())},|_|async move {Ok(input)},&store,&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"tickers\":rows.map(|rows| rows.iter().map(|t| serde_json::json!({\"symbol\":t.symbol,\"bid\":format!(\"{:016x}\", t.bid.to_bits()),\"ask\":format!(\"{:016x}\", t.ask.to_bits()),\"last\":format!(\"{:016x}\", t.last.to_bits()),\"mark\":format!(\"{:016x}\", t.mark.to_bits()),\"index\":format!(\"{:016x}\", t.index.to_bits())})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
@@ -14024,6 +14024,67 @@
         "output": {
           "ok": true,
           "tickers": null
+        }
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "symbol": "ETHUSD",
+              "ask": 123.5,
+              "bid": 121.25
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": [
+            {
+              "symbol": "ETHUSD",
+              "bid": "405e500000000000",
+              "ask": "405ee00000000000",
+              "last": "405e500000000000",
+              "mark": "405e500000000000",
+              "index": "405e500000000000"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "symbol": "ETHUSD",
+              "ask": 123.5,
+              "bid": 121.25,
+              "type": {},
+              "time": null
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": [
+            {
+              "symbol": "ETHUSD",
+              "bid": "405e500000000000",
+              "ask": "405ee00000000000",
+              "last": "405e500000000000",
+              "mark": "405e500000000000",
+              "index": "405e500000000000"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "events": [
+            null
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": []
         }
       }
     ]
@@ -17993,5 +18054,323 @@
     },
     "evidence": "Reviewed concrete eager raw-future/truthiness/formatter orchestration. Production decoder lives in portfolio::format_open_positions, with native observations and actual HTTP binding regressions.",
     "reason": "Does not deserialize an external representation: takes an already captured input future and typed Store, delegates formatting and forwards the source reporter and error conversion."
+  },
+  "safe_cex_venue_breakoutprop::portfolio::native_open_positions": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "native_open_positions",
+      "signature": {
+        "inputs": [
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::numeric_ingress::JsNumberInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "store",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_store::contract::Store",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local_to_utc",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "primitive": "f64"
+                                }
+                              ],
+                              "output": {
+                                "primitive": "f64"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "report",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Canonical source position mapping retains native copied fields and inherited side referents until final consumer projection. Independently authored native observations call the production private helper and inspect returned Js properties, computed binary64 bits, retained info and source catch logs directly. Balance and filtered Position outputs use this same helper; no serializer or stand-in mapper supplies observations.",
+    "call": "{ let input:safe_cex_num::numeric_ingress::JsNumberInput=serde_json::from_value($value.clone()).unwrap(); let store=safe_cex_store::store::DefaultStore::new(); let logs=std::cell::RefCell::new(Vec::<String>::new()); let report=|message:&str| {logs.borrow_mut().push(message.into());Ok(())}; let result=super::native_open_positions(&input,&store,&|n|n,&report); match result { Ok(rows)=>serde_json::json!({\"rows\":rows.map(|rows|rows.iter().map(|row|{let entry=row.get(\"entryPrice\").unwrap();let contracts=row.get(\"contracts\").unwrap();serde_json::json!({\"symbol\":row.get(\"symbol\").unwrap().to_display(),\"entry\":entry.to_display(),\"entryType\":entry.type_of(),\"contracts\":contracts.to_display(),\"contractsType\":contracts.type_of(),\"sideType\":row.get(\"side\").unwrap().type_of(),\"marginBits\":format!(\"{:016x}\",row.get(\"marginSize\").unwrap().to_number().unwrap().to_bits()),\"upnlBits\":format!(\"{:016x}\",row.get(\"unrealizedPnl\").unwrap().to_number().unwrap().to_bits()),\"marker\":row.get(\"info\").unwrap().get(\"marker\").unwrap().to_display()})}).collect::<Vec<_>>()),\"logs\":*logs.borrow()}), Err(error)=>serde_json::json!({\"error\":error.message,\"logs\":*logs.borrow()}) } }",
+    "cases": [
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "BTCUSD",
+                  "side": "BUY",
+                  "openPrice": 100,
+                  "quantity": 2,
+                  "quantityNotional": 200,
+                  "marginRate": 0.05,
+                  "lastUpdateTime": 0,
+                  "marker": "opaque-1"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "rows": [
+            {
+              "symbol": "BTCUSD",
+              "entry": "100",
+              "entryType": "number",
+              "contracts": "2",
+              "contractsType": "number",
+              "sideType": "string",
+              "marginBits": "4024000000000000",
+              "upnlBits": "0000000000000000",
+              "marker": "opaque-1"
+            }
+          ],
+          "logs": []
+        }
+      },
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "BTCUSD",
+                  "side": "constructor",
+                  "openPrice": "100",
+                  "quantity": "2",
+                  "quantityNotional": 200,
+                  "marginRate": 0.05,
+                  "lastUpdateTime": 0,
+                  "marker": "opaque-1"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "rows": [
+            {
+              "symbol": "BTCUSD",
+              "entry": "100",
+              "entryType": "string",
+              "contracts": "2",
+              "contractsType": "string",
+              "sideType": "function",
+              "marginBits": "4024000000000000",
+              "upnlBits": "8000000000000000",
+              "marker": "opaque-1"
+            }
+          ],
+          "logs": []
+        }
+      },
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "BTCUSD",
+                  "side": "constructor",
+                  "openPrice": "100",
+                  "quantity": "2",
+                  "quantityNotional": 200,
+                  "marginRate": 0.05,
+                  "lastUpdateTime": 0,
+                  "marker": "opaque-1"
+                },
+                null
+              ]
+            }
+          ]
+        },
+        "output": {
+          "rows": [],
+          "logs": [
+            "Cannot read properties of null (reading 'side')"
+          ]
+        }
+      },
+      {
+        "input": {
+          "portfolios": []
+        },
+        "output": {
+          "rows": null,
+          "logs": []
+        }
+      }
+    ]
   }
 }
