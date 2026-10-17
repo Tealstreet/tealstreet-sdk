@@ -22,9 +22,9 @@ note = "CHOSEN: source KrakenSpotExchange fixes its own 17 arrow bodies and cons
 ts = "KrakenSpotExchange.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-venue-kraken/src/construction.rs::spot_constructor"
+rs = [ "safe-cex-venue-kraken/src/classes.rs::spot_exchange", "safe-cex-venue-kraken/src/construction.rs::construct_with" ]
 status = "ported"
-note = "Host-bound complete source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Actual-source/native witness tests/composition.rs::spot_constructor_native; compiled family discrimination scripts/composition-controls.py. Original values, current state, ordered callbacks/assignments and source exception boundaries are preserved over explicit runtime/intrinsic dependencies; no fixed class/runtime or live network claim. Rename target: `safe-cex-venue-kraken/src/construction.rs::spot_constructor`."
+note = "Production constructor assembled by classes::spot_exchange over the shared js_runtime host; construct_with preserves superclass/field initialization, secondary-key client, five-RPS wrapper, unlimited client and Futures history client ordering. tests/exchange_binding.rs covers actual startup, private topics and native Store/fill outputs. A compiled xhr-assignment mutation fails the real startup Store assertion; exact restoration passes. Unused standalone constructor wrappers and their generic-only corpus are removed. Rename target: `safe-cex-venue-kraken/src/classes.rs::spot_exchange`. Rename target: `safe-cex-venue-kraken/src/construction.rs::construct_with`. Existing class/member boundaries remain independently declared."
 
 [[symbol]]
 ts = "KrakenSpotExchange.start"
