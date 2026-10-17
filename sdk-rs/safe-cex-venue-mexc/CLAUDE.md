@@ -337,3 +337,10 @@ swallows both fetch and Store-update failures, matching the TypeScript callback'
 empty catch. `socket_assembly::registered_private_asset_refresh_swallows_balance_fetch_failure`
 drives a real registered private frame, advances the host monotonic timer, and
 requires one attempted balance read with no host exception report.
+
+The two remaining generic socket copies in runtime_assembly (private_on_message
+and public_listen_order_book) and their fake-host scenarios are removed.
+Production private dispatch remains in sockets::PrivateProtocol; public book
+subscriptions remain in ws_public::MexcPublicSocket. The assembly oracle now
+covers only its seven live exchange-body groups (61 source cases). Manifest
+rows cite those live owners and retain explicit coverage findings.
