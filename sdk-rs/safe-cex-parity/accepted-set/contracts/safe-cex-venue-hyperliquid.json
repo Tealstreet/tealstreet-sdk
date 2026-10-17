@@ -60052,6 +60052,261 @@
           "weightText": "2",
           "weightBits": "4000000000000000"
         }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid raw boundary 39",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid raw boundary 40",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "2",
+          "weightBits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid raw boundary 80",
+          "url": "/exchange",
+          "mode": "raw",
+          "data": "{\"action\":{\"type\":\"cancelByCloid\",\"cancels\":[null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]}}"
+        },
+        "output": {
+          "ok": true,
+          "weightText": "3",
+          "weightBits": "4008000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid value boundary 39",
+          "url": "/exchange",
+          "mode": "value",
+          "data": {
+            "action": {
+              "type": "cancelByCloid",
+              "cancels": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "1",
+          "weightBits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid value boundary 40",
+          "url": "/exchange",
+          "mode": "value",
+          "data": {
+            "action": {
+              "type": "cancelByCloid",
+              "cancels": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "2",
+          "weightBits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "case": "cancelByCloid value boundary 80",
+          "url": "/exchange",
+          "mode": "value",
+          "data": {
+            "action": {
+              "type": "cancelByCloid",
+              "cancels": [
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "weightText": "3",
+          "weightBits": "4008000000000000"
+        }
       }
     ],
     "nativeObservation": {
