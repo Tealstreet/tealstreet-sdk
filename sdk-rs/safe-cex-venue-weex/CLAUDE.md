@@ -34,6 +34,11 @@ call the real source member through invoke/unit and cover both nonempty and empt
 REST responses, stale IDs, updated contracts and exact fake-zero snapshots. The
 public trait wiring remains separate from this Store-policy correction.
 
+Positions and historical fills use the source's default extractArray admission:
+raw arrays and the `data` array only. Extra `items`, `list` and `rows` wrappers
+are ignored. Constructed HTTP regressions cover all six direct/nested extra
+wrappers plus the two accepted forms, retaining fake zero positions when needed.
+
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
 request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
@@ -514,3 +519,10 @@ parsing and public socket pacing retain their source raw clocks. The production
 binding's `synced_clock` regression independently checks HMACs and synced time
 for REST and two private dials with different server corrections, so reopening
 must reevaluate the current offset.
+
+The typed Exchange `nuke` and `nuke_positions` entrypoints dispatch to the existing
+WEEX members: close all venue positions, replace the refreshed snapshot, then
+(for `nuke`) cancel ordinary and algo orders. The source has no retry-count input.
+`exchange_binding` proves endpoint reachability from an empty Store and close/refresh/
+cancel order; private order, position and account frames assert actual Store changes
+alongside the retained fill-event witness.
