@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.ws-public.ts"
-rust_files = [ "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs", "safe-cex-venue-bybit/src/ws_public/streams.rs", "safe-cex-venue-bybit/src/book_mapping.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs", "safe-cex-venue-bybit/src/ws_public/streams.rs", "safe-cex-venue-bybit/src/book_mapping.rs", "safe-cex-venue-bybit/src/ws_public/candles.rs" ]
 
 [[symbol]]
 ts = "BybitPublicWebsocket"
@@ -133,10 +133,10 @@ note = "MIXED Shared ticker patch operation extracted to safe-cex-venue-bybit/sr
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOHLCVs"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public/candles.rs::listen_ohlcvs", "safe-cex-venue-bybit/src/ws_public/candles.rs::map_bulk" ]
+status = "ported"
+note = "Live bulk kline subscription retains topics, replaces the prefix handler and sends source chunks of 50 with core-owned connection retries. Native JS coercions and shared UTF-16 String search parse wire metadata; ModelField<AnyTimeframe> retains monthly and own-undefined interval output. Maintained source member corpus and real socket binding tests cover the production composition. Renamed source member to safe-cex-venue-bybit/src/ws_public/candles.rs::listen_ohlcvs, safe-cex-venue-bybit/src/ws_public/candles.rs::map_bulk."
 
 [[symbol]]
 ts = "BybitPublicWebsocket.listenOHLCV"
