@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseJsonWithSource } from './accepted-json-source.mjs';
 
 export const defaultContractDirectory = new URL('../accepted-set/contracts/', import.meta.url);
 
 function readObject(file) {
-  const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const value = parseJsonWithSource(fs.readFileSync(file, 'utf8'));
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), `accepted-set: contracts must be an object: ${file}`);
   return value;
 }

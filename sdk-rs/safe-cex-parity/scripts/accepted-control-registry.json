@@ -30,11 +30,15 @@
       "selected candle-cache inventory closes every construction owner and rejects both error policy mutations"
     ],
     "accepted-contract-files.test.mjs": [
+      "authored JSON tokens retain integer key order, numbers and escaped keys",
+      "generated case wrappers retain nested and primitive authored input tokens",
+      "raw contract and dispatch token retention reject executed loader mutations",
       "per-crate contracts preserve every legacy value and explicit fixture file",
       "contract directories reject missing malformed misplaced duplicate and hidden inputs",
       "contract shard namespace and complete merge checks reject executed mutations"
     ],
     "accepted-contracts.test.mjs": [
+      "multi-entry dispatch carries authored raw case tokens into native contracts",
       "new public or private Deserialize owner fails closed by name",
       "new conversion is not discharged by a strict serde contract",
       "new inherent decoder fails even if its name is unrelated to parsing",
@@ -138,6 +142,9 @@
       "unsupported receivers and uninstantiated defaults pass only with a reviewed source pin",
       "receiver item hashes preserve Unicode columns and refuse invalid spans",
       "compiler receiver item pins survive unrelated edits and refuse changes inside the impl"
+    ],
+    "accepted-json-source-native.test.mjs": [
+      "authored JSON order detects removal of actual Aster query key sorting"
     ],
     "accepted-loader-future-native.test.mjs": [
       "loader future actual compiler coverage refuses removal and restores the named assertion"
@@ -384,6 +391,9 @@
     "projection selected workspace source",
     "projection native concrete owner identity",
     "receiver item pin widened to whole file",
-    "receiver item source check removed"
+    "receiver item source check removed",
+    "authored JSON contract source retention",
+    "authored JSON dispatch token retention",
+    "authored JSON native key ordering"
   ]
 }

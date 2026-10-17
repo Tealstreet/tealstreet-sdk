@@ -72,3 +72,16 @@ flat owner-to-contract JSON shape. The former shared `contracts.json` is removed
 The gate and this helper load the complete directory through
 `../scripts/accepted-contract-files.mjs`; native proof and all validation rules
 are unchanged. Custom fixture files still work with `--contracts=<file.json>`.
+
+Contract loading retains authored JSON tokens for native input. In particular,
+`{"9":...,"2":...,"x":...}` reaches Rust in that authored order, so the Rust
+implementation must perform any TS numeric-key ordering itself. Number spelling
+(including `-0` and values outside JS's exact integer range), escaped keys and
+nested cases are preserved through generated multi-entry dispatch. Use
+`loadContracts()` and the shared `runProbes()` path; a separate `JSON.parse` /
+`JSON.stringify` round trip or `structuredClone` of cases loses this source
+metadata. Programmatically constructed fixtures have only their JS value and
+cannot claim an authored ordering or numeric spelling they no longer retain.
+When appending to a loaded shard, write it with `stringifyJsonWithSource` from
+`../scripts/accepted-json-source.mjs` or edit the authored text directly. Rewriting
+existing cases with ordinary `JSON.stringify` permanently discards those tokens.
