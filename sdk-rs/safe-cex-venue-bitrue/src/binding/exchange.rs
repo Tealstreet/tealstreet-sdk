@@ -272,6 +272,10 @@ impl Exchange for BitrueExchange {
         let a = args!(js(&isolated), opt(symbol));
         self.unit("changeMarginType", a)
     }
+    fn update_symbol_metadata(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        let a = args!(js(&symbol));
+        self.unit("updateSymbolMetadata", a)
+    }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
         let a = args!(js(&options));
         self.invoke("updateOrder", a)
