@@ -407,3 +407,11 @@ passes all23 native tests each time; restored decoder runs repeat all16 outputs
 and7 classifications. Literal whole-function uniqueness is checked before any
 mutation; new source drift must refuse. Other functions, aliases, receivers,
 construction, feature and wasm accepted behavior remain separate obligations.
+
+Private position frames preserve the source mapper's socket receiver: unlike the
+exchange receiver, the socket has no `log` method. An unknown market therefore
+raises TypeError after the mapper's earlier reads, before any position updates,
+refresh timestamp/timer or later same-frame pong. The shared mapping body accepts
+its receiver's logging capability so REST mappings retain exchange warning logs.
+The production binding tests cover mixed valid/unknown rows, unchanged Store and
+skipped pong, plus a known-market socket-frame control that updates Store.
