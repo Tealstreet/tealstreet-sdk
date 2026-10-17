@@ -22,7 +22,7 @@ CONTROLS = [
      'limit: w.limit,', 'limit: w.limit.map(f64::abs),',
      ['types::AsterDEXMarketResponseFiltersItem', 'types::AsterDEXMarketResponse']),
     ('market-delivery-negative-zero-loss', 'types.rs', 'AsterDEXMarketResponse',
-     'delivery_date: w.delivery_date,', 'delivery_date: w.delivery_date.abs(),', ['types::AsterDEXMarketResponse']),
+     'delivery_date: w.delivery_date,', 'delivery_date: w.delivery_date.map(f64::abs),', ['types::AsterDEXMarketResponse']),
     ('position-time-negative-zero-loss', 'types.rs', 'AsterDEXPositionResponse',
      'update_time: w.update_time,', 'update_time: w.update_time.abs(),', ['types::AsterDEXPositionResponse']),
     ('order-id-negative-zero-loss', 'types.rs', 'AsterDEXOrderResponse',
