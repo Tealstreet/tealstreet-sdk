@@ -1,6 +1,6 @@
 # Bounded Transport API reviews
 
-This batch reviews 24 compiler-inventoried owners and aliases. Native/default
+The first batch reviews 24 compiler-inventoried owners and aliases. Native/default
 and actual Wasm probes execute 19 runtime contracts and five explicit
 classifications each. These are selected-owner results; remaining Transport
 findings require separate review.
@@ -36,3 +36,45 @@ The native runner accepts an actual inventory file and an output receipt path:
 No replacement API inventory or alternate contract input is supplied by the
 mutation controller. Signing and resolution schemas retain their existing
 numeric, field-presence and opaque JSON policies.
+
+
+## Query and diagnostic reviews
+
+A second bounded batch reviews nine complete compiler-inventoried owners. Native
+and actual Wasm execution each provide eight runtime receipts and one explicit
+classification. This batch adds contracts and controls to existing production
+code.
+
+| Owner | Evidence |
+| --- | --- |
+| `TradeTunnelTimeoutError` | Actual constructor fields, retained request context, independent diagnostic method/URL, route and Display |
+| `axios_form_encode` | Native encoded bytes, key trimming, omissions, flat-array handling and invalid array-length refusal |
+| `deserialize_query_wire` | Direct raw text plus stock `F64Deserializer` events; variant identity, exact numeric bits, key order and a reserved-looking literal property |
+| `query_json_projection` | Actual `Option` presence, undefined omission, array null substitution, nonfinite projection and zero normalization |
+| `response_data` | Encoded/native/invalid-body results, returned native kind, keys and numeric bits |
+| `is_binance_style_signature_rejection` | Actual numeric/string coercion, predicate result and TypeError identity/message |
+| `is_tealstreet_web_socket_url` | Actual URL parsing and host acceptance/refusal |
+| `resolve_account_transport` | Executed typed conversion with independently authored flag/presence/region expectations |
+| `default_proxy_region` | Specific selector classification, backed by the native preference test and its maintained-source corpus |
+
+The selector returns an existing typed key or the fixed SG fallback. Its
+classification supplies no decoder output receipt. The concrete query-field
+function remains a decoder; the observation examines variants and bits before
+JSON projection. Routing conversion also executes its own output witnesses.
+
+`accepted-query-controls.py` discovers fresh production compiler owners, then
+faults eight operations independently. Fresh receipts must report exactly the
+named output mismatch; compilation failures are refused. The selector control
+faults its fallback and runs
+`native_preferences_preserve_undefined_final_operands_and_region_order`, which
+compares 162 source cases and explicit default/key-order witnesses. Every fault
+restores the exact source bytes and requires the corresponding restored run to
+pass. Run it from the repository root, serially with other source-sensitive
+inventory, probes and checks.
+
+
+`accepted-query-source.mjs` independently compares five predicate cases against
+the maintained TypeScript function, seven raw query inputs against engine JSON
+parsing and six projection cases against engine JSON.stringify. It observes
+numeric bits and key order before encoding its report. The two stock native
+F64Deserializer event cases remain native witnesses.

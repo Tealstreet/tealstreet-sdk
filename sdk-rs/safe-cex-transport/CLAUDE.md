@@ -189,4 +189,7 @@ records use the existing object guard. Keep generic borrowed request payloads,
 all original field/presence rules and the independently inventoried visitor
 contracts. The fourteen compiling disconnect controls restore exact source bytes.
 The bounded follow-up API reviews are recorded in
-[ACCEPTED_API_REVIEWS.md](ACCEPTED_API_REVIEWS.md).
+[ACCEPTED_API_REVIEWS.md](ACCEPTED_API_REVIEWS.md). Its query and
+diagnostic section records the direct retained-number field decoder, JSON
+projection, error construction, raw URL parsing and separate typed selector
+review, with native/Wasm receipts and serial mutation controls.

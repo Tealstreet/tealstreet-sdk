@@ -1522,8 +1522,8 @@
     ]
   },
   "safe_cex_transport::how_context::TradeTunnelTimeoutError": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "shape": "observed",
+    "evidence": "Actual timeout diagnostic constructor from the HOW wrapper. Native witnesses distinguish its own method/url/route from the retained request config and inspect every field plus Display; no DTO is serialized to infer its contents.",
     "entrypoints": [
       {
         "api": {
@@ -1583,8 +1583,63 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "input": "observed",
+        "reason": "Raw diagnostic text and opaque route are retained by the real constructor, with a separately typed request context. Observe native fields rather than relabeling this String/Value API typed."
+      }
+    ],
+    "call": "{ let config=crate::RestRequest {method:\"PATCH\".into(),url:$value[\"configUrl\"].as_str().expect(\"config URL\").into(),timeout_ms:Some(27),..Default::default()};let row=$type::new($value[\"message\"].as_str().expect(\"message\").into(),config,$value[\"method\"].as_str().expect(\"method\").into(),$value[\"route\"].clone(),$value[\"url\"].as_str().expect(\"URL\").into());let display=row.to_string();serde_json::json!({\"name\":row.name,\"message\":row.message,\"method\":row.method,\"url\":row.url,\"route\":row.trade_tunnel_route,\"configMethod\":row.config.method,\"configUrl\":row.config.url,\"timeout\":row.config.timeout_ms,\"display\":display}) }",
+    "cases": [
+      {
+        "input": {
+          "message": "first-timeout",
+          "method": "GET",
+          "url": "/diagnostic-one",
+          "configUrl": "/config-one",
+          "route": {
+            "server": "SG",
+            "attempt": 1
+          }
+        },
+        "output": {
+          "name": "TradeTunnelTimeoutError",
+          "message": "first-timeout",
+          "method": "GET",
+          "url": "/diagnostic-one",
+          "route": {
+            "server": "SG",
+            "attempt": 1
+          },
+          "configMethod": "PATCH",
+          "configUrl": "/config-one",
+          "timeout": 27,
+          "display": "first-timeout"
+        }
+      },
+      {
+        "input": {
+          "message": "second-timeout",
+          "method": "POST",
+          "url": "/diagnostic-two",
+          "configUrl": "/config-two",
+          "route": [
+            "JA",
+            false
+          ]
+        },
+        "output": {
+          "name": "TradeTunnelTimeoutError",
+          "message": "second-timeout",
+          "method": "POST",
+          "url": "/diagnostic-two",
+          "route": [
+            "JA",
+            false
+          ],
+          "configMethod": "PATCH",
+          "configUrl": "/config-two",
+          "timeout": 27,
+          "display": "second-timeout"
+        }
       }
     ]
   },
@@ -9963,6 +10018,1025 @@
         "output": {
           "value": "native-string",
           "sameReference": true
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::provider::axios_form_encode": {
+    "api": {
+      "kind": "function",
+      "name": "axios_form_encode",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::provider::TransportError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Raw form-data conversion performs source coercion and array-like validation before URLSearchParams encoding. The native cases independently pin actual output bytes, null omission, key trimming and the invalid array-length refusal; existing accepted_local_helpers tests also execute these behaviors through the real RestBody wire boundary.",
+    "call": "{ match $type($value) { Ok(text)=>serde_json::json!({\"ok\":true,\"text\":text}),Err(error)=>serde_json::json!({\"ok\":false,\"message\":error.to_string()}) } }",
+    "cases": [
+      {
+        "input": {
+          " a ": true,
+          "list": [
+            1,
+            null,
+            "x y"
+          ],
+          "inner": {
+            " z[] ": "v+"
+          }
+        },
+        "output": {
+          "ok": true,
+          "text": "a=true&list%5B%5D=1&list%5B%5D=x+y&inner%5Bz%5D=v%2B"
+        }
+      },
+      {
+        "input": {
+          "items[]": {
+            "length": 3,
+            "2": false,
+            "1": null,
+            "0": "x y"
+          },
+          "skip": null
+        },
+        "output": {
+          "ok": true,
+          "text": "items%5B%5D=x+y&items%5B%5D=false"
+        }
+      },
+      {
+        "input": {
+          "items[]": {
+            "length": 1.5,
+            "0": "never"
+          }
+        },
+        "output": {
+          "ok": false,
+          "message": "Invalid array length"
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": true,
+          "text": ""
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::query::deserialize_query_wire": {
+    "api": {
+      "kind": "function",
+      "name": "deserialize_query_wire",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::query_value::QueryValue",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual generic query-field decoder: direct JSON text preserves token numbers, numeric-looking strings, own-key order and reserved-looking literal object keys. Stock F64Deserializer witnesses additionally retain native negative zero and a NaN payload. The observation inspects QueryValue variants and numeric bits before JSON projection; this does not narrow D to serde_json or claim a serialized roundtrip proves retention.",
+    "call": "{ fn observe(value:&safe_cex_types::QueryValue)->serde_json::Value { use safe_cex_types::QueryValue as Q; match value {Q::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Q::Null=>serde_json::json!({\"kind\":\"null\"}),Q::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),Q::String(v)=>serde_json::json!({\"kind\":\"string\",\"value\":v}),Q::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":v.to_bits().to_string()}),Q::Array(v)=>serde_json::json!({\"kind\":\"array\",\"items\":v.iter().map(observe).collect::<Vec<_>>()}),Q::Object(v)=>serde_json::json!({\"kind\":\"object\",\"entries\":v.iter().map(|(k,v)|serde_json::json!([k,observe(v)])).collect::<Vec<_>>()})} } let result=if let Some(bits)=$value.get(\"eventBits\").and_then(serde_json::Value::as_str){$type(serde::de::value::F64Deserializer::<serde::de::value::Error>::new(f64::from_bits(bits.parse().expect(\"native bits\")))).map_err(|error|error.to_string())}else{let mut decoder=serde_json::Deserializer::from_str($value[\"raw\"].as_str().expect(\"raw text\"));$type(&mut decoder).map_err(|error|error.to_string())}; match result{Ok(row)=>serde_json::json!({\"ok\":true,\"present\":row.is_some(),\"native\":row.as_ref().map(observe)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "cases": [
+      {
+        "input": {
+          "raw": "null"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "null"
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "-0"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "number",
+            "bits": "9223372036854775808"
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "1e400"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "number",
+            "bits": "9218868437227405312"
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "\"-0\""
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "string",
+            "value": "-0"
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "{\"2\":2,\"1\":1,\"zero\":-0,\"nested\":[null,true]}"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "object",
+            "entries": [
+              [
+                "1",
+                {
+                  "kind": "number",
+                  "bits": "4607182418800017408"
+                }
+              ],
+              [
+                "2",
+                {
+                  "kind": "number",
+                  "bits": "4611686018427387904"
+                }
+              ],
+              [
+                "zero",
+                {
+                  "kind": "number",
+                  "bits": "9223372036854775808"
+                }
+              ],
+              [
+                "nested",
+                {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "null"
+                    },
+                    {
+                      "kind": "bool",
+                      "value": true
+                    }
+                  ]
+                }
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "{\"$serde_json::private::Number\":\"-0\"}"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "object",
+            "entries": [
+              [
+                "$serde_json::private::Number",
+                {
+                  "kind": "string",
+                  "value": "-0"
+                }
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "input": {
+          "raw": "not-json"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "eventBits": "9223372036854775808"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "number",
+            "bits": "9223372036854775808"
+          }
+        }
+      },
+      {
+        "input": {
+          "eventBits": "9221120237041090626"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "native": {
+            "kind": "number",
+            "bits": "9221120237041090626"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::query::query_json_projection": {
+    "api": {
+      "kind": "function",
+      "name": "query_json_projection",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::query_value::QueryValue",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Explicit typed-query to JSON boundary, independently of query rendering. Actual native QueryValue inputs include undefined, nonfinite numbers and signed zero; witnesses observe returned Option presence, array null substitution and object omission. It is not used to reconstruct or normalize native request params.",
+    "call": "{ use safe_cex_types::QueryValue as Q;let input=match $value[\"mode\"].as_str().expect(\"profile\"){\"undefined\"=>Q::Undefined,\"null\"=>Q::Null,\"number\"=>Q::Number(f64::from_bits($value[\"bits\"].as_str().expect(\"bits\").parse().expect(\"native bits\"))),\"array\"=>Q::Array(vec![Q::Undefined,Q::Null,Q::Number(f64::NAN),Q::Number(-0.0),Q::String(\"-0\".into())]),\"object\"=>Q::Object([(\"drop\".into(),Q::Undefined),(\"zero\".into(),Q::Number(-0.0)),(\"huge\".into(),Q::Number(f64::INFINITY)),(\"text\".into(),Q::String(\"literal\".into()))].into_iter().collect()),_=>panic!(\"unreviewed profile\")};let actual=$type(&input);serde_json::json!({\"present\":actual.is_some(),\"value\":actual}) }",
+    "cases": [
+      {
+        "input": {
+          "mode": "undefined"
+        },
+        "output": {
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "mode": "null"
+        },
+        "output": {
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "mode": "number",
+          "bits": "9223372036854775808"
+        },
+        "output": {
+          "present": true,
+          "value": 0
+        }
+      },
+      {
+        "input": {
+          "mode": "number",
+          "bits": "9221120237041090626"
+        },
+        "output": {
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "mode": "array"
+        },
+        "output": {
+          "present": true,
+          "value": [
+            null,
+            null,
+            null,
+            0,
+            "-0"
+          ]
+        }
+      },
+      {
+        "input": {
+          "mode": "object"
+        },
+        "output": {
+          "present": true,
+          "value": {
+            "zero": 0,
+            "huge": null,
+            "text": "literal"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::signature_rejection::response_data": {
+    "api": {
+      "kind": "function",
+      "name": "response_data",
+      "signature": {
+        "inputs": [
+          [
+            "response",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestResponse",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual response-body model decoder, not a borrowed property selector: Encoded bytes pass through json_value while native data keeps its existing phase, and invalid bytes fall back to Null. Native outputs inspect returned kind/own keys and numeric value bits before output encoding.",
+    "call": "{let body=if $value[\"phase\"]==\"encoded\"{crate::RestResponseBody::Encoded($value[\"raw\"].as_str().expect(\"raw body\").as_bytes().to_vec())}else{crate::RestResponseBody::Transformed($value[\"body\"].clone())};let response=crate::RestResponse{status:200,reason:None,headers:Default::default(),body};let actual=$type(&response);let bits=actual.get(\"number\").map(|v|safe_cex_num::js_number(Some(v)).expect(\"numeric field\").to_bits().to_string());serde_json::json!({\"kind\":if actual.is_object(){\"object\"}else if actual.is_array(){\"array\"}else if actual.is_null(){\"null\"}else{\"scalar\"},\"keys\":actual.as_object().map(|v|v.keys().collect::<Vec<_>>()).unwrap_or_default(),\"bits\":bits}) }",
+    "cases": [
+      {
+        "input": {
+          "phase": "encoded",
+          "raw": "{\"number\":-0,\"other\":true}"
+        },
+        "output": {
+          "kind": "object",
+          "keys": [
+            "number",
+            "other"
+          ],
+          "bits": "9223372036854775808"
+        }
+      },
+      {
+        "input": {
+          "phase": "native",
+          "body": {
+            "number": 12.25
+          }
+        },
+        "output": {
+          "kind": "object",
+          "keys": [
+            "number"
+          ],
+          "bits": "4623085754984169472"
+        }
+      },
+      {
+        "input": {
+          "phase": "encoded",
+          "raw": "not-json"
+        },
+        "output": {
+          "kind": "null",
+          "keys": [],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "phase": "native",
+          "body": [
+            "retained",
+            false
+          ]
+        },
+        "output": {
+          "kind": "array",
+          "keys": [],
+          "bits": null
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::signature_rejection::is_binance_style_signature_rejection": {
+    "api": {
+      "kind": "function",
+      "name": "is_binance_style_signature_rejection",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual source predicate performs Number(code) and String(msg) coercions before its case-insensitive signature decision. Execute those conversions and the native TypeError path rather than classifying the JSON predicate as a pure selector. tests/signature_rejection.rs compares the maintained TypeScript source independently.",
+    "call": "{match $type($value){Ok(result)=>serde_json::json!({\"ok\":true,\"rejected\":result}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"message\":error.message})}}",
+    "cases": [
+      {
+        "input": {
+          "code": " -1022 "
+        },
+        "output": {
+          "ok": true,
+          "rejected": true
+        }
+      },
+      {
+        "input": {
+          "code": -1021,
+          "msg": [
+            "SIGNATURE FOR THIS REQUEST IS NOT VALID"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "rejected": true
+        }
+      },
+      {
+        "input": {
+          "code": null,
+          "msg": null
+        },
+        "output": {
+          "ok": true,
+          "rejected": false
+        }
+      },
+      {
+        "input": {
+          "code": {},
+          "msg": 123
+        },
+        "output": {
+          "ok": true,
+          "rejected": false
+        }
+      },
+      {
+        "input": {
+          "code": {
+            "toString": 0
+          },
+          "msg": "signature for this request is not valid"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::tealstreet::is_tealstreet_web_socket_url": {
+    "api": {
+      "kind": "function",
+      "name": "is_tealstreet_web_socket_url",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual raw URL parser plus hostname predicate, not a string-substring selector. Native cases pin root/subdomain acceptance, case folding, unrelated suffix refusal and malformed input; tests/tealstreet_transport.rs independently observes seven maintained-source URL decisions.",
+    "call": "serde_json::json!($type($value.as_str().expect(\"raw URL\")))",
+    "cases": [
+      {
+        "input": "wss://tealstreet.io/socket",
+        "output": true
+      },
+      {
+        "input": "https://SUB.TEALSTREET.IO/path",
+        "output": true
+      },
+      {
+        "input": "wss://tealstreet.io.evil/path",
+        "output": false
+      },
+      {
+        "input": "wss://badtealstreet.io/",
+        "output": false
+      },
+      {
+        "input": "not-a-url",
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_transport::transport_resolution::default_proxy_region": {
+    "api": {
+      "kind": "function",
+      "name": "default_proxy_region",
+      "signature": {
+        "inputs": [
+          [
+            "regions",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::object_map::JsObjectMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "alloc::string::String",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Specific body review plus executed native/source test native_preferences_preserve_undefined_final_operands_and_region_order in tests/tealstreet_transport.rs: None and empty-key defaults are SG, native integer keys retain JS order, and the parent resolver matches 162 actual source cases. This explicit classification is not a decoder output receipt.",
+    "reason": "Selects the first already-typed JsObjectMap key or the fixed SG fallback, cloning the existing String. The empty-key truthiness branch does not parse data or validate a schema; typed resolution construction is classified separately."
+  },
+  "safe_cex_transport::transport_resolution::resolve_account_transport": {
+    "api": {
+      "kind": "function",
+      "name": "resolve_account_transport",
+      "signature": {
+        "inputs": [
+          [
+            "account",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::transport_resolution::ResolvedTransport",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "metadata",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::transport_resolution::TransportMetadata",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_transport::transport_resolution::ResolvedTransport",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Native typed preference conversion is executed and observed rather than relabeled away. Independently authored flag/presence/region expectations retain the source final-operand semantics and JS key order; the existing source oracle covers all 162 preference cases separately. Fixture deserialization only arranges typed inputs and does not claim that this function admits raw account JSON.",
+    "call": "{let account:super::ResolvedTransport=serde_json::from_value($value[\"account\"].clone()).expect(\"typed account fixture\");let metadata:super::TransportMetadata=serde_json::from_value($value[\"metadata\"].clone()).expect(\"typed metadata fixture\");let actual=$type(&account,&metadata);serde_json::json!({\"proxy\":actual.tealstreet_proxy,\"tunnel\":actual.tealstreet_tunnel,\"region\":actual.proxy_region})}",
+    "cases": [
+      {
+        "input": {
+          "account": {},
+          "metadata": {
+            "requiresCors": false,
+            "privateProxyRegions": {}
+          }
+        },
+        "output": {
+          "proxy": null,
+          "tunnel": null,
+          "region": null
+        }
+      },
+      {
+        "input": {
+          "account": {
+            "tealstreetProxy": false,
+            "tealstreetTunnel": false,
+            "proxyRegion": ""
+          },
+          "metadata": {
+            "requiresCors": true,
+            "supportsTunnel": false,
+            "privateProxyRegions": {
+              "JA": [
+                "x"
+              ],
+              "SG": []
+            }
+          }
+        },
+        "output": {
+          "proxy": true,
+          "tunnel": false,
+          "region": "JA"
+        }
+      },
+      {
+        "input": {
+          "account": {
+            "tealstreetProxy": false,
+            "tealstreetTunnel": false,
+            "proxyRegion": "SG"
+          },
+          "metadata": {
+            "requiresCors": false,
+            "enforceWsTunnel": true,
+            "supportsTunnel": false,
+            "privateProxyRegions": {}
+          }
+        },
+        "output": {
+          "proxy": true,
+          "tunnel": true,
+          "region": "SG"
+        }
+      },
+      {
+        "input": {
+          "account": {
+            "tealstreetProxy": true,
+            "proxyRegion": "JA"
+          },
+          "metadata": {
+            "requiresCors": false,
+            "privateProxyRegions": {}
+          }
+        },
+        "output": {
+          "proxy": true,
+          "tunnel": true,
+          "region": "JA"
+        }
+      },
+      {
+        "input": {
+          "account": {
+            "tealstreetProxy": false,
+            "tealstreetTunnel": true,
+            "proxyRegion": ""
+          },
+          "metadata": {
+            "requiresCors": false,
+            "enforceWsTunnel": false,
+            "supportsTunnel": false,
+            "privateProxyRegions": {}
+          }
+        },
+        "output": {
+          "proxy": false,
+          "tunnel": true,
+          "region": null
+        }
+      },
+      {
+        "input": {
+          "account": {},
+          "metadata": {
+            "requiresCors": true,
+            "privateProxyRegions": {
+              "JA": [],
+              "2": [],
+              "1": []
+            }
+          }
+        },
+        "output": {
+          "proxy": true,
+          "tunnel": true,
+          "region": "1"
         }
       }
     ]
