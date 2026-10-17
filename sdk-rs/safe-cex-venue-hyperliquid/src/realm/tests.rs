@@ -197,3 +197,218 @@ fn number_to_string_with_radix_matches_v8() {
         assert_eq!(radix_string(v, radix), expected, "{v}.toString({radix})");
     }
 }
+
+fn production_realm() -> (Realm, Rc<TestRuntime>) {
+    let (realm, runtime) = realm();
+    super::imports::bind(&realm);
+    (realm, runtime)
+}
+
+#[test]
+fn production_import_registry_uses_real_helpers_and_rejects_unknown_names() {
+    let (mut r, _) = production_realm();
+    for name in [
+        "hasSeenFill",
+        "markFillSeen",
+        "isFinitePositiveNumber",
+        "mapSeries",
+        "hyperliquidOrderResponseHasDeferredOrderStatus",
+    ] {
+        assert!(r.global_binding(name).unwrap().is_callable(), "{name}");
+    }
+    let error = r
+        .global_binding("__unknown_hyperliquid_import")
+        .unwrap_err();
+    assert_eq!(
+        message(&mut r, &error),
+        "__unknown_hyperliquid_import is not defined"
+    );
+    let seen = r.global_binding("hasSeenFill").unwrap();
+    let mark = r.global_binding("markFillSeen").unwrap();
+    let id = Value::str("authored-fill-id");
+    assert!(matches!(
+        r.call(&seen, &Value::Undefined, std::slice::from_ref(&id))
+            .unwrap(),
+        Value::Bool(false)
+    ));
+    assert!(matches!(
+        r.call(&mark, &Value::Undefined, std::slice::from_ref(&id))
+            .unwrap(),
+        Value::Undefined
+    ));
+    let factory = r.global_binding("getCrossCache").unwrap();
+    let cache = r.call(&factory, &Value::Undefined, &[]).unwrap();
+    assert!(matches!(
+        r.call_method(&cache, "hasSeenFill", std::slice::from_ref(&id))
+            .unwrap(),
+        Value::Bool(true)
+    ));
+    assert!(matches!(
+        r.call(&seen, &Value::Undefined, &[id]).unwrap(),
+        Value::Bool(true)
+    ));
+    let predicate = r.global_binding("isFinitePositiveNumber").unwrap();
+    for (number, expected) in [
+        (f64::NAN, false),
+        (f64::INFINITY, false),
+        (-f64::INFINITY, false),
+        (-0.0, false),
+        (0.0, false),
+        (-1.0, false),
+        (1.25, true),
+    ] {
+        assert!(
+            matches!(r.call(&predicate, &Value::Undefined, &[Value::Number(number)]).unwrap(), Value::Bool(value) if value==expected)
+        );
+    }
+    let object = r.new_object();
+    let poison = r.native("toJSON", 0, |_, _, _| {
+        panic!("strict numeric predicate must not inspect an object's toJSON")
+    });
+    r.define_hidden(&object, PropKey::str("toJSON"), poison);
+    for value in [
+        Value::Undefined,
+        Value::Null,
+        Value::Bool(true),
+        Value::str("1.25"),
+        object,
+    ] {
+        assert!(matches!(
+            r.call(&predicate, &Value::Undefined, &[value]).unwrap(),
+            Value::Bool(false)
+        ));
+    }
+}
+
+#[test]
+fn production_import_map_series_awaits_values_and_callbacks_and_reads_live_length() {
+    let (mut r, rt) = production_realm();
+    let series = r.global_binding("mapSeries").unwrap();
+    let promised = r.settled_promise(Ok(Value::Number(3.0)));
+    let input = r.new_array(vec![Value::Number(2.0), promised]);
+    let expected_input = input.clone();
+    let receiver = r.new_object();
+    let expected_receiver = receiver.clone();
+    let trace = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let recorded = trace.clone();
+    let callback = r.native("serial-callback", 3, move |r, this, args| {
+        assert!(this.strict_equal(&expected_receiver));
+        assert!(args[2].strict_equal(&expected_input));
+        let value = args[0].as_number().unwrap();
+        let index = args[1].as_number().unwrap();
+        recorded.borrow_mut().push(("start", value));
+        if index == 0.0 {
+            r.call_method(&expected_input, "push", &[Value::Number(4.0)])?;
+        }
+        let sleep = r.runtime().sleep(10);
+        let ended = recorded.clone();
+        Ok(r.spawn_value(Box::pin(async move {
+            sleep.await.unwrap();
+            ended.borrow_mut().push(("end", value));
+            Ok(Value::Number(value * 10.0))
+        })))
+    });
+    let output = r
+        .call(&series, &Value::Undefined, &[input, callback, receiver])
+        .unwrap();
+    rt.drain();
+    let cell = output.promise().unwrap();
+    let result = match &cell.borrow().state {
+        PromiseState::Fulfilled(v) => v.clone(),
+        _ => panic!("serial result must fulfill"),
+    };
+    assert_eq!(
+        *trace.borrow(),
+        [
+            ("start", 2.0),
+            ("end", 2.0),
+            ("start", 3.0),
+            ("end", 3.0),
+            ("start", 4.0),
+            ("end", 4.0)
+        ]
+    );
+    assert_eq!(r.get_str(&result, "length").unwrap().as_number(), Some(3.0));
+    for (i, n) in [20.0, 30.0, 40.0].into_iter().enumerate() {
+        assert_eq!(
+            r.get_str(&result, &i.to_string()).unwrap().as_number(),
+            Some(n)
+        );
+    }
+}
+
+#[test]
+fn production_import_map_series_retains_module_receiver_and_original_rejection() {
+    let (mut r, rt) = production_realm();
+    let series = r.global_binding("mapSeries").unwrap();
+    let expected_series = series.clone();
+    let original = r.error_of("RangeError", "authored serial rejection");
+    let thrown = original.clone();
+    let calls = Rc::new(std::cell::Cell::new(0));
+    let observed = calls.clone();
+    let callback = r.native("reject", 1, move |r, this, _| {
+        assert!(r.get_str(this, "mapSeries")?.strict_equal(&expected_series));
+        observed.set(observed.get() + 1);
+        Ok(r.settled_promise(Err(thrown.clone())))
+    });
+    let input = r.new_array(vec![Value::Number(1.0), Value::Number(2.0)]);
+    let output = r
+        .call(&series, &Value::Undefined, &[input, callback])
+        .unwrap();
+    rt.drain();
+    let cell = output.promise().unwrap();
+    match &cell.borrow().state {
+        PromiseState::Rejected(error) => assert!(error.strict_equal(&original)),
+        _ => panic!("serial error must reject"),
+    };
+    assert_eq!(calls.get(), 1, "no later callback after rejection");
+}
+
+#[test]
+fn production_import_map_series_resolves_callback_call_before_awaited_item() {
+    let (mut r, rt) = production_realm();
+    let series = r.global_binding("mapSeries").unwrap();
+    let trace = Rc::new(std::cell::RefCell::new(Vec::new()));
+    let input = r.object_from(vec![("length", Value::Number(1.0))]);
+    let item_trace = trace.clone();
+    let item = r.native("item", 0, move |r, _, _| {
+        item_trace.borrow_mut().push("get item");
+        Ok(r.settled_promise(Ok(Value::Number(2.0))))
+    });
+    r.define_getter(&input, PropKey::str("0"), item);
+    let callback = r.native("callback", 1, |_, _, _| {
+        panic!("own call must replace direct invocation")
+    });
+    let expected_callback = callback.clone();
+    let receiver = r.new_object();
+    let expected_receiver = receiver.clone();
+    let call_trace = trace.clone();
+    let own_call = r.native("own call", 4, move |_, this, args| {
+        assert!(this.strict_equal(&expected_callback));
+        assert!(args[0].strict_equal(&expected_receiver));
+        assert_eq!(args[1].as_number(), Some(2.0));
+        assert_eq!(args[2].as_number(), Some(0.0));
+        call_trace.borrow_mut().push("own call");
+        Ok(Value::Number(20.0))
+    });
+    let getter_trace = trace.clone();
+    let getter = r.native("get call", 0, move |_, _, _| {
+        getter_trace.borrow_mut().push("get callback.call");
+        Ok(own_call.clone())
+    });
+    r.define_getter(&callback, PropKey::str("call"), getter);
+    let output = r
+        .call(&series, &Value::Undefined, &[input, callback, receiver])
+        .unwrap();
+    rt.drain();
+    assert_eq!(
+        *trace.borrow(),
+        ["get callback.call", "get item", "own call"]
+    );
+    let cell = output.promise().unwrap();
+    let result = match &cell.borrow().state {
+        PromiseState::Fulfilled(v) => v.clone(),
+        _ => panic!("own call result must fulfill"),
+    };
+    assert_eq!(r.get_str(&result, "0").unwrap().as_number(), Some(20.0));
+}
