@@ -1386,3 +1386,10 @@ primitive elements, nullish elements and throwing getters/conversions.
 The numeric patch witnesses pass entity selectors (`{id}`), matching the source
 Store signatures, while retaining all numeric-bit, null and omission assertions.
 Bare primitive selectors remain negative cases in the source ID corpus.
+
+Shared console.info/debug route to the native runtime console sink and return
+undefined. `tests/js_console_info_debug.rs` captures the actual NativeRuntime
+output in a child process and compares its payloads with Node, including exact
+info/debug severity dispatch. The original shared globals compile but fail at
+console.info before either host output can be observed. Console.log is handled
+by its separate source-binding change.
