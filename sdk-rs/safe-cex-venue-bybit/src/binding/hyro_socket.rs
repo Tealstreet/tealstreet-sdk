@@ -56,7 +56,14 @@ pub(crate) fn callback(
                 Ok(Js::Undefined)
             })));
         }
-        session::dispatch(&rt, &owner, code, &captures, args)
+        session::dispatch(
+            &rt,
+            &owner,
+            session::Callback::from_name(code)
+                .expect("SessionHost routes only registered session callbacks"),
+            &captures,
+            args,
+        )
     }))
 }
 

@@ -5,8 +5,7 @@ import subprocess
 workspace = Path(__file__).resolve().parents[2]
 source = workspace / "safe-cex-candle-cache/src/backends.rs"
 original = source.read_bytes()
-needle = b'''                            serde_json::from_value::<safe_cex_types::Candle>(candle.clone())
-                        else {
+needle = b'''                        let Some(candle) = crate::codec::decode_json_candle(candle) else {
                             continue;
                         };'''
 assert original.count(needle) == 1
@@ -36,4 +35,4 @@ finally:
 restored = test()
 assert restored.returncode == 0 and "1 passed" in restored.stdout
 assert source.read_bytes() == original
-print("Malformed-row error propagation compiled and failed; exact restoration passed all 48 miss/refetch cases.")
+print("Malformed-row error propagation compiled and failed; exact restoration passed all 38 structural miss/refetch cases.")
