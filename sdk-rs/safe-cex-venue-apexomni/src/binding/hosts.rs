@@ -19,7 +19,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_num::JsJsonValue as J;
 use safe_cex_store::Store;
-use safe_cex_types::*;
+use safe_cex_types::{Candle, ExchangeOptions, OHLCVOptions, OrderBook};
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},

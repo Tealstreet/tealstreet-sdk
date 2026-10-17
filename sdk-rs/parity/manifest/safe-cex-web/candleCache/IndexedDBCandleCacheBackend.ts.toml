@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex-web/src/candleCache/IndexedDBCandleCacheBackend.ts"
-rust_files = [ "safe-cex-candle-cache/src/indexed_db.rs" ]
+rust_files = [ "safe-cex-candle-cache/src/indexed_db.rs", "safe-cex-candle-cache/src/codec.rs" ]
 
 [[symbol]]
 ts = "IndexedDBCandleCacheBackendOptions"
@@ -46,17 +46,17 @@ note = "MIXED CHOSEN typed snapshots and CORRECTED callback failure settlement: 
 ts = "IndexedDBCandleCacheBackend.loadChunks"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::load_chunks"
+rs = [ "safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::load_chunks", "safe-cex-candle-cache/src/codec.rs::decode_js_candle" ]
 status = "divergent"
-note = "MIXED CHOSEN typed snapshots and CORRECTED callback failure settlement: Typed bounded sparse decoding rejects malformed candles and drops unknown fields. CHOSEN pre-epoch read: sparse uses Euclidean remainder, so index -1 occupies slot 99 for size 100 instead of a negative array property that TS filter ignores; a JS-like sparse property representation could mirror this, but the bounded dense typed chunk contract was retained. CORRECTED ts-bug: a record lacking a candles array errors and reports once, retains successful siblings and settles; TS throws inside onsuccess and leaves its Promise pending with no report. Generic callback throw could emulate that hang but was rejected to keep failures observable. Independent request successes are retained before error; returned owned snapshot cannot receive later successes as TS mutable Map can. CHOSEN early null/accessor availability guard is defined on open. Adapted target: safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::load_chunks."
+note = "Split: safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::load_chunks and safe-cex-candle-cache/src/codec.rs::decode_js_candle. Reads native numeric fields directly, retaining NaN/nonfinite values and signed zero. Previously persisted null OHLC/volume decodes to NaN as a hit; missing/wrong-kind fields and invalid timestamps still miss. Compiled Wasm executes against real Chrome IndexedDB:26 read-mode/field profiles and maintained TS backend writes run independently, with zero venue fetches for NaN/null numeric hits and one for structural misses. MIXED CHOSEN typed snapshots and CORRECTED callback failure settlement: Typed bounded sparse decoding rejects malformed candles and drops unknown fields. CHOSEN pre-epoch read: sparse uses Euclidean remainder, so index -1 occupies slot 99 for size 100 instead of a negative array property that TS filter ignores; a JS-like sparse property representation could mirror this, but the bounded dense typed chunk contract was retained. CORRECTED ts-bug: a record lacking a candles array errors and reports once, retains successful siblings and settles; TS throws inside onsuccess and leaves its Promise pending with no report. Generic callback throw could emulate that hang but was rejected to keep failures observable. Independent request successes are retained before error; returned owned snapshot cannot receive later successes as TS mutable Map can. CHOSEN early null/accessor availability guard is defined on open. Adapted target: safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::load_chunks."
 
 [[symbol]]
 ts = "IndexedDBCandleCacheBackend.persistChunks"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::persist_chunks"
+rs = [ "safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::persist_chunks", "safe-cex-candle-cache/src/codec.rs::encode_js_record" ]
 status = "divergent"
-note = "CHOSEN: Preserves marked TS abort-only pending transaction behavior; cancellation detaches event handlers. CHOSEN pre-epoch persistence: Euclidean slots persist negative-index candles, whereas TS filter ignores negative array properties. JS-like sparse properties could emulate TS but bounded dense typed chunks were chosen. Adapted target: safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::persist_chunks. A non-cancellable browser Promise could mirror source lifetime, but scoped handler ownership was selected so dropping native/wasm futures releases callback resources."
+note = "Split: safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::persist_chunks and safe-cex-candle-cache/src/codec.rs::encode_js_record. Builds the native record directly before the real IndexedDB put, preserving numeric values through structured clone rather than a lossy JSON roundtrip. Compiled Wasm executes against real Chrome IndexedDB:26 read-mode/field profiles and maintained TS backend writes run independently, with zero venue fetches for NaN/null numeric hits and one for structural misses. CHOSEN: Preserves marked TS abort-only pending transaction behavior; cancellation detaches event handlers. CHOSEN pre-epoch persistence: Euclidean slots persist negative-index candles, whereas TS filter ignores negative array properties. JS-like sparse properties could emulate TS but bounded dense typed chunks were chosen. Adapted target: safe-cex-candle-cache/src/indexed_db.rs::IndexedDBCandleCacheBackend::persist_chunks. A non-cancellable browser Promise could mirror source lifetime, but scoped handler ownership was selected so dropping native/wasm futures releases callback resources."
 
 [[symbol]]
 ts = "IndexedDBCandleCacheBackend.clear"

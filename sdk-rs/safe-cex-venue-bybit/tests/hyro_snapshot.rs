@@ -542,9 +542,11 @@ impl Host for Harness {
                 self.touch("isCurrent", &[])?;
                 Ok(boolean(self.profile != "stale-current"))
             }
-            "snapshot-current" | "snapshot-pnl" | "market-usdt" | "market-entry" => {
-                api::dispatch(self, code, args)
-            }
+            "snapshot-current" | "snapshot-pnl" | "market-usdt" | "market-entry" => api::dispatch(
+                self,
+                api::Callback::from_name(code).expect("source callback selector"),
+                args,
+            ),
             "reduce" => {
                 let mut sum = args[1].clone();
                 for value in elements(owner) {
