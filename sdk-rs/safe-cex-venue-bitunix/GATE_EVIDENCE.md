@@ -1069,3 +1069,45 @@ Clippy, formatting/diff, parity7459/16613 and extraction0 pass. Logs
 /tmp/bitunix-visible-{amount-control-red,amount-fixed,final-native,
 final-inventories,final-native-clippy,final-wasm-clippy,final-parity,
 final-extract}.log. This accepted input residual is recorded in known-residuals.md.
+
+## Money-path D: attached amendment cancel/recreate
+
+Maintained source `updateOrder` catches an unsupported-operation refusal on an
+attached virtual TP/SL leg and calls `recreateAttachedTpslParentOrder`. The native
+binding previously emitted/threw without recovery. The new public
+`native_identity::attached_amendment_recreates_only_after_matching_refusal_and_successful_cancel`
+regression constructs the actual venue, signed clients and DefaultStore, replacing
+only terminal REST responses. Its optional source-oracle mode executes actual
+amendment, fallback, hydration, formatter and placement bodies with the actual
+TypeScript DefaultStore; the original model corpus stays unchanged.
+
+Eight source/native cases retain TP/SL trigger types and protection legs, reject
+nonmatching errors and ordinary-parent unsupported errors without cancel, refuse
+both LIMIT leg execution semantics before cancel, preserve Store on failed
+cancel, and retain canceled Store status on failed placement. Exact payloads and
+request order, returned chart aliases, visible errors and exact parent/child
+versus neighboring-ID status changes are compared. Fixture error envelopes keep
+`data: {}` so method emissions are observed independently of the API's separate
+msg-without-data diagnostic.
+
+The regression compiled and failed on master (`f203fd13c2`, expected NEW__tp,
+actual unsupported-operation error). With the final assertions, restoring the
+original `update_order` body compiled and failed the same recovery assertion;
+exact source restoration passed. Logs: `/tmp/bitunix-attached-red.log`,
+`/tmp/bitunix-attached-control-red.log`, and
+`/tmp/bitunix-attached-control-restored.log`.
+
+Scoped native identity/model/placement/trait tests, strict native and WASM
+all-target Clippy, all-feature cancellation/override/binding inventories and full
+parity passed. Inventory outcomes are cancellation6pass/1explicit export-ignore,
+override7pass/1live-TS-ignore and binding25pass. Changed production bodies have no
+cancellation/override body pins; the required target passed without a pin edit.
+Manifest rows now map the fallback, string classifier and internal trigger helper
+using the existing retained snapshot/UTF-8 boundaries. No carrier migration.
+
+Final normal-master refresh `c5b55adb18` preserves both distinct append-only test
+and doc additions. All18 scoped native tests (including the inherited80-case
+ticker witness), native/WASM strict all-target lint, inventories6+7+25 with the two
+explicit ignores, parity7459/16587 and extractor0updates pass. The independent
+money-path audit WEEX receipt is57 concrete binding tests +1 original trading
+corpus, all passing. All checks ran serially with Cargo jobs1.

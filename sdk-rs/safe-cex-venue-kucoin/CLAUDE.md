@@ -90,10 +90,12 @@ borrowed, qualified and text decoding. Run the six compiled guard-removal contro
 serially with `node safe-cex-venue-kucoin/tests/accepted-native-controls.mjs` from
 `sdk-rs`; the runner restores production bytes and reruns all seven tests.
 
-`accepted_exchange_members` exercises connected native book callbacks and cleanup.
-The futures case proves a valid change emits before cleanup, then suppresses the
-next valid change. Run `node safe-cex-venue-kucoin/tests/accepted-book-cleanup-control.mjs`
-alone for the compiled handler-removal failure and exact restoration proof.
+`accepted_exchange_members` exercises connected native book/candle callbacks and
+cleanup for both families. Futures books suppress duplicate sequences and refetch
+then replay a gap; Spot replaces the whole snapshot without checksum validation.
+Distinct candle fields are compared as native bits with both maintained listeners.
+Run `node safe-cex-venue-kucoin/tests/accepted-book-cleanup-control.mjs` alone for
+four compiling cleanup/duplicate/gap/volume failures and exact restoration proof.
 
 Account-mode Serialize emits native fields directly, without an intermediate
 `json!` Value that would erase infinities before the ingress output guard.
