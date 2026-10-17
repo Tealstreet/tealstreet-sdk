@@ -8,6 +8,18 @@ use safe_cex_num::{js_string, js_truthy};
 use safe_cex_types::{BothPositionSide, Execution, ExecutionPositionSide, HistoricalTrade, Market};
 use serde_json::Value;
 
+#[derive(Debug)]
+pub(crate) struct ExecutionProjectionRefusal {
+    pub error: WeexUtilityError,
+    pub value: Value,
+}
+
+#[derive(Debug)]
+pub(crate) enum ExecutionRowError {
+    Source(WeexUtilityError),
+    Projection(ExecutionProjectionRefusal),
+}
+
 fn optional_bool(value: Option<&Value>, field: &str) -> Result<Option<bool>, WeexUtilityError> {
     value
         .map(|value| {
@@ -24,8 +36,24 @@ pub fn normalize_execution(
     market: Option<&Market>,
     local_to_utc: impl FnOnce(f64) -> f64,
 ) -> Result<Option<Execution>, WeexUtilityError> {
-    normalize_execution_fields(raw, market, local_to_utc)?
-        .map(|execution| project_execution(execution, raw, market))
+    normalize_execution_row(raw, market, local_to_utc).map_err(|error| match error {
+        ExecutionRowError::Source(error) => error,
+        ExecutionRowError::Projection(refusal) => refusal.error,
+    })
+}
+
+// Both the public utility and the constructed binding use this one pipeline.
+// Only closed output-field refusals are recoverable at the batch boundary.
+pub(crate) fn normalize_execution_row(
+    raw: &WeexUtilityInput,
+    market: Option<&Market>,
+    local_to_utc: impl FnOnce(f64) -> f64,
+) -> Result<Option<Execution>, ExecutionRowError> {
+    normalize_execution_fields(raw, market, local_to_utc)
+        .map_err(ExecutionRowError::Source)?
+        .map(|execution| {
+            project_execution(execution, raw, market).map_err(ExecutionRowError::Projection)
+        })
         .transpose()
 }
 
@@ -116,16 +144,27 @@ fn project_execution(
     mut execution: Execution,
     raw: &WeexUtilityInput,
     market: Option<&Market>,
-) -> Result<Execution, WeexUtilityError> {
-    execution.maker = optional_bool(raw.as_value().get("maker"), "Execution.maker")?;
+) -> Result<Execution, ExecutionProjectionRefusal> {
+    execution.maker = match raw.as_value().get("maker") {
+        Some(value) => optional_bool(Some(value), "Execution.maker").map_err(|error| {
+            ExecutionProjectionRefusal {
+                error,
+                value: value.clone(),
+            }
+        })?,
+        None => None,
+    };
     execution.commission_asset = match raw.pick_retained(&["commissionAsset", "coin"]) {
         Some(asset) => Some(
             asset
                 .as_value()
                 .as_str()
-                .ok_or_else(|| WeexUtilityError {
-                    name: "TypeError",
-                    message: "Execution.commissionAsset requires a string".to_owned(),
+                .ok_or_else(|| ExecutionProjectionRefusal {
+                    error: WeexUtilityError {
+                        name: "TypeError",
+                        message: "Execution.commissionAsset requires a string".to_owned(),
+                    },
+                    value: asset.as_value().clone(),
                 })?
                 .to_owned(),
         ),
@@ -152,7 +191,7 @@ pub fn normalize_historical_trade(
         local_to_utc,
     )?;
     let buyer = optional_bool(raw.as_value().get("buyer"), "HistoricalTrade.buyer")?;
-    let execution = project_execution(execution, raw, market)?;
+    let execution = project_execution(execution, raw, market).map_err(|refusal| refusal.error)?;
     Ok(Some(HistoricalTrade {
         id: execution.id,
         symbol: execution.symbol,

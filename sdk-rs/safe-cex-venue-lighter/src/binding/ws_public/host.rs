@@ -75,7 +75,7 @@ fn iterate(
     let iterator = js(JsIterator::open(value))?;
     while let Some(item) = iterator.step().map_err(to_signing)? {
         if let Err(error) = visit(to_account(&item)) {
-            iterator.close();
+            let _ = iterator.close();
             return Err(error);
         }
     }
@@ -271,7 +271,7 @@ impl WatchdogEntriesCall for Enumerate {
             let pair = js(JsIterator::open(&to_js(&entry)))?;
             let key = pair.step().map_err(to_signing)?.unwrap_or(Js::Undefined);
             let value = pair.step().map_err(to_signing)?.unwrap_or(Js::Undefined);
-            pair.close();
+            pair.close().map_err(to_signing)?;
             let key = js(to_string(&key))?;
             visit(key.to_vec(), to_account(&value))
         })

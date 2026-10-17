@@ -4778,7 +4778,7 @@ reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or Base
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::local_to_utc"
-reason = "Native receiver/callback and imported clock, Dayjs, loop, Blob or BaseWebSocket capability for ten mapped BingX REST history/listener/routing/polling/disposal bodies. No separate TS declaration. Shared public state and real private event/listen-key adapter are linked; full exchange/socket classes and constructors remain pending. No pending venue body is delegated."
+reason = "Native local-wall-time host capability for source Date parsing. The production HistoryHost delegates to required BingxDependencies.local_wall_time_to_utc; the native registry explicitly supplies its UTC profile. Real binding historical_fills_use_host_local_time_conversion compares the actual source fill mapper in Singapore and New York winter/summer and proves explicit offsets bypass the callback. No separate TS declaration."
 
 [[exempt]]
 rs = "safe-cex-venue-bingx/src/read_history.rs::HistoryHost::loop_after"
@@ -6855,26 +6855,6 @@ reason = "C3: mandatory local property/call/intrinsic bridge for mapped canonica
 [[exempt]]
 rs = "safe-cex-venue-woo/src/public_canonical.rs::CanonicalCallback"
 reason = "C3: retained arrow callback signature for native mapper and comparator functions; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/public_canonical.rs::CanonicalModule"
-reason = "C3: native module-lifetime binding carrier holding persistent mapped function objects; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowOps"
-reason = "C3: mandatory opaque language-operation bridge; Rust owns normalization and comparison bodies; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference"
-reason = "C3: identity-preserving structural Error representation constraint for the mapped comparison declaration; no separately named TypeScript symbol."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/snapshot_parity.rs::SnapshotPrimitives"
-reason = "C3: mandatory opaque language-operation and module-state bridge for mapped public parity bodies; no separately named TypeScript declaration."
-
-[[exempt]]
-rs = "safe-cex-venue-woo/src/snapshot_parity.rs::SnapshotParityOps"
-reason = "C3: mandatory opaque language-operation and module-state bridge for mapped public parity bodies; no separately named TypeScript declaration."
 
 [[exempt]]
 rs = "safe-cex-venue-woo/src/legacy_lifecycle.rs::LifecycleOps"

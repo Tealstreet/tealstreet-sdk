@@ -1136,6 +1136,15 @@ fn stored_order(h: &Harness, id: &str) -> Order {
 #[test]
 fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
     let h = authenticated_private_venue();
+    let fills = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        std::rc::Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
     let mut unknown = live_order("unknown", "ACTIVE", "0");
     unknown["instrument_name"] = json!("UNKNOWN-PERP");
     let advanced = json!({"order_id":"ws-advanced","instrument_name":SYMBOL,
@@ -1208,6 +1217,11 @@ fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
         h.runtime.reports.borrow().is_empty(),
         "{:?}",
         h.runtime.reports.borrow()
+    );
+    assert_eq!(
+        fills.get(),
+        0,
+        "source Crypto.com order/fill state updates emit no fill event"
     );
     h.venue().dispose().expect("dispose");
 }

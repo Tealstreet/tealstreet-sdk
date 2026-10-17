@@ -7037,6 +7037,68 @@
             }
           ],
           [
+            "report",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
             "format_error",
             {
               "impl_trait": [
@@ -10834,7 +10896,7 @@
                       "tuple": [
                         {
                           "resolved_path": {
-                            "path": "safe_cex_venue_breakoutprop::types::PortfolioResponse",
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
                             "args": null
                           }
                         },
@@ -10868,8 +10930,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "Portfolio decoding returns the typed portfolios separately from the preserved raw response; it must retain unknown fields in raw info. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); match super::decode(&input) { Ok((typed, raw)) => serde_json::json!({\"ok\":true,\"count\":typed.portfolios.len(),\"first\":typed.portfolios.first().map(|p| &p.account),\"unknown\":raw.get(\"unknown\")}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "evidence": "Captures the raw numeric portfolio input once and exposes its actual native JS value separately from retained info. It reads no declaration-only field and imposes no whole PortfolioResponse validation; actual host/source tests cover consumed fields.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); match super::decode(&input) { Ok((native, raw)) => { let portfolios=native.get(\"portfolios\").ok(); let count=portfolios.as_ref().and_then(|p|p.array_values()).map(|p|p.len()); let first=portfolios.and_then(|p|p.get(\"0\").ok()).and_then(|p|p.get(\"account\").ok()).and_then(|v|safe_cex_exchange::js_runtime::value::to_typed::<String>(&v).ok()); serde_json::json!({\"ok\":true,\"count\":count,\"first\":first,\"unknown\":raw.get(\"unknown\")}) }, Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -11709,6 +11771,68 @@
                 }
               }
             }
+          ],
+          [
+            "report",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
           ]
         ],
         "output": {
@@ -11761,7 +11885,7 @@
       }
     },
     "evidence": "Position formatting filters explicit symbol inputs and appends missing zero-contract positions after existing rows; actual contracts and entry prices are observed directly. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let symbols = vec![\"ETHUSD\".to_owned(),\"SOLUSD\".to_owned()]; match super::format_positions(&input, &store, Some(&symbols), &|v| v) { Ok(rows) => serde_json::json!({\"ok\":true,\"positions\":rows.iter().map(|p| serde_json::json!({\"symbol\":p.symbol,\"contracts\":format!(\"{:016x}\", p.contracts.to_bits()),\"entry\":format!(\"{:016x}\", p.entry_price.to_bits())})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let symbols = vec![\"ETHUSD\".to_owned(),\"SOLUSD\".to_owned()]; match super::format_positions(&input, &store, Some(&symbols), &|v| v, &|_| Ok(())) { Ok(rows) => serde_json::json!({\"ok\":true,\"positions\":rows.iter().map(|p| serde_json::json!({\"symbol\":p.symbol,\"contracts\":format!(\"{:016x}\", p.contracts.to_bits()),\"entry\":format!(\"{:016x}\", p.entry_price.to_bits())})).collect::<Vec<_>>()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -12054,7 +12178,7 @@
       }
     },
     "evidence": "Order formatting decodes first-leg price, quantity/fill/remaining, order-code identity and close effect; native output is inspected before any model serialization. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
-    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); match super::format_orders(&input, &store, &|v| v, &|_| Ok(())) { Ok(rows) => serde_json::json!({\"ok\":true,\"orders\":rows.map(|rows| rows.iter().map(|o| serde_json::json!({\"id\":o.id,\"price\":format!(\"{:016x}\", o.price.to_bits()),\"amount\":format!(\"{:016x}\", o.amount.to_bits()),\"filled\":format!(\"{:016x}\", o.filled.to_bits()),\"remaining\":format!(\"{:016x}\", o.remaining.to_bits()),\"reduceOnly\":o.reduce_only})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); match super::format_orders(&input, &store, &|v| v, &|_| Ok(())) { Ok(rows) => serde_json::json!({\"ok\":true,\"orders\":rows.map(|rows| rows.iter().map(|o| serde_json::json!({\"id\":o.id,\"price\":format!(\"{:016x}\", o.price.value().expect(\"fixture price\").to_bits()),\"amount\":format!(\"{:016x}\", o.amount.to_bits()),\"filled\":format!(\"{:016x}\", o.filled.to_bits()),\"remaining\":format!(\"{:016x}\", o.remaining.to_bits()),\"reduceOnly\":o.reduce_only})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
         "input": {
@@ -12721,7 +12845,7 @@
         ]
       }
     },
-    "evidence": "Uncached account lookup decodes USER_RESPONSE, filters FULL_TRADING, selects the first substring match and caches the exact selected account; username/request effects remain actual host seams. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
+    "evidence": "Uncached account lookup retains native input, reads only first-user accounts, filters FULL_TRADING, selects the first substring match and caches the exact selected account; username/request effects remain actual host seams. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity.",
     "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let cache = std::cell::RefCell::new(None); let logger = |_:serde_json::Value| Ok(()); let future = super::get_account_code(&cache,\"user\".into(),None,||async {Ok(\"token\".into())},|_|async move {Ok(input)},&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(account) => serde_json::json!({\"ok\":true,\"account\":account,\"cached\":cache.borrow().clone()}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
@@ -12792,6 +12916,50 @@
           "ok": true,
           "account": "demo:B",
           "cached": "demo:B"
+        }
+      },
+      {
+        "input": {
+          "userDetails": [
+            {
+              "accounts": [
+                {
+                  "accountStatus": "DISABLED"
+                },
+                {
+                  "account": "default:A",
+                  "accountStatus": "FULL_TRADING"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "account": "default:A",
+          "cached": "default:A"
+        }
+      },
+      {
+        "input": {
+          "userDetails": [
+            {
+              "fullName": false,
+              "accounts": [
+                {
+                  "owner": [],
+                  "account": "default:A",
+                  "accountStatus": "FULL_TRADING"
+                }
+              ]
+            },
+            null
+          ]
+        },
+        "output": {
+          "ok": true,
+          "account": "default:A",
+          "cached": "default:A"
         }
       }
     ]
@@ -13794,7 +13962,7 @@
         ]
       }
     },
-    "evidence": "Quote reading decodes events to native Tickers, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
+    "evidence": "Quote reading projects only source-consumed symbol/bid/ask through native property reads and retains its mapping catch/fallback, keeps bid/ask distinct and assigns bid to last/mark/index; missing/null events remain None. Reviewed production body and corresponding actual TypeScript method. Expected input/output values are independently authored. Native adapters call the real function and inspect its returned native fields/Value without serializing a typed decoded owner; existing source corpora additionally pin complete fields, numeric bits and effect ordering. Ready fixture polling does not establish pending-future lifecycle parity. Floating output fields are observed as exact native binary64 bit strings; expected bits come from the independently specified values, avoiding numeric token rewriting by the JavaScript contract loader.",
     "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput = serde_json::from_value($value.clone()).expect(\"independent JSON input\"); let store = safe_cex_store::store::DefaultStore::new(); let logger = |_:serde_json::Value| Ok(()); let future = super::fetch_tickers_for_symbols(vec![\"ETHUSD\".into()],||async {Ok(\"token\".into())},||async {Ok(\"account\".into())},|_|async move {Ok(input)},&store,&logger); let mut future = std::pin::pin!(future); let result = match std::future::Future::poll(future.as_mut(), &mut std::task::Context::from_waker(std::task::Waker::noop())) { std::task::Poll::Ready(result) => result, std::task::Poll::Pending => panic!(\"ready fixture must complete\") }; match result { Ok(rows) => serde_json::json!({\"ok\":true,\"tickers\":rows.map(|rows| rows.iter().map(|t| serde_json::json!({\"symbol\":t.symbol,\"bid\":format!(\"{:016x}\", t.bid.to_bits()),\"ask\":format!(\"{:016x}\", t.ask.to_bits()),\"last\":format!(\"{:016x}\", t.last.to_bits()),\"mark\":format!(\"{:016x}\", t.mark.to_bits()),\"index\":format!(\"{:016x}\", t.index.to_bits())})).collect::<Vec<_>>())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
     "cases": [
       {
@@ -13856,6 +14024,67 @@
         "output": {
           "ok": true,
           "tickers": null
+        }
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "symbol": "ETHUSD",
+              "ask": 123.5,
+              "bid": 121.25
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": [
+            {
+              "symbol": "ETHUSD",
+              "bid": "405e500000000000",
+              "ask": "405ee00000000000",
+              "last": "405e500000000000",
+              "mark": "405e500000000000",
+              "index": "405e500000000000"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "events": [
+            {
+              "symbol": "ETHUSD",
+              "ask": 123.5,
+              "bid": 121.25,
+              "type": {},
+              "time": null
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": [
+            {
+              "symbol": "ETHUSD",
+              "bid": "405e500000000000",
+              "ask": "405ee00000000000",
+              "last": "405e500000000000",
+              "mark": "405e500000000000",
+              "index": "405e500000000000"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "events": [
+            null
+          ]
+        },
+        "output": {
+          "ok": true,
+          "tickers": []
         }
       }
     ]
@@ -17126,5 +17355,1022 @@
       }
     ],
     "evidence": "Reviewed constructor and concrete public-polling ancestor construction against BreakoutpropPublicWebsocket and inherited shared BaseWebSocket. Dependencies are typed reusable capabilities; the raw handler-table entry remains an executed observed method. Native cases prove retained ownership and actual runtime delegation without dialing a socket. Cleanup ticker decoding is independently executed by the concrete PollingBase contract, and Clone has a separate construction review and negative control."
+  },
+  "safe_cex_venue_breakoutprop::portfolio::format_open_positions": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "format_open_positions",
+      "signature": {
+        "inputs": [
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::numeric_ingress::JsNumberInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "store",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_store::contract::Store",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local_to_utc",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "primitive": "f64"
+                                }
+                              ],
+                              "output": {
+                                "primitive": "f64"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "report",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_types::Position",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual native property reader over captured numeric input; independent symbol, quantity and price identities at two rows. Does not validate unused declaration fields.",
+    "call": "{ let input: safe_cex_num::numeric_ingress::JsNumberInput=serde_json::from_value($value.clone()).unwrap(); let store=safe_cex_store::store::DefaultStore::new(); match super::format_open_positions(&input,&store,&|v|v,&|_|Ok(())) { Ok(rows)=>serde_json::json!({\"ok\":true,\"positions\":rows.map(|rows|rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"contracts\":format!(\"{:016x}\",p.contracts.to_bits()),\"entry\":format!(\"{:016x}\",p.entry_price.to_bits())})).collect::<Vec<_>>())}), Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.message}) } }",
+    "cases": [
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "ETHUSD",
+                  "quantity": 1.25,
+                  "openPrice": 2000,
+                  "side": "BUY",
+                  "quantityNotional": 2500,
+                  "marginRate": 0.1,
+                  "lastUpdateTime": "2026-01-01T00:00:00Z"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "positions": [
+            {
+              "symbol": "ETHUSD",
+              "contracts": "3ff4000000000000",
+              "entry": "409f400000000000"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "XBTUSD",
+                  "quantity": 2.5,
+                  "openPrice": 4000,
+                  "side": "BUY",
+                  "quantityNotional": 2500,
+                  "marginRate": 0.1,
+                  "lastUpdateTime": "2026-01-01T00:00:00Z"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "positions": [
+            {
+              "symbol": "XBTUSD",
+              "contracts": "4004000000000000",
+              "entry": "40af400000000000"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_breakoutprop::portfolio_reads::fetch_open_positions": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_open_positions",
+      "signature": {
+        "inputs": [
+          [
+            "fetch_portfolio_raw",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "store",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_store::contract::Store",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local_to_utc",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "primitive": "f64"
+                                }
+                              ],
+                              "output": {
+                                "primitive": "f64"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "report",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "format_error",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::runtime::ExchangeError",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "E"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "impl_trait": [
+            {
+              "trait_bound": {
+                "trait": {
+                  "path": "core::future::future::Future",
+                  "args": {
+                    "angle_bracketed": {
+                      "args": [],
+                      "constraints": [
+                        {
+                          "name": "Output",
+                          "args": null,
+                          "binding": {
+                            "equality": {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "core::option::Option",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "alloc::vec::Vec",
+                                                          "args": {
+                                                            "angle_bracketed": {
+                                                              "args": [
+                                                                {
+                                                                  "type": {
+                                                                    "resolved_path": {
+                                                                      "path": "safe_cex_types::Position",
+                                                                      "args": null
+                                                                    }
+                                                                  }
+                                                                }
+                                                              ],
+                                                              "constraints": []
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                "generic_params": [],
+                "modifier": "none"
+              }
+            }
+          ]
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(ExchangeError) -> E",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::runtime::ExchangeError",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "E"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "core::option::Option",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "safe_cex_num::numeric_ingress::JsNumberInput",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "evidence": "Reviewed concrete eager raw-future/truthiness/formatter orchestration. Production decoder lives in portfolio::format_open_positions, with native observations and actual HTTP binding regressions.",
+    "reason": "Does not deserialize an external representation: takes an already captured input future and typed Store, delegates formatting and forwards the source reporter and error conversion."
+  },
+  "safe_cex_venue_breakoutprop::portfolio::native_open_positions": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "native_open_positions",
+      "signature": {
+        "inputs": [
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::numeric_ingress::JsNumberInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "store",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_store::contract::Store",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local_to_utc",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "primitive": "f64"
+                                }
+                              ],
+                              "output": {
+                                "primitive": "f64"
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "report",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Canonical source position mapping retains native copied fields and inherited side referents until final consumer projection. Independently authored native observations call the production private helper and inspect returned Js properties, computed binary64 bits, retained info and source catch logs directly. Balance and filtered Position outputs use this same helper; no serializer or stand-in mapper supplies observations.",
+    "call": "{ let input:safe_cex_num::numeric_ingress::JsNumberInput=serde_json::from_value($value.clone()).unwrap(); let store=safe_cex_store::store::DefaultStore::new(); let logs=std::cell::RefCell::new(Vec::<String>::new()); let report=|message:&str| {logs.borrow_mut().push(message.into());Ok(())}; let result=super::native_open_positions(&input,&store,&|n|n,&report); match result { Ok(rows)=>serde_json::json!({\"rows\":rows.map(|rows|rows.iter().map(|row|{let entry=row.get(\"entryPrice\").unwrap();let contracts=row.get(\"contracts\").unwrap();serde_json::json!({\"symbol\":row.get(\"symbol\").unwrap().to_display(),\"entry\":entry.to_display(),\"entryType\":entry.type_of(),\"contracts\":contracts.to_display(),\"contractsType\":contracts.type_of(),\"sideType\":row.get(\"side\").unwrap().type_of(),\"marginBits\":format!(\"{:016x}\",row.get(\"marginSize\").unwrap().to_number().unwrap().to_bits()),\"upnlBits\":format!(\"{:016x}\",row.get(\"unrealizedPnl\").unwrap().to_number().unwrap().to_bits()),\"marker\":row.get(\"info\").unwrap().get(\"marker\").unwrap().to_display()})}).collect::<Vec<_>>()),\"logs\":*logs.borrow()}), Err(error)=>serde_json::json!({\"error\":error.message,\"logs\":*logs.borrow()}) } }",
+    "cases": [
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "BTCUSD",
+                  "side": "BUY",
+                  "openPrice": 100,
+                  "quantity": 2,
+                  "quantityNotional": 200,
+                  "marginRate": 0.05,
+                  "lastUpdateTime": 0,
+                  "marker": "opaque-1"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "rows": [
+            {
+              "symbol": "BTCUSD",
+              "entry": "100",
+              "entryType": "number",
+              "contracts": "2",
+              "contractsType": "number",
+              "sideType": "string",
+              "marginBits": "4024000000000000",
+              "upnlBits": "0000000000000000",
+              "marker": "opaque-1"
+            }
+          ],
+          "logs": []
+        }
+      },
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "BTCUSD",
+                  "side": "constructor",
+                  "openPrice": "100",
+                  "quantity": "2",
+                  "quantityNotional": 200,
+                  "marginRate": 0.05,
+                  "lastUpdateTime": 0,
+                  "marker": "opaque-1"
+                }
+              ]
+            }
+          ]
+        },
+        "output": {
+          "rows": [
+            {
+              "symbol": "BTCUSD",
+              "entry": "100",
+              "entryType": "string",
+              "contracts": "2",
+              "contractsType": "string",
+              "sideType": "function",
+              "marginBits": "4024000000000000",
+              "upnlBits": "8000000000000000",
+              "marker": "opaque-1"
+            }
+          ],
+          "logs": []
+        }
+      },
+      {
+        "input": {
+          "portfolios": [
+            {
+              "positions": [
+                {
+                  "symbol": "BTCUSD",
+                  "side": "constructor",
+                  "openPrice": "100",
+                  "quantity": "2",
+                  "quantityNotional": 200,
+                  "marginRate": 0.05,
+                  "lastUpdateTime": 0,
+                  "marker": "opaque-1"
+                },
+                null
+              ]
+            }
+          ]
+        },
+        "output": {
+          "rows": [],
+          "logs": [
+            "Cannot read properties of null (reading 'side')"
+          ]
+        }
+      },
+      {
+        "input": {
+          "portfolios": []
+        },
+        "output": {
+          "rows": null,
+          "logs": []
+        }
+      }
+    ]
   }
 }
