@@ -49,7 +49,19 @@ async function main() {
  const grouped=await client.getCreateGroupedOrdersTransaction({groupingType:1,orders:[groupedInput,child]});
  const detail=grouped.groupedOrderDetails.orders[0];
  const group={data:grouped.data,isBuyRetained:Object.is(detail.isBuy,groupedInput.isBuy),reduceOnlyRetained:detail.reduceOnly===groupedInput.reduceOnly};
+ const sideCases=[];
+ for(const [label,groupingType,sideA,sideB] of [['falsey-oto',1,0,false],['objects-oto',1,[],[]],['falsey-oco',2,0,false]]) {
+  const a={...order(),orderId:8n,isBuy:sideA,reduceOnly:true};
+  const b={...order(),orderId:9n,isBuy:sideB,reduceOnly:true,orderType:'stop_loss',amount:0n};
+  if(groupingType===2){a.orderType='take_profit';b.amount=1n;}
+  try {
+   const tx=await client.getCreateGroupedOrdersTransaction({groupingType,orders:[a,b]});
+   const rows=tx.groupedOrderDetails.orders;
+   sideCases.push({label,data:tx.data,retained:rows[0].isBuy===sideA&&rows[1].isBuy===sideB});
+  }catch(error){sideCases.push({label,error:error.message});}
+ }
+ assert.equal(sideCases.length,3);
  assert.equal(singles.length,51);assert.equal(batch.length,3);assert.equal(nonceReads,1);
- process.stdout.write(JSON.stringify({singles,batch,group}),()=>process.exit(0));
+ process.stdout.write(JSON.stringify({singles,batch,group,sideCases}),()=>process.exit(0));
 }
 main().catch(error=>{console.error(error);process.exit(1);});

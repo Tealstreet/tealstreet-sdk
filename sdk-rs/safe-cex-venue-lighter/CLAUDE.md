@@ -417,3 +417,7 @@ calling the live owner helper; source oracles cover identity, numeric bits and U
 Nonce retry classification reads the original error's code and message directly.
 Both String conversions precede the final OR, so matching codes still observe
 message coercion failures. Unread surrogate fields and cycles stay untouched.
+
+Signer class flag inputs use JavaScript truthiness for preimage bits and preserve
+original JS values in returned order metadata. Group validation shares one body
+with typed callers and receives strict raw-side equality from the JS binding.

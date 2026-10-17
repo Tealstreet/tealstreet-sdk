@@ -772,9 +772,53 @@ fn transaction_client_retains_native_flags_while_signing_their_truthiness() {
         }
         Err(error) => json!({"error":error.message()}),
     };
+    let mut side_cases = vec![];
+    for (label, grouping, side_a, side_b) in [
+        ("falsey-oto", 1., Js::Number(0.), Js::Bool(false)),
+        ("objects-oto", 1., Js::array(vec![]), Js::array(vec![])),
+        ("falsey-oco", 2., Js::Number(0.), Js::Bool(false)),
+    ] {
+        let a = flag_order(8);
+        let b = flag_order(9);
+        a.set("isBuy", side_a.clone()).unwrap();
+        b.set("isBuy", side_b.clone()).unwrap();
+        a.set("reduceOnly", Js::Bool(true)).unwrap();
+        b.set("reduceOnly", Js::Bool(true)).unwrap();
+        b.set("orderType", Js::str("stop_loss")).unwrap();
+        b.set("amount", big(if grouping == 2. { 1 } else { 0 }))
+            .unwrap();
+        if grouping == 2. {
+            a.set("orderType", Js::str("take_profit")).unwrap();
+        }
+        let result = w.settle(
+            client
+                .call_method(
+                    "getCreateGroupedOrdersTransaction",
+                    vec![Js::object(vec![
+                        ("groupingType", Js::Number(grouping)),
+                        ("orders", Js::array(vec![a, b])),
+                    ])],
+                )
+                .unwrap(),
+        );
+        side_cases.push(match result {
+            Ok(tx) => {
+                let rows = tx
+                    .get("groupedOrderDetails")
+                    .unwrap()
+                    .get("orders")
+                    .unwrap();
+                json!({"label":label,"data":tx.get("data").unwrap().to_display(),
+                    "retained":rows.get("0").unwrap().get("isBuy").unwrap().strict_equals(&side_a)
+                        && rows.get("1").unwrap().get("isBuy").unwrap().strict_equals(&side_b)})
+            }
+            Err(error) => json!({"label":label,"error":error.message()}),
+        });
+    }
+    assert_eq!(side_cases.len(), 3);
     assert_eq!(w.sent().len(), 1, "actual SDK nonce cache");
     assert_eq!(
-        json!({"singles":singles,"batch":batch,"group":group}),
+        json!({"singles":singles,"batch":batch,"group":group,"sideCases":side_cases}),
         source
     );
 }
