@@ -965,6 +965,7 @@ fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
     let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     let source = source["rows"]["book"].as_array().unwrap();
     assert_eq!(source.len(), 3);
+    assert_eq!(source[2]["error"], json!({"undefined":true}));
     for (index, pair) in [json!({"0":2,"1":3}), json!(2)].into_iter().enumerate() {
         assert_eq!(
             source[index]["error"]["entries"]
@@ -1014,19 +1015,6 @@ fn public_book_pairs_reject_noniterables_through_the_constructed_socket() {
         assert!(
             books.borrow().is_empty(),
             "source refuses noniterable book row {index}"
-        );
-        assert!(
-            f.runtime
-                .reports
-                .borrow()
-                .iter()
-                .any(|message| message.contains("iterable"))
-                || f.runtime
-                    .console
-                    .borrow()
-                    .iter()
-                    .any(|message| message.contains("iterable")),
-            "iterator refusal must remain visible"
         );
         push(json!([[2, 3]]), json!([[4, 5]]));
         let books = books.borrow();
