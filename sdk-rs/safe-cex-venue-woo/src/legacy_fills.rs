@@ -88,9 +88,15 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for WooLegacyFillsQuery {
 
 fn native_params(params: WooLegacyFillsParams) -> Result<serde_json::Value, serde_json::Error> {
     use safe_cex_types::retained_json::RetainedJsonInput;
-    let mut values = vec![("size".into(), RetainedJsonInput::Float(params.size))];
+    let mut values = vec![(
+        "size".encode_utf16().collect(),
+        RetainedJsonInput::Float(params.size),
+    )];
     if let Some(symbol) = params.symbol {
-        values.push(("symbol".into(), RetainedJsonInput::Text(symbol)));
+        values.push((
+            "symbol".encode_utf16().collect(),
+            RetainedJsonInput::Text(symbol.encode_utf16().collect()),
+        ));
     }
     for (key, value) in [
         ("start_t", params.start_t),
@@ -98,7 +104,10 @@ fn native_params(params: WooLegacyFillsParams) -> Result<serde_json::Value, serd
         ("page", params.page),
     ] {
         if let Some(value) = value {
-            values.push((key.into(), RetainedJsonInput::Float(value)));
+            values.push((
+                key.encode_utf16().collect(),
+                RetainedJsonInput::Float(value),
+            ));
         }
     }
     RetainedJsonInput::Object(values).into_value()

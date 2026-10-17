@@ -414,11 +414,11 @@
         "output": "-Infinity"
       },
       {
-        "input": "\ufeff2",
+        "input": "﻿2",
         "output": "2"
       },
       {
-        "input": "\u00852",
+        "input": "2",
         "output": "NaN"
       }
     ]
@@ -1567,10 +1567,10 @@
             ]
           },
           {
-            "input": "\u96ea",
+            "input": "雪",
             "output": [
               "text",
-              "\u96ea"
+              "雪"
             ]
           }
         ]
@@ -1655,10 +1655,10 @@
             ]
           },
           {
-            "input": "\u96ea",
+            "input": "雪",
             "output": [
               "text",
-              "\u96ea"
+              "雪"
             ]
           }
         ]
@@ -2928,7 +2928,7 @@
     "call": "{ let observe = |n: f64| if n.is_nan() { serde_json::json!(\"NaN\") } else { serde_json::json!(format!(\"{:016x}\",n.to_bits())) }; observe($type($value.as_str().expect(\"parseFloat text\"))) }",
     "cases": [
       {
-        "input": "\ufeff -0tail",
+        "input": "﻿ -0tail",
         "output": "8000000000000000"
       },
       {
@@ -3718,10 +3718,10 @@
         }
       },
       {
-        "input": "\u96ea\u0000message",
+        "input": "雪\u0000message",
         "output": {
           "name": "ScriptValidationError",
-          "message": "\u96ea\u0000message"
+          "message": "雪\u0000message"
         }
       }
     ]
@@ -3754,13 +3754,13 @@
         "reason": "Actual typed conversion is executed for four explicit native error operands; inspect resulting kind/name/message/code-unit fields."
       }
     ],
-    "call": "{ let (name,message)=match $value.as_str().expect(\"native error selector\") { \"RangeError\"=>(\"RangeError\",\"\u96ea\"), \"SyntaxError\"=>(\"SyntaxError\",\"syntax\"), \"TypeError\"=>(\"TypeError\",\"typed\"), \"HostFault\"=>(\"HostFault\",\"custom\"), _=>panic!(\"unreviewed native error selector\") }; let v=$type::from(crate::JsCoercionError{name,message}); serde_json::json!({\"kind\":v.kind.name(),\"message\":v.message,\"units\":v.message_utf16}) }",
+    "call": "{ let (name,message)=match $value.as_str().expect(\"native error selector\") { \"RangeError\"=>(\"RangeError\",\"雪\"), \"SyntaxError\"=>(\"SyntaxError\",\"syntax\"), \"TypeError\"=>(\"TypeError\",\"typed\"), \"HostFault\"=>(\"HostFault\",\"custom\"), _=>panic!(\"unreviewed native error selector\") }; let v=$type::from(crate::JsCoercionError{name,message}); serde_json::json!({\"kind\":v.kind.name(),\"message\":v.message,\"units\":v.message_utf16}) }",
     "cases": [
       {
         "input": "RangeError",
         "output": {
           "kind": "RangeError",
-          "message": "\u96ea",
+          "message": "雪",
           "units": [
             38634
           ]
@@ -3856,10 +3856,10 @@
         ]
       },
       {
-        "input": "\"\u96ea\\u0000\"",
+        "input": "\"雪\\u0000\"",
         "output": [
           "text",
-          "\u96ea\u0000"
+          "雪\u0000"
         ]
       },
       {
@@ -4029,8 +4029,8 @@
           },
           {
             "input": {
-              "left": "\u00e9",
-              "right": "e\u0301"
+              "left": "é",
+              "right": "é"
             },
             "output": "equal"
           }
@@ -8223,7 +8223,7 @@
         }
       },
       {
-        "input": " \ufeff ",
+        "input": " ﻿ ",
         "output": {
           "ok": true,
           "decimal": "0"
@@ -10005,7 +10005,7 @@
         },
         "input": "observed",
         "reason": "Call actual typed receiver property access with native identity/UTF16-length or precise nullish receiver refusal.",
-        "call": "{ fn show(v:crate::PrototypeValue)->serde_json::Value { match v { crate::PrototypeValue::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),crate::PrototypeValue::Null=>serde_json::json!({\"kind\":\"null\"}),crate::PrototypeValue::Boolean(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),crate::PrototypeValue::String(v)=>serde_json::json!({\"kind\":\"text\",\"value\":v}),crate::PrototypeValue::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),crate::PrototypeValue::Reference(r)=>{ let member=match r.member(){crate::prototype_realm::BuiltinIdentity::Object(crate::ProtoMember::ToString)=>\"toString\",crate::prototype_realm::BuiltinIdentity::Object(crate::ProtoMember::Prototype)=>\"Object.prototype\",crate::prototype_realm::BuiltinIdentity::FunctionPrototype=>\"Function.prototype\",_=>panic!(\"unselected builtin identity\")};serde_json::json!({\"kind\":\"reference\",\"member\":member,\"callable\":r.is_callable()}) } } } let realm=std::rc::Rc::new(crate::PrototypeRealm::default());let _binding=realm.bind();let actual_current=$type::current();assert!(std::rc::Rc::ptr_eq(&realm,&actual_current),\"actual current realm identity\");let realm=actual_current; let key=$value[\"key\"].as_str().unwrap();let value=match $value[\"tag\"].as_str().unwrap(){\"text\"=>crate::PrototypeValue::String(\"\ud83d\udca1\".into()),\"null\"=>crate::PrototypeValue::Null,\"undefined\"=>crate::PrototypeValue::Undefined,_=>panic!(\"typed native receiver\")};match $type::get(&realm,&value,key){Ok(v)=>serde_json::json!({\"ok\":true,\"value\":show(v)}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e})} }",
+        "call": "{ fn show(v:crate::PrototypeValue)->serde_json::Value { match v { crate::PrototypeValue::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),crate::PrototypeValue::Null=>serde_json::json!({\"kind\":\"null\"}),crate::PrototypeValue::Boolean(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),crate::PrototypeValue::String(v)=>serde_json::json!({\"kind\":\"text\",\"value\":v}),crate::PrototypeValue::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),crate::PrototypeValue::Reference(r)=>{ let member=match r.member(){crate::prototype_realm::BuiltinIdentity::Object(crate::ProtoMember::ToString)=>\"toString\",crate::prototype_realm::BuiltinIdentity::Object(crate::ProtoMember::Prototype)=>\"Object.prototype\",crate::prototype_realm::BuiltinIdentity::FunctionPrototype=>\"Function.prototype\",_=>panic!(\"unselected builtin identity\")};serde_json::json!({\"kind\":\"reference\",\"member\":member,\"callable\":r.is_callable()}) } } } let realm=std::rc::Rc::new(crate::PrototypeRealm::default());let _binding=realm.bind();let actual_current=$type::current();assert!(std::rc::Rc::ptr_eq(&realm,&actual_current),\"actual current realm identity\");let realm=actual_current; let key=$value[\"key\"].as_str().unwrap();let value=match $value[\"tag\"].as_str().unwrap(){\"text\"=>crate::PrototypeValue::String(\"💡\".into()),\"null\"=>crate::PrototypeValue::Null,\"undefined\"=>crate::PrototypeValue::Undefined,_=>panic!(\"typed native receiver\")};match $type::get(&realm,&value,key){Ok(v)=>serde_json::json!({\"ok\":true,\"value\":show(v)}),Err(e)=>serde_json::json!({\"ok\":false,\"error\":e})} }",
         "cases": [
           {
             "input": {
@@ -14690,5 +14690,166 @@
         "reason": "into_deserializer receives only the already captured private Node decoder and a typed caller visitor (or returns the same decoder for IntoDeserializer). Its standard Serde delegation does not admit a new raw string/JSON API. The caller visitor supplies its result schema; numeric event retention and model/refusal paths are exercised by the separately observed raw-metadata methods, whole-entry tests/numeric_ingress.rs and native sequence/map seeds. No claim that every generic visitor/model is eligible."
       }
     ]
+  },
+  "safe_cex_num::json_stringify::quoted_utf16": {
+    "api": {
+      "kind": "function",
+      "name": "quoted_utf16",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Specific outbound rendering role reviewed against this production body; retained_json_writer executes actual Node JSON.stringify comparisons and scripts/retained-json-controls.py requires compiled text-replacement/array-truncation failures with exact restored passes. This classification is separate from universal semantic or admission proof.",
+    "reason": "Appends wire JSON quotation of an already captured UTF-16 string to the caller-owned output buffer via the single lower quote helper. It does not parse JSON, construct a DTO or select an input shape."
+  },
+  "safe_cex_num::json_stringify::number": {
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Specific outbound rendering role reviewed against this production body; retained_json_writer executes actual Node JSON.stringify comparisons and scripts/retained-json-controls.py requires compiled text-replacement/array-truncation failures with exact restored passes. This classification is separate from universal semantic or admission proof.",
+    "reason": "Appends the JSON number spelling of an already native binary64 scalar to a caller-owned output buffer; finite values delegate to shared Number-to-String and nonfinite values emit null at this final wire boundary. No decoder or new numeric admission."
+  },
+  "safe_cex_num::json_stringify::write_retained": {
+    "api": {
+      "kind": "function",
+      "name": "write_retained",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Specific outbound rendering role reviewed against this production body; retained_json_writer executes actual Node JSON.stringify comparisons and scripts/retained-json-controls.py requires compiled text-replacement/array-truncation failures with exact restored passes. This classification is separate from universal semantic or admission proof.",
+    "reason": "Recursively renders already captured canonical retained data into the caller-owned wire buffer, preserving omission/array-null policy until this final JSON projection. It does not parse JSON or construct a new value carrier; all capture/admission remains in the canonical types parser."
   }
 }

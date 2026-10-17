@@ -9,7 +9,7 @@ source = root / 'sdk-rs/safe-cex-venue-weex/src/public_feed.rs'
 out = root / 'sdk-rs/target/weex-public-feed-gates'
 out.mkdir(parents=True, exist_ok=True)
 sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
-command = ['/opt/homebrew/opt/rustup/bin/cargo', 'test', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-weex', '--jobs', '2', '--test', 'public_feed']
+command = ['/opt/homebrew/opt/rustup/bin/cargo', 'test', '--manifest-path', 'sdk-rs/Cargo.toml', '-p', 'safe-cex-venue-weex', '--jobs', '1', '--test', 'public_feed']
 env = dict(os.environ, SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript')
 text = source.read_text()
 kline_start = text.index('let route = (rt.route_method)(host)?;', text.index('"kline")'))
@@ -27,8 +27,11 @@ controls = [
     ('depth-price-amount-swap', 'handle_depth', '(rt.update_price)(host, &book, side, price, amount)', '(rt.update_price)(host, &book, side, amount, price)', 'public_feed::message_native message_depth'),
     ('dynamic-ticker-dispatch', 'on_message', '(rt.invoke)(host, &(rt.this_property)(host, "handleTicker")?, json)', 'handle_ticker(host, rt, json)', 'public_feed::message_native message_dynamic_ticker'),
     ('routed-method-capture', 'on_message', kline, late_capture, 'public_feed::message_native message_coercion_order'),
-    ('gap-warning-symbol', 'handle_depth', 'WeexPublicCallback::SnapshotFailure { symbol },', 'WeexPublicCallback::SnapshotFailure { symbol: (rt.text)("") },', 'public_feed::depth_native_gap_warning depth_gap_reject'),
+    ('gap-silence', 'handle_depth', 'WeexPublicCallback::GapSnapshotFailure,', 'WeexPublicCallback::SnapshotFailure { symbol },', 'public_feed::depth_native depth_gap_reject'),
 ]
+selected = os.environ.get('WEEX_PUBLIC_FEED_CONTROL')
+controls = [control for control in controls if selected is None or control[0] == selected]
+assert controls, ('unknown control', selected)
 results = []
 for name, function, before, after, assertion in controls:
     original = source.read_bytes()

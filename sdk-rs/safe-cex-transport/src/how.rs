@@ -896,10 +896,9 @@ impl HOWWebSocket {
             if let Some(value) = request
                 .config_extensions
                 .get(property)
-                .map(safe_cex_num::JsJsonValue::from)
-                .filter(safe_cex_num::JsJsonValue::truthy)
+                .filter(|value| safe_cex_num::js_retained_truthy(value))
             {
-                let json = safe_cex_num::js_json_stringify(&value)
+                let json = safe_cex_num::js_retained_json_stringify(value)
                     .map_err(|error| TransportError::Host(error.to_string()))?
                     .expect("truthy config has a JSON representation");
                 headers.insert(

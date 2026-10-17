@@ -5929,6 +5929,36 @@
       {
         "receiver": "dynamic",
         "kind": "call",
+        "hook": "fetch_closed_pnl",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_historical_fills",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_historical_orders",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "fetch_income_history_range",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
         "hook": "start",
         "count": 1
       }
@@ -6299,6 +6329,13 @@
         "kind": "reference",
         "hook": "fetch_historical_orders",
         "callee": "members :: history :: fetch_historical_orders",
+        "count": 1
+      },
+      {
+        "receiver": "path",
+        "kind": "reference",
+        "hook": "fetch_historical_positions",
+        "callee": "crate :: ledger_history :: fetch_historical_positions",
         "count": 1
       },
       {

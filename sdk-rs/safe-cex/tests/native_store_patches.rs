@@ -59,7 +59,7 @@ fn unrelated_position_patch_preserves_every_existing_nonfinite_field() {
                 unrealized_pnl_native: Some(f64::NAN),
             },
         );
-        host.update_positions(&[("p".into(), patch)]).unwrap();
+        host.update_positions(&[(Some("p".into()), patch)]).unwrap();
         same_number(host.positions()[0].entry_price, price);
         assert!(
             host.positions()[0]
@@ -325,11 +325,11 @@ fn invalid_later_fields_commit_no_state_aliases_counters_or_notifications() {
     assert!(
         real.update_positions(&[
             (
-                "p1".into(),
+                Some("p1".into()),
                 json!({"contracts":7}).as_object().unwrap().clone().into()
             ),
             (
-                "p2".into(),
+                Some("p2".into()),
                 json!({"entryPrice":null})
                     .as_object()
                     .unwrap()

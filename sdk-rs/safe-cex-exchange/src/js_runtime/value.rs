@@ -167,11 +167,113 @@ impl From<Thrown> for ExchangeError {
     }
 }
 
-pub fn error_object(name: &str, message: &str) -> Js {
+fn error_data_property(object: &Js, key: &str, value: Js, enumerable: bool) {
+    let Js::Object(data) = object else {
+        unreachable!("fresh error/prototype object")
+    };
+    data.props.borrow_mut().insert(
+        utf16(key),
+        Prop::DataDescriptor {
+            value,
+            writable: true,
+            enumerable,
+            configurable: true,
+        },
+    );
+}
+
+// Shared stock prototypes carry inherited names; no constructor/runtime captures
+// or reference cycles are retained by this immutable thread-local lookup table.
+fn error_prototype(name: &str) -> (Js, bool) {
+    thread_local! {
+        static ERROR_PROTOTYPES: IndexMap<&'static str, Js> = {
+            let base = Js::object(vec![]);
+            error_data_property(&base, "name", Js::str("Error"), false);
+            error_data_property(&base, "message", Js::str(""), false);
+            error_data_property(&base, "toString", Js::function("toString", |this, _| {
+                error_string(&this).map(Js::String)
+            }), false);
+            let mut prototypes = IndexMap::new();
+            prototypes.insert("Error", base.clone());
+            for name in ["EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"] {
+                let prototype = Js::object(vec![]);
+                let Js::Object(data) = &prototype else { unreachable!() };
+                *data.proto.borrow_mut() = Some(base.clone());
+                error_data_property(&prototype, "name", Js::str(name), false);
+                error_data_property(&prototype, "message", Js::str(""), false);
+                prototypes.insert(name, prototype);
+            }
+            prototypes
+        };
+    }
+    ERROR_PROTOTYPES.with(|prototypes| match prototypes.get(name) {
+        Some(prototype) => (prototype.clone(), false),
+        None => (prototypes["Error"].clone(), true),
+    })
+}
+
+fn make_error_object(name: &str, message: Option<Str>) -> Js {
+    let (prototype, custom_name) = error_prototype(name);
     let object = Js::object_with_class("Error", vec![]);
-    let _ = object.define("message", Js::str(message));
-    let _ = object.define("name", Js::str(name));
+    let Js::Object(data) = &object else {
+        unreachable!()
+    };
+    *data.proto.borrow_mut() = Some(prototype);
+    if let Some(message) = message {
+        // Native Axios diagnostics assign their own name/message; standard
+        // Error constructors define a non-enumerable own message instead.
+        error_data_property(&object, "message", Js::String(message), custom_name);
+    }
+    if custom_name {
+        error_data_property(&object, "name", Js::str(name), true);
+    }
     object
+}
+
+pub fn error_object(name: &str, message: &str) -> Js {
+    make_error_object(name, Some(utf16(message)))
+}
+
+pub(super) fn error_constructor(name: &'static str) -> Js {
+    Js::constructor(name, move |_, args| {
+        let message = arg(&args, 0);
+        let message = if message.is_undefined() {
+            None
+        } else {
+            Some(message.to_js_string()?)
+        };
+        Ok(make_error_object(name, message))
+    })
+}
+
+fn error_string(error: &Js) -> Result<Str, Thrown> {
+    if !error.is_object() {
+        return Err(Thrown::type_error(
+            "Error.prototype.toString requires an object",
+        ));
+    }
+    let name = error.get("name")?;
+    let name = if name.is_undefined() {
+        utf16("Error")
+    } else {
+        name.to_js_string()?
+    };
+    let message = error.get("message")?;
+    let message = if message.is_undefined() {
+        utf16("")
+    } else {
+        message.to_js_string()?
+    };
+    if name.is_empty() {
+        return Ok(message);
+    }
+    if message.is_empty() {
+        return Ok(name);
+    }
+    let mut out = name.to_vec();
+    out.extend(": ".encode_utf16());
+    out.extend_from_slice(&message);
+    Ok(out.into())
 }
 
 impl fmt::Debug for Js {
@@ -403,7 +505,7 @@ impl Js {
         }
         self.intrinsic_string()
     }
-    fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
+    pub(super) fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
         for name in names {
             let declared = self.has_property(&utf16(name));
             // None is the value model's implicit stock prototype. An
@@ -534,26 +636,7 @@ impl Js {
                 ) {
                     utf16(&format!("[object {}]", o.class))
                 } else if o.class == "Error" {
-                    let name = self.get("name")?;
-                    let message = self.get("message")?;
-                    let name = if name.is_undefined() {
-                        utf16("Error")
-                    } else {
-                        name.to_js_string()?
-                    };
-                    let message = if message.is_undefined() {
-                        utf16("")
-                    } else {
-                        message.to_js_string()?
-                    };
-                    if message.is_empty() {
-                        name
-                    } else {
-                        let mut out = name.to_vec();
-                        out.extend(": ".encode_utf16());
-                        out.extend_from_slice(&message);
-                        out.into()
-                    }
+                    error_string(self)?
                 } else {
                     utf16("[object Object]")
                 }
