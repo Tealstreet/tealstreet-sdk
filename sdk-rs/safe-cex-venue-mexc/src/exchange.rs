@@ -764,14 +764,14 @@ impl MexcExchange {
     pub fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         Box::pin(async move {
             let interval = match options.interval {
-                safe_cex_types::Timeframe::M1 => "Min1",
-                safe_cex_types::Timeframe::M5 => "Min5",
-                safe_cex_types::Timeframe::M15 => "Min15",
-                safe_cex_types::Timeframe::M30 => "Min30",
-                safe_cex_types::Timeframe::H1 => "Min60",
-                safe_cex_types::Timeframe::H4 => "Hour4",
-                safe_cex_types::Timeframe::D1 => "Day1",
-                safe_cex_types::Timeframe::W1 => "Week1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1) => "Min1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M5) => "Min5",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M15) => "Min15",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M30) => "Min30",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H1) => "Min60",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::H4) => "Hour4",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::D1) => "Day1",
+                safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::W1) => "Week1",
                 unsupported => {
                     let literal = serde_json::to_value(unsupported)
                         .ok()
@@ -1406,14 +1406,19 @@ impl MexcExchange {
         Box::pin(async move {
             let market = self.base.store.markets_by_symbol().get(&symbol).cloned();
             let config = self.symbol_settings.borrow().get(&symbol).cloned();
-            let positions = self.base.store.positions().to_vec();
-            let config = derive_symbol_config(
-                &symbol,
-                &positions,
-                config.as_ref(),
-                *self.account_position_mode.borrow(),
-            )
-            .map_err(|error| ExchangeError::new(error.message))?;
+            let config = match config {
+                Some(config) => config,
+                None => {
+                    let positions = self.base.store.positions().to_vec();
+                    derive_symbol_config(
+                        &symbol,
+                        &positions,
+                        None,
+                        *self.account_position_mode.borrow(),
+                    )
+                    .map_err(|error| ExchangeError::new(error.message))?
+                }
+            };
 
             if let Some(market) = market.filter(|_| !self.base.is_public_data_only(self)) {
                 let request = RestRequest {

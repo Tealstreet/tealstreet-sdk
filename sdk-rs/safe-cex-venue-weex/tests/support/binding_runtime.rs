@@ -212,6 +212,13 @@ impl Http {
     pub fn ok(&self, method: &str, path: &str, data: Value) {
         self.route(method, path, 200, data);
     }
+    pub fn replace(&self, method: &str, path: &str, data: Value) {
+        self.routes
+            .lock()
+            .unwrap()
+            .retain(|(m, p, _)| m != method || p != path);
+        self.ok(method, path, data);
+    }
     pub fn calls(&self, path: &str) -> Vec<RestRequest> {
         self.sent
             .lock()

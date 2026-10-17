@@ -216,6 +216,38 @@ fn private_order_frame_commits_to_the_production_store() {
 }
 
 #[test]
+fn private_order_frames_map_native_types_to_source_limit() {
+    let f = PrivateFixture::new();
+    f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":"existing-order","S":"SELL","o":"LIMIT","x":"NEW","X":"NEW","p":"27300","q":"3","z":"1"}}));
+    for kind in ["IOC", "FOK", "POST_ONLY", "STOP_LIMIT"] {
+        let id = format!("native-{kind}");
+        f.frame(json!({"e":"ORDER_TRADE_UPDATE","E":1700000001000.0,"o":{"s":"E-BTC-USDT","i":id,"S":"SELL","o":kind,"x":"NEW","X":"NEW","p":"27300","q":"3","z":"1"}}));
+        let orders = f.store.orders();
+        let order = orders
+            .iter()
+            .find(|order| order.id == id)
+            .expect("native private order reaches Store");
+        assert_eq!(
+            order.r#type.value(),
+            Some(&safe_cex_types::OrderType::Limit),
+            "private parseOrderType maps {kind} to limit"
+        );
+        let native = safe_cex_exchange::js_runtime::value::from_typed(order).unwrap();
+        assert!(native.has_own("type"));
+        assert_eq!(to_json(&native.get("type").unwrap()).unwrap(), "limit");
+        assert_eq!(order.filled, 1.0);
+        assert_eq!(order.remaining, 2.0);
+    }
+    assert!(
+        f.store
+            .orders()
+            .iter()
+            .any(|order| order.id == "existing-order")
+    );
+    assert!(f.runtime.reports.borrow().is_empty());
+}
+
+#[test]
 fn private_trade_frame_emits_incremental_fill_and_commits_order() {
     let f = PrivateFixture::new();
     let fills = Rc::new(RefCell::new(vec![]));

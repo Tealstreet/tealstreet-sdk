@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/mexc/mexc.ws-public.ts"
-rust_files = [ "safe-cex-venue-mexc/src/ws.rs", "safe-cex-venue-mexc/src/ws_public.rs", "safe-cex-venue-mexc/src/runtime_assembly.rs", "safe-cex-venue-mexc/src/exchange.rs" ]
+rust_files = [ "safe-cex-venue-mexc/src/ws.rs", "safe-cex-venue-mexc/src/ws_public.rs", "safe-cex-venue-mexc/src/exchange.rs" ]
 
 [[symbol]]
 ts = "subscriptionKey"
@@ -70,9 +70,9 @@ note = "FINDING evidence/coverage: the test-only generic socket body and its fak
 ts = "MexcPublicWebsocket.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-mexc/src/runtime_assembly.rs::public_listen_order_book"
-status = "ported"
-note = "Handler registration then snapshot promise, disposed guard, ordinary indexed assignment (prototype setter), original callback/snapshot/handler identity, subscribe and cleanup; captured logger and source symbol/error coercion order. Source body over crate-local AssemblyHost bound native intrinsics/imports and existing mapped member owners; this does not claim a full concrete adapter integration proof. Actual-source oracle asserts decoded native values and ordered effects; enumerations are floors. Adapted as safe-cex-venue-mexc/src/runtime_assembly.rs::public_listen_order_book."
+rs = [ "safe-cex-venue-mexc/src/ws_public.rs::MexcPublicSocket::listen_order_book" ]
+status = "divergent"
+note = "FINDING evidence/coverage: removed the uncalled generic AssemblyHost duplicate and its fake-host oracle cases. Production executes safe-cex-venue-mexc/src/ws_public.rs::MexcPublicSocket::listen_order_book. Existing constructed Exchange/socket and native registry frame witnesses exercise the live routes; broad prototype/getter/reentrancy coverage from the removed isolated-body oracle is not claimed. No production socket body was replaced."
 
 [[symbol]]
 ts = "MexcPublicWebsocket.dispose"

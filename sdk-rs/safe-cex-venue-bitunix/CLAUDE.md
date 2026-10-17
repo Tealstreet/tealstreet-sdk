@@ -125,7 +125,9 @@ and explicitly opt in to funding subtraction when realized PnL is net of funding
 The positionMode field selects hedge leg and liqQty selects liquidation; unknown
 directions refuse rather than default. Native settlement callbacks are infallible
 and row input is retained JSON/UTF-8, excluding executable/getter inputs. Use the
-focused --test position_adapter -- --include-ignored test; no fetch wiring is claimed.
+focused --test position_adapter test, enabled in ordinary Cargo runs.
+It needs Node and SAFE_CEX_TYPESCRIPT_PATH; no live account or network is used.
+No fetch wiring is claimed.
 
 **Response selection helpers:** `response_helpers` walks the seven source envelope edges in preorder through depth four without entering arrays. `row_extraction` selects the first qualifying array, preserves first-value precedence (including false/zero), and uses shared `TableHit` for inherited stock Object members. Inputs are retained JSON; account fallback is `None` for the source empty object.
 
@@ -154,6 +156,8 @@ returning cached markets, including an empty startup cache. This intentionally
 raises the source trace-only diagnostic at the existing typed Market boundary;
 it does not admit or replace the refused row. The production-binding witness is
 `tests/native_market_refusal.rs`; its control restores trace-only logging.
+
+The native HTTP lane acquires its rate slot before each signing attempt, including retries and signature resends. `tests/rate_limit_signing.rs` fills the constructed venue’s five-request window and changes the synced clock while a private read is queued; its transmitted timestamp must come from dequeue time.
 
 The production native query signer uses the shared JsRoot query profile rather
 than pre-sorting UTF-8 bytes. Sorting applies recursively to objects and array
