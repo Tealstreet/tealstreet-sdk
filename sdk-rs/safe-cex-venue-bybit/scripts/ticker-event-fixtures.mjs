@@ -8,7 +8,7 @@ const values=[null,false,true,0,1,-1,'','0','-0','12.5suffix','0x10','Infinity',
 const fields=['bid1Price','ask1Price','lastPrice','markPrice','indexPrice','price24hPcnt','openInterest','fundingRate','nextFundingTime','volume24h','turnover24h'];
 const encode=v=>typeof v==='number'&&!Number.isFinite(v)?String(v):Object.is(v,-0)?'-0':v;
 const cases=[];
-for(const variant of ['bybit','bybitinverse','bybitspot']) {
+for(const [variant,category] of [['bybit','linear'],['bybit','inverse'],['bybitinverse','inverse'],['bybitspot','spot']]) {
  const file=ts.createSourceFile(variant,readFileSync(new URL(`${variant}.ws-public.ts`,root),'utf8'),ts.ScriptTarget.Latest,true);
  const cls=file.statements.find(ts.isClassDeclaration);
  const method=cls.members.find(m=>m.name?.getText()==='handleTickersEvent');
@@ -17,8 +17,8 @@ for(const variant of ['bybit','bybitinverse','bybitspot']) {
  const add=frame=>{
   const ticker={...initial};let calls=0,notifications=0,error;
   const store={tickersBySymbol:{BTCUSDT:ticker},updateTicker(t,patch){calls++;if(t===ticker){Object.assign(t,patch);if(Object.keys(patch).length)notifications++;}}};
-  try{make.call({parent:{store}})(frame);}catch(e){error=e.message;}
-  cases.push({variant,frame,initial,result:Object.fromEntries(keys.map(k=>[k,encode(ticker[k])])),calls,notifications,error});
+  try{make.call({parent:{store},category})(frame);}catch(e){error=e.message;}
+  cases.push({variant,category,frame,initial,result:Object.fromEntries(keys.map(k=>[k,encode(ticker[k])])),calls,notifications,error});
  };
  for(const field of fields) for(const value of values) { add({data:{symbol:'BTCUSDT',[field]:value}});add({data:{symbol:'UNTRACKED',[field]:value}}); }
  // A later coercion failure must not flush earlier parsed fields to Store.
