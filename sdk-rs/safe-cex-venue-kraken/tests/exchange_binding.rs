@@ -178,6 +178,28 @@ fn futures_candles_refuse_only_nan_timestamp_rows() {
         );
         assert_eq!(h.http.calls(&url).len(), 1);
     }
+    let url = format!("https://futures.kraken.com/api/charts/v1/trade/{SYMBOL}/1m");
+    let h = futures(|http| {
+        http.ok("GET", &url, json!({"candles":[{
+        "time":1000,"open":"NaN","high":"Infinity","low":"-0","close":"-Infinity","volume":"5"
+    }]}))
+    });
+    let candles = h
+        .drive(
+            h.venue().fetch_ohlcv(
+                serde_json::from_value(json!({
+                    "symbol":SYMBOL,"interval":"1m","to":1700000000000.0
+                }))
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(candles.len(), 1, "only timestamp controls row admission");
+    assert!(candles[0].open.is_nan());
+    assert_eq!(candles[0].high.to_bits(), f64::INFINITY.to_bits());
+    assert_eq!(candles[0].low.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(candles[0].close.to_bits(), f64::NEG_INFINITY.to_bits());
+    assert!(h.runtime.console.borrow().is_empty());
 }
 
 #[test]
