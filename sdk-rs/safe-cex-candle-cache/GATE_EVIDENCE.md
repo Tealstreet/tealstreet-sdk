@@ -813,3 +813,13 @@ CANDLE_CACHE_BROWSER. The structural control compiled with only decoder refusal
 changed to an error, failed the named CACHE-MALFORMED assertion (exit 101), then
 restored exact source bytes and passed all 38 current structural cases. This
 positive browser result does not close the older rollback/fault probe coverage.
+
+Readiness on the merged master base: scoped native all-target tests pass 60,
+with six explicit external-service/source-oracle ignores; the library source
+oracle was separately enabled and all 42 library tests pass. Native and wasm
+all-target Clippy both pass with -D warnings, and changed Rust files pass fmt.
+Full-resolution scoped parity passes 7,459 source rows / 80 public cache items
+with the existing 19 scoped exemptions; extractor check changes zero manifests.
+Required safe-cex-exchange all-features cancellable_future_inventory passes six,
+with the explicit discovery export ignored; no producer pin refresh is needed.
+Logs use `/tmp/port-txflow-candle-{all-targets,lib-all,clippy-native,clippy-wasm,parity,extract,cancellation}.log`.
