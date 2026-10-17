@@ -230,6 +230,7 @@ const NATIVE_ACCOUNT_EVENTS: &[&str] = &[
     "grafana-http-request",
     "grafana-http-response",
     "grafana-info",
+    "deactivate",
     "listenOHLCV",
     "listenOHLCVs",
     "listenOrderBook",
@@ -241,13 +242,48 @@ pub fn native_account_watch(
     on_store: Rc<dyn Fn(Value)>,
 ) -> Box<dyn Fn()> {
     let base = account.exchange.base();
+    let active = Rc::new(Cell::new(true));
+    let store_active = active.clone();
+    let unsubscribe: Rc<dyn Fn()> = account
+        .store
+        .subscribe(Box::new(move |data, _| {
+            if store_active.get() {
+                on_store(json!({
+                    "latency": data.latency,
+                    "balance": data.balance,
+                    "orders": data.orders,
+                    "positions": data.positions,
+                    "loaded": data.loaded,
+                    "updateIds": data.update_ids,
+                }));
+            }
+            Ok(())
+        }))
+        .into();
     let ids: Vec<(&str, String)> = NATIVE_ACCOUNT_EVENTS
         .iter()
         .map(|event| {
             let forward = on_event.clone();
+            let active = active.clone();
+            let unsubscribe = unsubscribe.clone();
+            let exchange = Rc::downgrade(&account.exchange);
             let id = base.on(
                 event,
                 Rc::new(move |name: &str, data: &Value| {
+                    if !active.get() {
+                        return Ok(());
+                    }
+                    if name == "deactivate" {
+                        // ExchangeWorker clears its delivery pipeline before disposal,
+                        // including the Store reset that disposal performs.
+                        active.set(false);
+                        unsubscribe();
+                        if let Some(exchange) = exchange.upgrade() {
+                            exchange.dispose()?;
+                        }
+                        forward("deactivate-status", &Value::Bool(true));
+                        return Ok(());
+                    }
                     forward(name, data);
                     Ok(())
                 }),
@@ -255,19 +291,9 @@ pub fn native_account_watch(
             (*event, id)
         })
         .collect();
-    let unsubscribe = account.store.subscribe(Box::new(move |data, _| {
-        on_store(json!({
-            "latency": data.latency,
-            "balance": data.balance,
-            "orders": data.orders,
-            "positions": data.positions,
-            "loaded": data.loaded,
-            "updateIds": data.update_ids,
-        }));
-        Ok(())
-    }));
     let exchange = account.exchange.clone();
     Box::new(move || {
+        active.set(false);
         unsubscribe();
         for (event, id) in &ids {
             exchange.base().off(event, Some(id));

@@ -46,6 +46,13 @@ Rejections are JavaScript Error objects with the source `name`, plain `message`
 and optional `code`. An absent source code stays absent; callers do not parse
 error messages as JSON. `tests/native-account-errors.test.mjs` checks this
 through the actual registry and native transport.
+
+Venue `deactivate` requests clear host delivery, dispose the exchange, and post
+`{event: "deactivate-status", data: true}`, matching the TS worker. The Store
+reset performed by disposal is suppressed. The Rust `native_account_deactivation`
+suite and Node `tests/native-account-deactivation.test.mjs` drive an actual
+Orderly-family account through a loopback expired-key response. The Rust suite
+also verifies that signer waits resolve as disposed.
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
 
 Streaming uses the same command channel: call `listenOHLCV([options])`,
