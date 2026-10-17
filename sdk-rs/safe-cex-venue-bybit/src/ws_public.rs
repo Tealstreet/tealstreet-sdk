@@ -385,7 +385,11 @@ impl PublicProtocol {
             )
             .map_err(|error| match error {
                 TickerEventError::Store(error) => error.into(),
-                TickerEventError::Source(message) => ExchangeError::new(message),
+                TickerEventError::Source(message) => {
+                    let mut error = ExchangeError::new(message);
+                    error.name = "TypeError".into();
+                    error
+                }
             })
         });
         let pong_socket = Rc::downgrade(socket);

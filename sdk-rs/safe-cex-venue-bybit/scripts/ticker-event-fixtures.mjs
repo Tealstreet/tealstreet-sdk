@@ -22,6 +22,9 @@ for(const variant of ['bybit','bybitinverse','bybitspot']) {
  assert.throws(()=>make.call({parent:{store:failingStore}})({data:{symbol:'BTCUSDT',lastPrice:'42'}}),e=>e===failure,`${variant}: subscriber error identity`);
  assert.equal(committed.last,42,`${variant}: ticker commit precedes rejection`);
  assert.equal(later,0,`${variant}: rejection stops subsequent work`);
+ for(const data of [{symbol:{toString:null}},{symbol:'BTCUSDT',lastPrice:{toString:null}}]) {
+  assert.throws(()=>make.call({parent:{store:failingStore}})({data}),e=>e.name==='TypeError',`${variant}: coercion error class`);
+ }
  const add=frame=>{
   const ticker={...initial};let calls=0,notifications=0,error;
   const store={tickersBySymbol:{BTCUSDT:ticker},updateTicker(t,patch){calls++;if(t===ticker){Object.assign(t,patch);if(Object.keys(patch).length)notifications++;}}};

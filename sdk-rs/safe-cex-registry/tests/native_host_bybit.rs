@@ -22,6 +22,49 @@ fn signature(payload: &str) -> String {
 }
 
 #[test]
+fn bybit_ticker_socket_preserves_coercion_type_errors_through_native_registry() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_transport::socket::SocketFrame;
+
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(account),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            let slot = if name == ExchangeName::Bybitinverse {
+                SocketSlot::PublicSecondary
+            } else {
+                SocketSlot::Public
+            };
+            let socket = h.exchange.base().get_socket(slot).unwrap();
+            let error = socket.on_message(&SocketFrame::Text(
+                r#"{"topic":"tickers.BTCUSDT","data":{"symbol":{"toString":null},"lastPrice":"42"}}"#.into(),
+            )).unwrap_err();
+            assert_eq!(
+                error.name, "TypeError",
+                "native socket retains coercion error class: {name:?}"
+            );
+            assert_eq!(error.message, "Cannot convert object to primitive value");
+            assert!(
+                h.store.tickers().is_empty(),
+                "coercion fails before ticker mutation"
+            );
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
 fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
     use safe_cex_exchange::{runtime::ExchangeError, socket_lifecycle::SocketSlot};
     use safe_cex_store::StoreUpdate;
