@@ -304,3 +304,11 @@ constructor rate limiting. It reads the current session after dequeue and on
 every network retry; the one-shot 401 recovery remains in DxApi. The three
 `auth_pipeline_` production binding regressions fail on the previous early-auth
 placement and pass with the native pipeline hook.
+
+Amendment copies retain Order.clientOrderId into internal PreparedOrderOpts.
+Both fresh and replacement placement enter the same caller-ID preflight before
+market/session work, outside the placement catch. Source updateOrder cancels
+first, then unsupported caller IDs (including the empty string) emit one refusal
+and prevent replacement HTTP. The binding regression compares absent, own
+undefined, nonempty and empty IDs against actual source updateOrder/placeOrder
+and BaseExchange guard bodies, preserving valid cancel-then-place controls.

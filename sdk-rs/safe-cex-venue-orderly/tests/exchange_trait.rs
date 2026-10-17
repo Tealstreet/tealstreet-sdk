@@ -7,6 +7,181 @@ use safe_cex_exchange::{
 };
 use serde_json::json;
 use support::drive;
+
+#[test]
+fn public_books_and_candles_reach_each_family_binding() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use safe_cex_types::ExchangeName;
+    use std::{cell::RefCell, rc::Rc};
+    for name in [
+        ExchangeName::Kodiakfi,
+        ExchangeName::Mode,
+        ExchangeName::Salsadex,
+        ExchangeName::TealstreetDex,
+        ExchangeName::What,
+        ExchangeName::Woofi,
+    ] {
+        let (venue, rt, _, wire) = support::fixture_for(
+            name.clone(),
+            json!({
+                "key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"
+            }),
+        );
+        script(&wire);
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let capture = errors.clone();
+        venue.base().on(
+            "error",
+            Rc::new(move |_, error| {
+                capture.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        wire.responses.borrow_mut().insert("/v1/orderbook/PERP_BTC_USDC".into(), json!({"success":true,"data":{
+            "timestamp":100,"bids":[{"price":99,"quantity":2}],"asks":[{"price":101,"quantity":4}]
+        }}));
+        drive(&rt, venue.start()).unwrap();
+        // Startup fills the real 10-RPS limiter; advance its deterministic clock.
+        let pump = || {
+            for _ in 0..16 {
+                rt.now.set(rt.now.get() + 100.0);
+                rt.pump();
+            }
+        };
+        pump();
+        let socket = rt
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("private"))
+            .unwrap()
+            .1
+            .clone();
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let seen = books.clone();
+        let close_book = venue
+            .listen_order_book(
+                "BTCUSDC".into(),
+                Rc::new(move |book| seen.borrow_mut().push(book)),
+            )
+            .unwrap();
+        let candles = Rc::new(RefCell::new(Vec::new()));
+        let seen = candles.clone();
+        let close_candle = venue
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":"BTCUSDC","interval":"1m"})).unwrap(),
+                Rc::new(move |candle| seen.borrow_mut().push(candle)),
+            )
+            .unwrap();
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("PERP_BTC_USDC@orderbookupdate"))
+        );
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("PERP_BTC_USDC@kline_1m"))
+        );
+        let frame = |topic: &str, ts: u64, data: serde_json::Value| {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    json!({"topic":topic,"ts":ts,"data":data}).to_string(),
+                )));
+            pump();
+            assert!(
+                rt.errors.borrow().is_empty(),
+                "{name:?}: {:?}",
+                rt.errors.borrow()
+            );
+        };
+        frame(
+            "PERP_BTC_USDC@kline_1m",
+            103,
+            json!({"startTime":1700000000000u64,"open":100,"high":104,"low":99,"close":103,"volume":9}),
+        );
+        assert_eq!(candles.borrow().len(), 1);
+        assert_eq!(
+            (
+                candles.borrow()[0].timestamp,
+                candles.borrow()[0].close,
+                candles.borrow()[0].volume
+            ),
+            (1700000000.0, 103.0, 9.0)
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            99,
+            json!({"bids":[[99,999]],"asks":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "{name:?} snapshot errors: {:?}; runtime errors: {:?}",
+            errors.borrow(),
+            rt.errors.borrow(),
+        );
+        assert_eq!(
+            books.borrow()[0].bids[0].amount,
+            2.0,
+            "buffered older update is discarded against snapshot timestamp100"
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            101,
+            json!({"bids":[[99,3],[98,5]],"asks":[]}),
+        );
+        assert_eq!(books.borrow().len(), 2);
+        assert_eq!(
+            (
+                books.borrow()[1].bids[0].amount,
+                books.borrow()[1].bids[1].total
+            ),
+            (3.0, 8.0)
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            102,
+            json!({"bids":[[99,0]],"asks":[[101,6]]}),
+        );
+        assert_eq!(books.borrow().len(), 3);
+        assert_eq!(
+            (
+                books.borrow()[2].bids.len(),
+                books.borrow()[2].bids[0].price,
+                books.borrow()[2].asks[0].amount
+            ),
+            (1, 98.0, 6.0)
+        );
+        close_book().unwrap();
+        close_candle().unwrap();
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("unsubscribe")
+                    && frame.contains("PERP_BTC_USDC@orderbookupdate"))
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            104,
+            json!({"bids":[[97,1]],"asks":[]}),
+        );
+        frame(
+            "PERP_BTC_USDC@kline_1m",
+            105,
+            json!({"startTime":1700000060000u64,"open":100,"high":104,"low":99,"close":104,"volume":10}),
+        );
+        assert_eq!((books.borrow().len(), candles.borrow().len()), (3, 1));
+        venue.dispose().unwrap();
+    }
+}
+
 fn script(wire: &support::Wire) {
     let mut responses = wire.responses.borrow_mut();
     responses.insert(

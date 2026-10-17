@@ -806,3 +806,19 @@ four. Existing 401 recovery, HTTP metadata, source order payload and the API
 source comparison pass, as does strict Clippy for both touched test targets.
 The all-features cancellation inventory passes six tests; override inventory,
 parity (7459 rows) and TS extractor check pass without unrelated pin changes.
+
+## Money-path amendment caller-ID guard
+
+`binding::amendment_preserves_caller_id_and_refuses_replacement_after_cancellation`
+drives the public constructed exchange through actual session/account/client I/O.
+Four maintained-source cases use actual updateOrder/placeOrder and BaseExchange
+resolveCallerClientOrderId/rejectPreflight bodies. Absent and own-undefined IDs
+cancel then replace; nonempty and empty IDs cancel then emit one refusal with no
+replacement POST. The original runtime body compiles/fails with Ok(["placed"])
+versus the required refusal; exact final bytes restored and the test passes.
+
+Final normal-master refresh through52d945d9ac: binding55 +polling_lifecycle10,
+native/Wasm all-target strict Clippy, all-features cancellation6/1export-ignore,
+override7/1live-TS-ignore, binding gate25, parity7459/16581 and extractor0 pass.
+Logs: /tmp/breakout-amendment-caller-{red,native,control-red,control-restored,
+native-clippy,wasm-clippy,inventories,parity,extract}.log.
