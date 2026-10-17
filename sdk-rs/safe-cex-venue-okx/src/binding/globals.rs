@@ -333,10 +333,14 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     def(
         "safeCexAxiosCreate",
         Js::function("safeCexAxiosCreate", move |_, a| {
-            Ok(client::create(
-                scope_of(&w)?.shared.http.clone(),
+            let rt = scope_of(&w)?;
+            client::factory::create(
+                rt.shared.http.clone(),
+                &*rt.shared.runtime.transport(),
                 arg(&a, 0),
-            ))
+                &arg(&a, 1),
+                rt.base(),
+            )
         }),
     );
     def(
@@ -379,13 +383,20 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
             Ok(Js::Undefined)
         }),
     );
+    let w = weak.clone();
     def(
         "installTransportAdapter",
-        Js::function("installTransportAdapter", |_, _| {
-            Err(Thrown::error(
-                "Error",
-                "Tealstreet tunnel transport is not available in the Rust OKX binding",
-            ))
+        Js::function("installTransportAdapter", move |_, a| {
+            let rt = scope_of(&w)?;
+            client::factory::install_transport_adapter(
+                rt.shared.http.clone(),
+                &*rt.shared.runtime.transport(),
+                &arg(&a, 0),
+                &arg(&a, 1),
+                to_typed(&arg(&a, 2))?,
+                safe_cex_transport::RestAdapterVariant::BigInt,
+            )?;
+            Ok(Js::Undefined)
         }),
     );
     def(
