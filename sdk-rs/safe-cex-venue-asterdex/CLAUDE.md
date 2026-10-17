@@ -86,3 +86,6 @@ clients keep the same hosted identity through post-sign transport selection.
 `ALIAS_CONTRACT_REVIEW.md` records the eight original native/default aliases.
 The selected gate retains full discovery and authenticates actual compiler
 artifacts before native Serde/conversion probes and compiled identity controls.
+
+`PROJECTION_CONTRACT_REVIEW.md` records twenty nonce/builder/request/projection
+function contracts, actual-source/native observations and isolated compiled controls.
