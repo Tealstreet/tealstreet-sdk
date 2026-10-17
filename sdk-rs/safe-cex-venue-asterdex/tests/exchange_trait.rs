@@ -883,6 +883,143 @@ fn stream_fixture() -> (
     }
     (venue, rt, store, wire)
 }
+#[test]
+fn public_frames_preserve_partial_depth_and_candle_semantics() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::cell::RefCell;
+    let (venue, rt, store, _) = stream_fixture();
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let saved = books.clone();
+    let close_book = venue
+        .listen_order_book(
+            "BTCUSDT".into(),
+            Rc::new(move |book| {
+                saved.borrow_mut().push(book);
+            }),
+        )
+        .unwrap();
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let saved = candles.clone();
+    let close_candle = venue
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTCUSDT","interval":"1m"})).unwrap(),
+            Rc::new(move |candle| saved.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    let frame = |value: Value| {
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(value.to_string())));
+        for _ in 0..8 {
+            rt.pump();
+        }
+        assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+    };
+    assert!(
+        rt.sent
+            .borrow()
+            .iter()
+            .any(|v| v.contains("btcusdt@depth20@100ms"))
+    );
+    frame(json!({"stream":"btcusdt@depth@100ms","data":{"b":[["99","2"]],"a":[["101","4"]]}}));
+    assert!(
+        books.borrow().is_empty(),
+        "incremental depth is not an authoritative snapshot"
+    );
+    frame(
+        json!({"stream":"btcusdt@depth20@100ms","data":{"b":[["98","3"],["99","2"]],"a":[["102","5"],["101","4"]]}}),
+    );
+    assert_eq!(books.borrow().len(), 1);
+    {
+        let rows = books.borrow();
+        assert_eq!(
+            (
+                rows[0].bids[0].price,
+                rows[0].bids[1].total,
+                rows[0].asks[0].price,
+                rows[0].asks[1].total
+            ),
+            (99.0, 5.0, 101.0, 9.0)
+        );
+    }
+    for bids in [
+        json!([[99, "2"]]),
+        json!([["99junk", "2"]]),
+        json!([["99", "0"]]),
+        json!([["102", "2"]]),
+    ] {
+        frame(json!({"stream":"btcusdt@depth20@100ms","data":{"b":bids,"a":[["101","4"]]}}));
+    }
+    assert_eq!(
+        books.borrow().len(),
+        1,
+        "malformed or crossed snapshot keeps the last good book"
+    );
+    frame(
+        json!({"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"100.5","P":"2.5","v":"8","q":"900"}]}),
+    );
+    frame(
+        json!({"stream":"!markPrice@arr@1s","data":[{"s":"BTCUSDT","p":"100.75","i":"100.25","r":"0","T":1700000100000u64}]}),
+    );
+    {
+        let rows = store.tickers();
+        let ticker = rows.iter().find(|v| v.symbol == "BTCUSDT").unwrap();
+        assert_eq!(
+            (
+                ticker.bid,
+                ticker.ask,
+                ticker.last,
+                ticker.percentage,
+                ticker.volume,
+                ticker.quote_volume
+            ),
+            (99.0, 101.0, 100.5, 2.5, 8.0, 900.0)
+        );
+        assert_eq!(
+            (
+                ticker.mark,
+                ticker.index,
+                ticker.funding_rate,
+                ticker.funding_time
+            ),
+            (100.75, 100.25, 0.0, 1700000100000.0)
+        );
+    }
+    let candle = json!({"stream":"btcusdt@kline_1m","data":{"k":{"i":"1m","t":1700000000000u64,"o":"100","h":"104","l":"99","c":"103","v":"7","q":"999"}}});
+    frame(candle.clone());
+    assert_eq!(candles.borrow().len(), 1);
+    assert_eq!(
+        (
+            candles.borrow()[0].timestamp,
+            candles.borrow()[0].close,
+            candles.borrow()[0].volume
+        ),
+        (1700000000000.0, 103.0, 7.0)
+    );
+    close_book().unwrap();
+    close_candle().unwrap();
+    frame(candle);
+    frame(json!({"stream":"btcusdt@depth20@100ms","data":{"b":[["97","1"]],"a":[["103","2"]]}}));
+    assert_eq!((books.borrow().len(), candles.borrow().len()), (1, 1));
+    assert!(
+        rt.sent
+            .borrow()
+            .iter()
+            .any(|v| v.contains("UNSUBSCRIBE") && v.contains("btcusdt@depth20@100ms"))
+    );
+    venue.dispose().unwrap();
+}
+
 fn deliver_private(rt: &support::Runtime, frame: Value) {
     let socket = rt
         .sockets
