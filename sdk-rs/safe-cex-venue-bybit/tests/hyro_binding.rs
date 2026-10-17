@@ -672,7 +672,7 @@ fn hyro_reconnect_ignores_old_acks_and_retired_socket_frames() {
         .borrow()
         .iter()
         .filter(|(url, _)| url.contains("/private"))
-        .last()
+        .next_back()
         .unwrap()
         .1
         .clone();
@@ -764,7 +764,7 @@ fn hyro_private_reconciliation_retries_changed_revision_and_publishes_atomically
     assert_eq!(h.store.positions()[0].leverage, 30.0);
     assert_eq!(h.store.balance().total, 195.0);
     let snapshots = snapshots.lock().unwrap();
-    assert!(snapshots.iter().any(|row| *row == (Some(30.0), 195.0, 5.0)));
+    assert!(snapshots.contains(&(Some(30.0), 195.0, 5.0)));
     assert!(
         snapshots
             .iter()
