@@ -1018,3 +1018,74 @@ fn place_order_merges_a_sub_minimum_trailing_lot_into_the_previous_lot() {
         .collect();
     assert_eq!(ids, sent_ids);
 }
+
+#[test]
+fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    h.drive(h.venue().start()).unwrap();
+    // The source suppresses fills for five seconds after its real VirtualClock connect.
+    std::thread::sleep(std::time::Duration::from_millis(5100));
+    let fills = Rc::new(RefCell::new(vec![]));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, fill| {
+            observed.borrow_mut().push(fill.clone());
+            Ok(())
+        }),
+    );
+    let socket = h.runtime.sockets.borrow()[1].1.clone();
+    let mut order = active_order();
+    order["order_index"] = json!(888);
+    order["client_order_index"] = json!(888);
+    let mut position = account()["accounts"][0]["positions"][0].clone();
+    position["position"] = json!("0.75");
+    let mut refreshed = account();
+    refreshed["accounts"][0]["available_balance"] = json!("645");
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != ACCOUNT);
+    h.http.ok("GET", ACCOUNT, refreshed);
+    socket.events.borrow_mut().push_back(WsEvent::Message(SocketFrame::Text(json!({
+        "channel":"account_all:42","type":"update/account_all",
+        "orders":{"1":[order]},"positions":{"1":[position]},
+        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get()}]},
+        "account":{"collateral":"1000"}
+    }).to_string())));
+    h.runtime.pump();
+    assert!(
+        h.store.orders().iter().any(|order| order.id == "888"),
+        "private order goes through real venue mapper"
+    );
+    assert_eq!(
+        h.store.positions()[0].contracts,
+        0.75,
+        "private position uses real venue mapper and Store"
+    );
+    assert_eq!(
+        *fills.borrow(),
+        vec![json!({"id":"888","side":"buy","symbol":"BTC","price":49000.0,"amount":0.1})],
+        "private trade produces source fill payload"
+    );
+    assert_eq!(
+        h.store.balance().free,
+        800.0,
+        "balance refresh waits for the source throttle"
+    );
+    h.runtime.advance(500.0);
+    assert_eq!(
+        h.store.balance().free,
+        645.0,
+        "private account frame triggers real balance refresh"
+    );
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().unwrap();
+}
