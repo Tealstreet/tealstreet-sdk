@@ -350,9 +350,15 @@ fn historical_fills_closed_maker_refusals_keep_good_rows_and_report_values() {
 }
 #[test]
 fn historical_fills_closed_asset_refusals_keep_good_rows_and_report_values() {
-    for bad in [json!(17), json!(true), json!({"asset":"USDT"})] {
+    for (field, bad) in [
+        ("commissionAsset", json!(17)),
+        ("commissionAsset", json!(true)),
+        ("commissionAsset", json!({"asset":"USDT"})),
+        ("coin", json!(17)),
+    ] {
         let mut refused = historical_fill_row("refused", Some(json!(false)), 1700000001000);
-        refused["commissionAsset"] = bad.clone();
+        refused.as_object_mut().unwrap().remove("commissionAsset");
+        refused[field] = bad.clone();
         let h = harness(options(), |http| {
             http.ok(
                 "GET",
