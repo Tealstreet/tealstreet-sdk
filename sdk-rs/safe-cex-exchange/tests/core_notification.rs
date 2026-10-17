@@ -207,7 +207,7 @@ fn non_exchange_subscriber_response_survives_overlay_recovery() {
         "error",
         Rc::new(move |_, value| {
             seen.borrow_mut()
-                .push(value[0].as_str().unwrap().to_owned());
+                .push(value.as_str().unwrap().to_owned());
             Ok(())
         }),
     );
