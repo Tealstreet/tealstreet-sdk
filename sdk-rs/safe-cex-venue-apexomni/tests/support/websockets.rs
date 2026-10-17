@@ -154,13 +154,19 @@ impl ApexSocketHost for SocketHost {
     }
     fn send(&self, frame: &str, logged: bool) -> Result<(), ExchangeError> {
         self.raw_frames.borrow_mut().push(frame.to_owned());
-        let mut value = safe_cex_transport::how::json_parse(frame);
+        let mut value = safe_cex_transport::how::json_parse(frame)
+            .into_value()
+            .unwrap();
         if value["op"] == "login" {
             let args = value["args"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|arg| safe_cex_transport::how::json_parse(arg.as_str().unwrap()))
+                .map(|arg| {
+                    safe_cex_transport::how::json_parse(arg.as_str().unwrap())
+                        .into_value()
+                        .unwrap()
+                })
                 .collect::<Vec<_>>();
             value["args"] = json!(args);
         }
@@ -989,17 +995,26 @@ fn socket_frame_units_are_observed_before_wire() {
         );
         let raw = row["raw"].as_str().unwrap();
         let decoded = safe_cex_transport::how::json_parse(raw);
+        assert!(
+            !matches!(
+                decoded,
+                safe_cex_types::retained_json::RetainedJsonInput::Null
+            ),
+            "{marker} native parser retains the complete source frame"
+        );
+        let decoded = decoded.into_value();
         if refused {
             assert!(
                 raw.is_ascii(),
                 "{marker} refused source frame is valid ASCII transport"
             );
             assert!(
-                decoded.is_null(),
-                "{marker} native parser refuses whole frame"
+                decoded.is_err(),
+                "{marker} explicit typed frame view refuses whole frame"
             );
             native_refusals += 1;
         } else {
+            let decoded = decoded.unwrap();
             let value = if private {
                 &decoded["args"][0]
             } else {

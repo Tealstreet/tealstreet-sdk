@@ -112,7 +112,15 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserSigner {
         let RemoteSignerRequest::Http(request) = request else {
             panic!("HTTP relay only")
         };
-        let mut body = match request.config.data.as_ref().unwrap() {
+        let mut body = match &request
+            .config
+            .data
+            .as_ref()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap()
+        {
             Value::String(text) => serde_json::from_str::<Value>(text).unwrap(),
             body => body.clone(),
         };
@@ -129,7 +137,9 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserSigner {
                     url: None,
                     headers: request.config.headers,
                     params: request.config.params,
-                    data: Some(Value::String(body.to_string())),
+                    data: Some(safe_cex_types::retained_json::RetainedJsonInput::Text(
+                        body.to_string().encode_utf16().collect(),
+                    )),
                 }),
             }))
         })

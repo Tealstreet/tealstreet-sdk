@@ -46,7 +46,9 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserSigner {
                     Some(Value::Object(map)) => map,
                     _ => Default::default(),
                 };
-                if let Some(Value::Object(body)) = request.config.data {
+                if let Some(Value::Object(body)) =
+                    request.config.data.map(|value| value.into_value().unwrap())
+                {
                     params.extend(body);
                 }
                 params.insert("timestamp".into(), json!(1_700_000_000_000u64));

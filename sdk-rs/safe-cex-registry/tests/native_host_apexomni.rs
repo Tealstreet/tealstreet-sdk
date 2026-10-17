@@ -185,17 +185,19 @@ impl safe_cex_transport::signing::RemoteSigner for HostedApex {
                         assert!(config.params.as_ref().is_none_or(
                             |p| p.is_null() || p.as_object().is_some_and(|o| o.is_empty())
                         ));
-                        let data = config
-                            .data
-                            .as_ref()
-                            .map_or("", |v| v.as_str().expect("Apex signed form string"));
+                        let data = config.data.as_ref().map_or_else(String::new, |v| match v {
+                            safe_cex_types::retained_json::RetainedJsonInput::Text(units) => {
+                                String::from_utf16(units).expect("Apex signed form string")
+                            }
+                            _ => panic!("Apex signed form string"),
+                        });
                         let path = format!(
                             "/api{}",
                             config.url.strip_prefix("/api").unwrap_or(&config.url)
                         );
                         let message = format!(
                             "{timestamp}{method}{path}{}",
-                            if query_method { "" } else { data }
+                            if query_method { "" } else { &data }
                         );
                         let mut headers = config.headers;
                         headers.insert("APEX-SIGNATURE".into(), hosted_apex_mac(&message));

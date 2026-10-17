@@ -175,7 +175,12 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: Some("OK".into()),
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(next["data"].clone()),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        next["data"].clone(),
+                    )
+                    .unwrap(),
+                ),
             })
         })
     }

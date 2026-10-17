@@ -1439,8 +1439,9 @@ fn factory_response_phase_native() {
         "[1,2]",
         "null",
     ];
-    let parse = |v: Value| match v {
-        Value::String(ref text) => serde_json::from_str(text).unwrap_or(v),
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let parse = |v: Input| match v {
+        Input::Text(ref text) => Input::parse_json(text).unwrap_or(v),
         _ => v,
     };
     let mut native = vec![];
@@ -1455,18 +1456,21 @@ fn factory_response_phase_native() {
             if text == "\"123\"" {
                 if tunnel {
                     assert_eq!(
-                        data.as_f64().unwrap().to_bits(),
+                        match &data {
+                            Input::Float(value) => value.to_bits(),
+                            _ => panic!("RESPONSE native HOW numeric result"),
+                        },
                         123f64.to_bits(),
                         "RESPONSE native HOW second parse numeric bits"
                     );
                 } else {
                     assert!(
-                        data.is_string(),
+                        matches!(data, Input::Text(_)),
                         "RESPONSE native direct quoted scalar remains string"
                     );
                 }
             }
-            native.push(data);
+            native.push(data.into_value().unwrap());
         }
     }
     let out = Command::new("node")
