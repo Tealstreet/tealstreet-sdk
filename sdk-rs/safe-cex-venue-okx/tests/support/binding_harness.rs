@@ -203,6 +203,7 @@ pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
+    pub held_instrument: RefCell<Option<(String, String, Rc<Cell<bool>>)>>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
@@ -254,6 +255,13 @@ impl JsHttpHost for Http {
             },
             headers: read("headers"),
         });
+        let held = self
+            .held_instrument
+            .borrow()
+            .as_ref()
+            .and_then(|(path, instrument, gate)| {
+                (url == *path && read("params")["instType"] == *instrument).then(|| gate.clone())
+            });
         let response = {
             let mut routes = self.routes.borrow_mut();
             routes
@@ -278,7 +286,19 @@ impl JsHttpHost for Http {
                 &format!("unscripted request {method} {url}"),
             )),
         };
-        Box::pin(async move { result })
+        Box::pin(async move {
+            if let Some(gate) = held {
+                std::future::poll_fn(move |_| {
+                    if gate.get() {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                })
+                .await;
+            }
+            result
+        })
     }
 }
 
