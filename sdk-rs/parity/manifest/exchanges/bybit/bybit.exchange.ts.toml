@@ -926,9 +926,9 @@ note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::list
 ts = "BybitExchange.listenOHLCVs"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs" ]
 status = "ported"
-note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs. Groups symbols by publicSocketFor in first-seen socket order (Map identity), then calls listenOHLCVs once per socket with {...opts, symbols}; discards the socket returns."
+note = "Concrete Exchange bulk listener selects the maintained category socket and installs the live public kline handler. Real binding regressions fail on master and cover callback metadata, source topic grouping, replacement, reconnect and delayed connection. Strict public interval inputs remain unchanged. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs."
 
 [[symbol]]
 ts = "BybitExchange.listenOrderBook"

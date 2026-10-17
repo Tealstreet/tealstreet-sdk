@@ -9,13 +9,38 @@ use safe_cex_types::{Candle, ModelField, OHLCVSOptions};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
 
+pub(super) fn first_candle(data: &Js) -> Result<Js, Thrown> {
+    if matches!(data, Js::Array(_) | Js::String(_)) {
+        let iterator = data.iterator()?;
+        let step = iterator.call_method("next", vec![])?;
+        let value = step.get("value")?;
+        if !step.get("done")?.truthy() {
+            let close = iterator.get("return")?;
+            if !close.is_nullish() {
+                close.call(iterator, vec![])?;
+            }
+        }
+        return Ok(value);
+    }
+    let operand = match data {
+        Js::Null => "object null".to_owned(),
+        Js::Bool(_) | Js::Number(_) => format!("{} {}", data.type_of(), data.to_display()),
+        _ => data.type_of().to_owned(),
+    };
+    let message = if data.is_nullish() {
+        format!(
+            "Cannot destructure property 'Symbol(Symbol.iterator)' of '{operand}' as it is {}.",
+            data.to_display()
+        )
+    } else {
+        format!("{operand} is not iterable (cannot read property Symbol(Symbol.iterator))")
+    };
+    Err(Thrown::type_error(&message))
+}
+
 fn map_bulk(frame: &Value) -> Result<SubscribedCandle, Thrown> {
     let frame = from_json(frame);
-    let data = frame.get("data")?;
-    let raw = match &data {
-        Js::Array(_) | Js::String(_) => data.get("0")?,
-        _ => return Err(Thrown::error("TypeError", "object is not iterable")),
-    };
+    let raw = first_candle(&frame.get("data")?)?;
     let topic = frame.get("topic")?;
     let second_dot = topic.call_method("indexOf", vec![Js::str("."), Js::Number(6.)])?;
     let wire_interval = topic.call_method("slice", vec![Js::Number(6.), second_dot.clone()])?;
@@ -50,14 +75,10 @@ fn map_bulk(frame: &Value) -> Result<SubscribedCandle, Thrown> {
     })
 }
 
-fn connect_bulk(
-    socket: Rc<BaseWebSocket>,
-    topics: Rc<Vec<String>>,
-    chunk_size: usize,
-) -> Result<(), ExchangeError> {
+fn connect_bulk(socket: Rc<BaseWebSocket>, topics: Rc<Vec<String>>) -> Result<(), ExchangeError> {
     if socket.is_connected() {
         if !socket.is_disposed() {
-            for chunk in topics.chunks(chunk_size) {
+            for chunk in topics.chunks(50) {
                 socket.send(&json!({"op":"subscribe","args":chunk}).to_string())?;
             }
         }
@@ -65,7 +86,7 @@ fn connect_bulk(
         let weak = Rc::downgrade(&socket);
         socket.start_timeout(100, move || {
             if let Some(socket) = weak.upgrade() {
-                connect_bulk(socket, topics.clone(), chunk_size)?;
+                connect_bulk(socket, topics.clone())?;
             }
             Ok(())
         })?;
@@ -77,7 +98,6 @@ pub(crate) fn listen_ohlcvs(
     socket: Rc<BaseWebSocket>,
     retained: Topics,
     options: OHLCVSOptions,
-    chunk_size: usize,
     callback: Rc<dyn Fn(SubscribedCandle)>,
 ) -> Result<(), ExchangeError> {
     let interval = serde_json::to_value(&options.interval)
@@ -103,7 +123,7 @@ pub(crate) fn listen_ohlcvs(
         .message_handlers
         .borrow_mut()
         .insert("kline".into(), Rc::new(RefCell::new(vec![parser])));
-    connect_bulk(socket, Rc::new(topics), chunk_size)
+    connect_bulk(socket, Rc::new(topics))
 }
 
 #[cfg(test)]
@@ -126,14 +146,29 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(cases.len(), 21);
+        assert_eq!(cases.len(), 36);
         for (index, case) in cases.iter().enumerate() {
+            if !case["error"].is_null() {
+                let error = map_bulk(&case["frame"]).unwrap_err().to_exchange_error();
+                assert_eq!(
+                    json!({"name":error.name,"message":error.message}),
+                    case["error"],
+                    "maintained bulk error {index}"
+                );
+                continue;
+            }
             let candle = map_bulk(&case["frame"]).unwrap();
             let mut actual = serde_json::to_value(&candle).unwrap();
             if candle.interval.is_undefined() {
                 actual["interval"] = json!("$undefined");
             }
-            assert_eq!(actual, case["emitted"], "maintained bulk case {index}");
+            let mut expected = case["emitted"].clone();
+            for field in ["timestamp", "open", "high", "low", "close", "volume"] {
+                if let Some(value) = expected[field].as_f64() {
+                    expected[field] = json!(value);
+                }
+            }
+            assert_eq!(actual, expected, "maintained bulk case {index}");
         }
     }
 }

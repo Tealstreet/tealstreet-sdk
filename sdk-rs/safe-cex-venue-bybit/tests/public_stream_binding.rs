@@ -325,8 +325,18 @@ fn demo_bulk_candles_reach_real_socket() {
     bulk_candles(ExchangeName::Bybitdemo);
 }
 #[test]
-fn spot_bulk_candles_reach_real_socket() {
-    bulk_candles(ExchangeName::Bybitspot);
+fn spot_bulk_candles_preserve_inherited_noop() {
+    let (h, socket, symbol) = setup(ExchangeName::Bybitspot);
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(|_| panic!("Spot inherits BaseExchange.listenOHLCVs")),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"1","high":"2","low":"0","close":"1","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(
+        sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+        0
+    );
+    h.venue().dispose().unwrap();
 }
 #[test]
 fn inverse_bulk_candles_reach_real_socket() {
@@ -338,10 +348,8 @@ fn bulk_candle_subscription_preserves_source_family_chunk_sizes() {
     for name in [
         ExchangeName::Bybit,
         ExchangeName::Bybitdemo,
-        ExchangeName::Bybitspot,
         ExchangeName::Bybitinverse,
     ] {
-        let spot = name == ExchangeName::Bybitspot;
         let (h, _, _) = setup(name);
         let symbols: Vec<_> = (0..51).map(|i| format!("ASSET{i}USDT")).collect();
         h.venue().listen_ohlcvs(
@@ -368,14 +376,7 @@ fn bulk_candle_subscription_preserves_source_family_chunk_sizes() {
             .iter()
             .map(|v| v["args"].as_array().unwrap().len())
             .collect();
-        assert_eq!(
-            lengths,
-            if spot {
-                vec![10, 10, 10, 10, 10, 1]
-            } else {
-                vec![50, 1]
-            }
-        );
+        assert_eq!(lengths, vec![50, 1]);
         h.venue().dispose().unwrap();
     }
 }
@@ -470,4 +471,75 @@ fn bulk_candle_month_interval_reaches_native_callback() {
 #[test]
 fn bulk_candle_unknown_interval_reaches_callback_as_own_undefined() {
     bulk_candle_interval("999", None);
+}
+
+#[test]
+fn primary_bulk_candles_route_inverse_symbols_to_secondary_socket() {
+    let (h, socket, symbol) = setup_for(ExchangeName::Bybit, true);
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(move |candle| sink.borrow_mut().push(candle)),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 1);
+    assert_eq!(seen.borrow()[0].symbol, symbol);
+    assert_eq!(
+        sent_topics(&h, "subscribe", &format!("kline.1.{symbol}")),
+        1
+    );
+    assert!(
+        h.venue()
+            .base()
+            .get_socket(SocketSlot::Public)
+            .unwrap()
+            .message_handlers
+            .borrow()
+            .get("kline")
+            .is_none()
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn bulk_candle_malformed_data_preserves_source_type_errors() {
+    for name in [
+        ExchangeName::Bybit,
+        ExchangeName::Bybitdemo,
+        ExchangeName::Bybitinverse,
+    ] {
+        let (h, socket, symbol) = setup(name);
+        h.venue().listen_ohlcvs(
+            serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+            Rc::new(|_| panic!("malformed candle must not emit")),
+        );
+        for (data, message) in [
+            (
+                json!({}),
+                "object is not iterable (cannot read property Symbol(Symbol.iterator))",
+            ),
+            (
+                json!(false),
+                "boolean false is not iterable (cannot read property Symbol(Symbol.iterator))",
+            ),
+            (
+                json!(42),
+                "number 42 is not iterable (cannot read property Symbol(Symbol.iterator))",
+            ),
+            (
+                json!(null),
+                "Cannot destructure property 'Symbol(Symbol.iterator)' of 'object null' as it is null.",
+            ),
+        ] {
+            let error = socket
+                .on_message(&SocketFrame::Text(
+                    json!({"topic":format!("kline.1.{symbol}"),"data":data}).to_string(),
+                ))
+                .unwrap_err();
+            assert_eq!(error.name, "TypeError");
+            assert_eq!(error.message, message);
+        }
+        h.venue().dispose().unwrap();
+    }
 }

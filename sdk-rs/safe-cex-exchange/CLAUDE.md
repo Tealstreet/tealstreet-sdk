@@ -1299,3 +1299,9 @@ truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while
 endsWith defaults to the full length only for undefined. The native Node corpus
 covers surrogate halves, empty needles, all position boundaries and thrown
 position conversion identity.
+
+SubscribedCandle.interval uses ModelField<AnyTimeframe> at the callback boundary.
+Its native record codec preserves absent, own undefined and concrete intervals,
+including 1M, and omits undefined intervals from JSON. Candle number bits remain
+native through that codec; strict public OHLCV(S) request options are unchanged.
+The scoped subscribed_candle_fields witness exercises the actual native bridge.

@@ -129,19 +129,11 @@ impl BybitExchange {
                 .base
                 .get_socket(SocketSlot::PublicSecondary)
                 .is_some_and(|other| Rc::ptr_eq(&socket, &other));
-            let spot = self.base.name == ExchangeName::Bybitspot;
-            let category = if secondary {
-                "inverse"
-            } else if spot {
-                "spot"
-            } else {
-                "linear"
-            };
+            let category = if secondary { "inverse" } else { "linear" };
             crate::ws_public::candles::listen_ohlcvs(
                 socket,
                 self.subscription_topics(category),
                 options,
-                if spot { 10 } else { 50 },
                 callback,
             )
         };
@@ -149,12 +141,7 @@ impl BybitExchange {
             ExchangeName::Bybitinverse => {
                 crate::stream_delegation::listen_inverse_ohlcvs(options, callback, websocket, call)
             }
-            ExchangeName::Bybitspot => call(
-                websocket("publicWebsocket")?,
-                "listenOHLCVs",
-                options,
-                callback,
-            ),
+            ExchangeName::Bybitspot => Ok(()),
             _ => crate::stream_delegation::listen_primary_ohlcvs(
                 Ok(options.symbols.clone()),
                 callback,
