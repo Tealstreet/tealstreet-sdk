@@ -1,3 +1,7 @@
+The concrete order and position mapper callbacks read the shared VirtualClock.
+`tests/native_clock.rs` checks synchronized timestamps through signed REST reads
+for Classic, USDC, inverse and both UTA routes; inverse positions already used it.
+
 # Bitget venue family
 
 The private-topic host consumes the shared iterator protocol instead of indexing

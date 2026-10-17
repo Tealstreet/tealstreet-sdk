@@ -9,17 +9,6 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-async fn retry_signature_rejection(
-    request: ClassifiedRequest,
-    adapter: &dyn RestAdapter,
-    retries: usize,
-    venue: SignatureRetryVenue,
-    clock: &dyn RateLimitClock,
-) -> Result<RestResponse, safe_cex_transport::RestFailure> {
-    retry_signature_rejection_with_receipt(request, adapter, retries, venue, clock)
-        .await
-        .map(|execution| execution.response)
-}
 fn run<T>(future: impl Future<Output = T>) -> T {
     let waker = Waker::noop();
     let mut future = std::pin::pin!(future);
@@ -183,7 +172,7 @@ fn network_retry_excludes_timeout_response_errors_and_exhausts_budget() {
     assert_eq!(venue.accepted.lock().unwrap().len(), 4);
 }
 #[test]
-fn asterdex_status_retry_and_signature_rejection_are_separate() {
+fn asterdex_status_retry_uses_the_read_policy() {
     let venue = Venue::default();
     venue.replies.lock().unwrap().push_back(Ok(RestResponse {
         status: 503,
@@ -201,38 +190,6 @@ fn asterdex_status_retry_and_signature_rejection_are_separate() {
         200
     );
     assert_eq!(venue.accepted.lock().unwrap().len(), 2);
-    for key in ["ret_msg", "retMsg"] {
-        venue
-            .replies
-            .lock()
-            .unwrap()
-            .push_back(Err(signature_failure(
-                serde_json::to_vec(&json!({key: "error sign!"})).unwrap(),
-            )));
-        assert!(
-            run(retry_signature_rejection(
-                ReadClassification::Methods.classify(req("POST", "/orders")),
-                &venue,
-                1,
-                SignatureRetryVenue::Bybit,
-                &RetryClock::default(),
-            ))
-            .is_ok()
-        );
-    }
-    assert_eq!(venue.accepted.lock().unwrap().len(), 6);
-    venue.replies.lock().unwrap().push_back(Err(reset()));
-    assert!(
-        run(retry_signature_rejection(
-            ReadClassification::Methods.classify(req("POST", "/orders")),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .is_err()
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 7);
 }
 struct Signer {
     calls: Mutex<Vec<RemoteSignerRequest>>,
@@ -485,43 +442,6 @@ fn polling_override_replaces_clamps_and_preserves_wildcard_fallthrough() {
     assert_eq!(get_tick_interval_multiplier("okx"), 1.0);
     set_tick_interval_multipliers(None);
     assert_eq!(get_tick_interval_multiplier("bybit"), 1.0);
-}
-
-#[test]
-fn bybit_excludes_instruments_network_retry_but_keeps_signature_retry() {
-    let venue = Venue::default();
-    let instruments = || {
-        ClassifiedRequest::Read(read(
-            ReadClassification::Methods,
-            req("GET", "/v5/market/instruments-info"),
-        ))
-    };
-    venue.replies.lock().unwrap().push_back(Err(reset()));
-    assert!(
-        run(retry_signature_rejection(
-            instruments(),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .is_err()
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 1);
-    let mut failure = signature_failure(br#"{"retMsg":"error sign!"}"#.to_vec());
-    failure.request = Box::new(req("GET", "/v5/market/instruments-info"));
-    venue.replies.lock().unwrap().push_back(Err(failure));
-    assert!(
-        run(retry_signature_rejection(
-            instruments(),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .is_ok()
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 3);
 }
 
 struct HeldClock(Mutex<u64>);
@@ -978,81 +898,6 @@ fn direct_http_reason_is_optional_and_survives_adapter_return() {
     let response = run(venue.execute(req("GET", "/data"))).unwrap();
     assert_eq!(response.reason.as_deref(), Some("Internal Server Error"));
     assert_eq!(ok().reason, None);
-}
-
-fn signature_failure(body: Vec<u8>) -> safe_cex_transport::RestFailure {
-    safe_cex_transport::RestFailure {
-        code: None,
-        message: "Request failed with status code 400".into(),
-        transport_error: None,
-        response: Some(Box::new(RestResponse {
-            status: 400,
-            body: safe_cex_transport::RestResponseBody::Encoded(body),
-            ..ok()
-        })),
-        request: Box::new(req("POST", "/orders")),
-        context: None,
-    }
-}
-#[test]
-fn resolved_signature_text_never_replays_an_accepted_write() {
-    let venue = Venue::default();
-    let response = RestResponse {
-        body: safe_cex_transport::RestResponseBody::Encoded(
-            br#"{"retMsg":"one leg: error sign!"}"#.to_vec(),
-        ),
-        ..ok()
-    };
-    venue
-        .replies
-        .lock()
-        .unwrap()
-        .push_back(Ok(response.clone()));
-    assert_eq!(
-        run(retry_signature_rejection(
-            ReadClassification::Methods.classify(req("POST", "/orders")),
-            &venue,
-            3,
-            SignatureRetryVenue::Bybit,
-            &RetryClock::default(),
-        ))
-        .unwrap(),
-        response
-    );
-    assert_eq!(
-        venue.accepted.lock().unwrap().len(),
-        1,
-        "resolved response must never enter signature retry"
-    );
-}
-
-#[test]
-fn signature_retry_exhaustion_retains_terminal_response_request_and_context() {
-    let venue = Venue::default();
-    let first = signature_failure(br#"{"retMsg":"first error sign!"}"#.to_vec());
-    let mut last = signature_failure(br#"{"retMsg":"terminal error sign!","code":51603}"#.to_vec());
-    last.message = "terminal rejection".into();
-    last.context = Some(Box::new(json!({"attempt":2})));
-    last.request.url = "/terminal-attempt".into();
-    last.response.as_mut().unwrap().reason = Some("terminal reason".into());
-    venue
-        .replies
-        .lock()
-        .unwrap()
-        .extend([Err(first), Err(last.clone())]);
-    let result = run(retry_signature_rejection(
-        ReadClassification::Methods.classify(req("POST", "/orders")),
-        &venue,
-        1,
-        SignatureRetryVenue::Bybit,
-        &RetryClock::default(),
-    ));
-    assert_eq!(
-        result,
-        Err(last),
-        "exhaustion returns the full terminal failure"
-    );
-    assert_eq!(venue.accepted.lock().unwrap().len(), 2);
 }
 
 #[test]
@@ -1760,24 +1605,24 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
                 (
                     "grvtCookie".into(),
                     safe_cex_types::retained_json::RetainedJsonInput::Text(
-                        "gravity=retained".into(),
+                        "gravity=retained".encode_utf16().collect(),
                     ),
                 ),
                 (
                     "nativeConfig".into(),
                     safe_cex_types::retained_json::RetainedJsonInput::Object(vec![
                         (
-                            "missing".into(),
+                            "missing".encode_utf16().collect(),
                             safe_cex_types::retained_json::RetainedJsonInput::Undefined,
                         ),
                         (
-                            "nan".into(),
+                            "nan".encode_utf16().collect(),
                             safe_cex_types::retained_json::RetainedJsonInput::Float(
                                 f64::from_bits(0x7ff8000000000042),
                             ),
                         ),
                         (
-                            "negativeZero".into(),
+                            "negativeZero".encode_utf16().collect(),
                             safe_cex_types::retained_json::RetainedJsonInput::Float(-0.0),
                         ),
                     ]),
@@ -1819,12 +1664,14 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
                 panic!("native config object");
             };
             assert_eq!(fields.len(), 3, "hosted config retains every data field");
-            assert!(matches!(&fields[0], (key, Input::Undefined) if key == "missing"));
             assert!(
-                matches!(&fields[1], (key, Input::Float(value)) if key == "nan" && value.to_bits() == 0x7ff8000000000042)
+                matches!(&fields[0], (key, Input::Undefined) if key == &"missing".encode_utf16().collect::<Vec<_>>())
             );
             assert!(
-                matches!(&fields[2], (key, Input::Float(value)) if key == "negativeZero" && value.to_bits() == (-0.0_f64).to_bits())
+                matches!(&fields[1], (key, Input::Float(value)) if key == &"nan".encode_utf16().collect::<Vec<_>>() && value.to_bits() == 0x7ff8000000000042)
+            );
+            assert!(
+                matches!(&fields[2], (key, Input::Float(value)) if key == &"negativeZero".encode_utf16().collect::<Vec<_>>() && value.to_bits() == (-0.0_f64).to_bits())
             );
         }
         assert_eq!(

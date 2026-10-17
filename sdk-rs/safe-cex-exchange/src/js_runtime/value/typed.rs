@@ -20,7 +20,7 @@ pub(super) fn from_input(value: Input) -> Js {
         Input::Undefined => Js::Undefined,
         Input::Null => Js::Null,
         Input::Bool(value) => Js::Bool(value),
-        Input::Text(value) => Js::str(&value),
+        Input::Text(value) => Js::utf16(&value),
         Input::Float(value) => Js::Number(value),
         Input::Lexeme(value) => Js::Number(value.parse().expect("captured numeric lexeme")),
         Input::Array(values) => Js::array(values.into_iter().map(from_input).collect()),
@@ -28,7 +28,7 @@ pub(super) fn from_input(value: Input) -> Js {
             let object = Js::object(vec![]);
             for (key, value) in values {
                 object
-                    .define(&key, from_input(value))
+                    .define_key(&key, from_input(value))
                     .expect("fresh object data property");
             }
             object
@@ -49,11 +49,8 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
         Js::Null | Js::Function(_) | Js::Promise(_) => Input::Null,
         Js::Bool(value) => Input::Bool(*value),
         Js::Number(value) => Input::Float(*value),
-        Js::BigInt(value) => Input::Text(value.to_string()),
-        Js::String(value) => Input::Text(
-            String::from_utf16(value)
-                .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?,
-        ),
+        Js::BigInt(value) => Input::Text(value.to_string().encode_utf16().collect()),
+        Js::String(value) => Input::Text(value.to_vec()),
         Js::Array(values) => Input::Array(
             values
                 .borrow()
@@ -72,10 +69,7 @@ pub(super) fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<
                 if !present_fields && (matches!(value, Js::Function(_)) || value.is_callable()) {
                     continue;
                 }
-                fields.push((
-                    String::from_utf16_lossy(&key),
-                    capture(&value, depth + 1, present_fields)?,
-                ));
+                fields.push((key.to_vec(), capture(&value, depth + 1, present_fields)?));
             }
             Input::Object(fields)
         }
@@ -123,7 +117,9 @@ impl<'de> Deserializer<'de> for NativeInput {
         match self.0 {
             Input::Undefined | Input::Null => visitor.visit_unit(),
             Input::Bool(value) => visitor.visit_bool(value),
-            Input::Text(value) => visitor.visit_string(value),
+            Input::Text(value) => {
+                visitor.visit_string(String::from_utf16(&value).map_err(de::Error::custom)?)
+            }
             Input::Float(value) => {
                 if !value.is_finite()
                     && std::any::type_name::<V::Value>()
@@ -148,7 +144,14 @@ impl<'de> Deserializer<'de> for NativeInput {
                     .filter(|(_, value)| {
                         self.1 != NativeMode::Normal || !matches!(value, Input::Undefined)
                     })
-                    .map(|(key, value)| (key, NativeInput(value, self.1.child()))),
+                    .map(|(key, value)| {
+                        Ok((
+                            String::from_utf16(&key).map_err(de::Error::custom)?,
+                            NativeInput(value, self.1.child()),
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?
+                    .into_iter(),
             )
             .deserialize_any(visitor),
         }
@@ -180,12 +183,23 @@ impl<'de> Deserializer<'de> for NativeInput {
         visitor: V,
     ) -> Result<V::Value, Error> {
         match self.0 {
-            Input::Text(value) => visitor.visit_enum(value.into_deserializer()),
+            Input::Text(value) => visitor.visit_enum(
+                String::from_utf16(&value)
+                    .map_err(de::Error::custom)?
+                    .into_deserializer(),
+            ),
             Input::Object(values) if values.len() == 1 => {
                 de::value::MapAccessDeserializer::new(de::value::MapDeserializer::new(
                     values
                         .into_iter()
-                        .map(|(key, value)| (key, NativeInput(value, self.1.child()))),
+                        .map(|(key, value)| {
+                            Ok((
+                                String::from_utf16(&key).map_err(de::Error::custom)?,
+                                NativeInput(value, self.1.child()),
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, Error>>()?
+                        .into_iter(),
                 ))
                 .deserialize_enum(name, variants, visitor)
             }
