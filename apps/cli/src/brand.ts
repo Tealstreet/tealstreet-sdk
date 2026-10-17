@@ -33,7 +33,7 @@ export interface Brand {
   brewFormula: string | null;
 }
 
-const BRANDS: Record<BrandId, Brand> = {
+export const BRANDS: Record<BrandId, Brand> = {
   tealstreet: {
     id: 'tealstreet',
     displayName: 'Tealstreet',
@@ -51,7 +51,7 @@ const BRANDS: Record<BrandId, Brand> = {
     binName: 'disrupt',
     configDirName: '.disrupt',
     webUrl: 'https://disrupt.trade',
-    docsUrl: 'https://docs.tealstreet.io/cli',
+    docsUrl: 'https://github.com/DisruptTrade/cli#readme',
     releaseRepo: 'DisruptTrade/cli',
     npmPackage: null,
     brewFormula: null,

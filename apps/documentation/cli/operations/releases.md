@@ -29,7 +29,8 @@ The Disrupt build of the same CLI is published separately to
 same five assets named `disrupt-<platform>`. It is GitHub-only: no npm
 package and no Homebrew formula. Install it by downloading the binary for
 your platform from that release page. It logs in through `disrupt.trade`,
-keeps its files under `~/.disrupt/`, and `disrupt update` polls that repo.
+keeps its files under `~/.disrupt/`, `disrupt update` polls that repo, and its
+built-in help links to that repository rather than to this site.
 
 A fifth asset, `tealstreet-windows-x64.exe`, covers Windows x64.
 `bun build --compile` appends the `.exe` itself on a Windows target, so the

@@ -59,9 +59,12 @@ any of them. **Infrastructure names are NOT branded** — `TEALSTREET_*` env var
 same on every brand. Renaming them would break docs and scripts for nothing.
 
 Adding a config-dir or display-name literal anywhere under `src/` is a brand
-leak: route it through `BRAND`. Two known limits, accepted for v1: both brands
-bind the listener on `127.0.0.1:53219`, so they cannot run at the same time;
-and the disrupt build links to the Tealstreet-branded docs site.
+leak: route it through `BRAND`. One known limit, accepted for v1: both brands
+bind the listener on `127.0.0.1:53219`, so they cannot run at the same time.
+**The disrupt build must never print a tealstreet.io URL** — its `docsUrl` is
+the `DisruptTrade/cli` README, and `src/brand.test.ts` greps the disrupt brand
+for `tealstreet.io`. The internal HoW `Origin` header and the listener's origin
+allowlist are not user-visible and are exempt.
 
 **Release:** `BRAND=disrupt yarn release:patch` pushes `disrupt-cli-vX.Y.Z`.
 `cli-release.yml` derives brand, binary name and repo from the tag prefix and
