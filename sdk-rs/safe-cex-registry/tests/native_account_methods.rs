@@ -35,7 +35,7 @@ async fn account() -> Rc<NativeAccount> {
     open_native_account(NativeAccountSpec {
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange: "binance".into(),
-        options: json!({"key":"test-key","secret":"test-secret","overrideProxyUrl":origin}),
+        options: json!({"key":"test-key","secret":"test-secret","overrideProxyUrl":origin}).into(),
         account_name: None,
         sign: None,
         proxy_token: None,
@@ -43,13 +43,20 @@ async fn account() -> Rc<NativeAccount> {
     .unwrap()
 }
 async fn call(account: &Rc<NativeAccount>, method: &str, args: Value) -> Value {
-    native_account_call(
-        account.clone(),
-        method.into(),
-        args.as_array().unwrap().clone(),
+    support::boundary_json(
+        native_account_call(
+            account.clone(),
+            method.into(),
+            args.as_array()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{method}: {error}")),
     )
-    .await
-    .unwrap_or_else(|error| panic!("{method}: {error}"))
 }
 
 #[test]
@@ -87,7 +94,7 @@ fn removes_orders_by_id_and_posts_the_mutated_store() {
         let unwatch = native_account_watch(
             &account,
             Rc::new(|_, _| {}),
-            Rc::new(move |data| captured.borrow_mut().push(data)),
+            Rc::new(move |data| captured.borrow_mut().push(support::boundary_json(data))),
         );
         call(&account, "fetchAndSetOrders", json!([null])).await;
         assert_eq!(stores.borrow().last().unwrap()["orders"][0]["id"], "77");
@@ -95,7 +102,10 @@ fn removes_orders_by_id_and_posts_the_mutated_store() {
             call(&account, "removeOrders", json!([[{"id":"77"}]])).await,
             Value::Null
         );
-        assert_eq!(stores.borrow().last().unwrap()["orders"], json!([]));
+        support::eventually("throttled order removal Store post", || {
+            stores.borrow().last().unwrap()["orders"] == json!([])
+        })
+        .await;
         unwatch();
         call(&account, "dispose", json!([])).await;
     });
@@ -172,15 +182,16 @@ fn hosted_signer_signs_native_query_requests() {
         let account = open_native_account(NativeAccountSpec {
             hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
             exchange: "mexc".into(),
-            options: json!({"key":"hosted-key","secret":"","overrideProxyUrl":origin}),
+            options: json!({"key":"hosted-key","secret":"","overrideProxyUrl":origin}).into(),
             account_name: Some("mexc-hosted".into()),
-            sign: Some(Rc::new(move |wire: Value| {
+            sign: Some(Rc::new(move |wire| {
+                let wire = support::boundary_json(wire);
                 captured.borrow_mut().push(wire.clone());
                 let mut headers = wire["config"]["headers"].clone();
                 headers["X-Hosted-Signature"] = json!("host-signed");
                 let response = json!({"id":wire["id"],"config":{
                     "params":wire["config"]["params"],"headers":headers}});
-                Box::pin(async move { Ok(response) })
+                Box::pin(async move { Ok(response.into()) })
             })),
             proxy_token: None,
         })
@@ -200,11 +211,14 @@ fn hosted_signer_signs_native_query_requests() {
         assert_eq!(wire["accountName"], "mexc-hosted");
         assert_eq!(
             wire["config"]["params"],
-            json!({"symbol":"BTC_USDT","page_num":1,"page_size":100})
+            json!({"symbol":"BTC_USDT","page_num":1.0,"page_size":100.0})
         );
         let seen = seen.take();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].headers["x-hosted-signature"], "host-signed");
+        let query: Vec<_> = seen[0].query.split('&').collect();
+        assert!(query.contains(&"page_num=1"), "{}", seen[0].query);
+        assert!(query.contains(&"page_size=100"), "{}", seen[0].query);
         assert!(
             seen[0].query.contains("symbol=BTC_USDT"),
             "{}",
