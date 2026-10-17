@@ -1,5 +1,15 @@
 # Bitget venue family
 
+The typed `Exchange::cancel_all_orders` routes to the family's assembled override.
+Classic accounts send venue-wide cancellation even with an empty local order store;
+UTA sweeps venue normal and strategy orders before cancellation; inverse uses each
+unique market margin coin. Venue errors retain source emission and swallowing.
+`tests/cancellation_binding.rs` exercises real constructors/signing/HTTP, and
+`scripts/cancel-all-binding-controls.py` removes only the trait override to require
+four compiled named failures and exact restoration. The actual private socket
+witnesses cover Classic orders, fills, positions and account balances. Terminal
+order frames patch status only, as TS does; fill amounts come from the new frame.
+
 The concrete binding connects both signature-rejection retry imports to the
 shared client replay path and shared request-stamp key. Non-2xx refusals stamp
 the live config; resolved refusals copy and stamp it before re-entering request

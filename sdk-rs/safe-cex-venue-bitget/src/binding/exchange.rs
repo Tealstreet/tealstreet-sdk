@@ -280,4 +280,8 @@ impl Exchange for BitgetExchange {
         let a = args!(js(&options));
         self.invoke("fetchHistoricalFills", a)
     }
+    // ts: BitgetExchange.cancelAllOrders / BitgetInverseExchange.cancelAllOrders
+    fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
+        self.invoke_unit("cancelAllOrders", vec![])
+    }
 }
