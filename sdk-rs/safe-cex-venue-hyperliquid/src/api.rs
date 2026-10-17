@@ -28,13 +28,26 @@ const RELAY_SIGNABLE_ACTION_TYPES: &[&str] = &[
     "updateIsolatedMargin",
     "scheduleCancel",
 ];
-fn request_data(request: &RestRequest) -> Option<Value> {
-    match request.body.as_ref()? {
-        RestBody::Untransformed(value) => Some(value.clone()),
-        RestBody::Transformed(data) => Some(data.value().clone()),
-        RestBody::Encoded(bytes) => std::str::from_utf8(bytes)
-            .ok()
-            .map(|raw| Value::String(raw.to_owned())),
+fn request_data(request: &RestRequest) -> Result<Option<Value>, TransportError> {
+    match request.body.as_ref() {
+        None => Ok(None),
+        Some(RestBody::Untransformed(value)) => {
+            value.clone().into_value().map(Some).map_err(|error| {
+                TransportError::Host(format!("Hyperliquid typed signer input refusal: {error}"))
+            })
+        }
+        Some(RestBody::Transformed(data)) => {
+            data.value()
+                .clone()
+                .into_value()
+                .map(Some)
+                .map_err(|error| {
+                    TransportError::Host(format!("Hyperliquid typed signer input refusal: {error}"))
+                })
+        }
+        Some(RestBody::Encoded(bytes)) => std::str::from_utf8(bytes)
+            .map(|text| Some(Value::String(text.into())))
+            .map_err(|error| TransportError::Host(error.to_string())),
     }
 }
 // Match the shared capture's node-depth budget before the UTF-16 raw decoder.
@@ -127,12 +140,13 @@ pub fn get_request_action_type(data: &Value) -> Option<String> {
         .as_str()
         .map(str::to_owned)
 }
-fn request_action_type(request: &RestRequest) -> Option<String> {
+fn request_action_type(request: &RestRequest) -> Result<Option<String>, TransportError> {
     if let Some(RestBody::Encoded(bytes)) = &request.body {
-        let raw = std::str::from_utf8(bytes).ok()?;
-        get_request_action_type(&Value::String(raw.to_owned()))
+        let raw =
+            std::str::from_utf8(bytes).map_err(|error| TransportError::Host(error.to_string()))?;
+        Ok(get_request_action_type(&Value::String(raw.to_owned())))
     } else {
-        request_data(request).and_then(|data| get_request_action_type(&data))
+        Ok(request_data(request)?.and_then(|data| get_request_action_type(&data)))
     }
 }
 type TelemetryEmitter = dyn Fn(&str, Option<&Value>);
@@ -199,8 +213,8 @@ impl ApiClient {
         self.telemetry_emit = Some(emit);
         self
     }
-    fn emit_order_error(&self, request: &RestRequest, message: &str) {
-        let data = request_data(request).unwrap_or(Value::Null);
+    fn emit_order_error(&self, request: &RestRequest, message: &str) -> Result<(), TransportError> {
+        let data = request_data(request)?.unwrap_or(Value::Null);
         let context = self
             .telemetry
             .as_ref()
@@ -210,9 +224,10 @@ impl ApiClient {
         } else {
             (self.emit)(message);
         }
+        Ok(())
     }
 
-    pub fn build_request(&self, url: &str, body: &Value) -> RestRequest {
+    pub fn build_request(&self, url: &str, body: &Value) -> Result<RestRequest, TransportError> {
         let environment = if self.options.testnet.unwrap_or(false) {
             "TESTNET"
         } else {
@@ -223,7 +238,10 @@ impl ApiClient {
             method: "POST".into(),
             url: url.into(),
             base_url: Some(base_url.into()),
-            body: Some(RestBody::Untransformed(body.clone())),
+            body: Some(RestBody::Untransformed(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(body.clone())
+                    .map_err(|error| TransportError::Host(error.to_string()))?,
+            )),
             timeout_ms: self
                 .options
                 .extra
@@ -236,7 +254,7 @@ impl ApiClient {
             "Content-Type".into(),
             "application/json, charset=utf-8".into(),
         );
-        request
+        Ok(request)
     }
     pub fn prepare_request(
         &self,
@@ -244,7 +262,7 @@ impl ApiClient {
         capture: bool,
     ) -> TransportFuture<'_, RestRequest> {
         Box::pin(async move {
-            let data = request_data(&request).unwrap_or(Value::Null);
+            let data = request_data(&request)?.unwrap_or(Value::Null);
             // Axios executes request interceptors in reverse registration order.
             if !capture {
                 let weight = get_hyperliquid_rest_request_weight(&request.url, &data)
@@ -316,7 +334,12 @@ impl ApiClient {
                 "signature".into(),
                 serde_json::to_value(signature).map_err(|e| TransportError::Host(e.to_string()))?,
             );
-            request.body = Some(original_body.with_signed_data(body)?);
+            request.body = Some(
+                original_body.with_signed_data(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body)
+                        .map_err(|error| TransportError::Host(error.to_string()))?,
+                )?,
+            );
             Ok(request)
         })
     }
@@ -329,15 +352,15 @@ impl ApiClient {
         response: RestResponse,
         capture: bool,
     ) -> Result<RestResponse, TransportError> {
-        let data = response
-            .body
-            .json_value()
-            .unwrap_or_else(|_| match &response.body {
-                safe_cex_transport::RestResponseBody::Encoded(bytes) if bytes.is_empty() => {
-                    Value::Null
-                }
-                body => body.clone().into_data(),
-            });
+        let data = match &response.body {
+            safe_cex_transport::RestResponseBody::Encoded(bytes) if bytes.is_empty() => Value::Null,
+            _ => response
+                .body
+                .clone()
+                .transform_axios_response()?
+                .json_value()
+                .map_err(|error| TransportError::Host(error.to_string()))?,
+        };
         let is_exchange = request.url == "/exchange";
         let failed = is_exchange && response.status >= 400;
         let body_error = extract_hyperliquid_response_error(&data);
@@ -347,12 +370,12 @@ impl ApiClient {
             } else {
                 error.clone()
             };
-            let action = request_action_type(request);
+            let action = request_action_type(request)?;
             if !(is_exchange
                 && matches!(action.as_deref(), Some("cancel" | "cancelByCloid"))
                 && is_only_hyperliquid_terminal_cancel_error(&error))
             {
-                self.emit_order_error(request, &msg)
+                self.emit_order_error(request, &msg)?
             }
             return Err(TransportError::Host(msg));
         }

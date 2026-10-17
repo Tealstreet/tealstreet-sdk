@@ -6,7 +6,7 @@ use safe_cex_transport::{
     NetworkFailure, RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse,
     TransportError, TransportFuture, rate_limit::RateLimitClock,
 };
-use safe_cex_types::ExchangeName;
+use safe_cex_types::{ExchangeName, retained_json::RetainedJsonInput as Input};
 use safe_cex_venue_kucoin::api::{create_api, create_kucoin_spot_api};
 use serde_json::{Value, json};
 use std::{
@@ -85,6 +85,21 @@ impl HttpHost for Host {
         false
     }
 }
+// Observe every native number before producing the source JSON.stringify report.
+fn native_body(value: &Input) -> Value {
+    match value {
+        Input::Float(n) => json!({"numberBits":n.to_bits().to_string()}),
+        Input::Lexeme(n) => json!({"numberBits":n.parse::<f64>().unwrap().to_bits().to_string()}),
+        Input::Text(text) => json!({"textUnits":text}),
+        Input::Array(items) => json!({"array":items.iter().map(native_body).collect::<Vec<_>>()}),
+        Input::Object(entries) => {
+            json!({"object":entries.iter().map(|(key,value)|json!([key,native_body(value)])).collect::<Vec<_>>()})
+        }
+        Input::Null => json!({"null":true}),
+        Input::Bool(value) => json!({"bool":value}),
+        Input::Undefined => json!({"undefined":true}),
+    }
+}
 struct Wire {
     case: Value,
     clock: Rc<Clock>,
@@ -95,7 +110,18 @@ impl RestAdapter for Wire {
         Box::pin(async move {
             let body = request.body.as_ref().map(|body| match body {
                 // Observe the inner adapter's data BEFORE network byte projection.
-                RestBody::Transformed(data) => data.value().clone(),
+                RestBody::Transformed(data) => {
+                    let expected = &self.case["wire"][self.calls.borrow().len()]["data"];
+                    assert_eq!(
+                        native_body(data.value()),
+                        native_body(&Input::from_value(expected.clone()).unwrap()),
+                        "native inner-adapter values before the report boundary"
+                    );
+                    let text = safe_cex_num::js_retained_json_stringify(data.value())
+                        .unwrap()
+                        .unwrap();
+                    serde_json::from_str(&text).unwrap()
+                }
                 RestBody::Encoded(bytes) => json!(String::from_utf8(bytes.clone()).unwrap()),
                 RestBody::Untransformed(_) => panic!("inner adapter received untransformed data"),
             });
@@ -229,7 +255,14 @@ fn run_with_expected_schedules(case: &Value, expected: Option<usize>) -> Value {
         body: case["dataPresent"]
             .as_bool()
             .unwrap_or(!case["data"].is_null())
-            .then(|| RestBody::Untransformed(case["data"].clone())),
+            .then(|| {
+                RestBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                        case["data"].clone(),
+                    )
+                    .unwrap(),
+                )
+            }),
         headers: case["extra"]["request"]["headers"]
             .as_object()
             .map(|m| {
@@ -755,7 +788,10 @@ fn native_query_profile_is_inherited_from_production_factory() {
                     reason: None,
                     headers: Default::default(),
                     body: safe_cex_transport::RestResponseBody::Untransformed(
-                        json!({"code":"200000"}),
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(
+                            json!({"code":"200000"}),
+                        )
+                        .unwrap(),
                     ),
                 })
             })

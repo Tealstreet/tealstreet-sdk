@@ -612,7 +612,13 @@ fn native_public_bindings_execute_and_retain_shared_state() {
     drop(tickers);
     h.runtime.imports.borrow_mut().insert(
         "jsonParse".into(),
-        function(|_, a| Ok(decode(&safe_cex_transport::how::json_parse(&text(&a[0]))))),
+        function(|_, a| {
+            Ok(decode(
+                &safe_cex_transport::how::json_parse(&text(&a[0]))
+                    .into_value()
+                    .unwrap(),
+            ))
+        }),
     );
     h.method(
         &r,
@@ -854,7 +860,13 @@ fn native_private_bindings_preserve_async_and_live_heartbeat() {
     );
     h.runtime.imports.borrow_mut().insert(
         "jsonParse".into(),
-        function(|_, a| Ok(decode(&safe_cex_transport::how::json_parse(&text(&a[0]))))),
+        function(|_, a| {
+            Ok(decode(
+                &safe_cex_transport::how::json_parse(&text(&a[0]))
+                    .into_value()
+                    .unwrap(),
+            ))
+        }),
     );
     h.method(
         &r,

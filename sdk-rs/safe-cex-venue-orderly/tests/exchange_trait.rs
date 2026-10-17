@@ -337,7 +337,14 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
         .unwrap()
         .clone();
     assert_eq!(
-        request.body.unwrap().untransformed().unwrap()["leverage"]
+        request
+            .body
+            .unwrap()
+            .untransformed()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap()["leverage"]
             .as_f64()
             .unwrap()
             .to_bits(),
@@ -370,7 +377,15 @@ fn all_sixteen_methods_execute_the_source_bodies_on_the_constructed_exchange() {
         .find(|r| r.method == "post" && r.url == "/v1/order")
         .unwrap()
         .clone();
-    let body = request.body.as_ref().unwrap().untransformed().unwrap();
+    let body = request
+        .body
+        .as_ref()
+        .unwrap()
+        .untransformed()
+        .unwrap()
+        .clone()
+        .into_value()
+        .unwrap();
     assert_eq!(body["client_order_id"], json!("caller-order-12"));
     assert_eq!(body["margin_mode"], json!("ISOLATED"));
     assert_eq!(body["order_tag"], json!("TEALSTREET"));
@@ -636,7 +651,15 @@ fn each_family_constructor_preserves_its_source_order_tag_and_normalized_key() {
             .unwrap()
             .clone();
         assert_eq!(
-            request.body.as_ref().unwrap().untransformed().unwrap()["order_tag"],
+            request
+                .body
+                .as_ref()
+                .unwrap()
+                .untransformed()
+                .unwrap()
+                .clone()
+                .into_value()
+                .unwrap()["order_tag"],
             json!(tag),
             "{name:?} source subclass"
         );
@@ -975,7 +998,15 @@ fn trait_set_all_leverage_updates_account_once_and_clamps_without_positions() {
     let requests = wire.requests.borrow();
     assert_eq!(requests.len(), 3);
     for (request, leverage) in requests.iter().zip([20.0, 100.0, 1.0]) {
-        let payload = request.body.as_ref().unwrap().untransformed().unwrap();
+        let payload = request
+            .body
+            .as_ref()
+            .unwrap()
+            .untransformed()
+            .unwrap()
+            .clone()
+            .into_value()
+            .unwrap();
         assert_eq!(payload["leverage"].as_f64(), Some(leverage));
         assert_eq!(payload["margin_mode"], "CROSS");
         assert!(payload.get("symbol").is_none());

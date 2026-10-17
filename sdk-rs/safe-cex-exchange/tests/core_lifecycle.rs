@@ -460,7 +460,10 @@ fn http_signing_capture_parses_json_per_request_and_missing_client_refuses() {
             url: url.into(),
             base_url: "https://venue".into(),
             params: Some(serde_json::json!("{\"x\":1}")),
-            data: Some(json!("[1,2]")),
+            data: Some(
+                safe_cex_types::retained_json::RetainedJsonInput::from_value(json!("[1,2]"))
+                    .unwrap(),
+            ),
             ..Default::default()
         },
     };
@@ -476,7 +479,15 @@ fn http_signing_capture_parses_json_per_request_and_missing_client_refuses() {
         assert_eq!(response.id, id);
         let config = response.config.unwrap();
         assert_eq!(config.params, Some(serde_json::json!({"x":1})));
-        assert_eq!(config.data, Some(json!([1, 2])));
+        assert_eq!(
+            config.data,
+            Some(safe_cex_types::retained_json::RetainedJsonInput::Array(
+                vec![
+                    safe_cex_types::retained_json::RetainedJsonInput::Float(1.0),
+                    safe_cex_types::retained_json::RetainedJsonInput::Float(2.0)
+                ]
+            ))
+        );
         assert_eq!(config.headers.get("signed").map(String::as_str), Some(url));
     }
     assert_eq!(client.requests.borrow().len(), 2);

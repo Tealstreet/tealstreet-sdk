@@ -46,7 +46,8 @@ fn transaction_native_fields_match_actual_source() {
             .get(index)
             .expect("TRANSACTION independently required case");
         let input = safe_cex_transport::how::json_parse(case["raw"].as_str().unwrap());
-        let actual = parse_transaction_history_row(input.as_object().unwrap());
+        let actual =
+            parse_transaction_history_row(input.into_value().unwrap().as_object().unwrap());
         if let Some(error) = case.get("error") {
             classes[0] += 1;
             assert_eq!(

@@ -1,4 +1,5 @@
 use safe_cex_transport::provider::TransformedData;
+use safe_cex_types::retained_json::RetainedJsonInput;
 fn main() {
-    let _ = TransformedData { value: serde_json::json!("guessed bytes") };
+    let _ = TransformedData { value: RetainedJsonInput::Null };
 }

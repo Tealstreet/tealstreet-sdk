@@ -127,10 +127,12 @@ fn retry_budget_uses_the_injected_limiter_clock() {
         Rc::new(RateLimiter::new(clock.clone(), 1200.0, 60000.0)),
         Arc::new(|_| {}),
     );
-    let mut request = client.build_request(
-        "/info",
-        &serde_json::from_str(r#"{"type":"allMids"}"#).unwrap(),
-    );
+    let mut request = client
+        .build_request(
+            "/info",
+            &serde_json::from_str(r#"{"type":"allMids"}"#).unwrap(),
+        )
+        .unwrap();
     request.timeout_ms = Some(5);
     let failure = run(client.execute(request, false)).unwrap_err();
     assert_eq!(
@@ -166,7 +168,7 @@ fn venue_refusal_retains_response_and_signed_request() {
     );
     let body =
         serde_json::from_str(r#"{"action":{"type":"cancel","cancels":[]},"nonce":1}"#).unwrap();
-    let request = client.build_request("/exchange", &body);
+    let request = client.build_request("/exchange", &body).unwrap();
     let failure = run(client.execute(request.clone(), false)).unwrap_err();
     assert_eq!(failure.message, "venue rejection (HTTP 422)");
     assert_eq!(
@@ -193,7 +195,7 @@ fn transformed_string_replay_keeps_source_signing_guard() {
     );
     let body: Value =
         serde_json::from_str(r#"{"action":{"type":"order","orders":[]},"nonce":1}"#).unwrap();
-    let mut request = client.build_request("/exchange", &body);
+    let mut request = client.build_request("/exchange", &body).unwrap();
     let original = request
         .body
         .as_ref()
@@ -210,7 +212,7 @@ fn transformed_string_replay_keeps_source_signing_guard() {
         "transformed data stays a string, so TS interceptor must skip signing"
     );
     assert_eq!(replay.body.unwrap().wire_bytes().unwrap(), wire);
-    let mut encoded = client.build_request("/exchange", &body);
+    let mut encoded = client.build_request("/exchange", &body).unwrap();
     encoded.body = Some(RestBody::Encoded(wire));
     let failure = run(client.execute(encoded, true)).unwrap_err();
     assert_eq!(
@@ -345,7 +347,9 @@ fn actual_ts_relay_allowlist_and_unsigned_info_skip() {
         } else {
             create_info_api(opts, adapter, limiter, emit)
         };
-        let request = client.build_request(case["url"].as_str().unwrap(), &raw(case, "raw"));
+        let request = client
+            .build_request(case["url"].as_str().unwrap(), &raw(case, "raw"))
+            .unwrap();
         let prepared = run(client.prepare_request(request, false)).unwrap();
         let value: Value =
             serde_json::from_slice(&prepared.body.as_ref().unwrap().wire_bytes().unwrap()).unwrap();
@@ -380,7 +384,9 @@ fn actual_ts_response_interceptor_and_capture_decisions() {
             )),
             emit,
         );
-        let request = client.build_request(case["url"].as_str().unwrap(), &raw(case, "request"));
+        let request = client
+            .build_request(case["url"].as_str().unwrap(), &raw(case, "request"))
+            .unwrap();
         let response = RestResponse {
             reason: None,
             status: case["status"].as_u64().unwrap() as u16,
@@ -472,8 +478,9 @@ fn lost_write_response_never_retries_but_posted_read_does() {
             )),
             Arc::new(|_| {}),
         );
-        let request =
-            client.build_request(url, &serde_json::from_str(r#"{"type":"allMids"}"#).unwrap());
+        let request = client
+            .build_request(url, &serde_json::from_str(r#"{"type":"allMids"}"#).unwrap())
+            .unwrap();
         assert!(run(client.execute(request, false)).is_err());
         assert_eq!(
             adapter.calls.load(Ordering::SeqCst),
@@ -499,10 +506,12 @@ fn shared_weighted_pacing_and_capture_bypass_are_observable() {
         limiter,
         Arc::new(|_| {}),
     );
-    let request = client.build_request(
-        "/info",
-        &serde_json::from_str(r#"{"type":"userRole"}"#).unwrap(),
-    );
+    let request = client
+        .build_request(
+            "/info",
+            &serde_json::from_str(r#"{"type":"userRole"}"#).unwrap(),
+        )
+        .unwrap();
     run(client.prepare_request(request, true)).unwrap();
     assert_eq!(*clock.sleeps.lock().unwrap(), [1000, 3000]);
 }
@@ -661,10 +670,12 @@ fn live_ts_diagnostic_json_and_utf16_bound() {
             )),
             Arc::new(move |s| output.lock().unwrap().push(s.to_owned())),
         );
-        let request = client.build_request(
-            "/exchange",
-            &serde_json::from_str(r#"{"action":{"type":"order"}}"#).unwrap(),
-        );
+        let request = client
+            .build_request(
+                "/exchange",
+                &serde_json::from_str(r#"{"action":{"type":"order"}}"#).unwrap(),
+            )
+            .unwrap();
         let response = RestResponse {
             reason: None,
             status: 422,
@@ -853,10 +864,12 @@ fn order_error_telemetry_is_optional_and_terminal_cancel_stays_quiet() {
                 .push((message.to_owned(), context.cloned()))
         }),
     );
-    let request = client.build_request(
-        "/exchange",
-        &serde_json::from_str(r#"{"action":{"type":"cancel"}}"#).unwrap(),
-    );
+    let request = client
+        .build_request(
+            "/exchange",
+            &serde_json::from_str(r#"{"action":{"type":"cancel"}}"#).unwrap(),
+        )
+        .unwrap();
     for body in [
         r#"{"status":"err","response":"Order was never placed, already canceled, or filled. asset=0"}"#,
         r#"{"status":"err","response":"bad price"}"#,
@@ -914,7 +927,7 @@ fn signed_action_order_is_exactly_the_sent_action_order() {
     let body: Value =
         serde_json::from_str(r#"{"action":{"z":1,"type":"order","a":2},"nonce":1700000000000}"#)
             .unwrap();
-    run(client.execute(client.build_request("/exchange", &body), false)).unwrap();
+    run(client.execute(client.build_request("/exchange", &body).unwrap(), false)).unwrap();
     let requests = adapter.0.lock().unwrap();
     let bytes = requests[0].body.as_ref().unwrap().wire_bytes().unwrap();
     let sent: Value = serde_json::from_slice(&bytes).unwrap();
@@ -1012,7 +1025,9 @@ fn source_bound_relay_guards_preserve_existing_signatures_and_capture_signing() 
             )),
             Arc::new(move |s| output.lock().unwrap().push(s.to_owned())),
         );
-        let request = client.build_request("/exchange", &raw(case, "raw"));
+        let request = client
+            .build_request("/exchange", &raw(case, "raw"))
+            .unwrap();
         match run(client.prepare_request(request, case["capture"].as_bool().unwrap())) {
             Ok(prepared) => assert_eq!(
                 normalize(
@@ -1077,7 +1092,9 @@ fn existing_signature_truthiness_prevents_resigning() {
             )),
             Arc::new(|_| {}),
         );
-        let request = client.build_request("/exchange", &raw(case, "raw"));
+        let request = client
+            .build_request("/exchange", &raw(case, "raw"))
+            .unwrap();
         let prepared = run(client.prepare_request(request, false)).unwrap();
         assert_eq!(
             normalize(
@@ -1339,17 +1356,19 @@ fn signing_validates_wallet_before_invalid_vault_and_encoded_cancel_retains_acti
         )),
         Arc::new(move |message| logs.lock().unwrap().push(message.to_owned())),
     );
-    let request = client.build_request(
-        "/exchange",
-        &serde_json::json!({"action":{"type":"cancel"},"nonce":1,"vaultAddress":"0xzz"}),
-    );
+    let request = client
+        .build_request(
+            "/exchange",
+            &serde_json::json!({"action":{"type":"cancel"},"nonce":1,"vaultAddress":"0xzz"}),
+        )
+        .unwrap();
     let error = run(client.prepare_request(request, true)).unwrap_err();
     assert_eq!(
         error.to_string(),
         "invalid private key",
         "KEY native key failure precedes invalid vault"
     );
-    let mut request = client.build_request("/exchange", &Value::Null);
+    let mut request = client.build_request("/exchange", &Value::Null).unwrap();
     request.body = Some(RestBody::Encoded(
         br#"{"action":{"type":"cancel"},"unused":"\ud800"}"#.to_vec(),
     ));
@@ -1390,8 +1409,9 @@ fn audit_split_surrogate_response_refuses_before_emitting_substituted_error() {
         Rc::new(RateLimiter::new(Arc::new(Clock::default()), 1200., 60000.)),
         Arc::new(move |text| output.lock().unwrap().push(text.to_owned())),
     );
-    let request =
-        client.build_request("/exchange", &serde_json::json!({"action":{"type":"order"}}));
+    let request = client
+        .build_request("/exchange", &serde_json::json!({"action":{"type":"order"}}))
+        .unwrap();
     let response = RestResponse {
         reason: None,
         status: 422,
@@ -1523,8 +1543,9 @@ fn audit_encoded_response_retains_reserved_number_object_before_error_extraction
         Rc::new(RateLimiter::new(clock, 1200., 60000.)),
         Arc::new(|_| {}),
     );
-    let request =
-        client.build_request("/exchange", &serde_json::json!({"action":{"type":"order"}}));
+    let request = client
+        .build_request("/exchange", &serde_json::json!({"action":{"type":"order"}}))
+        .unwrap();
     let error = client
         .check_response(
             &request,
@@ -1556,12 +1577,14 @@ fn audit_encoded_request_marker_uses_object_weight_in_actual_pacing() {
         Rc::new(RateLimiter::new(clock.clone(), 1200., 60000.)),
         Arc::new(|_| {}),
     );
-    let mut first = client.build_request("/info", &Value::Null);
+    let mut first = client.build_request("/info", &Value::Null).unwrap();
     first.body = Some(RestBody::Encoded(
         br#"{"type":"candleSnapshot","limit":{"$serde_json::private::Number":"120"}}"#.to_vec(),
     ));
     run(client.prepare_request(first, false)).unwrap();
-    let second = client.build_request("/info", &serde_json::json!({"type":"allMids"}));
+    let second = client
+        .build_request("/info", &serde_json::json!({"type":"allMids"}))
+        .unwrap();
     run(client.prepare_request(second, false)).unwrap();
     assert_eq!(
         *clock.sleeps.lock().unwrap(),
@@ -1585,10 +1608,12 @@ fn audit_poisoned_action_type_throws_before_unknown_action_emission() {
         Rc::new(RateLimiter::new(clock, 1200., 60000.)),
         Arc::new(move |s| output.lock().unwrap().push(s.into())),
     );
-    let request = client.build_request(
-        "/exchange",
-        &serde_json::json!({"action":{"type":{"toString":0}},"nonce":1}),
-    );
+    let request = client
+        .build_request(
+            "/exchange",
+            &serde_json::json!({"action":{"type":{"toString":0}},"nonce":1}),
+        )
+        .unwrap();
     let result = run(client.prepare_request(request, false));
     let Err(TransportError::JavaScript(error)) = result else {
         panic!("AUDIT native action type coercion must throw TypeError before emitter or wallet");
@@ -1601,10 +1626,12 @@ fn audit_poisoned_action_type_throws_before_unknown_action_emission() {
         "AUDIT native failed coercion emits nothing"
     );
     assert_eq!(adapter.calls.load(Ordering::SeqCst), 0);
-    let unknown = client.build_request(
-        "/exchange",
-        &serde_json::json!({"action":{"type":"unknown"},"nonce":1}),
-    );
+    let unknown = client
+        .build_request(
+            "/exchange",
+            &serde_json::json!({"action":{"type":"unknown"},"nonce":1}),
+        )
+        .unwrap();
     assert!(run(client.prepare_request(unknown, false)).is_ok());
     assert_eq!(
         *emitted.lock().unwrap(),
@@ -1667,7 +1694,7 @@ fn audit_encoded_weight_parses_once_and_ignores_unused_native_strings() {
     ];
     let mut expected_start = 0.;
     for (index, (bytes, weight)) in cases.into_iter().enumerate() {
-        let mut request = client.build_request("/info", &Value::Null);
+        let mut request = client.build_request("/info", &Value::Null).unwrap();
         request.body = Some(RestBody::Encoded(bytes));
         run(client.prepare_request(request, false)).unwrap();
         assert_eq!(
@@ -1735,7 +1762,7 @@ fn audit_response_cap_accepts_complete_scalar_prefix() {
         Rc::new(RateLimiter::new(Arc::new(Clock::default()), 1200., 60000.)),
         Arc::new(move |s| output.lock().unwrap().push(s.into())),
     );
-    let request = client.build_request("/exchange", &Value::Null);
+    let request = client.build_request("/exchange", &Value::Null).unwrap();
     let body = format!("a{}", "😀".repeat(200));
     let error = client
         .check_response(
@@ -1772,11 +1799,13 @@ fn audit_encoded_string_literal_weight_is_not_parsed_again() {
         Rc::new(RateLimiter::new(clock.clone(), 1200., 60000.)),
         Arc::new(|_| {}),
     );
-    let mut request = client.build_request("/info", &Value::Null);
+    let mut request = client.build_request("/info", &Value::Null).unwrap();
     request.body = Some(RestBody::Encoded(br#""{\"type\":\"userRole\"}""#.to_vec()));
     run(client.prepare_request(request, false)).unwrap();
     run(client.prepare_request(
-        client.build_request("/info", &serde_json::json!({"type":"allMids"})),
+        client
+            .build_request("/info", &serde_json::json!({"type":"allMids"}))
+            .unwrap(),
         false,
     ))
     .unwrap();
@@ -1820,7 +1849,7 @@ fn audit_encoded_request_telemetry_preserves_current_data_phase() {
             output.fetch_add(1, Ordering::SeqCst);
         }),
     );
-    let mut request = client.build_request("/exchange", &Value::Null);
+    let mut request = client.build_request("/exchange", &Value::Null).unwrap();
     request.body = Some(RestBody::Encoded(
         br#"{"action":{"type":"order"},"unused":{"$serde_json::private::Number":"120"}}"#.to_vec(),
     ));

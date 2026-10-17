@@ -836,6 +836,15 @@ The real HTTP regression sends a rejected first split lot with a non-coercible
 error code and verifies later lots still place; a single order without a caller
 ID also skips classification, while a caller-ID control still reaches it.
 
+The retained HTTP body carries lone UTF-16 surrogate units through the common
+response hook. The legacy api_factory typed response view still refuses those
+strings visibly under the strict-output decision; its RestFailure retains the
+original response and effective request. This is a post-response consumer
+refusal, not a network failure. The native factory observer records canonical
+retained input, and its compiled control fails if the original response is lost.
+Numeric fixture comparisons check exact binary64 bits and source JSON spelling,
+rather than serde number lexemes.
+
 The remaining generic callback dispatchers take closed per-module `Callback`
 selectors. Native routing converts only the original fixed factory tags; all
 matches are exhaustive. Their former unknown-callback intrinsic arms had no

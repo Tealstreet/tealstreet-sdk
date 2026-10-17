@@ -138,7 +138,11 @@ impl OrderExecution {
         let mut request = RestRequest {
             method: method.into(),
             url,
-            body: body.map(RestBody::Untransformed),
+            body: body
+                .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                .transpose()
+                .map_err(|error| ExchangeError::new(error.to_string()))?
+                .map(RestBody::Untransformed),
             params,
             ..Default::default()
         };
@@ -149,22 +153,20 @@ impl OrderExecution {
             );
         }
         let response = adapter.execute(request).await.map_err(|failure| {
-            let mut e = ExchangeError::new(failure.message);
+            let method = failure.request.method.clone();
+            let url = failure.request.url.clone();
+            let mut e: ExchangeError = failure.into();
             e.is_axios_error = true;
-            e.code = failure.code.map(Value::String);
-            e.context = failure.context.map(|c| *c);
-            e.method = Some(failure.request.method);
-            e.url = Some(failure.request.url);
-            if let Some(r) = failure.response {
-                e.response =
-                    Some(json!({"status":r.status,"data":r.body.into_data(),"headers":r.headers}));
-            }
+            e.method = Some(method);
+            e.url = Some(url);
             e
         })?;
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     // ts: AsterDEXExchange.validateAccount
     pub async fn validate_account(
@@ -697,10 +699,12 @@ impl OrderExecution {
             })
             .await
             .map_err(|e| ExchangeError::new(e.message))?;
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     async fn interest(
         &self,

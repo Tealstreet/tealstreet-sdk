@@ -749,7 +749,7 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "53dff7b21535effc79cc139c0b43dfb897ecd00a590a34334612224069af8b36",
+      "producer_sha256": "8f3a34d1349464b79de654bba3aa5dca6dd07abc9c031bdc8df740af621417ea",
       "classification": "no-owned-latch",
       "reason": "Signing input and response are request-local, with remote signing delegated to the host signer future."
     },
@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "6fd7379a66becfd3670ff075d23b458d42817bb0de17eb710506bd71b0777d6d"
+          "sha256": "3c7f415cf541b53814e2e1480aaf2fbc26920acb1a5a50192f18b60bac03a1b7"
         }
       ],
       "guards": [
@@ -1478,7 +1478,7 @@
         "await",
         "await"
       ],
-      "producer_sha256": "4dd4bce4ae855996b4ff9a5cfe6b2ce51f98f788782f4b4aec1fdc13b322e186",
+      "producer_sha256": "745724aec989c245f85aef17303b3fe9e19c48ca9fa8d87073724753d6f795ab",
       "classification": "no-owned-latch",
       "reason": "Pending authorization and host adapter stages own request values. Selected response transforms and effective-config hooks are synchronous after the response; statistics remain observations. No independent lifecycle slot or waiter registration is reserved. Receipt cutover reviewed at 88b2ffc150."
     },
@@ -1637,9 +1637,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "f1997ddcf13d1b6ae83ade69b57c34f1b2dc8683987cd3dbc957f2e42a4a316e",
+      "producer_sha256": "f71cf9275673b9522d067a5958828a32e0fd20e7e1a9e6c6514a0f1134ca1780",
       "classification": "no-owned-latch",
-      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added. RetainedJsonInput restoration replaces JSON projection synchronously before the same await; local config values own no new task, borrow, reservation or cancellation registration."
+      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added. RetainedJsonInput restoration replaces JSON projection synchronously before the same await; local config values own no new task, borrow, reservation or cancellation registration. Reviewed retained-body cutover: synchronous native body restoration replaces early wire JSON projection; the same xhr child Promise is awaited with no new waiter, task, timer or owned latch."
     },
     {
       "owner": "src/js_runtime/client.rs::RestHttpHost as JsHttpHost::send",
@@ -2110,7 +2110,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "6fd7379a66becfd3670ff075d23b458d42817bb0de17eb710506bd71b0777d6d"
+          "sha256": "3c7f415cf541b53814e2e1480aaf2fbc26920acb1a5a50192f18b60bac03a1b7"
         }
       ],
       "guards": [

@@ -8,5 +8,15 @@
     "category": "non-decoder",
     "reason": "Reviewed external_provider_object::unsubscribe: wraps an existing ListenerCleanup in a single-consumption RefCell slot and exposes a zero-argument native function. Invoking it takes the existing cleanup and forwards its result; it accepts no serialized model input and constructs no decoded domain value.",
     "sourceSha256": "3c4162821234a5a42801ac0f27f038005186c72695e34df2c8bcad960887c105"
+  },
+  "safe-cex-exchange/src/http.rs::LOCAL_FUNCTION:same": {
+    "category": "non-decoder",
+    "reason": "Recursive receipt body identity comparison of already retained values, including bitwise native floats and ordered keys; selects whether to restore this codec projection without constructing or admitting a model. Reviewed proxy diagnostic repair: physical response bytes use the shared Axios transform for classification/logging only, while native data and the original failure remain unchanged. The nested receipt identity comparator body is unchanged.",
+    "sourceSha256": "9ebadc098a88ab14c15dff8d3842fe0bc45a6a91d3a82ed2474baac0de4619d4"
+  },
+  "safe-cex-exchange/src/runtime.rs::LOCAL_FUNCTION:utf8_view": {
+    "category": "non-decoder",
+    "reason": "Explicit lossy legacy Error JSON output view; normalizes native string units only for the legacy view while the original RestFailure retains the authoritative native body. The real error origin regression asserts both profiles and origin identity. Physical response bytes receive the existing JSON.parse view before string-unit normalization; native string responses are not parsed a second time. The encoded error-origin witness preserves invalid bytes and checks parsed valid JSON.",
+    "sourceSha256": "2adddfb18bc735cf339f50e9a3b98ee20c9e5693f9414affff5eed1019373aae"
   }
 }

@@ -582,7 +582,7 @@ fn rest_response(response: &Js) -> Result<RestResponse, Thrown> {
         status: if status.is_finite() { status as u16 } else { 0 },
         reason: None,
         headers: Default::default(),
-        body: RestResponseBody::Untransformed(to_json(&response.get("data")?)?),
+        body: RestResponseBody::Untransformed(to_retained_input(&response.get("data")?)?),
     })
 }
 
@@ -615,15 +615,15 @@ impl JsRestAdapter {
         let method = request.method.to_lowercase();
         let pending = if method == "post" {
             let data = match &request.body {
-                Some(body) => {
-                    let bytes = body
-                        .wire_bytes()
-                        .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-                    let text = String::from_utf8_lossy(&bytes);
-                    from_json(
-                        &serde_json::from_str(&text)
-                            .unwrap_or(serde_json::Value::String(text.into_owned())),
+                Some(RestBody::Untransformed(value)) => from_retained_input(value.clone()),
+                Some(RestBody::Transformed(data)) => from_retained_input(data.value().clone()),
+                Some(RestBody::Encoded(bytes)) => {
+                    let text = String::from_utf8_lossy(bytes);
+                    safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+                        &text.encode_utf16().collect::<Vec<_>>(),
                     )
+                    .map(from_retained_input)
+                    .unwrap_or_else(|_| Js::str(&text))
                 }
                 None => Js::Undefined,
             };
@@ -817,11 +817,15 @@ fn rest_request_data(
         Js::Undefined | Js::Null => None,
         // A JS string is still typed adapter data at hosted-signing ingress.
         // Only the direct terminal path has finished with that provenance.
-        Js::String(_) if before_signing => Some(RestBody::Untransformed(to_json(&data)?)),
+        Js::String(_) if before_signing => Some(RestBody::Untransformed(
+            super::value::to_retained_input(&data)?,
+        )),
         Js::String(text) => Some(RestBody::Encoded(
             String::from_utf16_lossy(text).into_bytes(),
         )),
-        other => Some(RestBody::Untransformed(to_json(other)?)),
+        other => Some(RestBody::Untransformed(super::value::to_retained_input(
+            other,
+        )?)),
     };
     let mut url = optional_text(config, "url")?.unwrap_or_default();
     let mut params = config.get("params")?;
@@ -913,7 +917,7 @@ fn response_data(body: RestResponseBody) -> Js {
             .unwrap_or_else(|_| Js::str(&text))
         }
         RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
-            from_json(&value)
+            super::value::from_retained_input(value)
         }
     }
 }
@@ -940,8 +944,10 @@ fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     )?;
     let data = match request.body {
         None => Js::Undefined,
-        Some(RestBody::Untransformed(value)) => from_json(&value),
-        Some(RestBody::Transformed(value)) => from_json(value.value()),
+        Some(RestBody::Untransformed(value)) => super::value::from_retained_input(value),
+        Some(RestBody::Transformed(value)) => {
+            super::value::from_retained_input(value.value().clone())
+        }
         Some(RestBody::Encoded(bytes)) => Js::str(&String::from_utf8_lossy(&bytes)),
     };
     result.set("data", data)?;

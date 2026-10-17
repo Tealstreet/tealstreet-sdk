@@ -154,13 +154,19 @@ impl ApexSocketHost for SocketHost {
     }
     fn send(&self, frame: &str, logged: bool) -> Result<(), ExchangeError> {
         self.raw_frames.borrow_mut().push(frame.to_owned());
-        let mut value = safe_cex_transport::how::json_parse(frame);
+        let mut value = safe_cex_transport::how::json_parse(frame)
+            .into_value()
+            .unwrap();
         if value["op"] == "login" {
             let args = value["args"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|arg| safe_cex_transport::how::json_parse(arg.as_str().unwrap()))
+                .map(|arg| {
+                    safe_cex_transport::how::json_parse(arg.as_str().unwrap())
+                        .into_value()
+                        .unwrap()
+                })
                 .collect::<Vec<_>>();
             value["args"] = json!(args);
         }
@@ -944,6 +950,16 @@ fn frame_units(value: &Value) -> Vec<u16> {
 #[test]
 fn socket_frame_units_are_observed_before_wire() {
     use safe_cex_num::numeric_ingress::js_from_str;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    fn property<'a>(value: &'a Input, name: &str) -> Option<&'a Input> {
+        let Input::Object(entries) = value else {
+            return None;
+        };
+        entries
+            .iter()
+            .find(|(key, _)| key.iter().copied().eq(name.encode_utf16()))
+            .map(|(_, value)| value)
+    }
     let output = Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -989,17 +1005,46 @@ fn socket_frame_units_are_observed_before_wire() {
         );
         let raw = row["raw"].as_str().unwrap();
         let decoded = safe_cex_transport::how::json_parse(raw);
+        assert!(
+            !matches!(
+                decoded,
+                safe_cex_types::retained_json::RetainedJsonInput::Null
+            ),
+            "{marker} native parser retains the complete source frame"
+        );
+        // Observe retained units before the explicitly fallible UTF-8 frame view.
+        let values = property(&decoded, if private { "args" } else { "data" }).unwrap();
+        let Input::Array(values) = values else {
+            panic!("{marker} native frame array");
+        };
+        let value = if private {
+            &values[0]
+        } else {
+            property(&values[0], "s").unwrap()
+        };
+        assert!(
+            matches!(value, Input::Text(actual) if actual == units),
+            "{marker} retained native input units"
+        );
+        if label == "unused-extra" {
+            assert!(
+                matches!(property(&decoded, "ignored"), Some(Input::Text(actual)) if actual == &[0xd800]),
+                "{marker} unrelated native lone unit retained"
+            );
+        }
+        let decoded = decoded.into_value();
         if refused {
             assert!(
                 raw.is_ascii(),
                 "{marker} refused source frame is valid ASCII transport"
             );
             assert!(
-                decoded.is_null(),
-                "{marker} native parser refuses whole frame"
+                decoded.is_err(),
+                "{marker} explicit typed frame view refuses whole frame"
             );
             native_refusals += 1;
         } else {
+            let decoded = decoded.unwrap();
             let value = if private {
                 &decoded["args"][0]
             } else {
@@ -1057,16 +1102,22 @@ fn socket_frame_units_are_observed_before_wire() {
         .unwrap();
         let host = SocketHost::new(runtime.clone(), private, 0, "frame-units");
         runtime.operations.borrow_mut().clear();
-        if private {
+        let result = if private {
             ApexOmniPrivateWebsocket::new(parent, host.clone())
                 .unwrap()
                 .on_message(raw)
-                .unwrap();
         } else {
             ApexOmniPublicWebsocket::new(parent, host.clone())
                 .unwrap()
                 .on_message(raw)
-                .unwrap();
+        };
+        if refused {
+            assert!(
+                result.unwrap_err().message.contains("invalid utf-16"),
+                "{marker} typed frame refusal is visible"
+            );
+        } else {
+            result.unwrap();
         }
         let sent = host.raw_frames.borrow().clone();
         assert_eq!(
