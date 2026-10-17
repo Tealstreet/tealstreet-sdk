@@ -1,3 +1,5 @@
+> Historical evidence: the test-only V3 comparison/canonical bodies, operation holders and their oracle commands are retired. The live legacy operation shape is retained; see CLAUDE.md.
+
 # WOO public canonical helpers
 
 Base: `ac0f5fccf24207b26c279e67da2a88f2c72a7aae`.

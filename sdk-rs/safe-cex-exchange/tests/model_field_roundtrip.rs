@@ -106,7 +106,7 @@ fn store_insert_and_partial_patch_retain_own_undefined() {
         .call_method(
             "updateOrder",
             vec![
-                Js::str("o"),
+                Js::object(vec![("id", Js::str("o"))]),
                 Js::object(vec![
                     ("price", Js::Number(7.0)),
                     ("stopLoss", Js::Number(5.0)),
@@ -119,7 +119,7 @@ fn store_insert_and_partial_patch_retain_own_undefined() {
         .call_method(
             "updateOrder",
             vec![
-                Js::str("o"),
+                Js::object(vec![("id", Js::str("o"))]),
                 Js::object(vec![
                     ("price", Js::Undefined),
                     ("stopLoss", Js::Undefined),
