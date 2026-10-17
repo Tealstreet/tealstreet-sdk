@@ -142,6 +142,11 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
         reject("handled-sync")
             .call_method("catch", vec![catch.clone()])
             .unwrap();
+        let early = Promise::pending(&runtime);
+        Js::Promise(early.clone())
+            .call_method("catch", vec![catch.clone()])
+            .unwrap();
+        early.settle(Err(Thrown::error("Error", "handled-before-rejection")));
         let deferred = reject("handled-microtasks");
         let handler = catch.clone();
         let first = Promise::pending(&runtime);
@@ -174,7 +179,7 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
                 ])],
             )
             .unwrap()
-            .call_method("catch", vec![catch])
+            .call_method("catch", vec![catch.clone()])
             .unwrap();
         let pending = Promise::pending(&runtime);
         shared
@@ -189,7 +194,9 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
                 ])],
             )
             .unwrap();
+        let late = reject("unhandled-handled-after-report");
         tokio::time::sleep(Duration::from_millis(5)).await;
+        late.call_method("catch", vec![catch]).unwrap();
         pending.settle(Ok(Js::Undefined));
         tokio::time::sleep(Duration::from_millis(5)).await;
         reject("unhandled-idle-driver");
