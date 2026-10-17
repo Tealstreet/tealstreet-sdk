@@ -28,6 +28,7 @@ pub struct Runtime {
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
     pub dial_sockets: RefCell<Vec<Rc<dyn WsSocket>>>,
+    pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -96,7 +97,10 @@ impl ExchangeRuntime for Runtime {
 }
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
-        Arc::new(safe_cex_transport::DirectTransport)
+        self.provider
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| Arc::new(safe_cex_transport::DirectTransport))
     }
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("fixture refuses tunnel transport")

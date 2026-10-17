@@ -219,6 +219,10 @@ fn venue(
         Rc::new(Response),
         Rc::new(|v| v),
         MexcSocketDependencies {
+            current_time_ms: {
+                let runtime = runtime.clone();
+                Rc::new(move || runtime.now_ms())
+            },
             runtime,
             remote_account_name: None,
             emit_fill: Rc::new(move |fill| {

@@ -70,6 +70,7 @@ pub struct BlofinDependencies {
 
 /// Native collaborators of the already-bound MEXC exchange.
 pub struct MexcDependencies {
+    pub current_time_ms: Rc<dyn Fn() -> f64>,
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Rc<dyn RestAdapter>,
     pub local_to_utc: Rc<dyn Fn(f64) -> f64>,
@@ -377,6 +378,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             deps.http,
             deps.local_to_utc,
             safe_cex_venue_mexc::sockets::MexcSocketDependencies {
+                current_time_ms: deps.current_time_ms,
                 runtime: deps.runtime,
                 remote_account_name: host.hosted_signer().and_then(|(_, account)| account),
                 emit_fill: Rc::new(move |fill| {

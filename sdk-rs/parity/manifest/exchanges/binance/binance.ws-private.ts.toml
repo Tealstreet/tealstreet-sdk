@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/binance/binance.ws-private.ts"
-rust_files = [ "safe-cex-venue-binance/src/private_classes.rs", "safe-cex-venue-binance/src/private_helpers.rs", "safe-cex-venue-binance/src/private_session.rs", "safe-cex-venue-binance/src/private_open.rs", "safe-cex-venue-binance/src/private_message.rs", "safe-cex-venue-binance/src/private_order_logic.rs", "safe-cex-venue-binance/src/private_ping.rs", "safe-cex-venue-binance/src/private_events.rs", "safe-cex-venue-binance/src/position_refresh.rs", "safe-cex-venue-binance/src/listen_key.rs", "safe-cex-venue-binance/src/orders_throttle.rs", "safe-cex-venue-binance/src/class_flags.rs", "safe-cex-venue-binance/src/class_jobs.rs", "safe-cex-venue-binance/src/order_operations.rs", "safe-cex-venue-binance/src/private_event_value.rs" ]
+rust_files = [ "safe-cex-venue-binance/src/private_classes.rs", "safe-cex-venue-binance/src/private_helpers.rs", "safe-cex-venue-binance/src/private_session.rs", "safe-cex-venue-binance/src/private_open.rs", "safe-cex-venue-binance/src/private_message.rs", "safe-cex-venue-binance/src/private_ping.rs", "safe-cex-venue-binance/src/private_events.rs", "safe-cex-venue-binance/src/position_refresh.rs", "safe-cex-venue-binance/src/listen_key.rs", "safe-cex-venue-binance/src/orders_throttle.rs", "safe-cex-venue-binance/src/class_flags.rs", "safe-cex-venue-binance/src/class_jobs.rs", "safe-cex-venue-binance/src/order_operations.rs", "safe-cex-venue-binance/src/private_event_value.rs" ]
 
 [[symbol]]
 ts = "BinancePrivateWebsocket"
@@ -54,9 +54,9 @@ note = "Extracted private onMessage body with MessageEvent.data read before disp
 ts = "BinancePrivateWebsocket#getOrderRejectReason"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-binance/src/private_order_logic.rs::get_order_reject_reason"
+rs = "safe-cex-venue-binance/src/private_events.rs::get_order_reject_reason"
 status = "ported"
-note = "safe-cex-venue-binance/src/private_order_logic.rs::get_order_reject_reason Extracted websocket rejection classification: truthy r or empty string, shared fallible String conversion, uppercase substring checks for POST_ONLY, GTX and MAKER. Coercion throws remain Result errors; socket integration remains pending."
+note = "safe-cex-venue-binance/src/private_events.rs::get_order_reject_reason Extracted websocket rejection classification: truthy r or empty string, shared fallible String conversion, uppercase substring checks for POST_ONLY, GTX and MAKER. Coercion throws remain Result errors; the production PrivateState classifier consumes this native body."
 
 [[symbol]]
 ts = "BinancePrivateWebsocket.ping"
