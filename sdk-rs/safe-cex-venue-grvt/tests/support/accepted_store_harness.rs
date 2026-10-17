@@ -190,7 +190,7 @@ pub fn watch(
 }
 pub fn view_order(value: &Order) -> Value {
     json!({"id":value.id,"symbol":value.symbol,"status":format!("{:?}",value.status),"type":format!("{:?}",value.r#type),
-        "side":format!("{:?}",value.side),"price":bits(value.price),"amount":bits(value.amount),"filled":bits(value.filled),
+        "side":format!("{:?}",value.side),"price":bits((value.price).to_number()),"amount":bits(value.amount),"filled":bits(value.filled),
         "remaining":bits(value.remaining),"reduce":value.reduce_only,"last":bits(value.last_update),
         "tif":value.time_in_force.map(|v|format!("{v:?}")),"parent":value.parent_id,"client":value.client_order_id})
 }

@@ -60,19 +60,19 @@ pub fn map_order(
     let remaining =
         parse_float(&js_string(row.get("remaining_size")).map_err(|error| error.to_string())?);
     Ok(Order {
-        client_order_id: None,
+        client_order_id: (None).into(),
         id: text("id")?.to_owned(),
-        parent_id: None,
+        parent_id: (None).into(),
         symbol: text("market")?.to_owned(),
-        side,
-        r#type: kind,
-        status,
-        price,
+        side: side.into(),
+        r#type: (kind).into(),
+        status: status.into(),
+        price: price.into(),
         amount,
         filled: amount - remaining,
         remaining,
         reduce_only,
-        time_in_force: None,
+        time_in_force: None.into(),
         // Date distinguishes missing, null and booleans before primitive/string parsing.
         last_update: match row.get("created_at") {
             None => f64::NAN,
@@ -92,13 +92,13 @@ pub fn map_order(
                 ),
             },
         },
-        info: Some(Value::Object(row.clone())),
-        close: None,
-        trigger_type: None,
-        tp_trigger_type: None,
-        sl_trigger_type: None,
-        take_profit: None,
-        stop_loss: None,
-        extra: None,
+        info: (Some(Value::Object(row.clone()))).into(),
+        close: (None).into(),
+        trigger_type: (None).into(),
+        tp_trigger_type: (None).into(),
+        sl_trigger_type: (None).into(),
+        take_profit: (None).into(),
+        stop_loss: (None).into(),
+        extra: (None).into(),
     })
 }

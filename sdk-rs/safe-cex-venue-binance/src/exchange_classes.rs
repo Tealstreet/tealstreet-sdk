@@ -1247,7 +1247,7 @@ impl crate::order_operations::OrderBindings for Context {
         Ok(Rc::new(move |opts| {
             Ok(owner
                 .base
-                .resolve_caller_client_order_id(&typed(&opts)?)
+                .resolve_caller_client_order_id(&typed::<safe_cex_types::PreparedOrderOpts>(&opts)?)
                 .map_err(Rc::new)?
                 .map_or(EventValue::Undefined, string))
         }))

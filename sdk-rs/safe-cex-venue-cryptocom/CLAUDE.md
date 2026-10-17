@@ -403,3 +403,9 @@ production class and socket bodies. Retained historical logs are archives, not
 coverage claims. Production lifecycle and admin coverage lives in
 `tests/exchange_binding.rs`; streams/history and private data frames are separate
 follow-up obligations.
+
+The binding’s REST and private WebSocket auth helpers read the shared synchronized
+VirtualClock directly. Do not reconstruct a clock from one raw runtime reading.
+The isolated native_clock target syncs the actual singleton, checks emitted IDs,
+nonces and HMACs, authenticates the private socket and maps a private order frame
+whose missing update timestamp falls back to the same synchronized clock.
