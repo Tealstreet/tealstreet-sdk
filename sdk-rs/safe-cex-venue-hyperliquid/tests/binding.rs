@@ -743,6 +743,230 @@ fn fractional_host_clock_still_produces_integer_date_now_signing_nonces() {
     assert!(body["signature"]["r"].is_string());
 }
 
+fn production_trigger_opts(amount: f64) -> safe_cex_types::PlaceOrderOpts {
+    serde_json::from_value(json!({"symbol":"BTC-PERP","type":"stop_market","side":"sell", "amount":amount,"price":59000,"reduceOnly":true})).unwrap()
+}
+
+#[test]
+fn production_import_position_tpsl_posts_signed_zero_size_trigger() {
+    let f = started();
+    let ids = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_order(&*f.exchange, production_trigger_opts(0.0)),
+        )
+        .expect("production position TP/SL must resolve its helpers");
+    assert_eq!(ids, ["777"]);
+    let body = last_body(&f, "exchange:order");
+    assert_eq!(body["action"]["grouping"], "positionTpsl");
+    assert_eq!(body["action"]["orders"][0]["s"], "0");
+    assert_eq!(
+        body["action"]["orders"][0]["t"]["trigger"]["triggerPx"],
+        "59000"
+    );
+    assert_eq!(body["action"]["orders"][0]["t"]["trigger"]["tpsl"], "sl");
+    assert!(body["signature"]["r"].is_string());
+}
+
+#[test]
+fn production_import_partial_tpsl_posts_its_amount_with_normal_grouping() {
+    let f = started();
+    let ids = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_order(&*f.exchange, production_trigger_opts(0.01)),
+        )
+        .expect("production partial TP/SL must resolve its helpers");
+    assert_eq!(ids, ["777"]);
+    let body = last_body(&f, "exchange:order");
+    assert_eq!(body["action"]["grouping"], "na");
+    assert_eq!(body["action"]["orders"][0]["s"], "0.01");
+    assert!(body["signature"]["r"].is_string());
+}
+
+#[test]
+fn production_import_waiting_tpsl_returns_empty_ids_and_schedules_refresh() {
+    let f = started();
+    for (name, response) in &mut *f.routes.routes.borrow_mut() {
+        if name == "exchange:order" {
+            *response = json!({"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}});
+        }
+    }
+    let before = f.routes.count("info:frontendOpenOrders");
+    let result = f.host.block_on(
+        f.exchange
+            .base()
+            .place_order(&*f.exchange, production_trigger_opts(0.0)),
+    );
+    assert_eq!(
+        f.routes.count("exchange:order"),
+        1,
+        "the waiting trigger is already posted before its response is interpreted"
+    );
+    let ids = result.expect("an already-live waiting trigger must not become a ReferenceError");
+    assert!(ids.is_empty());
+    let after_return = f.routes.count("info:frontendOpenOrders");
+    assert!(after_return >= before);
+    f.host.advance(500.0);
+    assert_eq!(
+        f.routes.count("info:frontendOpenOrders"),
+        after_return + 1,
+        "waiting TP/SL schedules the actual order refresh"
+    );
+}
+
+fn production_batch_opts() -> Vec<safe_cex_types::PlaceOrderOpts> {
+    [json!({"symbol":"BTC-PERP","type":"limit","side":"buy","amount":0.01,"price":60000,"clientOrderId":"0x11111111111111111111111111111111"}), json!({"symbol":"BTC-PERP","type":"limit","side":"sell","amount":0.02,"price":62000,"clientOrderId":"0x22222222222222222222222222222222"})].into_iter().map(|v|serde_json::from_value(v).unwrap()).collect()
+}
+
+#[test]
+fn production_import_place_orders_posts_and_flattens_both_results_in_order() {
+    let f = started();
+    let ids = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_orders(&*f.exchange, production_batch_opts()),
+        )
+        .expect("production placeOrders must resolve mapSeries");
+    assert_eq!(ids, ["777", "777"]);
+    let requests = f.routes.requests.borrow();
+    let orders = requests
+        .iter()
+        .filter(|(r, _)| r == "exchange:order")
+        .map(|(_, b)| b)
+        .collect::<Vec<_>>();
+    assert_eq!(orders.len(), 2);
+    for (index, (amount, price, cloid)) in [
+        ("0.01", "60000", "0x11111111111111111111111111111111"),
+        ("0.02", "62000", "0x22222222222222222222222222222222"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let wire = &orders[index]["action"]["orders"][0];
+        assert_eq!(wire["s"], amount);
+        assert_eq!(wire["p"], price);
+        assert_eq!(wire["c"], cloid);
+        assert!(orders[index]["signature"]["r"].is_string());
+    }
+}
+
+#[test]
+fn production_import_place_orders_stops_after_the_first_venue_failure() {
+    let f = started();
+    for (name, response) in &mut *f.routes.routes.borrow_mut() {
+        if name == "exchange:order" {
+            *response = json!({"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"first batch denied"}]}}});
+        }
+    }
+    let error = f
+        .host
+        .block_on(
+            f.exchange
+                .base()
+                .place_orders(&*f.exchange, production_batch_opts()),
+        )
+        .unwrap_err();
+    assert!(
+        error.message.contains("first batch denied"),
+        "original venue error must survive: {error:?}"
+    );
+    assert_eq!(
+        f.routes.count("exchange:order"),
+        1,
+        "serial placement must not start the second order after first rejection"
+    );
+}
+
+#[test]
+fn production_import_live_fills_emit_each_fill_update_later_positions_and_refresh_hip3() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let f = started();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let observed = events.clone();
+    f.exchange.base().on(
+        "fill",
+        Rc::new(move |_, event| {
+            observed.borrow_mut().push(event.clone());
+            Ok(())
+        }),
+    );
+    let wires = f.host.sockets.borrow().clone();
+    assert_eq!(wires.len(), 2);
+    for wire in &wires {
+        wire.push(WsEvent::Open);
+    }
+    f.host.settle();
+    let private = wires
+        .iter()
+        .find(|wire| {
+            wire.sent.borrow().iter().any(|text| {
+                serde_json::from_str::<Value>(text)
+                    .is_ok_and(|v| v["subscription"]["type"] == "userFills")
+            })
+        })
+        .expect("production private socket subscribes to userFills");
+    let fill = |coin: &str, size: &str, start: &str, tid: u64| json!({"coin":coin,"px":"60000","sz":size,"side":"B","time":1700000000000u64+tid,"startPosition":start,"dir":"Open Long","closedPnl":"0","hash":format!("fill-{tid}"),"oid":tid+1000,"crossed":false,"fee":"0","tid":tid});
+    let frame = json!({"channel":"userFills","data":{"isSnapshot":false,"user":MASTER,"fills":[fill("BTC","0.1","0",101),fill("BTC","0.2","0.1",102),fill("xyz:BTC","0.05","0",103)]}}).to_string();
+    private.push(WsEvent::Message(SocketFrame::Text(frame.clone())));
+    f.host.settle();
+    assert_eq!(
+        events.borrow().len(),
+        3,
+        "every live fill must reach the actual BaseExchange emitter"
+    );
+    for (i, event) in events.borrow().iter().enumerate() {
+        assert_eq!(event["id"], (101 + i).to_string());
+        assert_eq!(event["orderId"], (1101 + i).to_string());
+        assert_eq!(event["side"], "buy");
+    }
+    let positions = f.exchange.base().store.positions();
+    let position = positions
+        .iter()
+        .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
+        .expect("optimistic core position");
+    assert!(
+        (position.contracts - 0.3).abs() < 1e-12,
+        "later fills must update positions: {position:?}"
+    );
+    drop(positions);
+    private.push(WsEvent::Message(SocketFrame::Text(frame)));
+    f.host.settle();
+    assert_eq!(
+        events.borrow().len(),
+        3,
+        "shared cache deduplicates notification replay"
+    );
+    assert!(
+        !f.routes
+            .requests
+            .borrow()
+            .iter()
+            .any(|(r, b)| r == "info:clearinghouseState" && b["dex"] == "xyz")
+    );
+    // The debounce starts the request; the shared limiter still owns its pacing.
+    f.host.advance(350.0);
+    f.host.advance(5000.0);
+    assert!(
+        f.routes
+            .requests
+            .borrow()
+            .iter()
+            .any(|(r, b)| r == "info:clearinghouseState" && b["dex"] == "xyz"),
+        "HIP-3 fill scheduling must survive the whole frame: console={:?} reports={:?} requests={:?}",
+        f.host.console.borrow(),
+        f.host.reports.borrow(),
+        f.routes.requests.borrow()
+    );
+}
+
 fn seam_started() -> Fixture {
     let f = started();
     // Join the startup's actual coalesced order read before seeding assertions.

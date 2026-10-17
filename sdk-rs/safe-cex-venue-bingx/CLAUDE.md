@@ -207,3 +207,10 @@ transmitted order fields. A stray local secret must not trigger local signing.
 A refusing signer sends no HTTP request. hosted-signing-controls.py independently
 removes HTTP forwarding, BaseExchange signer attachment and API local-signing
 bypass; each must compile/fail the named native E2E and restore to pass.
+
+The production batch-placement capability dispatches to BingxPlacement.place_orders,
+matching the source whole-batch formatting and submission loop. A formatting
+failure sends nothing; a submission rejection still allows later payloads to be
+attempted before the final error is thrown. Real binding regressions verify a
+rejected take profit does not suppress the stop loss, and a later invalid full
+stop prevents an earlier entry from being submitted.
