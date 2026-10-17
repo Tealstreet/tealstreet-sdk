@@ -281,6 +281,7 @@ impl ExchangeTask for Task {
     }
 }
 
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub(crate) fn checkpoint(runtime: Rc<dyn ExchangeRuntime>) {
     let jobs = QUEUES.with(|queues| {
         queues.borrow().iter().find_map(|(owner, jobs)| {
