@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "209 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "210 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -2735,6 +2735,17 @@
       "classification": "delegated",
       "delegate": "src/websocket.rs::BaseWebSocket::start_prepared_websocket",
       "reason": "The retained header provider executes inside the existing core-owned dial preparation. A thrown auth error prevents dial; generation/disposal guards and cancellation remain owned by start_prepared_websocket/spawn_owned_kind. ws_options witnesses source dial inputs, rejected preparation and real native upgrade headers."
+    },
+    {
+      "owner": "src/js_runtime/globals.rs::resolve_promise",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block"
+      ],
+      "producer_sha256": "45c478b9cc71fca3bdd5e6a6009b836e9234b09e98eda493b04fdf0a1204e3b4",
+      "classification": "delegated",
+      "delegate": "ExchangeRuntime::spawn_local / native::NativeRuntime",
+      "reason": "The native runtime owns the queued thenable job independently of the returned Promise observer. Dropping its task handle does not cancel the job; the job carries the target promise until settlement or until source thenable code retains its resolvers. It installs no exchange/socket registry slot. The actual NativeRuntime constructor witness dropping_the_constructor_observer_does_not_cancel_its_thenable_job checks execution after observer drop."
     }
   ]
 }
