@@ -878,8 +878,14 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                 .generated_order_link_id()
                 .map_or(Js::Undefined, |id| Js::str(&id))
         };
+        // Lodash times returns no lots outside 1..=MAX_SAFE_INTEGER, including Infinity.
+        let count = if (1. ..=9_007_199_254_740_991.).contains(&lots) {
+            lots as usize
+        } else {
+            0
+        };
         let mut payloads = vec![];
-        for idx in 0..lots as usize {
+        for idx in 0..count {
             let payload = req_object.spread_object()?;
             if idx > 0 {
                 for key in ["stopLoss", "takeProfit", "slTriggerBy", "tpTriggerBy"] {
