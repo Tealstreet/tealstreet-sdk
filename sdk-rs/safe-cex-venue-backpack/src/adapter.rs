@@ -58,13 +58,7 @@ impl BackpackExchange {
         );
         let base = Rc::new(base);
         let o = base.options();
-        let options = Rc::new(RefCell::new(crate::api_factory::Options {
-            testnet: o.testnet.unwrap_or(false),
-            recv_window: o.extra.as_ref().and_then(|v| v.recv_window),
-            tunnel: o.tealstreet_tunnel.unwrap_or(false),
-            key: o.key.clone(),
-            secret: o.secret.clone(),
-        }));
+        let options = Rc::new(RefCell::new(o));
         let xhr = crate::api_factory::create_api(
             Rc::new(RefCell::new(crate::native_http::Factory {
                 base: base.clone(),
