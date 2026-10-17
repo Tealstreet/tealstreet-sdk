@@ -1189,3 +1189,55 @@ fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
     );
     f.exchange.dispose().unwrap();
 }
+
+#[test]
+fn account_lookup_reads_only_selected_account_fields() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "/users/k".into(),
+        200,
+        json!({"userDetails":[{"accounts":[
+            {"accountStatus":"DISABLED"},
+            {"account":"default:A","accountStatus":"FULL_TRADING"}
+        ]}]}),
+    ));
+    f.run(f.exchange.start()).unwrap();
+    assert_eq!(
+        f.exchange.account_code.borrow().as_deref(),
+        Some("default:A")
+    );
+    assert!(f.store.loaded().orders && f.store.loaded().positions && f.store.loaded().balance);
+    f.request("GET", "accounts/default:A/portfolio");
+    f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/users/k")
+            .count(),
+        1
+    );
+    f.exchange.dispose().unwrap();
+}
+
+#[test]
+fn account_lookup_ignores_unused_metadata_and_later_users() {
+    let f = fixture();
+    f.wire.faults.borrow_mut().push_back((
+        "/users/k".into(),
+        200,
+        json!({"userDetails":[{
+            "login":null,"domain":[],"version":{},"fullName":false,"username":12,
+            "accounts":[{"account":"default:A","accountStatus":"FULL_TRADING",
+                "owner":[],"version":null,"baseCurrency":{},"registrationTime":false,
+                "pricingStream":12,"positionBased":"unused"}]
+        },null,{"accounts":"ignored"}]}),
+    ));
+    f.run(f.exchange.fetch_orders(None)).unwrap();
+    assert_eq!(
+        f.exchange.account_code.borrow().as_deref(),
+        Some("default:A")
+    );
+    f.request("GET", "accounts/default:A/portfolio");
+}

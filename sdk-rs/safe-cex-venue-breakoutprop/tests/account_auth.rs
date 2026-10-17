@@ -166,13 +166,6 @@ fn actual_account_read() {
             c["trace"],
             "ACCOUNT-REQUEST ordered calls"
         );
-        if ["missing-unused", "missing-later-user"].contains(name) {
-            assert!(c["expected"]["ok"].is_string());
-            assert!(result.is_err(), "ACCOUNT-DECLARED refused");
-            assert!(cache.borrow().is_none());
-            comparisons += 1;
-            continue;
-        }
         match result {
             Ok(value) => assert_eq!(
                 value, c["expected"]["ok"],
@@ -402,4 +395,55 @@ fn validation_logger_argument_snapshot() {
         json!({"error":{"value":"before"}}),
         "VALIDATE-OWNED logger argument snapshot"
     );
+}
+
+#[test]
+fn account_consumed_fields_match_source() {
+    let cases = ORACLE["consumed"].as_array().unwrap();
+    let names = [
+        "minimal",
+        "poisoned-unused",
+        "ignored-later",
+        "ignored-disabled",
+        "arraylike-users",
+        "null-user",
+        "null-accounts",
+        "scalar-accounts",
+        "null-account",
+        "nonstring-status",
+        "missing-status",
+        "bad-code-before-second-match",
+    ];
+    assert_eq!(cases.len(), names.len(), "ACCOUNT-CONSUMED source census");
+    for (case, name) in cases.iter().zip(names) {
+        assert_eq!(case["name"], name);
+        let cache = RefCell::new(None);
+        let errors = RefCell::new(Vec::<Value>::new());
+        let logger = |value| {
+            errors.borrow_mut().push(value);
+            Ok(())
+        };
+        let input = js_from_str::<JsNumberInput>(case["raw"].as_str().unwrap()).unwrap();
+        let result = run(get_account_code(
+            &cache,
+            "k".into(),
+            Some("A".into()),
+            || ready(Ok("token".into())),
+            |_| ready(Ok(input)),
+            &logger,
+        ));
+        match result {
+            Ok(account) => assert_eq!(
+                json!({"ok":account,"errors":*errors.borrow()}),
+                case["expected"],
+                "{name}"
+            ),
+            Err(error) => assert_eq!(
+                json!({"error":error.message,"name":error.name,"errors":*errors.borrow()}),
+                case["expected"],
+                "{name}"
+            ),
+        }
+        assert_eq!(json!(*cache.borrow()), case["after"], "{name}: cache");
+    }
 }
