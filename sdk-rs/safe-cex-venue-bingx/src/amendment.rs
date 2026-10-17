@@ -107,7 +107,7 @@ fn opts(
         side: order.side.into_property(),
         amount: order.amount,
         price: Some(price),
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         close: order.close.into_value(),
         time_in_force: None,
         client_order_id: None,
@@ -273,7 +273,7 @@ impl BingxAmendment {
                 order.id
             ));
         }
-        if reduce.is_some_and(|b| b != order.reduce_only) {
+        if reduce.is_some_and(|b| order.reduce_only != b) {
             return self.reject(format!(
                 "BingX cannot safely amend {}: reduce-only state is not reconciled",
                 order.id
@@ -529,7 +529,7 @@ impl BingxAmendment {
                 order.id
             ));
         }
-        if reduce.is_some_and(|b| b != reconciled.reduce_only) {
+        if reduce.is_some_and(|b| reconciled.reduce_only != b) {
             return self.reject(format!(
                 "BingX cannot safely replace {}: reduce-only state is not reconciled",
                 order.id
@@ -616,7 +616,7 @@ impl BingxAmendment {
                 "ONLY_NEW"
             });
         }
-        if resolved == "BOTH" && reconciled.reduce_only {
+        if resolved == "BOTH" && reconciled.reduce_only == true {
             payload["reduceOnly"] = json!(true)
         }
         let result = async {
