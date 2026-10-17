@@ -1,0 +1,12 @@
+{
+  "safe-cex-venue-kraken/src/binding/host.rs::LOCAL_FUNCTION:keys": {
+    "category": "non-decoder",
+    "reason": "Inside qs_stringify: collects existing outgoing object entries and optionally sorts their text keys with the configured root collator. It prepares query serialization and admits no inbound record.",
+    "sourceSha256": "cd606772bf77e78c68a052316034ac462bc38923f2aa3eb5afd1041ebc205b96"
+  },
+  "safe-cex-venue-kraken/src/binding/host.rs::LOCAL_FUNCTION:walk": {
+    "category": "non-decoder",
+    "reason": "Inside qs_stringify: recursively emits outgoing bracket query pairs, null empty values, repeated arrays and scalar JS string coercion. This is request encoding over existing VM values, not response/model decoding.",
+    "sourceSha256": "cd606772bf77e78c68a052316034ac462bc38923f2aa3eb5afd1041ebc205b96"
+  }
+}

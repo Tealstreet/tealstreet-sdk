@@ -8,5 +8,10 @@
     "category": "non-decoder",
     "reason": "Reviewed qs_stringify::walk: recursively emits outgoing bracket query keys and encoded scalar text, omitting undefined/functions and emitting empty null values. It traverses existing VM values to serialize an HTTP request; it constructs no decoded typed response or validated authority. Reviewed source changes through c876a20471: response-key lookup now checks inherited keys and primitive in-operator refusal; transport error forwarding passes the base. Both changes are outside qs_stringify, whose enc/walk bodies and outbound-only role are unchanged.",
     "sourceSha256": "c16871f0101fbcdcdf8c0a767daa3c7af53fea2d332c13491c965f1432476ecf"
+  },
+  "safe-cex-venue-bitget/src/binding/hosts/assembly.rs::LOCAL_FUNCTION:contains": {
+    "category": "non-decoder",
+    "reason": "Inside get_key: checks own properties, prototype-chain members and native array/function builtins on an existing Js receiver. It returns only property presence for the source in-operator lookup; it performs no wire parse or typed record construction.",
+    "sourceSha256": "c16871f0101fbcdcdf8c0a767daa3c7af53fea2d332c13491c965f1432476ecf"
   }
 }

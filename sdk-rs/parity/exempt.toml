@@ -2681,14 +2681,6 @@ rs = "safe-cex-venue-apexomni/src/lifecycle.rs::ApexServices::place_orders"
 reason = "C3 imported Date/Base/private-socket capability place_orders. This is runtime/dependency glue with no separately exported local TypeScript declaration; mapped placement/cancellation bodies retain venue logic and native call-order assertions."
 
 [[exempt]]
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::RecentOrderCache"
-reason = "C3: ordered storage for the anonymous recentlyPlacedOrders Map field in the mapped inverse/spot methods. A private RefCell vector enforces insert/replace/delete through mapped functions and retains Rc order references; no standalone TypeScript declaration names this field representation. This does not implement an exchange class or constructor."
-
-[[exempt]]
-rs = "safe-cex-venue-bybit/src/local_order_cache.rs::RecentOrderCache::snapshot"
-reason = "C3: read-only Map-state observer for the anonymous cache field, exposing ordered keys, placedAt and retained references for native callers and gates. It adds no venue policy or mutation; all cache behavior belongs to the separately mapped functions."
-
-[[exempt]]
 rs = "safe-cex-venue-coinbase/src/json_key_scanner.rs::JsonKeyScanResult"
 reason = "Native tag for the scanner internal JsonKeyScanResult union, which has no extracted source row. The mapped scanner methods execute the grammar and return this tag without introducing a Serde or frame-classification ingress."
 
