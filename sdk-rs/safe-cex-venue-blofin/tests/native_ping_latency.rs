@@ -155,6 +155,7 @@ fn private_fill_frame_updates_order_and_emits_original_fill_fields() {
     live.venue.base().on(
         "fill",
         std::rc::Rc::new(move |_, data| {
+            let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
             saved.borrow_mut().push(data.clone());
             Ok(())
         }),

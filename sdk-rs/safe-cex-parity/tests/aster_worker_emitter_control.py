@@ -23,14 +23,14 @@ def test(name):
 
 try:
     source.write_bytes(mutated)
-    result = test("native_private_order_and_fill_have_source_event_arguments")
+    result = test("native_private_fill_keeps_infinite_price_through_event_and_worker_post")
     assert result.returncode == 101 and "could not compile" not in result.stdout
-    assert "native_private_order_and_fill_have_source_event_arguments ... FAILED" in result.stdout
+    assert "native_private_fill_keeps_infinite_price_through_event_and_worker_post ... FAILED" in result.stdout
     assert "left: 0" in result.stdout and "right: 1" in result.stdout
 finally:
     assert source.read_bytes() == mutated, "refusing to overwrite concurrent source edits"
     source.write_bytes(original)
 restored = test("")
-assert restored.returncode == 0 and "2 passed" in restored.stdout
+assert restored.returncode == 0 and "3 passed" in restored.stdout
 assert source.read_bytes() == original
-print("Compiled real worker-fill disconnect failed; exact restoration passed both master-ABI cross-layer witnesses.")
+print("Compiled real worker-fill disconnect failed; exact restoration passed all three cross-layer witnesses.")

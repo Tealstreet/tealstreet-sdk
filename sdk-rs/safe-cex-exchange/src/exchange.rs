@@ -6,10 +6,11 @@ use crate::client_order_id::{
 };
 use crate::client_order_id::{default_mint_candidates, order_carries_client_order_id};
 use crate::error_reporting::{
-    ExchangeErrorInput, assign, formatted_context, insert_option, raw_formatted_context,
+    ExchangeErrorInput, assign, formatted_context, raw_formatted_context,
     read_http_failure_context, record_http_failure, truthy,
 };
 use crate::external::ExternalPublicData;
+use crate::js_runtime::value::{Js, from_json, from_typed, to_json, to_typed};
 use crate::lifecycle::{SignerWaitGuard, SignerWaiter, WatchdogGuard, WatchdogOwner};
 use crate::order_operations::order_options;
 use crate::snapshots::{AccountMarketOverlay, MarketChanges, PositionFetch, market_changes};
@@ -68,11 +69,7 @@ impl Drop for WorkerReplyGuard {
     }
 }
 
-fn emit_listeners(
-    listeners: &ListenerRows,
-    event: &str,
-    args: &[Value],
-) -> Result<(), ExchangeError> {
+fn emit_listeners(listeners: &ListenerRows, event: &str, args: &[Js]) -> Result<(), ExchangeError> {
     let callbacks = listeners.borrow().get(event).cloned().unwrap_or_default();
     for (id, callback, once) in callbacks {
         if once && let Some(rows) = listeners.borrow_mut().get_mut(event) {
@@ -540,8 +537,10 @@ impl BaseExchange {
         let listeners: ListenerRows = Rc::default();
         let events = listeners.clone();
         let unsubscribe = store.subscribe(Box::new(move |data, _| {
-            let data = serde_json::to_value(data)
-                .map_err(|error| safe_cex_types::StoreSubscriberError::new(error.to_string()))?;
+            let data = from_typed(data).map_err(|error| {
+                safe_cex_types::StoreSubscriberError::new(error.message())
+                    .with_cause(Rc::new(error.to_exchange_error()))
+            })?;
             emit_listeners(&events, "update", &[data]).map_err(Into::into)
         }));
         let active = options
@@ -586,7 +585,7 @@ impl BaseExchange {
     pub fn on(&self, event: &str, callback: Listener) -> String {
         self.on_args(
             event,
-            Rc::new(move |event, args| callback(event, args.first().unwrap_or(&Value::Null))),
+            Rc::new(move |event, args| callback(event, args.first().unwrap_or(&Js::Undefined))),
         )
     }
     pub fn on_args(&self, event: &str, callback: ArgsListener) -> String {
@@ -601,7 +600,7 @@ impl BaseExchange {
     pub fn once(&self, event: &str, callback: Listener) -> String {
         self.once_args(
             event,
-            Rc::new(move |event, args| callback(event, args.first().unwrap_or(&Value::Null))),
+            Rc::new(move |event, args| callback(event, args.first().unwrap_or(&Js::Undefined))),
         )
     }
     pub fn once_args(&self, event: &str, callback: ArgsListener) -> String {
@@ -614,19 +613,44 @@ impl BaseExchange {
         id
     }
     pub fn off(&self, event: &str, id: Option<&str>) {
-        let mut listeners = self.listeners.borrow_mut();
-        if let Some(id) = id {
-            if let Some(rows) = listeners.get_mut(event) {
-                rows.retain(|row| row.0 != id);
-            }
-        } else {
-            listeners.remove(event);
-        }
+        self.retain_event_listeners(event, |candidate| {
+            Ok::<_, std::convert::Infallible>(id.is_some_and(|id| id != candidate))
+        })
+        .unwrap_or_else(|never| match never {});
     }
-    pub fn emit(&self, event: &str, data: serde_json::Value) -> Result<(), ExchangeError> {
+    pub(crate) fn retain_event_listeners<E>(
+        &self,
+        event: &str,
+        mut retain: impl FnMut(&str) -> Result<bool, E>,
+    ) -> Result<Vec<String>, E> {
+        let snapshot = self
+            .listeners
+            .borrow()
+            .get(event)
+            .cloned()
+            .unwrap_or_default();
+        let mut retained = Vec::new();
+        for row in snapshot {
+            if retain(&row.0)? {
+                retained.push(row);
+            }
+        }
+        let ids = retained.iter().map(|row| row.0.clone()).collect();
+        let displaced = {
+            let mut listeners = self.listeners.borrow_mut();
+            if retained.is_empty() {
+                listeners.remove(event)
+            } else {
+                listeners.insert(event.into(), retained)
+            }
+        };
+        drop(displaced);
+        Ok(ids)
+    }
+    pub fn emit(&self, event: &str, data: Js) -> Result<(), ExchangeError> {
         self.emit_args(event, &[data])
     }
-    pub fn emit_args(&self, event: &str, args: &[Value]) -> Result<(), ExchangeError> {
+    pub fn emit_args(&self, event: &str, args: &[Js]) -> Result<(), ExchangeError> {
         emit_listeners(&self.listeners, event, args)
     }
 
@@ -659,7 +683,7 @@ impl BaseExchange {
             return Ok(());
         }
         *self.active_symbols.borrow_mut() = next.clone();
-        self.emit("activeTickerSymbols:changed", serde_json::json!(next))?;
+        self.emit("activeTickerSymbols:changed", from_typed(&next)?)?;
         Ok(())
     }
     pub fn get_ticker_symbols_for_subscription(&self, available: &[String]) -> Vec<String> {
@@ -689,8 +713,8 @@ impl BaseExchange {
         self.emit_args(
             "log",
             &[
-                json!(format!("[{}] {message}", name.as_str().unwrap())),
-                json!(severity),
+                Js::str(&format!("[{}] {message}", name.as_str().unwrap())),
+                Js::str(severity),
             ],
         )
     }
@@ -1050,7 +1074,7 @@ impl BaseExchange {
                 .collect(),
         );
         let msg = msg.filter(|m| !m.is_empty());
-        let mut context = Map::new();
+        let mut context = Js::object(vec![]);
         let (formatted, error) = match input {
             ExchangeErrorInput::Missing => {
                 let formatted = msg.unwrap_or("Unknown Exchange Error").to_owned();
@@ -1085,20 +1109,22 @@ impl BaseExchange {
                         || error.method.as_ref().is_some_and(|v| !v.is_empty())
                     {
                         if let Some(url) = &error.url {
-                            context.insert("url".into(), json!(url));
+                            context.define("url", Js::str(url))?;
                         }
                         if let Some(method) = &error.method {
-                            context.insert("method".into(), json!(method));
+                            context.define("method", Js::str(method))?;
                         }
-                        insert_option(&mut context, "originalError", error.original_error.as_ref());
-                        context.insert(
-                            "errorType".into(),
-                            json!(if error.name.is_empty() {
+                        if let Some(original) = &error.original_error {
+                            context.define("originalError", from_json(original))?;
+                        }
+                        context.define(
+                            "errorType",
+                            Js::str(if error.name.is_empty() {
                                 "TradeTunnelError"
                             } else {
                                 &error.name
                             }),
-                        );
+                        )?;
                     }
                     msg.map(str::to_owned).unwrap_or_else(|| {
                         if error.message.is_empty() {
@@ -1122,7 +1148,7 @@ impl BaseExchange {
                 let mut error = ExchangeError::new(text("message").unwrap_or_default());
                 error.name = text("name").unwrap_or_default();
                 error.context = value.get("context").cloned();
-                error.code = value.get("code").cloned();
+                error.code = value.get("code").map(from_json);
                 error.original_error = value.get("originalError").cloned();
                 error.config = value.get("config").cloned();
                 error.enhanced_message = value
@@ -1132,24 +1158,26 @@ impl BaseExchange {
                 let enhanced =
                     error.context.as_ref().is_some_and(truthy) && error.enhanced_message.is_some();
                 let formatted = if enhanced {
-                    context = raw_formatted_context(&value);
+                    context = raw_formatted_context(&value)?;
                     msg.map(|v| json!(v))
                         .unwrap_or_else(|| value["enhancedMessage"].clone())
                 } else {
                     if value.get("url").is_some_and(truthy)
                         || value.get("method").is_some_and(truthy)
                     {
-                        insert_option(&mut context, "url", value.get("url"));
-                        insert_option(&mut context, "method", value.get("method"));
-                        insert_option(&mut context, "originalError", value.get("originalError"));
-                        context.insert(
-                            "errorType".into(),
+                        for key in ["url", "method", "originalError"] {
+                            if let Some(field) = value.get(key) {
+                                context.define(key, from_json(field))?;
+                            }
+                        }
+                        context.define(
+                            "errorType",
                             value
                                 .get("name")
                                 .filter(|v| truthy(v))
-                                .cloned()
-                                .unwrap_or_else(|| json!("TradeTunnelError")),
-                        );
+                                .map(from_json)
+                                .unwrap_or_else(|| Js::str("TradeTunnelError")),
+                        )?;
                     }
                     if let Some(msg) = msg {
                         json!(msg)
@@ -1167,7 +1195,7 @@ impl BaseExchange {
                 (formatted, error)
             }
         };
-        assign(&mut context, &legacy);
+        assign(&context, &from_json(&legacy))?;
         let correlation = if !error.context.as_ref().is_some_and(truthy) {
             let record = self.last_http_failure.borrow_mut().take();
             read_http_failure_context(record.as_ref(), self.runtime.now_ms())
@@ -1177,15 +1205,15 @@ impl BaseExchange {
             json!({})
         };
         let name = serde_json::to_value(&self.name).expect("exchange");
-        let mut tags = Map::new();
-        tags.insert("exchange".into(), name);
-        tags.insert("module".into(), json!("Exchange"));
-        tags.insert("severity".into(), json!("error"));
-        assign(&mut tags, &Value::Object(context.clone()));
-        assign(&mut tags, &sentry_tags);
-        assign(&mut tags, &correlation);
-        let mut data = Map::new();
-        data.insert("originalMessage".into(), json!(formatted));
+        let tags = Js::object(vec![
+            ("exchange", from_json(&name)),
+            ("module", Js::str("Exchange")),
+            ("severity", Js::str("error")),
+        ]);
+        assign(&tags, &context)?;
+        assign(&tags, &from_json(&sentry_tags))?;
+        assign(&tags, &from_json(&correlation))?;
+        let data = Js::object(vec![("originalMessage", from_json(&formatted))]);
         let mut options = Map::new();
         if let Some(testnet) = self.options().testnet {
             options.insert("testnet".into(), json!(testnet));
@@ -1193,45 +1221,32 @@ impl BaseExchange {
         if let Some(public) = self.options().public_data_only {
             options.insert("publicDataOnly".into(), json!(public));
         }
-        data.insert("exchangeOptions".into(), Value::Object(options));
-        assign(&mut data, &Value::Object(context));
-        // JS spreads the formatter's undefined originalMessage over the outer value.
-        if error.context.as_ref().is_some_and(truthy)
-            && error
-                .enhanced_message
-                .as_ref()
-                .is_some_and(|m| !m.is_empty())
-            && error
-                .original_error
-                .as_ref()
-                .and_then(|e| e.get("message"))
-                .is_none()
-            && legacy.get("originalMessage").is_none()
-        {
-            data.shift_remove("originalMessage");
-        }
-        assign(&mut data, &sentry_extra);
-        let report = json!({"tags":tags,"extra":data});
-        let mut metadata = Map::new();
-        metadata.insert("suppressConsoleLog".into(), json!(suppress));
+        data.define("exchangeOptions", from_json(&Value::Object(options)))?;
+        assign(&data, &context)?;
+        assign(&data, &from_json(&sentry_extra))?;
+        let report = Js::object(vec![("tags", tags), ("extra", data)]);
+        let metadata = Js::object(vec![("suppressConsoleLog", Js::Bool(suppress))]);
         if let Some(context) = &error.context {
-            metadata.insert("enhancedContext".into(), context.clone());
+            metadata.define("enhancedContext", from_json(context))?;
         }
         if self.runtime.is_worker() {
-            metadata.insert("sendToSentry".into(), json!(true));
-            let mut report = report;
-            report["error"] = raw_error
-                .clone()
-                .unwrap_or_else(|| json!({"name":error.name,"message":error.message}));
-            metadata.insert("sentryData".into(), report);
+            metadata.define("sendToSentry", Js::Bool(true))?;
+            report.define(
+                "error",
+                raw_error
+                    .as_ref()
+                    .map(from_json)
+                    .unwrap_or_else(|| crate::js_runtime::value::Thrown::from(error.clone()).value),
+            )?;
+            metadata.define("sentryData", report)?;
         } else {
             if let Some(raw) = &raw_error {
-                self.runtime.report_raw_exception(raw, &report);
+                self.runtime.report_raw_exception(raw, &to_json(&report)?);
             } else {
-                self.runtime.report_exception(&error, &report);
+                self.runtime.report_exception(&error, &to_json(&report)?);
             }
         }
-        self.emit_args("error", &[json!(formatted), Value::Object(metadata)])
+        self.emit_args("error", &[from_json(&formatted), metadata])
     }
 }
 
@@ -1312,14 +1327,14 @@ impl BaseExchange {
         if signer.is_available() {
             return Box::pin(async { Ok(true) });
         }
-        if let Err(error) = self.emit("remoteSignerStatus", serde_json::json!("disconnected")) {
+        if let Err(error) = self.emit("remoteSignerStatus", Js::str("disconnected")) {
             return Box::pin(async move { Err(error) });
         }
         if self.is_disposed() {
             return Box::pin(async { Ok(false) });
         }
         if signer.is_available() {
-            if let Err(error) = self.emit("remoteSignerStatus", serde_json::json!("connected")) {
+            if let Err(error) = self.emit("remoteSignerStatus", Js::str("connected")) {
                 return Box::pin(async move { Err(error) });
             }
             return Box::pin(async { Ok(true) });
@@ -1346,7 +1361,7 @@ impl BaseExchange {
             waker: RefCell::new(None),
             unsubscribe: RefCell::new(None),
             on_available: Box::new(move || {
-                emit_listeners(&listeners, "remoteSignerStatus", &[json!("connected")])
+                emit_listeners(&listeners, "remoteSignerStatus", &[Js::str("connected")])
             }),
         });
         let guard = SignerWaitGuard(waiter.clone());
@@ -1668,7 +1683,10 @@ impl BaseExchange {
             )?;
             self.emit(
                 "markets:changed",
-                serde_json::json!({"added": changes.added, "removed": changes.removed}),
+                Js::object(vec![
+                    ("added", from_typed(&changes.added)?),
+                    ("removed", from_typed(&changes.removed)?),
+                ]),
             )?;
             self.log(
                 &format!(
@@ -2064,7 +2082,7 @@ impl BaseExchange {
         let now = self.runtime.now_ms();
         if now - self.last_reconnect_emit.get() > 5000.0 {
             self.last_reconnect_emit.set(now);
-            self.emit("ws-reconnected", Value::String(String::new()))?;
+            self.emit("ws-reconnected", Js::str(""))?;
         }
         Ok(())
     }
@@ -2254,12 +2272,18 @@ impl BaseExchange {
         callback: Rc<dyn Fn(Candle)>,
     ) -> Result<crate::runtime::ListenerCleanup, ExchangeError> {
         let sub_id = self.runtime.unique_id();
-        let params = json!({"symbol": symbol,"interval":interval,"subId":sub_id});
+        let params = Js::object(vec![
+            ("symbol", Js::str(&symbol)),
+            ("interval", from_typed(&interval)?),
+            ("subId", Js::str(&sub_id)),
+        ]);
         self.emit("subscribeOHLCV", params.clone())?;
         let listener: Listener = Rc::new(move |_, event| {
-            if event["symbol"] == symbol
-                && event["interval"] == json!(interval)
-                && let Ok(candle) = serde_json::from_value(event["candle"].clone())
+            if event.get("symbol")?.strict_equals(&Js::str(&symbol))
+                && event
+                    .get("interval")?
+                    .strict_equals(&from_typed(&interval)?)
+                && let Ok(candle) = to_typed(&event.get("candle")?)
             {
                 callback(candle);
             }
@@ -2280,13 +2304,16 @@ impl BaseExchange {
         symbol: String,
         callback: Rc<dyn Fn(OrderBook)>,
     ) -> Result<crate::runtime::ListenerCleanup, ExchangeError> {
-        let params = json!({"symbol":symbol,"subId":self.runtime.unique_id()});
+        let params = Js::object(vec![
+            ("symbol", Js::str(&symbol)),
+            ("subId", Js::str(&self.runtime.unique_id())),
+        ]);
         self.emit("subscribeOrderBook", params.clone())?;
         let id = self.on(
             "listenOrderBook",
             Rc::new(move |_, event| {
-                if event["symbol"] == symbol
-                    && let Ok(book) = serde_json::from_value(event["orderbook"].clone())
+                if event.get("symbol")?.strict_equals(&Js::str(&symbol))
+                    && let Ok(book) = to_typed(&event.get("orderbook")?)
                 {
                     callback(book);
                 }
@@ -2308,10 +2335,10 @@ impl BaseExchange {
         done: &str,
         mut request: Value,
         timeout_message: &str,
-    ) -> Result<Value, ExchangeError> {
+    ) -> Result<Js, ExchangeError> {
         let request_id = self.runtime.unique_id();
         request["requestId"] = json!(request_id);
-        self.emit(event, request)?;
+        self.emit(event, from_json(&request))?;
         let reply = Rc::new(RefCell::new(None));
         let waker: Rc<RefCell<Option<Waker>>> = Rc::default();
         let result = reply.clone();
@@ -2319,7 +2346,7 @@ impl BaseExchange {
         let id = self.on(
             done,
             Rc::new(move |_, value| {
-                if value["requestId"] == request_id {
+                if value.get("requestId")?.strict_equals(&Js::str(&request_id)) {
                     *result.borrow_mut() = Some(value.clone());
                     let pending = wake.borrow_mut().take();
                     if let Some(pending) = pending {
@@ -2365,20 +2392,25 @@ impl BaseExchange {
                 "Timeout updatePositionsInWebworker",
             )
             .await?;
-        if reply["success"] == true {
+        if reply.get("success")?.strict_equals(&Js::Bool(true)) {
             return Ok(());
         }
-        let reason = reply["reason"]
+        let reason = reply.get("reason")?;
+        let reason = reason
             .as_str()
-            .filter(|s| !s.is_empty())
-            .unwrap_or("Unknown error in updatePositionsInWebworker");
-        if reason != "retry_too_soon" && reply["reason"].as_str().is_some_and(|s| !s.is_empty()) {
+            .map(|text| String::from_utf16_lossy(text))
+            .filter(|text| !text.is_empty());
+        if let Some(reason) = &reason
+            && reason != "retry_too_soon"
+        {
             self.runtime.console(
                 "error",
                 &format!("reject in updatePositionsInWebworker {reason}"),
             );
         }
-        Err(ExchangeError::new(reason))
+        Err(ExchangeError::new(reason.unwrap_or_else(|| {
+            "Unknown error in updatePositionsInWebworker".into()
+        })))
     }
     pub async fn call_method_in_worker(
         &self,
@@ -2394,28 +2426,38 @@ impl BaseExchange {
                 "Timeout callMethodInWorker",
             )
             .await?;
-        if reply["success"] == true {
-            let result = reply["result"].clone();
+        let result = reply.get("result")?;
+        if reply.get("success")?.strict_equals(&Js::Bool(true)) {
+            let result = to_json(&result)?;
             self.after_method_called_in_worker(venue, &result, method, &args)?;
             return Ok(result);
         }
-        let result = &reply["result"];
+        let field = |key: &str| {
+            if result.is_nullish() {
+                Ok(Js::Undefined)
+            } else {
+                result.get(key)
+            }
+        };
+        let text = |value: &Js| {
+            value
+                .as_str()
+                .map(|text| String::from_utf16_lossy(text))
+                .filter(|text| !text.is_empty())
+        };
         let message = if result.is_object() {
-            result["message"].as_str()
+            field("message")?
         } else {
-            result.as_str()
+            result.clone()
+        };
+        let mut error =
+            ExchangeError::new(text(&message).unwrap_or_else(|| "Unknown error".into()));
+        if let Some(name) = text(&field("name")?) {
+            error.name = name;
         }
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Unknown error");
-        let mut error = ExchangeError::new(message);
-        if let Some(name) = result["name"].as_str().filter(|s| !s.is_empty()) {
-            error.name = name.into();
-        }
-        error.stack = result["stack"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned);
-        error.code = result.get("code").cloned();
+        error.stack = text(&field("stack")?);
+        let code = field("code")?;
+        error.code = (result.has_own("code") || !code.is_undefined()).then_some(code);
         Err(error)
     }
     pub fn after_method_called_in_worker(

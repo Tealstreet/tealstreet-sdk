@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Actual venue assembly, native scheduler/HTTP and private-frame dispatcher.
-use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::{exchange::Exchange, js_runtime::value::Js};
 use safe_cex_exchange::{js_runtime::client, native::native_runtime};
 use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{ExchangeName, OrderStatus};
@@ -41,7 +41,8 @@ fn watch(venue: &AsterDEXExchange, event: &str) -> Rc<RefCell<Vec<Value>>> {
     venue.base().on(
         event,
         Rc::new(move |_, value| {
-            sink.borrow_mut().push(value.clone());
+            sink.borrow_mut()
+                .push(safe_cex_exchange::js_runtime::value::to_json(value)?);
             Ok(())
         }),
     );
@@ -66,10 +67,17 @@ fn native_private_order_and_fill_have_source_event_arguments() {
         let sink = posts.clone();
         safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
             venue.base(),
-            Rc::new(move |payload| {
-                sink.borrow_mut().push(payload);
+            safe_cex_webworker::data_post::WorkerDataPost::new(Rc::new(move |payload| {
+                sink.borrow_mut()
+                    .push(safe_cex_webworker::payload::StoreWorkerPayload {
+                        op: payload.op,
+                        instance_id: None,
+                        data: Some(safe_cex_exchange::js_runtime::value::to_json(
+                            &payload.data,
+                        )?),
+                    });
                 Ok(())
-            }),
+            })),
         );
         frame(
             &venue,
@@ -105,16 +113,66 @@ fn native_private_order_and_fill_have_source_event_arguments() {
 }
 
 #[test]
-fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
+fn native_private_fill_keeps_infinite_price_through_event_and_worker_post() {
     run(|venue, _| {
-        let posts = Rc::new(RefCell::new(vec![]));
+        let received = Rc::new(RefCell::new(Vec::new()));
+        let sink = received.clone();
+        venue.base().on(
+            "fill",
+            Rc::new(move |_, value| {
+                sink.borrow_mut().push(value.clone());
+                Ok(())
+            }),
+        );
+        let posts = Rc::new(RefCell::new(Vec::new()));
         let sink = posts.clone();
         safe_cex_webworker::exchange_worker_start::install_exchange_event_bridge(
             venue.base(),
-            Rc::new(move |payload| {
-                sink.borrow_mut().push(payload);
+            safe_cex_webworker::data_post::WorkerDataPost::new(Rc::new(move |payload| {
+                if payload.op == safe_cex_webworker::payload::StoreWorkerOp::Fill {
+                    sink.borrow_mut().push(payload.data);
+                }
                 Ok(())
-            }),
+            })),
+        );
+        frame(
+            &venue,
+            json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"NEW","s":"BTCUSDT","o":"LIMIT","S":"BUY","p":"100","q":"2","z":"0","T":1700000000000u64}}),
+        );
+        frame(
+            &venue,
+            json!({"e":"ORDER_TRADE_UPDATE","o":{"i":7,"X":"FILLED","s":"BTCUSDT","S":"BUY","q":"2","z":"2","l":"2","L":"Infinity","T":1700000000001u64}}),
+        );
+        assert_eq!(received.borrow().len(), 1);
+        assert_eq!(posts.borrow().len(), 1);
+        let fill = received.borrow()[0].clone();
+        assert!(
+            matches!(fill.get("price").unwrap(), Js::Number(value) if value == f64::INFINITY),
+            "EMITTER-PRODUCTION native fill Infinity survives"
+        );
+        assert!(
+            posts.borrow()[0].same_reference(&fill),
+            "EMITTER-PRODUCTION worker post reads original fill object"
+        );
+        assert!(fill.get("orderId").unwrap().strict_equals(&Js::str("7")));
+    });
+}
+
+#[test]
+fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
+    run(|venue, _| {
+        use safe_cex_exchange::js_runtime::value::{from_json, to_json};
+        use safe_cex_webworker::{
+            data_post::WorkerDataPost, exchange_worker_start::install_exchange_event_bridge,
+        };
+        let posts = Rc::new(RefCell::new(Vec::new()));
+        let sink = posts.clone();
+        install_exchange_event_bridge(
+            venue.base(),
+            WorkerDataPost::new(Rc::new(move |payload| {
+                sink.borrow_mut().push(to_json(&payload.data)?);
+                Ok(())
+            })),
         );
         for expected in [
             json!([]),
@@ -122,19 +180,18 @@ fn native_worker_bridge_preserves_zero_single_array_and_multiple_arguments() {
             json!([["a", "b"]]),
             json!(["message", {"forceToast":true}]),
         ] {
-            let args = expected.as_array().unwrap();
-            venue.base().emit_args("warning", args).unwrap();
+            let args: Vec<_> = expected.as_array().unwrap().iter().map(from_json).collect();
+            venue.base().emit_args("warning", &args).unwrap();
             assert_eq!(
-                posts.borrow().last().unwrap().data.as_ref(),
+                posts.borrow().last(),
                 Some(&expected),
-                "worker posts the actual emitted argument list"
+                "worker keeps the production emitter argument list"
             );
         }
         venue.base().log("message", "info").unwrap();
         assert_eq!(
-            posts.borrow().last().unwrap().data,
-            Some(json!(["[asterdex] message", "info"])),
-            "native base log keeps two arguments"
+            posts.borrow().last(),
+            Some(&json!(["[asterdex] message", "info"]))
         );
     });
 }
