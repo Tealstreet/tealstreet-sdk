@@ -716,7 +716,7 @@ fn run(case: &Value) {
     };
     for (native, expected) in s.orders().iter().zip(case["orders"].as_array().unwrap()) {
         for (field, n) in [
-            ("price", native.price),
+            ("price", native.price.to_number()),
             ("amount", native.amount),
             ("remaining", native.remaining),
             ("filled", native.filled),

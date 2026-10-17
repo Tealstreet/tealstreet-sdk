@@ -588,7 +588,7 @@ fn fetch(variant: &str) {
                 let order = &patch.orders[row];
                 assert_eq!(order.id, id, "native order id");
                 assert_eq!(
-                    order.price.to_bits(),
+                    order.price.to_number().to_bits(),
                     price.to_bits(),
                     "native decoded order price"
                 );

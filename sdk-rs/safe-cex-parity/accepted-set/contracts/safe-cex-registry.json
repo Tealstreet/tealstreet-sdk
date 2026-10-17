@@ -1957,5 +1957,83 @@
         }
       }
     }
+  },
+  "safe_cex_registry::native_host::query": {
+    "api": {
+      "kind": "function",
+      "name": "query",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::query_value::QueryValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
+    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
+    "cases": [
+      {
+        "input": null,
+        "output": "Null"
+      },
+      {
+        "input": false,
+        "output": "Bool(false)"
+      },
+      {
+        "input": 2.5,
+        "output": "Number(2.5)"
+      },
+      {
+        "input": "BTC $",
+        "output": "String(\"BTC $\")"
+      },
+      {
+        "input": [
+          true,
+          3,
+          "ETH",
+          null
+        ],
+        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
+      },
+      {
+        "input": {
+          "coin": [
+            "BTC",
+            "ETH"
+          ],
+          "nested": {
+            "enabled": false
+          }
+        },
+        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
+      }
+    ]
   }
 }

@@ -245,3 +245,9 @@ independently authored native types. Keep the optional constructor, dynamic
 module/error owners and JSON error owner intact. These finite identity probes
 and ordinary Serde/conversion checks do not establish future execution, every
 lifetime/type argument, or the behavior of a module/browser/transport host.
+
+The native Hyperliquid JSON-to-query adapter lives at module scope so the accepted-set
+compiler inventory covers it directly. Its finite witnesses inspect QueryValue enum
+outputs for all JSON container/scalar kinds. The installed repeat serializer remains
+covered through the real native HTTP host; this owned Value input excludes undefined
+and nonfinite JSON values.
