@@ -893,18 +893,18 @@ note = "Retains split windows,50-row/20-page paging, first-id dedupe, final-wind
 [[symbol]]
 ts = "BybitExchange.fetchIncomeHistory"
 kind = "field-fn"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history"
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history", "safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history" ]
 status = "ported"
-note = "Retains eager context/option forwarding and original returned-Promise adoption; validated composing the two owned income bodies through their host capabilities. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history."
+note = "Exchange dispatches through the actual receiver, source income context, shared transaction-log helper and native mapper. Six compiled master-fail production binding controls cover both methods on primary/demo/inverse; Spot preserves inherited defaults. Additional signed-HTTP witnesses cover category sort/limit, paging, range boundaries and malformed-row diagnostics. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history; safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history."
 
 [[symbol]]
 ts = "BybitExchange.fetchIncomeHistoryRange"
 kind = "field-fn"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range"
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range", "safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range" ]
 status = "ported"
-note = "Retains context/start/end/type forwarding and returned-Promise adoption; tested with the owned income range/body composition. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range."
+note = "Exchange dispatches through the actual receiver, source income context, shared transaction-log helper and native mapper. Six compiled master-fail production binding controls cover both methods on primary/demo/inverse; Spot preserves inherited defaults. Additional signed-HTTP witnesses cover category sort/limit, paging, range boundaries and malformed-row diagnostics. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range. Renamed Rust targets: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range; safe-cex-venue-bybit/src/binding/members/history.rs::fetch_income_history_range."
 
 [[symbol]]
 ts = "BybitExchange.get incomeContexts"
