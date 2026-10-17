@@ -875,6 +875,8 @@ Shared journal intervals and fold projection live in position_intervals and
 fold_position_adapter. PositionInterval's camelCase Serde bridge lets production
 venue bindings pass the canonical interval through native JS values; optional
 fields omit absence and the shared native serializer retains floating-point values.
+Its private remote decoder requires an object and uses the existing numeric ingress
+pipeline; raw number spelling and native nonfinite/signed-zero bits must survive.
 No second interval model or fold implementation is introduced.
 Reconstruction is path-dependent: seeds remain incomplete,
 partial missing reducing PnL refuses a total, and crossing fills split fees by
