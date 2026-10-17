@@ -1497,3 +1497,8 @@ hosts import these implementations directly. `ExchangeWorkerHost` inherits the
 minimal StoreUpdateThrottleHost capability; each host supplies its existing timer
 error reporter. The deterministic timer fixture and keyed cancellation witness
 also live with the lower core owner.
+
+GetIterator rejects missing or non-callable iterator methods with the shared V8
+non-iterable diagnostic, before invoking input coercion hooks. Nullish inputs use
+that diagnostic as well. `tests/js_iterator_errors.rs` compares 30 live Node
+Promise.all/allSettled errors through NativeRuntime and the shared iterator API.
