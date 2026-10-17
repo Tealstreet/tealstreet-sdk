@@ -103,6 +103,33 @@ pub(crate) fn schedule_reconciliation(rt: &Rt, order: Order) -> Result<(), Throw
     )
 }
 
+// ts: BybitSpotExchange#recordRecentlyPlacedOrder and BybitInverseExchange#recordRecentlyPlacedOrder
+pub(crate) fn record_variant_recently_placed_order(rt: &Rt, order: Js) -> Result<Js, Thrown> {
+    if order.get("type")?.strict_equals(&Js::str("market")) {
+        return Ok(Js::Undefined);
+    }
+    let now = rt
+        .global("virtualClock.getCurrentTimeMs")?
+        .call(Js::Undefined, vec![])?;
+    rt.this.get("recentlyPlacedOrders")?.call_method(
+        "set",
+        vec![
+            order.get("id")?,
+            Js::object(vec![("placedAt", now), ("order", order.clone())]),
+        ],
+    )?;
+    if rt
+        .this
+        .call_method("shouldUseLocalRestOrderLifecycleFallback", vec![])?
+        .truthy()
+    {
+        rt.this
+            .get("store")?
+            .call_method("addOrUpdateOrders", vec![Js::array(vec![order])])?;
+    }
+    Ok(Js::Undefined)
+}
+
 // ts: BybitExchange#recordRecentlyPlacedOrder
 pub(crate) fn record_recently_placed_order(rt: &Rt, order: &Js) -> Result<(), Thrown> {
     let venue = venue(rt)?;
