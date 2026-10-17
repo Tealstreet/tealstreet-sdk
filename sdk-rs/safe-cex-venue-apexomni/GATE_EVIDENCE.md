@@ -865,3 +865,24 @@ CodeRabbit's manual review returned a rate limit; it did not execute a completed
 review. The other 103 originally censused owners, aliases, receiver policies,
 local functions, construction, features and wasm behavior remain independent
 obligations. No whole-venue completion is claimed.
+
+
+## Twenty-three scalar/validation helper bodies (2026-10-17, in progress)
+
+The full actual signer-utils source and selected exchange/utility declarations
+were read along with every native body. Production bodies remain byte-identical;
+only cfg(test) witness wiring is appended. The cohort individually separates16
+raw-value admission/projection/coercion decoders from7 typed/non-decoder roles.
+Native witnesses pass23 /zero failed /zero ignored on634 independently authored
+cases, including prepared Undefined/BigInt/NaN/nonfinite/negative zero, exact
+error strings, range/type boundaries, private display projection, native RandomId
+variants, entropy/clock counts, fee Math callback inputs/errors and borrowed
+prefix-slice pointer identity. Their fixed census and actual comparison counts
+are checked. The16 decoder contracts contain549 independently authored cases;
+all prior master contract values are preserved.
+
+The initial test-adapter return-type build error and initial unused-adapter
+production compile failure are tooling failures and are excluded from proof.
+No expected outcome was changed in response to native output. Fresh production
+verification, semantic controls and final readiness gates are recorded only
+after they execute; pending commands are not evidence.

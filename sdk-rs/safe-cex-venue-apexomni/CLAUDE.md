@@ -358,3 +358,31 @@ owner identity. New traits/conversions/inherent APIs must refuse. Other records,
 functions, aliases, receiver policies, feature and wasm behavior remain separate
 accepted-set obligations. Follow ../safe-cex-parity/accepted-set/MAP-ONLY-INGRESS.md and
 MANIFEST-SPEC#numeric-ingress-defect rather than adding a new primitive.
+
+
+## Accepted-set scalar and validation helpers
+
+The selected23 helper bodies in signer_utils, exchange_utils and utils::drop_prefix
+are reviewed individually. Prepared-value admission/projection, numeric string
+parsing and fee coercion use actual native decoder output contracts. Typed Boolean
+assertion, ignored subaccount arguments, literal byte indexing, injected random-ID
+generation/formatting, typed TP/SL arithmetic and literal prefix stripping each
+have their own non-decoder reason; those classification receipts do not execute
+decoder coverage. All23 still require direct named native behavior witnesses.
+
+The cfg(test) modules use tests/support/accepted_scalar_helper_fixtures.json and
+accepted_scalar_helper_support.rs. Expected outcomes come from reviewed source
+contracts and literal known answers, not production serialization or proposal
+reports. Fixed per-owner case counts and actual execution counters cover634 cases;
+callbacks expose argument bits, consumption count and ordering/error behavior.
+Prefix stripping additionally checks the exact borrowed pointer offset.
+
+Run scripts/accepted-scalar-helper-contracts.mjs for fresh native/default compiler
+discovery and16 actual decoder outputs plus7 explicit classifications. Run
+scripts/accepted-scalar-helper-controls.py serially:23 isolated reviewed full-body
+mutants must each compile/fail their own named native test; the16 decoder mutants
+also require the selected production function's output mismatch. Exact restoration
+passes all23 native tests each time; restored decoder runs repeat all16 outputs
+and7 classifications. Literal whole-function uniqueness is checked before any
+mutation; new source drift must refuse. Other functions, aliases, receivers,
+construction, feature and wasm accepted behavior remain separate obligations.
