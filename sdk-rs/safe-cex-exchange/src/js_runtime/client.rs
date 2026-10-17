@@ -490,11 +490,30 @@ async fn dispatch_request(
     if !response.get("config")?.is_object() {
         response.define("config", config.clone())?;
     }
+    transform_response(&response, &config)?;
     let status = response.get("status")?.to_number().unwrap_or(200.0);
     if !(200.0..300.0).contains(&status) {
         return Err(axios_error(&response, &config)?);
     }
     Ok(response)
+}
+
+fn transform_response(response: &Js, config: &Js) -> Result<(), Thrown> {
+    let transforms = config.get("transformResponse")?;
+    if transforms.is_nullish() {
+        return Ok(());
+    }
+    let transforms = transforms
+        .array_values()
+        .unwrap_or_else(|| vec![transforms]);
+    let mut data = response.get("data")?;
+    for transform in transforms {
+        data = transform.call(
+            config.clone(),
+            vec![data, response.get("headers")?, response.get("status")?],
+        )?;
+    }
+    response.set("data", data)
 }
 
 async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) -> Result<(), Thrown> {
@@ -908,7 +927,10 @@ fn js_response(response: RestResponse, config: Js) -> Js {
         RestResponseBody::Encoded(bytes)
             if config
                 .get("responseType")
-                .is_ok_and(|value| value.to_display() == "text") =>
+                .is_ok_and(|value| value.to_display() == "text")
+                || config
+                    .get("transformResponse")
+                    .is_ok_and(|value| !value.is_undefined()) =>
         {
             Js::str(&String::from_utf8_lossy(&bytes))
         }

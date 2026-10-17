@@ -99,39 +99,12 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
             }))
         },
         create: |h, config, options, _exchange| {
-            // The shared wire host supplies original tokens. Install this venue's
-            // explicit transform before its response/error status handling.
-            let transform = config.get("transformResponse")?;
-            config.define("responseType", Js::str("text"))?;
             let xhr = safe_cex_exchange::js_runtime::client::factory::create(
                 h.0.shared.http.clone(),
                 h.0.shared.runtime.transport().as_ref(),
                 config,
                 &options,
                 h.0.base(),
-            )?;
-            let apply = std::rc::Rc::new(move |response: &Js| -> Result<(), Thrown> {
-                let data = transform.call(Js::Undefined, std::vec![response.get("data")?])?;
-                response.set("data", data)
-            });
-            let fulfilled = apply.clone();
-            xhr.get("interceptors")?.get("response")?.call_method(
-                "use",
-                std::vec![
-                    Js::function("weexTransformResponse", move |_, args| {
-                        let response = arg(&args, 0);
-                        fulfilled(&response)?;
-                        Ok(response)
-                    }),
-                    Js::function("weexTransformErrorResponse", move |_, args| {
-                        let error = arg(&args, 0);
-                        let response = v::optional_dummy(&error, "response")?;
-                        if !response.is_nullish() {
-                            apply(&response)?;
-                        }
-                        Err(Thrown::new(error))
-                    }),
-                ],
             )?;
             Ok(xhr)
         },

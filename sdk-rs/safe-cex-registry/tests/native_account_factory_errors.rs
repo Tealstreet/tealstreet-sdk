@@ -16,7 +16,10 @@ use tokio::net::TcpListener;
 const TOKEN: &str =
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhY2N0LTEiLCJleHAiOjQxMDI0NDQ4MDB9.c2ln";
 
-async fn proxied_account(reply: Value) -> (Rc<NativeAccount>, Rc<RefCell<Vec<Seen>>>) {
+async fn proxied_account(
+    exchange: &str,
+    reply: Value,
+) -> (Rc<NativeAccount>, Rc<RefCell<Vec<Seen>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let seen = Rc::<RefCell<Vec<Seen>>>::default();
@@ -27,8 +30,8 @@ async fn proxied_account(reply: Value) -> (Rc<NativeAccount>, Rc<RefCell<Vec<See
     ));
     let account = open_native_account(NativeAccountSpec {
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
-        exchange: "bitrue".into(),
-        options: json!({"key":"test-key","secret":"test-secret","tealstreetProxy":true,
+        exchange: exchange.into(),
+        options: json!({"key":"test-key","secret":"test-secret","passphrase":"test-passphrase","tealstreetProxy":true,"tealstreetTunnel":false,
             "overrideProxyUrl":origin}),
         account_name: None,
         sign: None,
@@ -39,7 +42,11 @@ async fn proxied_account(reply: Value) -> (Rc<NativeAccount>, Rc<RefCell<Vec<See
 }
 
 async fn error_events(reply: Value) -> Vec<Value> {
-    let (account, seen) = proxied_account(reply).await;
+    error_events_for("bitrue", reply).await
+}
+
+async fn error_events_for(exchange: &str, reply: Value) -> Vec<Value> {
+    let (account, seen) = proxied_account(exchange, reply).await;
     let events = Rc::<RefCell<Vec<Value>>>::default();
     let recorded = events.clone();
     let unwatch = native_account_watch(
@@ -52,10 +59,12 @@ async fn error_events(reply: Value) -> Vec<Value> {
         Rc::new(|_| {}),
     );
     // The rejected call and proxy error event are separate observable outcomes.
-    let rejection = native_account_call(account.clone(), "validateAccount".into(), vec![])
-        .await
-        .unwrap_err();
-    assert_eq!(rejection["name"], "AxiosError");
+    let result = native_account_call(account.clone(), "validateAccount".into(), vec![]).await;
+    if exchange == "bitrue" {
+        assert_eq!(result.unwrap_err()["name"], "AxiosError");
+    } else {
+        result.unwrap();
+    }
     assert!(
         seen.borrow()
             .iter()
@@ -145,6 +154,26 @@ fn shared_factory_records_native_request_outcomes() {
             let counts = serde_json::to_value(&*h.store.request_stats().unwrap()).unwrap();
             assert_eq!(counts[outcome], requests as f64, "HTTP {status}: {counts}");
             h.exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn text_response_bindings_transform_before_proxy_error_classification() {
+    run_local(async {
+        for exchange in ["weex", "bingx"] {
+            let events = error_events_for(
+                exchange,
+                json!({"__status":401,"body":{"message":"Invalid JWT"}}),
+            )
+            .await;
+            let prefix = format!("[{exchange}] Tealstreet proxy auth failed (401): ");
+            assert!(
+                events.iter().any(|data| data
+                    .as_str()
+                    .is_some_and(|message| message.starts_with(&prefix))),
+                "{exchange}: {events:?}"
+            );
         }
     });
 }

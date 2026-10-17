@@ -17,10 +17,13 @@ use safe_cex_registry::native_account::{
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    future::{Future, poll_fn},
+    pin::pin,
     rc::{Rc, Weak},
     sync::OnceLock,
+    task::Poll,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 type Request = ThreadsafeFunction<String, Promise<String>, String, Status, false>;
 type Notify = ThreadsafeFunction<String, Unknown<'static>, String, Status, false>;
@@ -65,6 +68,7 @@ struct Open {
     // Venue runtimes can outlive disposal; only an open account owns JS callbacks.
     _sign: Option<Rc<Request>>,
     _proxy_token: Option<Rc<Request>>,
+    closed: watch::Sender<bool>,
 }
 
 fn commands() -> &'static mpsc::UnboundedSender<Command> {
@@ -151,6 +155,7 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                         continue;
                     };
                     (open.unwatch)();
+                    open.closed.send_replace(true);
                     // Acknowledgement means disposal finished; keep its errors visible
                     // to the JS host rather than leaving live work behind a resolved close.
                     tokio::task::spawn_local(async move {
@@ -171,17 +176,35 @@ fn error_json(message: &str) -> String {
 }
 
 /// A JS callback returning Promise<string>, as a JSON future on the host thread.
-fn request(callback: Weak<Request>, payload: String) -> JsonFuture<String> {
+fn request(
+    callback: Weak<Request>,
+    mut closed: watch::Receiver<bool>,
+    payload: String,
+) -> JsonFuture<String> {
     Box::pin(async move {
-        let failed = |message: String| json!({"name":"Error","message":message});
-        let callback = callback
-            .upgrade()
-            .ok_or_else(|| failed("native account callback is closed".into()))?;
-        let pending = callback
-            .call_async_catch(payload)
-            .await
-            .map_err(|e| failed(e.to_string()))?;
-        pending.await.map_err(|e| failed(e.to_string()))
+        let closed_error = || json!({"name":"Error","message":"native account callback is closed"});
+        if *closed.borrow() {
+            return Err(closed_error());
+        }
+        let mut operation = pin!(async move {
+            let failed = |message: String| json!({"name":"Error","message":message});
+            let callback = callback.upgrade().ok_or_else(closed_error)?;
+            let pending = callback
+                .call_async_catch(payload)
+                .await
+                .map_err(|e| failed(e.to_string()))?;
+            drop(callback);
+            pending.await.map_err(|e| failed(e.to_string()))
+        });
+        let mut closing = pin!(closed.changed());
+        poll_fn(|context| {
+            if closing.as_mut().poll(context).is_ready() {
+                Poll::Ready(Err(closed_error()))
+            } else {
+                operation.as_mut().poll(context)
+            }
+        })
+        .await
     })
 }
 
@@ -197,9 +220,11 @@ fn open(
         serde_json::from_str(&init.options_json).map_err(|e| error_json(&e.to_string()))?;
     let sign = sign.map(Rc::new);
     let proxy_token = proxy_token.map(Rc::new);
+    let (closed, cancellation) = watch::channel(false);
     let sign_source = sign.as_ref().map(Rc::downgrade).map(|callback| {
+        let cancellation = cancellation.clone();
         Rc::new(move |payload: Value| {
-            let pending = request(callback.clone(), payload.to_string());
+            let pending = request(callback.clone(), cancellation.clone(), payload.to_string());
             Box::pin(async move {
                 let text = pending.await?;
                 serde_json::from_str(&text)
@@ -208,7 +233,8 @@ fn open(
         }) as Rc<dyn Fn(Value) -> JsonFuture<Value>>
     });
     let proxy_source = proxy_token.as_ref().map(Rc::downgrade).map(|callback| {
-        Rc::new(move || request(callback.clone(), String::new()))
+        let cancellation = cancellation.clone();
+        Rc::new(move || request(callback.clone(), cancellation.clone(), String::new()))
             as Rc<dyn Fn() -> JsonFuture<String>>
     });
     let account = open_native_account(NativeAccountSpec {
@@ -237,6 +263,7 @@ fn open(
         unwatch,
         _sign: sign,
         _proxy_token: proxy_token,
+        closed,
     })
 }
 

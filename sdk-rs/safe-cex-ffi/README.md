@@ -82,4 +82,4 @@ the native registry path. Both use loopback HTTP.
 `tests/native-account-callback-lifetime.test.mjs` checks account close in a child
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
-runtime remains retained. The child must exit naturally after close.
+runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.

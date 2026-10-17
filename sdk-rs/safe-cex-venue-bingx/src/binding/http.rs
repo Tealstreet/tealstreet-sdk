@@ -143,13 +143,7 @@ impl ReadTransport for Transport {
                         );
                         if let Some(response) = response {
                             let raw = response.get("data").map_err(error)?;
-                            let data = if raw.is_string() {
-                                safe_cex_transport::how::big_int_as_string_json_parse(
-                                    &raw.to_display(),
-                                )
-                            } else {
-                                to_json(&raw).map_err(error)?
-                            };
+                            let data = to_json(&raw).map_err(error)?;
                             failure.response = Some(Box::new(safe_cex_transport::RestResponse {
                                 status: response
                                     .get("status")
@@ -176,11 +170,7 @@ impl ReadTransport for Transport {
                 }
             };
             let data = response.get("data").map_err(error)?;
-            let value = if data.is_string() {
-                safe_cex_transport::how::big_int_as_string_json_parse(&data.to_display())
-            } else {
-                to_json(&data).map_err(error)?
-            };
+            let value = to_json(&data).map_err(error)?;
             serde_json::from_value(value).map_err(|e| ExchangeError::new(e.to_string()))
         })
     }
@@ -259,7 +249,20 @@ impl ApiHost for Host {
             Js::object(vec![
                 ("baseURL", Js::str(&defaults.base_url)),
                 ("timeout", Js::Number(defaults.timeout)),
-                ("responseType", Js::str("text")),
+                (
+                    "transformResponse",
+                    Js::function("bigIntAsStringJsonParse", |_, args| {
+                        let value = arg(&args, 0);
+                        if !value.is_string() {
+                            return Ok(value);
+                        }
+                        Ok(from_json(
+                            &safe_cex_transport::how::big_int_as_string_json_parse(
+                                &value.to_display(),
+                            ),
+                        ))
+                    }),
+                ),
                 (
                     "headers",
                     Js::object(
