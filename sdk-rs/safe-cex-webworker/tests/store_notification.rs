@@ -131,7 +131,7 @@ fn source_store_notification_failure_commits_then_reaches_worker_boundary() {
     // BBO still has an infallible core callback; its source throw is separate.
 }
 
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,

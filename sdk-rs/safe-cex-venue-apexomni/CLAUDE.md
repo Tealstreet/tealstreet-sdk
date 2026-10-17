@@ -331,8 +331,9 @@ submission when the market maximum is zero. It still schedules order refresh.
 Trigger-price fallback preserves an adjusted zero in the final `price` operand.
 All split payloads are submitted before response IDs are read and projected;
 a numeric ID cannot interrupt the remaining submissions or reconciliation.
-Exact non-string placement results remain a coordinated shared `Vec<String>`
-representation issue; they are never stringified or replaced by fabricated IDs.
+The approved placement-result policy applies JS String to every provided ID
+after all submissions; missing IDs remain visible errors. Reconciliation is
+scheduled before ID conversion, so a result error cannot hide submitted orders.
 `tests/support/placement_parity.rs` drives all three cases through the real
 constructed binding and L2 signer, observing the signed HTTP requests.
 
