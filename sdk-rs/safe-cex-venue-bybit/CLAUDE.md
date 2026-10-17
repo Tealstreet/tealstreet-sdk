@@ -738,3 +738,10 @@ valid prefix on mapping errors, but discard a failed recovery accumulator. Sourc
 primary short/extended recovery differs from dedicated inverse single recovery;
 Spot inherits empty history. The full reader source corpus covers requests, results
 and diagnostics; mapper source corpora retain their separate scalar contracts.
+
+Primary/demo option reads now bind the chain, expiry and account-Greeks receiver
+members, including the source account opt-in guard. Quotes stay native through
+numeric coercion, duplicate-symbol joins and sorting against live Store markets.
+Dedicated Spot/Inverse retain the base options refusals. The actual HTTP/source
+comparison has 69 cases; its four tied-right cases require the shared
+String.prototype.localeCompare implementation and remain red until it lands.

@@ -309,7 +309,21 @@ fn option_reads_match_maintained_methods_and_helpers() {
                 assert_eq!(call.params["category"], "option");
                 assert_eq!(call.params["baseCoin"], case["query"]["underlying"]);
             } else {
-                assert!(call.params.as_object().unwrap().is_empty(),"case{index}: {:?}",call.params);
+                assert_eq!(
+                    call.params
+                        .as_object()
+                        .unwrap()
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                    vec!["requestId"],
+                    "case{index}"
+                );
+                assert!(
+                    call.params["requestId"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty())
+                );
             }
         }
         h.venue().dispose().unwrap();
