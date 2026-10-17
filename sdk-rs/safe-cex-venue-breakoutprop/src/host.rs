@@ -33,13 +33,12 @@ use std::{
     rc::{Rc, Weak},
 };
 
-/// Supply a fresh host per account. HTTP must carry the selected transport.
+/// Supply a fresh terminal HTTP host per account.
 #[derive(Clone)]
 pub struct BreakoutDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Rc<dyn JsHttpHost>,
     pub external_public_data: Option<ExternalPublicDataFactory>,
-    pub install_transport: Rc<dyn Fn(&ExchangeOptions) -> Result<(), ExchangeError>>,
     /// Offset-less legacy timestamps use the embedding host's timezone policy.
     pub local_to_utc: Rc<dyn Fn(f64) -> f64>,
 }
@@ -128,7 +127,7 @@ impl BreakoutHost for ProductionHost {
         let host = ClientFactory {
             http: self.deps.http.clone(),
             xhr: RefCell::new(None),
-            install: self.deps.install_transport.clone(),
+            provider: self.deps.runtime.transport(),
         };
         let options = exchange.base.options();
         api::create_api(&host, options, &exchange).map(|api| api as Rc<dyn DxClient>)
@@ -187,7 +186,7 @@ impl NativeRuntimeHost for ProductionHost {
         (self.deps.local_to_utc)(value)
     }
     fn uuid(&self) -> String {
-        self.deps.runtime.unique_id()
+        self.deps.runtime.unique_id().replace(['-', '_'], "")
     }
     fn spawn_order(&self, future: ExchangeFuture<'static, ()>) {
         self.owned(future)
@@ -297,7 +296,7 @@ impl PollingAncestor for PollingBase {
 struct ClientFactory {
     http: Rc<dyn JsHttpHost>,
     xhr: RefCell<Option<Js>>,
-    install: Rc<dyn Fn(&ExchangeOptions) -> Result<(), ExchangeError>>,
+    provider: std::sync::Arc<dyn safe_cex_transport::TransportProvider>,
 }
 struct Wire {
     xhr: Js,
@@ -306,12 +305,13 @@ impl ApiHost for ClientFactory {
     fn create(
         &self,
         defaults: ApiDefaults,
-        _options: &ExchangeOptions,
-        _exchange: &Rc<BreakoutpropExchange>,
+        options: &ExchangeOptions,
+        exchange: &Rc<BreakoutpropExchange>,
     ) -> Result<Rc<dyn ApiWire>, ExchangeError> {
         let serialize = defaults.serialize_params;
-        let xhr = client::create(
+        let xhr = client::factory::create(
             self.http.clone(),
+            &*self.provider,
             Js::object(vec![
                 ("baseURL", Js::str(defaults.base_url)),
                 ("timeout", Js::Number(defaults.timeout)),
@@ -326,7 +326,9 @@ impl ApiHost for ClientFactory {
                     }),
                 ),
             ]),
-        );
+            &safe_cex_exchange::js_runtime::value::from_typed(options)?,
+            &exchange.base,
+        )?;
         *self.xhr.borrow_mut() = Some(xhr.clone());
         Ok(Rc::new(Wire { xhr }))
     }
@@ -382,10 +384,21 @@ impl ApiHost for ClientFactory {
     fn install_transport_adapter(
         &self,
         _wire: &Rc<dyn ApiWire>,
-        _options: &ExchangeOptions,
-        _exchange: &Rc<BreakoutpropExchange>,
+        options: &ExchangeOptions,
+        exchange: &Rc<BreakoutpropExchange>,
     ) -> Result<(), ExchangeError> {
-        (self.install)(_options)
+        client::factory::install_transport_adapter(
+            self.http.clone(),
+            &*self.provider,
+            self.xhr
+                .borrow()
+                .as_ref()
+                .expect("create precedes transport"),
+            &safe_cex_exchange::js_runtime::value::from_typed(options)?,
+            exchange.base.name.clone(),
+            safe_cex_transport::RestAdapterVariant::Default,
+        )?;
+        Ok(())
     }
 }
 impl ApiWire for Wire {

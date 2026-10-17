@@ -275,8 +275,15 @@ jobs:
           node safe-cex-transport/scripts/routing.mjs --check --equivalence
           cargo test --locked -p safe-cex-transport --all-targets -- --include-ignored
           cargo test --locked -p safe-cex-transport --doc
+      - name: Fetch binding ratchet base
+        if: matrix.check == 'test' && github.event_name == 'pull_request'
+        env:
+          BINDING_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$BINDING_BASE_SHA"
       - name: Check exchange core parity and lifecycle
         if: matrix.check == 'test'
+        env:
+          VENUE_BINDING_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           node safe-cex-exchange/scripts/ci-deps.cjs "$RUNNER_TEMP/exchange-typescript-deps"
           corepack yarn --cwd "$RUNNER_TEMP/exchange-typescript-deps" install --frozen-lockfile --ignore-scripts --non-interactive
