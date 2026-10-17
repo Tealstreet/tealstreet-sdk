@@ -126,3 +126,12 @@ the native registry path. Both use loopback HTTP.
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
+
+Native `start` follows the worker startup result: `true` after the forced full
+Store post and `false` after cancellation or failure. Disposal, close and
+deactivation cancel pending startup. Errors and the 30-second deadline use the
+existing worker logger with `worker_error_phase: "startup"`; disposed failures
+follow the source console warning path. A lost startup race leaves the actual
+venue operation running, while its invalidated delivery token suppresses a late
+full snapshot. `tests/native-account-startup.test.mjs` exercises real gateway
+startup, cancellation, signer rejection and the actual deadline.

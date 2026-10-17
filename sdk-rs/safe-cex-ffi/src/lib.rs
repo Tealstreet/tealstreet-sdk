@@ -23,3 +23,6 @@ pub fn version() -> String {
 mod native_exchange;
 #[cfg(feature = "node")]
 mod native_value;
+
+#[cfg(feature = "node")]
+mod native_lifecycle;

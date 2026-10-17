@@ -7373,3 +7373,7 @@ reason = "FFI materialization glue: reconstructs the shared runtime value direct
 [[exempt]]
 rs = "safe-cex-ffi/src/native_value.rs::JsData"
 reason = "napi ABI glue: FromNapiValue/ToNapiValue wrapper for the shared owned tree, preserving own undefined, numeric bits, UTF-16 keys/strings and BigInt across the addon boundary. It applies the same explicit cycle/depth/unsupported-value profile; actual Node account-value regressions cover it. No independently declared TypeScript model."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::NativeAccount::cancel_startup"
+reason = "Native host lifecycle glue: invalidate pending startup delivery synchronously before an asynchronously dispatched disposal; no standalone TypeScript API. Actual Node native-account-startup tests prove cancellation and suppression of a late full snapshot."
