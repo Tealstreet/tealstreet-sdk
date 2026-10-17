@@ -271,3 +271,18 @@ and reporter failures retain their metadata.
 The production UUID host removes both nanoid separators before the order path
 adds its `tealstreet-` prefix. The binding regression supplies runtime entropy
 containing both separators and observes the actual POST order code.
+
+
+The native Exchange now forwards book/candle subscriptions to the existing
+polling container and returns its original cleanup through the shared single-use
+ABI. Owned typed callback values retain the shared native callback boundary;
+the source polling algorithm and handler table remain canonical. fetchOHLCV
+invokes the existing candle body over the actual account/session/client and the
+shared num Date ISO formatter. It preserves both returned rows despite limit=1,
+the encoded JSON candle request and original HTTP refusal metadata.
+Five `real_trait_` binding witnesses exercise the real polling loop, table cleanup,
+REST request, HTTP error and pre-POST invalid-date refusal. The four initial
+hook regressions fail the original defaults. Run
+`scripts/stream-binding-controls.py` exclusively for compiled dispatch, cleanup,
+empty/subset collection and TimeClip faults with exact restored passes. The
+runner checks disk space and restricts any required clean to this worktree target.

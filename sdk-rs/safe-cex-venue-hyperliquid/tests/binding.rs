@@ -1505,3 +1505,54 @@ fn production_seam_private_core_balance_frame_updates_the_store_without_a_fill()
         "balance snapshots do not invent fill events"
     );
 }
+
+#[test]
+fn production_reconcile_clears_undefined_tif_and_then_stops_rewriting() {
+    let f = seam_started();
+    let cloid = "0x11111111111111111111111111111111";
+    let mut seed = serde_json::to_value(seam_order()).unwrap();
+    seed["timeInForce"] =
+        serde_json::to_value(safe_cex_types::OrderTimeInForce::GoodTillCancel).unwrap();
+    f.exchange
+        .base()
+        .store
+        .add_order(serde_json::from_value(seed).unwrap())
+        .unwrap();
+    seam_route(
+        &f,
+        "info:frontendOpenOrders",
+        json!([{
+            "coin":"BTC", "oid":777, "side":"A", "limitPx":"60000", "sz":"0.01",
+            "origSz":"0.01", "timestamp":1700000000000u64, "orderType":"Limit",
+            "reduceOnly":false, "isTrigger":false, "tif":"Ioc", "cloid":cloid
+        }]),
+    );
+    let fetched = f.host.block_on(f.exchange.fetch_orders(None)).unwrap();
+    f.host.settle();
+    assert_eq!(fetched.len(), 1);
+    assert!(
+        fetched[0].time_in_force.is_undefined(),
+        "source mapper owns an undefined TIF"
+    );
+    {
+        let orders = f.exchange.base().store.orders();
+        let row = orders.iter().find(|row| row.id == "777").unwrap();
+        assert_eq!(
+            row.client_order_id.as_deref(),
+            Some(cloid),
+            "#465 restores the client order ID"
+        );
+        assert!(
+            row.time_in_force.is_undefined(),
+            "realm updateOrder must retain the mapper's own undefined TIF"
+        );
+    }
+    let revision = f.exchange.base().store.update_ids().orders;
+    f.host.block_on(f.exchange.fetch_orders(None)).unwrap();
+    f.host.settle();
+    assert_eq!(
+        f.exchange.base().store.update_ids().orders,
+        revision,
+        "an identical REST refresh must not rewrite the reconciled order"
+    );
+}
