@@ -868,3 +868,86 @@ fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel
         venue.dispose().unwrap();
     }
 }
+
+struct AccountRowsHttp(Rc<Http>, Value);
+impl JsHttpHost for AccountRowsHttp {
+    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+        self.0.0.clone()
+    }
+    fn send(&self, config: Js) -> JsFuture<'static> {
+        if config.get("url").unwrap().to_display() != "/fapi/v2/account" {
+            return self.0.send(config);
+        }
+        let response = Js::object(vec![
+            ("status", Js::Number(200.)),
+            ("data", from_json(&self.1)),
+            ("config", config),
+        ]);
+        Box::pin(async move { Ok(response) })
+    }
+}
+#[test]
+fn malformed_balance_upnl_refuses_only_its_account_row() {
+    for bad in [json!("bad-pnl"), json!(null), json!({}), json!(true)] {
+        let runtime = Rc::new(support::Runtime::default());
+        let http = Rc::new(AccountRowsHttp(
+            Rc::new(Http(
+                runtime.clone(),
+                RefCell::new(vec![]),
+                Cell::new(false),
+            )),
+            json!({"code":"0","data":{"account":[
+                {"marginCoin":"USDT","totalEquity":100,"accountNormal":70,"sumOpenRealizedAmount":3},
+                {"marginCoin":"USDT","totalEquity":999,"accountNormal":900,"sumOpenRealizedAmount":bad},
+                {"marginCoin":"USDC","totalEquity":200,"accountNormal":150,"sumOpenRealizedAmount":7}
+            ]}}),
+        ));
+        let store = Rc::new(DefaultStore::new());
+        let venue = BitrueExchange::new(
+            ExchangeName::Bitrue,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store.clone(),
+            BitrueDependencies {
+                runtime: runtime.clone(),
+                http,
+                external_public_data: None,
+            },
+        )
+        .unwrap();
+        complete(&runtime, venue.start()).expect("bad upnl must not reject the valid account rows");
+        let balance = store.balance();
+        assert_eq!(
+            (balance.total, balance.free, balance.used, balance.upnl),
+            (100., 70., 30., 3.)
+        );
+        let currencies = balance.currencies.as_ref().unwrap();
+        assert_eq!(currencies.len(), 2);
+        let usdc = currencies.get("USDC").unwrap().as_balance().unwrap();
+        assert_eq!(
+            (usdc.total, usdc.free, usdc.used, usdc.upnl),
+            (200., 150., 50., 7.)
+        );
+        assert_eq!(
+            balance.info.as_ref().unwrap()["data"]["account"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        let warnings = runtime.console.borrow();
+        let refusals: Vec<_> = warnings
+            .iter()
+            .filter(|line| line.contains("Balance.upnl"))
+            .collect();
+        assert!(!refusals.is_empty());
+        assert!(
+            refusals
+                .iter()
+                .all(|line| line.contains("USDT") && line.contains(&bad.to_string())),
+            "warning must identify field, currency and original value: {warnings:?}"
+        );
+        assert!(runtime.reports.borrow().is_empty());
+        drop(balance);
+        venue.dispose().unwrap();
+    }
+}

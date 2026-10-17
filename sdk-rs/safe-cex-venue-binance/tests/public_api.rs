@@ -180,19 +180,24 @@ fn oracle(vectors: &Value) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-fn tag_numbers(value: &Value) -> Value {
+fn tag_numbers(value: &safe_cex_types::retained_json::RetainedJsonInput) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match value {
-        Value::Number(_) => {
-            json!({"numberBits": format!("{:016x}", safe_cex_num::numeric_ingress::js_value_as_f64(value).unwrap().to_bits())})
+        Input::Float(number) => json!({"numberBits": format!("{:016x}", number.to_bits())}),
+        Input::Lexeme(number) => {
+            json!({"numberBits": format!("{:016x}", number.parse::<f64>().unwrap().to_bits())})
         }
-        Value::Array(values) => Value::Array(values.iter().map(tag_numbers).collect()),
-        Value::Object(values) => Value::Object(
+        Input::Array(values) => Value::Array(values.iter().map(tag_numbers).collect()),
+        Input::Object(values) => Value::Object(
             values
                 .iter()
-                .map(|(key, value)| (key.clone(), tag_numbers(value)))
+                .map(|(key, value)| (String::from_utf16(key).unwrap(), tag_numbers(value)))
                 .collect(),
         ),
-        value => value.clone(),
+        Input::Text(units) => Value::String(String::from_utf16(units).unwrap()),
+        Input::Bool(value) => Value::Bool(*value),
+        Input::Null => Value::Null,
+        Input::Undefined => panic!("JSON source fixture has no own undefined"),
     }
 }
 
@@ -298,15 +303,19 @@ fn public_factory_response_provenance_finding() {
             let parsed = response
                 .body
                 .transform(|data| match data {
-                    Value::String(text) => big_int_as_string_json_parse(&text),
+                    safe_cex_types::retained_json::RetainedJsonInput::Text(text) => {
+                        safe_cex_transport::how::big_int_as_string_json_parse_utf16(&text)
+                    }
                     data => data,
                 })
                 .into_data();
+            use safe_cex_types::retained_json::RetainedJsonInput as Input;
             let data_type = match &parsed {
-                Value::Null | Value::Array(_) | Value::Object(_) => "object",
-                Value::Bool(_) => "boolean",
-                Value::Number(_) => "number",
-                Value::String(_) => "string",
+                Input::Null | Input::Array(_) | Input::Object(_) => "object",
+                Input::Bool(_) => "boolean",
+                Input::Float(_) | Input::Lexeme(_) => "number",
+                Input::Text(_) => "string",
+                Input::Undefined => "undefined",
             };
             assert_eq!(
                 data_type, expected["result"]["dataType"],

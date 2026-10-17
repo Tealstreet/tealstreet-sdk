@@ -1,3 +1,5 @@
+> Historical evidence: the test-only V3 comparison/canonical bodies, operation holders and their oracle commands are retired. The live legacy operation shape is retained; see CLAUDE.md.
+
 # WOO native snapshot comparison
 
 Eight public-parity bodies now use native algorithms over retained host references.

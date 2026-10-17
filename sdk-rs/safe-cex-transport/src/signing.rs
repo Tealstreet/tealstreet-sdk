@@ -621,6 +621,24 @@ fn present_json<'de, D: serde::Deserializer<'de>>(
     Value::deserialize(deserializer).map(Some)
 }
 
+// Legacy params retain their bounded Value ABI; request data does not use this projection.
+pub fn try_parse_params_json(value: Value) -> Value {
+    let Value::String(text) = &value else {
+        return value;
+    };
+    let Ok(parsed) = crate::native_data::parse(text) else {
+        return value;
+    };
+    if !matches!(parsed, Input::Object(_) | Input::Array(_)) {
+        return value;
+    }
+    let Ok(mut projected) = parsed.into_value() else {
+        return value;
+    };
+    crate::how::normalize_json_numbers(&mut projected, false, false);
+    projected
+}
+
 #[cfg(test)]
 mod header_shape_tests {
     use super::{ExchangeName, SigningHeader};
@@ -638,22 +656,4 @@ mod header_shape_tests {
             },
         );
     }
-}
-
-// Legacy params retain their bounded Value ABI; request data does not use this projection.
-pub fn try_parse_params_json(value: Value) -> Value {
-    let Value::String(text) = &value else {
-        return value;
-    };
-    let Ok(parsed) = crate::native_data::parse(text) else {
-        return value;
-    };
-    if !matches!(parsed, Input::Object(_) | Input::Array(_)) {
-        return value;
-    }
-    let Ok(mut projected) = parsed.into_value() else {
-        return value;
-    };
-    crate::how::normalize_json_numbers(&mut projected, false, false);
-    projected
 }

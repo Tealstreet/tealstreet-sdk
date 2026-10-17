@@ -230,6 +230,7 @@ impl safe_cex_transport::signing::RemoteSigner for HostedBingx {
             let mut data = config
                 .data
                 .clone()
+                .map(|value| value.into_value().unwrap())
                 .or(config.params.clone())
                 .unwrap_or_else(|| json!({}));
             if let Some(text) = data.as_str() {
@@ -281,7 +282,12 @@ impl safe_cex_transport::signing::RemoteSigner for HostedBingx {
                 signed
                     .headers
                     .insert("Content-Type".into(), "application/json".into());
-                signed.data = Some(Value::String(serde_json::to_string(&payload).unwrap()));
+                signed.data = Some(safe_cex_types::retained_json::RetainedJsonInput::Text(
+                    serde_json::to_string(&payload)
+                        .unwrap()
+                        .encode_utf16()
+                        .collect(),
+                ));
             } else {
                 signed.params = Some(payload);
             }

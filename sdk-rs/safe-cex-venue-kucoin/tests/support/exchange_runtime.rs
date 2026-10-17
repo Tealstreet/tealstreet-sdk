@@ -4,7 +4,7 @@ use safe_cex_exchange::{
     http::{HttpClientOptions, HttpFuture, HttpHost},
     js_runtime::base_exchange::BaseExchangeParts,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
-    websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
+    websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
 use safe_cex_store::{Store, store::DefaultStore};
 use safe_cex_transport::{
@@ -18,7 +18,7 @@ use safe_cex_venue_kucoin::kucoin_exchange::{
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -34,7 +34,9 @@ pub struct Runtime {
     pub now: Rc<Cell<f64>>,
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
+    pub console: RefCell<Vec<(String, String)>>,
     pub dials: RefCell<Vec<String>>,
+    pub sockets: RefCell<Vec<Rc<Socket>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -85,7 +87,11 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((f, c.clone()));
         Box::new(Task(c))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console(&self, severity: &str, message: &str) {
+        self.console
+            .borrow_mut()
+            .push((severity.into(), message.into()));
+    }
     fn unique_id(&self) -> String {
         format!("id-{}", self.jobs.borrow().len())
     }
@@ -105,6 +111,41 @@ impl ExchangeRuntime for Runtime {
         Box::pin(async { Err(ExchangeError::new("Worker unused in native fixture")) })
     }
 }
+#[derive(Default)]
+pub struct Socket {
+    pub events: Rc<RefCell<VecDeque<WsEvent>>>,
+    pub sent: RefCell<Vec<String>>,
+    closed: Cell<bool>,
+}
+impl WsSocket for Socket {
+    fn ready_state(&self) -> u8 {
+        if self.closed.get() { 3 } else { 1 }
+    }
+    fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+        let events = self.events.clone();
+        Box::pin(std::future::poll_fn(move |_| {
+            events
+                .borrow_mut()
+                .pop_front()
+                .map_or(Poll::Pending, |e| Poll::Ready(Ok(e)))
+        }))
+    }
+    fn send(&self, message: &str) -> Result<(), ExchangeError> {
+        self.sent.borrow_mut().push(message.into());
+        Ok(())
+    }
+    fn close(&self) {
+        self.closed.set(true);
+    }
+    fn terminate(&self) {
+        self.closed.set(true);
+    }
+    fn reconnect(&self) {}
+    fn is_reconnecting(&self) -> bool {
+        false
+    }
+}
+
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
         Arc::new(safe_cex_transport::DirectTransport)
@@ -120,7 +161,10 @@ impl WsRuntime for Runtime {
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
         self.dials.borrow_mut().push(url);
-        Box::pin(async { Err(ExchangeError::new("No socket in the REST fixture")) })
+        let socket = Rc::new(Socket::default());
+        socket.events.borrow_mut().push_back(WsEvent::Open);
+        self.sockets.borrow_mut().push(socket.clone());
+        Box::pin(async move { Ok(socket as Rc<dyn WsSocket>) })
     }
     fn headers_capable(&self) -> bool {
         false

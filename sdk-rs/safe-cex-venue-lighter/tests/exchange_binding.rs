@@ -978,12 +978,12 @@ fn private_close_cancels_native_heartbeat_and_receive_deadlines() {
     h.venue().dispose().unwrap();
 }
 
-#[test]
-fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+fn private_account_frame_for_deployment(name: ExchangeName) {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
     use std::{cell::RefCell, rc::Rc};
-    let h = harness(ExchangeName::Lighter, options(), lighter);
+    let h = harness(name.clone(), options(), lighter);
+    assert_eq!(h.venue().base().name, name);
     h.drive(h.venue().start()).unwrap();
     // The source suppresses fills for five seconds after its real VirtualClock connect.
     std::thread::sleep(std::time::Duration::from_millis(5100));
@@ -1012,9 +1012,9 @@ fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers()
     socket.events.borrow_mut().push_back(WsEvent::Message(SocketFrame::Text(json!({
         "channel":"account_all:42","type":"update/account_all",
         "orders":{"1":[order]},"positions":{"1":[position]},
-        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get()}]},
+        "trades":{"1":[{"trade_id":71,"order_id":888,"symbol":"BTC","side":"sell","price":"49000","size":"0.1","timestamp":h.runtime.now.get(),"ignored":"SURROGATE_FIELD"}]},
         "account":{"collateral":"1000"}
-    }).to_string())));
+    }).to_string().replace("\"SURROGATE_FIELD\"", "\"\\ud800\""))));
     h.runtime.pump();
     assert!(
         h.store.orders().iter().any(|order| order.id == "888"),
@@ -1047,4 +1047,11 @@ fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers()
         h.runtime.reports.borrow()
     );
     h.venue().dispose().unwrap();
+}
+
+#[test]
+fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers() {
+    for name in [ExchangeName::Lighter, ExchangeName::LighterRobinhood] {
+        private_account_frame_for_deployment(name);
+    }
 }

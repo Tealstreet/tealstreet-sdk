@@ -64,7 +64,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data,\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "headers",
         "method",
@@ -305,7 +305,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data,\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "configUrl",
         "data",
@@ -1313,7 +1313,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{match serde_json::from_str::<$type>($value.as_str().expect(\"raw protocol input\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerRequest::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"account\":row.account_name,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"method\":row.config.method,\"url\":row.config.url,\"baseURL\":row.config.base_url,\"headers\":row.config.headers.iter().collect::<Vec<_>>(),\"paramsPresent\":row.config.params.is_some(),\"paramsNull\":row.config.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":row.config.params.as_ref().and_then(|p|p.get(\"limit\")).map(|n|safe_cex_num::js_number(Some(n)).expect(\"number\").to_bits().to_string()),\"dataPresent\":row.config.data.is_some(),\"dataNull\":row.config.data.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null))}),Ok(crate::signing::RemoteSignerRequest::WsAuth{exchange_name,account_name,request})=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"account\":account_name,\"isBybit\":exchange_name==safe_cex_types::ExchangeName::Bybit,\"idPresent\":request.id.is_some(),\"idNull\":request.id.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"requestType\":request.request_type.as_ref().map(|r|r.get()),\"payloadPresent\":request.ws_auth.is_some(),\"toSign\":request.ws_auth.as_ref().and_then(|a|a.to_sign.as_deref()),\"outputFormat\":request.ws_auth.as_ref().and_then(|a|a.output_format.as_ref()),\"extraPresent\":request.ws_auth.as_ref().is_some_and(|a|a.extra_data.is_some()),\"extraRaw\":request.ws_auth.as_ref().and_then(|a|a.extra_data.as_ref()).map(|r|r.get())})}}",
+      "call": "{match serde_json::from_str::<$type>($value.as_str().expect(\"raw protocol input\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerRequest::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"account\":row.account_name,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"method\":row.config.method,\"url\":row.config.url,\"baseURL\":row.config.base_url,\"headers\":row.config.headers.iter().collect::<Vec<_>>(),\"paramsPresent\":row.config.params.is_some(),\"paramsNull\":row.config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.config.params.as_ref().and_then(|p|p.get(\"limit\")).map(|n|safe_cex_num::js_number(Some(n)).expect(\"number\").to_bits().to_string()),\"dataPresent\":row.config.data.is_some(),\"dataNull\":row.config.data.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null))}),Ok(crate::signing::RemoteSignerRequest::WsAuth{exchange_name,account_name,request})=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"account\":account_name,\"isBybit\":exchange_name==safe_cex_types::ExchangeName::Bybit,\"idPresent\":request.id.is_some(),\"idNull\":request.id.as_ref().is_some_and(serde_json::Value::is_null),\"requestType\":request.request_type.as_ref().map(|r|r.get()),\"payloadPresent\":request.ws_auth.is_some(),\"toSign\":request.ws_auth.as_ref().and_then(|a|a.to_sign.as_deref()),\"outputFormat\":request.ws_auth.as_ref().and_then(|a|a.output_format.as_ref()),\"extraPresent\":request.ws_auth.as_ref().is_some_and(|a|a.extra_data.is_some()),\"extraRaw\":request.ws_auth.as_ref().and_then(|a|a.extra_data.as_ref()).map(|r|r.get())})}}",
       "nativeFields": [
         "kind",
         "account"
@@ -1449,7 +1449,7 @@
           "id",
           "error"
         ],
-        "call": "{let origin:$type=serde_json::from_value($value[\"request\"].clone()).expect(\"typed origin arrangement\");match origin.decode_response($value[\"response\"].as_str().expect(\"response wire\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerResponse::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"error\":row.error,\"configPresent\":row.config.is_some(),\"url\":row.config.as_ref().and_then(|c|c.url.as_deref()),\"headers\":row.config.as_ref().map(|c|c.headers.iter().collect::<Vec<_>>())}),Ok(crate::signing::RemoteSignerResponse::WsAuth(row))=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"idPresent\":row.id.is_some(),\"idNull\":row.id.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"id\":row.id,\"error\":row.error,\"signature\":row.ws_auth_signature})}}",
+        "call": "{let origin:$type=serde_json::from_value($value[\"request\"].clone()).expect(\"typed origin arrangement\");match origin.decode_response($value[\"response\"].as_str().expect(\"response wire\")){Err(_)=>serde_json::json!({\"ok\":false}),Ok(crate::signing::RemoteSignerResponse::Http(row))=>serde_json::json!({\"ok\":true,\"kind\":\"http\",\"id\":row.id,\"error\":row.error,\"configPresent\":row.config.is_some(),\"url\":row.config.as_ref().and_then(|c|c.url.as_deref()),\"headers\":row.config.as_ref().map(|c|c.headers.iter().collect::<Vec<_>>())}),Ok(crate::signing::RemoteSignerResponse::WsAuth(row))=>serde_json::json!({\"ok\":true,\"kind\":\"ws-auth\",\"idPresent\":row.id.is_some(),\"idNull\":row.id.as_ref().is_some_and(serde_json::Value::is_null),\"id\":row.id,\"error\":row.error,\"signature\":row.ws_auth_signature})}}",
         "cases": [
           {
             "input": {
@@ -1621,7 +1621,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "url",
         "paramsPresent",
@@ -1692,7 +1692,7 @@
       "baseURL": "https://one.invalid"
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers,\"method\":row.method,\"baseURL\":row.base_url}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data.map(|value|value.into_value().unwrap()),\"headers\":row.headers,\"method\":row.method,\"baseURL\":row.base_url}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "url",
         "paramsPresent",
@@ -2241,8 +2241,8 @@
     ]
   },
   "safe_cex_transport::how::HOWWebSocket": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "shape": "observed",
+    "evidence": "Reviewed packages/http-over-websocket/src/HOWWebSocket.ts constructor, validateAndSend, sendToken and latency lookup. Actual native constructors, connect_socket host binding, send/token frames and rpc.latency ingress execute unchanged production bodies; observations read stored endpoint/auth state, actual socket wire bytes and native latency fields. Host fixture supplies only deterministic clock/socket capabilities and records I/O. No REST request/response or parser API is replaced.",
     "entrypoints": [
       {
         "api": {
@@ -2333,8 +2333,351 @@
             "is_c_variadic": false
           }
         },
+        "input": "observed",
+        "reason": "Raw endpoint admission: empty URL refuses before host capability access; nonempty URLs retain their exact endpoint and lazy socket state.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); match $type::new(host.clone(),$value.as_str().unwrap().into()) {\n        Ok(client)=>serde_json::json!({\"url\":client.url,\"socket\":client.state.borrow().socket.is_some(),\"auth\":format!(\"{:?}\",client.state.borrow().auth),\"dials\":host.dials.borrow().len()}),\n        Err(error)=>serde_json::json!({\"error\":error.to_string(),\"capabilities\":host.capabilities_calls.get()}) } }",
+        "cases": [
+          {
+            "input": "wss://one.example/tunnel",
+            "output": {
+              "url": "wss://one.example/tunnel",
+              "socket": false,
+              "auth": "Unknown",
+              "dials": 0
+            }
+          },
+          {
+            "input": "wss://two.example/tunnel?tag=1",
+            "output": {
+              "url": "wss://two.example/tunnel?tag=1",
+              "socket": false,
+              "auth": "Unknown",
+              "dials": 0
+            }
+          },
+          {
+            "input": "",
+            "output": {
+              "error": "No HOW websocket endpoint provided",
+              "capabilities": 0
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "send",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "data",
+                {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw frame admission and actual stringify/send effects, including source ping-substring bypass while disconnected.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let client=$type::new(host.clone(),\"wss://fixture.example/tunnel\".into()).unwrap();\n        if $value[\"connected\"].as_bool().unwrap() {fx::ready(client.connect_socket(1000)).unwrap();}\n        let result=client.send($value[\"frame\"].clone()); let sent=fx::sent(&host.socket);\n        match result {Ok(())=>serde_json::json!({\"ok\":true,\"sent\":sent}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.to_string(),\"sent\":sent})} }",
+        "cases": [
+          {
+            "input": {
+              "connected": true,
+              "frame": {
+                "type": "notice",
+                "number": 7
+              }
+            },
+            "output": {
+              "ok": true,
+              "sent": [
+                "{\"type\":\"notice\",\"number\":7}"
+              ]
+            }
+          },
+          {
+            "input": {
+              "connected": false,
+              "frame": {
+                "type": "notice"
+              }
+            },
+            "output": {
+              "ok": false,
+              "error": "WebSocketNotReadyError",
+              "sent": []
+            }
+          },
+          {
+            "input": {
+              "connected": false,
+              "frame": {
+                "message": "PING anywhere"
+              }
+            },
+            "output": {
+              "ok": true,
+              "sent": []
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "send_token",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "token",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::TransportError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw token reaches the actual connected socket auth frame, preserving exact token bytes and worker source while updating native token/auth state.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let client=$type::new(host.clone(),\"wss://fixture.example/tunnel\".into()).unwrap();\n        fx::ready(client.connect_socket(1000)).unwrap(); client.send_token($value.as_str().unwrap()).unwrap();\n        serde_json::json!({\"sent\":fx::sent(&host.socket),\"tokenSent\":client.state.borrow().token_sent,\"auth\":format!(\"{:?}\",client.state.borrow().auth)}) }",
+        "cases": [
+          {
+            "input": "alpha",
+            "output": {
+              "sent": [
+                "{\"type\":\"rpc.auth\",\"token\":\"alpha\",\"source\":\"worker\"}"
+              ],
+              "tokenSent": true,
+              "auth": "Unknown"
+            }
+          },
+          {
+            "input": "beta\"quoted",
+            "output": {
+              "sent": [
+                "{\"type\":\"rpc.auth\",\"token\":\"beta\\\"quoted\",\"source\":\"worker\"}"
+              ],
+              "tokenSent": true,
+              "auth": "Unknown"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get_latency_for_domain",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "domain",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::how_config::LatencyEntry",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "String lookup observes the actual rpc.latency message path and native entry fields; a missing domain remains absent.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let client=$type::new(host,\"wss://fixture.example/tunnel\".into()).unwrap();\n        client.on_message(crate::socket::SocketFrame::Text(r#\"{\"type\":\"rpc.latency\",\"domain\":\"venue.example\",\"latency_ms\":7,\"source\":\"measured\",\"sample_count\":3,\"measured_at\":40}\"#.into())).unwrap();\n        match client.get_latency_for_domain($value.as_str().unwrap()) {Some(row)=>serde_json::json!({\"latency\":row.latency_ms,\"source\":row.source,\"cached\":row.cached,\"samples\":row.sample_count,\"measured\":row.measured_at,\"updated\":row.updated_at}),None=>serde_json::Value::Null} }",
+        "cases": [
+          {
+            "input": "venue.example",
+            "output": {
+              "latency": 7,
+              "source": "measured",
+              "cached": false,
+              "samples": 3,
+              "measured": 40,
+              "updated": 42
+            }
+          },
+          {
+            "input": "missing.example",
+            "output": null
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get_all_latencies",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "indexmap::map::IndexMap",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::how_config::LatencyEntry",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
         "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "reason": "Read-only snapshot of already admitted LatencyEntry values with no raw input or decoding step; string-domain admission is independently observed by get_latency_for_domain."
       }
     ]
   },
@@ -2435,8 +2778,8 @@
     ]
   },
   "safe_cex_transport::relay::RelayWebSocket": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "shape": "observed",
+    "evidence": "Reviewed packages/http-over-websocket/src/RelayWebSocket.ts and tunnelEndpoints.ts: first ts-relay query selection, remaining URL retention, lazy connecting state, close forwarding and once-only close dispatch. Actual production constructors, on_inner_open with recorded host I/O, close and on_inner_close/next_event execute; no replacement relay or fake protocol implementation is used.",
     "entrypoints": [
       {
         "api": {
@@ -2516,8 +2859,41 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "input": "observed",
+        "reason": "Raw relay URLs decode through production parsing; valid endpoints retain tunnel/upstream separately and invalid/missing upstream URLs refuse.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); match $type::new(host,$value.as_str().unwrap()) {Ok(relay)=>serde_json::json!({\"tunnel\":relay.tunnel_url,\"upstream\":relay.upstream,\"state\":relay.ready_state(),\"protocols\":relay.connection_options.protocols}),Err(error)=>serde_json::json!({\"error\":error.to_string()})} }",
+        "cases": [
+          {
+            "input": "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example%2Fprivate",
+            "output": {
+              "tunnel": "wss://relay.example/tunnel",
+              "upstream": "wss://venue.example/private",
+              "state": 0,
+              "protocols": []
+            }
+          },
+          {
+            "input": "wss://other.example/a?tag=2&ts-relay=wss%3A%2F%2Fsecond.example%3Fx%3D1#frag",
+            "output": {
+              "tunnel": "wss://other.example/a?tag=2#frag",
+              "upstream": "wss://second.example?x=1",
+              "state": 0,
+              "protocols": []
+            }
+          },
+          {
+            "input": "not a URL",
+            "output": {
+              "error": "Invalid URL"
+            }
+          },
+          {
+            "input": "wss://relay.example/tunnel",
+            "output": {
+              "error": "not a relay url: wss://relay.example/tunnel"
+            }
+          }
+        ]
       },
       {
         "api": {
@@ -2606,8 +2982,234 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "input": "observed",
+        "reason": "Raw endpoint plus already typed socket options retain protocol order and default header policy; URL admission is observed independently of the typed options.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let options=crate::relay::WebSocketConnectionOptions {\n        protocols:$value[\"protocols\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().into()).collect(),..Default::default()};\n        match $type::with_connection_options(host,$value[\"url\"].as_str().unwrap(),options) {Ok(relay)=>serde_json::json!({\"tunnel\":relay.tunnel_url,\"upstream\":relay.upstream,\"state\":relay.ready_state(),\"protocols\":relay.connection_options.protocols}),Err(error)=>serde_json::json!({\"error\":error.to_string()})} }",
+        "cases": [
+          {
+            "input": {
+              "url": "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example%2Fprivate",
+              "protocols": [
+                "p1"
+              ]
+            },
+            "output": {
+              "tunnel": "wss://relay.example/tunnel",
+              "upstream": "wss://venue.example/private",
+              "state": 0,
+              "protocols": [
+                "p1"
+              ]
+            }
+          },
+          {
+            "input": {
+              "url": "wss://other.example/a?tag=2&ts-relay=wss%3A%2F%2Fsecond.example%3Fx%3D1#frag",
+              "protocols": [
+                "x",
+                "y"
+              ]
+            },
+            "output": {
+              "tunnel": "wss://other.example/a?tag=2#frag",
+              "upstream": "wss://second.example?x=1",
+              "state": 0,
+              "protocols": [
+                "x",
+                "y"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "close",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "code",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::convert::Into",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::option::Option",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "primitive": "u16"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ],
+              [
+                "reason",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw reason and optional code traverse actual relay connection/close into the socket recorder without substitution.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let relay=$type::new(host.clone(),\"wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example\").unwrap();\n        fx::ready(relay.on_inner_open()).unwrap(); let code=$value[\"code\"].as_u64().map(|v|u16::try_from(v).unwrap());\n        relay.close(code,$value[\"reason\"].as_str().unwrap());\n        serde_json::json!({\"state\":relay.ready_state(),\"closes\":host.socket.closes.borrow().clone()}) }",
+        "cases": [
+          {
+            "input": {
+              "code": 4001,
+              "reason": "bye"
+            },
+            "output": {
+              "state": 2,
+              "closes": [
+                [
+                  4001,
+                  "bye"
+                ]
+              ]
+            }
+          },
+          {
+            "input": {
+              "code": null,
+              "reason": "no-code"
+            },
+            "output": {
+              "state": 2,
+              "closes": [
+                [
+                  null,
+                  "no-code"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "on_inner_close",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "code",
+                {
+                  "primitive": "u16"
+                }
+              ],
+              [
+                "reason",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "was_clean",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw host close data reaches the actual close event exactly once; a later duplicate cannot replace the first code/reason/clean flag.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } let host=fx::Host::new(); let relay=$type::new(host,\"wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example\").unwrap();\n        fx::ready(relay.on_inner_open()).unwrap(); relay.on_inner_close(u16::try_from($value[\"code\"].as_u64().unwrap()).unwrap(),$value[\"reason\"].as_str().unwrap().into(),$value[\"clean\"].as_bool().unwrap());\n        let event=fx::ready(relay.next_event()).unwrap(); relay.on_inner_close(4999,\"duplicate\".into(),false); assert!(relay.events.borrow().is_empty(),\"duplicate close must not enqueue another event\");\n        match event {crate::relay::RelayEvent::Close{code,reason,was_clean}=>serde_json::json!({\"state\":relay.ready_state(),\"code\":code,\"reason\":reason,\"clean\":was_clean}),_=>panic!(\"expected actual close event\")} }",
+        "cases": [
+          {
+            "input": {
+              "code": 4001,
+              "reason": "remote",
+              "clean": true
+            },
+            "output": {
+              "state": 3,
+              "code": 4001,
+              "reason": "remote",
+              "clean": true
+            }
+          },
+          {
+            "input": {
+              "code": 4007,
+              "reason": "lost",
+              "clean": false
+            },
+            "output": {
+              "state": 3,
+              "code": 4007,
+              "reason": "lost",
+              "clean": false
+            }
+          }
+        ]
       }
     ]
   },
@@ -5099,39 +5701,62 @@
       }
     },
     "category": "decoder",
-    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness.",
-    "call": "$type($value.as_str().expect(\"text witness\")).into_value().unwrap()",
+    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Number bits are asserted before the shared JSON writer produces the source-equivalent report; JSON fixture loading cannot preserve integer-versus-float lexical tokens.",
+    "call": "{fn number_bits(v:&safe_cex_types::retained_json::RetainedJsonInput,out:&mut Vec<String>){use safe_cex_types::retained_json::RetainedJsonInput as I;match v {I::Float(n)=>out.push(n.to_bits().to_string()),I::Lexeme(n)=>out.push(n.parse::<f64>().unwrap().to_bits().to_string()),I::Array(a)=>for v in a {number_bits(v,out)},I::Object(o)=>for (_,v) in o {number_bits(v,out)},_=>{}}}fn report(v:safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{let mut bits=Vec::new();number_bits(&v,&mut bits);let text=safe_cex_num::js_retained_json_stringify(&v).unwrap().unwrap();let value:serde_json::Value=serde_json::from_str(&text).unwrap();serde_json::json!({\"value\":value,\"numberBits\":bits})}report($type($value.as_str().expect(\"text witness\")))}",
     "cases": [
       {
         "input": "{}",
-        "output": {}
+        "output": {
+          "value": {},
+          "numberBits": []
+        }
       },
       {
         "input": "[1,true]",
-        "output": [
-          1,
-          true
-        ]
+        "output": {
+          "value": [
+            1.0,
+            true
+          ],
+          "numberBits": [
+            "4607182418800017408"
+          ]
+        }
       },
       {
         "input": "null",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "false",
-        "output": false
+        "output": {
+          "value": false,
+          "numberBits": []
+        }
       },
       {
         "input": "\"x\"",
-        "output": "x"
+        "output": {
+          "value": "x",
+          "numberBits": []
+        }
       },
       {
         "input": "invalid",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       }
     ]
   },
@@ -5168,59 +5793,96 @@
       }
     },
     "category": "decoder",
-    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior.",
-    "call": "$type($value.as_str().expect(\"text witness\")).into_value().unwrap()",
+    "evidence": "Live HOW parser contract: total JSON parser with null fallback; assert actual returned values, not success booleans. Big-integer preservation has its own witness. Protection requires a delimiter, so a bare top-level integer rounds through binary64; nested integers are retained as strings. Quoted-string corruption is intentional reference behavior. Number bits are asserted before the shared JSON writer produces the source-equivalent report; JSON fixture loading cannot preserve integer-versus-float lexical tokens.",
+    "call": "{fn number_bits(v:&safe_cex_types::retained_json::RetainedJsonInput,out:&mut Vec<String>){use safe_cex_types::retained_json::RetainedJsonInput as I;match v {I::Float(n)=>out.push(n.to_bits().to_string()),I::Lexeme(n)=>out.push(n.parse::<f64>().unwrap().to_bits().to_string()),I::Array(a)=>for v in a {number_bits(v,out)},I::Object(o)=>for (_,v) in o {number_bits(v,out)},_=>{}}}fn report(v:safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{let mut bits=Vec::new();number_bits(&v,&mut bits);let text=safe_cex_num::js_retained_json_stringify(&v).unwrap().unwrap();let value:serde_json::Value=serde_json::from_str(&text).unwrap();serde_json::json!({\"value\":value,\"numberBits\":bits})}report($type($value.as_str().expect(\"text witness\")))}",
     "cases": [
       {
         "input": "{}",
-        "output": {}
+        "output": {
+          "value": {},
+          "numberBits": []
+        }
       },
       {
         "input": "[1,true]",
-        "output": [
-          1,
-          true
-        ]
+        "output": {
+          "value": [
+            1.0,
+            true
+          ],
+          "numberBits": [
+            "4607182418800017408"
+          ]
+        }
       },
       {
         "input": "null",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "false",
-        "output": false
+        "output": {
+          "value": false,
+          "numberBits": []
+        }
       },
       {
         "input": "\"x\"",
-        "output": "x"
+        "output": {
+          "value": "x",
+          "numberBits": []
+        }
       },
       {
         "input": "invalid",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       },
       {
         "input": "9007199254740993",
-        "output": 9007199254740992
+        "output": {
+          "value": 9007199254740992.0,
+          "numberBits": [
+            "4845873199050653696"
+          ]
+        }
       },
       {
         "input": "[9007199254740993]",
-        "output": [
-          "9007199254740993"
-        ]
+        "output": {
+          "value": [
+            "9007199254740993"
+          ],
+          "numberBits": []
+        }
       },
       {
         "input": "{\"x\":9007199254740993}",
         "output": {
-          "x": "9007199254740993"
+          "value": {
+            "x": "9007199254740993"
+          },
+          "numberBits": []
         }
       },
       {
         "input": "\"x:9007199254740993!\"",
-        "output": null
+        "output": {
+          "value": null,
+          "numberBits": []
+        }
       }
     ]
   },
@@ -5452,11 +6114,11 @@
       },
       {
         "input": "%FF",
-        "output": "\ufffd"
+        "output": "�"
       },
       {
         "input": "%E2%82%AC",
-        "output": "\u20ac"
+        "output": "€"
       }
     ]
   },
@@ -7431,7 +8093,7 @@
       }
     ],
     "instantiation": "HttpRequestArgsMapVisitor<serde_json::Value>",
-    "call": "{ let visitor: $type = super::HttpRequestArgsMapVisitor(std::marker::PhantomData); let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "call": "{ let visitor: $type = super::HttpRequestArgsMapVisitor(std::marker::PhantomData); let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data,\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {
@@ -7791,7 +8453,7 @@
         "reason": "Consumes the supplied MapAccess and delegates the unchanged private remote frame schema; genuine frame decoder with actual native field observations at the concrete serde_json::Value map instantiation."
       }
     ],
-    "call": "{ let visitor: $type = super::ResponseDataMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data.map(|value|value.into_value().unwrap()),\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "call": "{ let visitor: $type = super::ResponseDataMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data,\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {
@@ -9539,7 +10201,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "isBinance",
@@ -9625,7 +10287,7 @@
       "error": null
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(|value|matches!(value,safe_cex_types::retained_json::RetainedJsonInput::Null)),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "config",
@@ -9862,7 +10524,7 @@
       }
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "isBinance",
@@ -9948,7 +10610,7 @@
       "error": null
     },
     "nativeObservation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data.clone().map(|v|v.into_value().unwrap()),\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "id",
         "config",
@@ -12085,14 +12747,14 @@
               "request": [
                 [
                   "x-token",
-                  "\tlast\r\n\u0000\u007f\t"
+                  "\tlast\r\n\u0000\t"
                 ],
                 [
                   " New ",
                   " a\tb "
                 ],
                 [
-                  " \ufeff ",
+                  " ﻿ ",
                   "skip"
                 ]
               ]
@@ -12753,7 +13415,7 @@
               "calls": 1,
               "seen": {
                 "kind": "string",
-                "value": "\ufffdA"
+                "value": "�A"
               },
               "actual": {
                 "phase": "transformed",
@@ -13079,7 +13741,7 @@
                 "phase": "transformed",
                 "value": {
                   "kind": "string",
-                  "value": "\ufeff{}"
+                  "value": "﻿{}"
                 }
               }
             }
@@ -13428,7 +14090,7 @@
             },
             "output": {
               "kind": "string",
-              "value": "\ufffdA"
+              "value": "�A"
             }
           },
           {
@@ -14811,15 +15473,18 @@
     },
     "category": "decoder",
     "evidence": "Shared canonical JSON.parse adapter; production HOW body regressions additionally assert native UTF-16/Float bits before any model view.",
-    "call": "{let actual=$type($value.as_str().unwrap());match actual { Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value.into_value().unwrap()}),Err(_)=>serde_json::json!({\"ok\":false}) }}",
+    "call": "{fn number_bits(v:&safe_cex_types::retained_json::RetainedJsonInput,out:&mut Vec<String>){use safe_cex_types::retained_json::RetainedJsonInput as I;match v {I::Float(n)=>out.push(n.to_bits().to_string()),I::Lexeme(n)=>out.push(n.parse::<f64>().unwrap().to_bits().to_string()),I::Array(a)=>for v in a {number_bits(v,out)},I::Object(o)=>for (_,v) in o {number_bits(v,out)},_=>{}}}fn report(v:safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value{let mut bits=Vec::new();number_bits(&v,&mut bits);let text=safe_cex_num::js_retained_json_stringify(&v).unwrap().unwrap();let value:serde_json::Value=serde_json::from_str(&text).unwrap();serde_json::json!({\"value\":value,\"numberBits\":bits})}match $type($value.as_str().unwrap()){Ok(v)=>{let mut r=report(v);r.as_object_mut().unwrap().insert(\"ok\".into(),serde_json::json!(true));r},Err(_)=>serde_json::json!({\"ok\":false})}}",
     "cases": [
       {
         "input": "{\"a\":1}",
         "output": {
           "ok": true,
           "value": {
-            "a": 1
-          }
+            "a": 1.0
+          },
+          "numberBits": [
+            "4607182418800017408"
+          ]
         }
       },
       {
@@ -14829,7 +15494,8 @@
           "value": [
             null,
             true
-          ]
+          ],
+          "numberBits": []
         }
       },
       {
@@ -15780,6 +16446,471 @@
         "output": {
           "ok": false
         }
+      }
+    ]
+  },
+  "safe_cex_transport::registry::TransportRegistry": {
+    "shape": "observed",
+    "evidence": "Reviewed packages/safe-cex/src/transport/registry.ts lazy options.transport/defaultTransport/directTransport precedence and truthy publicCorsProxy URL wrapping. Native observations use the actual registry, TealstreetTransport and DirectTransport, including an instance override after registration. Provider host REST/token capabilities panic if accidentally invoked.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "with_public_cors_proxy",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "instance",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::sync::Arc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "dyn_trait": {
+                                                "traits": [
+                                                  {
+                                                    "trait": {
+                                                      "path": "safe_cex_transport::provider::TransportProvider",
+                                                      "args": null
+                                                    },
+                                                    "generic_params": []
+                                                  }
+                                                ],
+                                                "lifetime": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw URL wrapping follows actual lazy provider selection; default and registered selection cannot override a supplied direct instance.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } use std::sync::Arc; use crate::TransportProvider;\n        let registry:$type=Default::default(); let mode=$value[\"mode\"].as_str().unwrap();\n        let direct:Arc<dyn TransportProvider>=Arc::new(crate::DirectTransport);\n        if mode!=\"default\" {registry.set_default_transport(Arc::new(crate::tealstreet::TealstreetTransport::new(Arc::new(fx::ProviderHost))));}\n        let instance=(mode==\"instance\").then_some(&direct);\n        serde_json::json!({\"url\":registry.with_public_cors_proxy($value[\"url\"].as_str().unwrap(),instance),\"provider\":registry.get_transport(instance).name()}) }",
+        "cases": [
+          {
+            "input": {
+              "mode": "default",
+              "url": "https://venue.example/book"
+            },
+            "output": {
+              "url": "https://venue.example/book",
+              "provider": "direct"
+            }
+          },
+          {
+            "input": {
+              "mode": "registered",
+              "url": "https://venue.example/book"
+            },
+            "output": {
+              "url": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://venue.example/book",
+              "provider": "tealstreet"
+            }
+          },
+          {
+            "input": {
+              "mode": "instance",
+              "url": "https://venue.example/book"
+            },
+            "output": {
+              "url": "https://venue.example/book",
+              "provider": "direct"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "resolve_transport_routing",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "exchange",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeName",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::routing::RoutingOptions",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "instance",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::sync::Arc",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "dyn_trait": {
+                                                "traits": [
+                                                  {
+                                                    "trait": {
+                                                      "path": "safe_cex_transport::provider::TransportProvider",
+                                                      "args": null
+                                                    },
+                                                    "generic_params": []
+                                                  }
+                                                ],
+                                                "lifetime": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_transport::routing::ResolvedRouting",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Selects a supplied or registered TransportProvider using already typed ExchangeName/RoutingOptions; no raw JSON/string decoding or new validation authority is introduced."
+      }
+    ]
+  },
+  "safe_cex_transport::tealstreet::TealstreetTransport": {
+    "shape": "observed",
+    "evidence": "Reviewed packages/safe-cex/src/transport/tealstreet/tealstreetTransport.ts wsConnection: relay detection takes precedence, ordinary Tealstreet hosts receive fixed upgrade headers, unrelated and lookalike hosts receive no override. Native observations invoke the actual provider trait, inspect connection kind and exact native Origin/User-Agent/header count, and never execute REST or token capabilities.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "host",
+                {
+                  "resolved_path": {
+                    "path": "alloc::sync::Arc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::tealstreet::TealstreetTransportHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Binds an already supplied TealstreetTransportHost capability; no raw input is decoded and the host is not invoked during construction."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_transport::provider::TransportProvider",
+          "name": "ws_routing",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "exchange",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeName",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_transport::routing::RoutingOptions",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_transport::routing::ResolvedRouting",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Projects already typed ExchangeName/RoutingOptions through the canonical routing resolver; raw URL admission is separately observed by ws_connection."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_transport::provider::TransportProvider",
+          "name": "ws_connection",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "url",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_transport::provider::WsConnection",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Raw URL selects actual Relay/Headers/None and exact upgrade header values, including an unrelated host and a suffix-spoofing negative.",
+        "call": "{ #[allow(dead_code)] mod fx { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/transport-socket-fixture.rs\")); } use crate::TransportProvider; let provider=$type::new(std::sync::Arc::new(fx::ProviderHost));\n        match provider.ws_connection($value.as_str().unwrap()) {\n        Some(crate::WsConnection::Headers{headers})=>serde_json::json!({\"kind\":\"headers\",\"origin\":headers.get(\"Origin\"),\"ua\":headers.get(\"User-Agent\"),\"count\":headers.len()}),\n        Some(crate::WsConnection::Relay{headers})=>serde_json::json!({\"kind\":\"relay\",\"origin\":headers.get(\"Origin\"),\"ua\":headers.get(\"User-Agent\"),\"count\":headers.len()}),\n        None=>serde_json::json!({\"kind\":\"none\",\"origin\":null,\"ua\":null,\"count\":0})} }",
+        "cases": [
+          {
+            "input": "wss://feed.tealstreet.io/tunnel",
+            "output": {
+              "kind": "headers",
+              "origin": "https://preview.tealstreet.io",
+              "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+              "count": 2
+            }
+          },
+          {
+            "input": "wss://relay.example/tunnel?ts-relay=wss%3A%2F%2Fvenue.example%2Fprivate",
+            "output": {
+              "kind": "relay",
+              "origin": "https://preview.tealstreet.io",
+              "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+              "count": 2
+            }
+          },
+          {
+            "input": "wss://ordinary.example/private",
+            "output": {
+              "kind": "none",
+              "origin": null,
+              "ua": null,
+              "count": 0
+            }
+          },
+          {
+            "input": "wss://tealstreet.io.evil.example/private",
+            "output": {
+              "kind": "none",
+              "origin": null,
+              "ua": null,
+              "count": 0
+            }
+          }
+        ]
       }
     ]
   }

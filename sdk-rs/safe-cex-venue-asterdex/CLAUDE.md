@@ -1,5 +1,9 @@
 # AsterDEX Rust venue
 
+Cross-layer native venue/worker witnesses live in the parity tooling target
+`aster_worker_emitter`. Private facade/frame checks remain in this crate;
+AsterDEX has no dependency on the higher worker layer.
+
 Behavioral reference: `packages/safe-cex/src/exchanges/asterdex`; both runtimes
 remain maintained. Check the [official API docs](https://github.com/asterdex/api-docs)
 while implementing. The maintained TypeScript determines parity behavior.
@@ -126,5 +130,6 @@ the source transformMarket default of 10. The helper still retains original Map
 identity, duplicate last-write precedence, log cardinality and partial entries
 before a later parse error. `exchange_trait` compares fifteen payloads in V1/V3
 against actual TS fetch/transform methods through the real production HTTP binding.
-Truthy nonnumeric leverage remains the pre-existing declared typed-output finding;
-this repair does not coerce it or claim a wider Market limit representation.
+Leverage Map values retain their raw shared Js value through the source truthy
+fallback. The approved numeric-limit policy then applies Number at the final max
+field, preserving zero, signed zero, NaN and infinities without widening types.

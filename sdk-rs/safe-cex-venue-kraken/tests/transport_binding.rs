@@ -29,7 +29,10 @@ impl RestAdapter for Adapter {
                 status: 200,
                 reason: None,
                 headers: Default::default(),
-                body: RestResponseBody::Untransformed(accounts()),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(accounts())
+                        .unwrap(),
+                ),
             })
         })
     }

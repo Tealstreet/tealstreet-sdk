@@ -93,7 +93,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "9a975bfd8c75ec3e816e72d09ef9c717907c5c59d3c84402d60fe6802eccfc99"
+      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
     },
     "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::futures(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_symbol_max_leverage(receiver,symbol).await.map(|_|()) })) }",
     "cases": [
@@ -268,7 +268,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "9a975bfd8c75ec3e816e72d09ef9c717907c5c59d3c84402d60fe6802eccfc99"
+      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
     },
     "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::futures(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
     "cases": [
@@ -445,7 +445,7 @@
     },
     "fixture": {
       "file": "safe-cex-venue-kucoin/tests/support/exchange_runtime.rs",
-      "sha256": "9a975bfd8c75ec3e816e72d09ef9c717907c5c59d3c84402d60fe6802eccfc99"
+      "sha256": "7e04b3f23a11d86d0b09e09b11429ea07a073f8d55c8ffac5ddea8f3c8dc03bb"
     },
     "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
     "cases": [

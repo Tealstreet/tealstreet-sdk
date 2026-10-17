@@ -1803,10 +1803,13 @@ process.stdout.write(JSON.stringify({cases,whitespace}));
     fn raw_integer_scanner_protects_exactly_nested_sixteen_digit_tokens() {
         let input = r#"{"short":123456789012345,"long":1234567890123456,"negative":-1234567890123456,"array":[123456789012345,1234567890123456],"decimal":1234567890123456.5,"exp":1234567890123456e1,"text":"1234567890123456"}"#;
         let expected = r#"{"short":123456789012345,"long":"1234567890123456","negative":"-1234567890123456","array":[123456789012345,"1234567890123456"],"decimal":1234567890123456.5,"exp":1234567890123456e1,"text":"1234567890123456"}"#;
-        assert_eq!(protect_big_integer_tokens(input), expected);
         assert_eq!(
-            protect_big_integer_tokens("1234567890123456"),
-            "1234567890123456"
+            protect_big_integer_tokens(&input.encode_utf16().collect::<Vec<_>>()),
+            expected.encode_utf16().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            protect_big_integer_tokens(&"1234567890123456".encode_utf16().collect::<Vec<_>>()),
+            "1234567890123456".encode_utf16().collect::<Vec<_>>()
         );
     }
 

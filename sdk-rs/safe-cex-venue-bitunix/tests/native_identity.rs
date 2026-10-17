@@ -69,11 +69,13 @@ fn native_nonce_client_id_and_fallback_match_source_uuid() {
         "native REST nonce must strip both separators"
     );
     let body: Value = match request.body.as_ref().unwrap() {
-        safe_cex_transport::RestBody::Untransformed(v) => v.clone(),
-        safe_cex_transport::RestBody::Transformed(t) => match t.value() {
-            Value::String(s) => serde_json::from_str(s).unwrap(),
-            v => v.clone(),
-        },
+        safe_cex_transport::RestBody::Untransformed(v) => v.clone().into_value().unwrap(),
+        safe_cex_transport::RestBody::Transformed(t) => {
+            match &t.value().clone().into_value().unwrap() {
+                Value::String(s) => serde_json::from_str(s).unwrap(),
+                v => v.clone(),
+            }
+        }
         safe_cex_transport::RestBody::Encoded(b) => serde_json::from_slice(b).unwrap(),
     };
     assert_eq!(body["clientId"], format!("ts_{expected}"));

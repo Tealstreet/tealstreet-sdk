@@ -11,6 +11,16 @@ only to executionreport/algoexecutionreportv2: fills trigger REST position refre
 and balance remains a REST read. `binding_streams` and `binding_reads` retain those
 real signed-client paths; no balance socket topic is introduced.
 
+The V3 canonical/shadow/snapshot comparison bodies were test-only: the SDK index
+exports none of them and their TS imports occur only in audit tests. Their Rust
+bodies, unused operation holders and oracle-only tests are retired; tealstreet-next
+owns the test-only TS cleanup. CanonicalOps/CanonicalCallback remain the exact
+live legacy operation shape. The independent route enum/strict union codec stays
+with its declaration witness. Legacy client-ID validation, including the
+constructed class's Number.isSafeInteger call, is retained for separate binding
+verification. Four dead-method baseline entries and five capability exemptions
+are removed with the retired bodies. No V3 route is enabled.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/woo/CLAUDE.md).
 Composition: [exchange core contract](../safe-cex-exchange/CLAUDE.md).
 
@@ -472,3 +482,8 @@ source BigInt throws and toJSON callbacks before any data-only transport capture
 exchange regression in `native_signing_retention` observes NaN and Infinity in
 actual HMAC preimages before the terminal wire projection. Finite JSON fixture
 views in older tests are explicit observations after signing.
+
+The constructed clientOrderIdRule retains its source Number(input) conversion and
+uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
+compares26 maintained-source identifiers, including safe-range and canonical-decimal
+boundaries, without replacing the rule or its operation table.
