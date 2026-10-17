@@ -1103,7 +1103,7 @@ fn market_leverage_refusal_case(refresh: bool) {
         assert_eq!(markets[1].limits.leverage.max, 75.0);
         let errors = errors.borrow();
         assert_eq!(errors.len(), 1);
-        let message = errors[0].as_str().unwrap();
+        let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
         assert!(
             message.contains("BAD-USDT")
                 && message.contains(&format!("limits.leverage.max={value}")),
