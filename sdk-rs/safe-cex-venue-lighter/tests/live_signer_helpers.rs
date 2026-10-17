@@ -1,3 +1,4 @@
+use safe_cex_exchange::js_runtime::value::from_json;
 use safe_cex_venue_lighter::signer_helpers::*;
 use serde_json::{Value, json};
 use std::process::Command;
@@ -26,9 +27,12 @@ fn lighter_signer_helpers_match_live_typescript() {
     }
 
     for case in oracle["nonce"].as_array().unwrap() {
-        let actual = match is_lighter_invalid_nonce_error(case.get("value")) {
+        let input = case.get("value").map(from_json);
+        let actual = match is_lighter_invalid_nonce_error(input.as_ref()) {
             Ok(value) => json!({"ok":value}),
-            Err(error) => json!({"error":{"name":error.name,"message":error.message}}),
+            Err(error) => {
+                json!({"error":{"name":error.value.get("name").unwrap().to_display(),"message":error.message()}})
+            }
         };
         assert_eq!(
             actual, case["expected"],

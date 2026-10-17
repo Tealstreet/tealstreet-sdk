@@ -43,13 +43,17 @@ encoder, with host callbacks for Date.now and the core socket send. Its live
 source oracle pins exact bytes, per-frame clock reads and send-failure ordering;
 it does not create a separate socket runtime.
 
-`order_reads` reads futures normal and algo books through RestAdapter and takes
-the shared VirtualClock for missing source timestamps. None marks
-failure, while Some(empty) is a successful empty book. The combined method awaits
-in source order, preserves failed categories from the store after both awaits,
-and applies shared same-id remainder reconciliation. Its whole-book typed-output
-refusals and error/JSON input findings are explicit; a mapper refusal must not be
-reported as an empty successful response.
+Production futures normal/algo order reads use `futures_native_order_reads`,
+installed by `binding/futures.rs` in the constructed exchange. The unused typed
+`order_reads` copy, its decoder contracts and tests have been deleted. Run
+`tests/order_reads_binding.rs` for the real HTTP/Store book witness and
+`tests/futures_native_order_reads.rs` for the native component/source cases.
+The binding witness observes both endpoints, scaled amounts and independent
+failed-category preservation. A compiled live-reader mutation passes all eight
+retired copy tests but fails the constructed witness; exact restoration passes.
+Historical typed-reader findings and control counts in evidence documents are
+not evidence about the production route. Shared typed projections remain bounded
+by the manifest's representation choices.
 
 `spot_reads::fetch_active_order_symbols` discovers active Spot symbols through
 RestAdapter, preserving every array entry rather than trusting the source's

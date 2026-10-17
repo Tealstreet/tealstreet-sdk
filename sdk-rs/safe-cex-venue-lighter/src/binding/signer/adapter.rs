@@ -16,7 +16,7 @@ use crate::{
     transaction_promise::NativePromise,
     transaction_signing::{SigningResult, TransactionSigningError},
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, to_json};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use std::{
     cell::{OnceCell, RefCell},
     rc::{Rc, Weak},
@@ -76,10 +76,9 @@ fn runtime(host: &Host) -> Runtime {
                 .encode_utf16()
                 .collect())
         },
-        // ts: isLighterInvalidNonceError, over the thrown value's JSON view.
+        // ts: isLighterInvalidNonceError reads the original thrown value.
         invalid_nonce: |_, e| {
-            let value = to_json(&to_thrown(e.clone()).value).map_err(to_signing)?;
-            is_lighter_invalid_nonce_error(Some(&value)).map_err(|c| to_signing(c.into()))
+            is_lighter_invalid_nonce_error(Some(&to_thrown(e.clone()).value)).map_err(to_signing)
         },
         // ts: new Promise((resolve) => setTimeout(resolve, ms))
         delay: |h, ms| {
@@ -238,4 +237,112 @@ pub(super) fn install(host: &Host) -> Result<(), Thrown> {
         Ok(realm.host.promise(created, |adapter| Ok(adapter.clone())))
     });
     host.define_global("createLighterSignerAdapter", factory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn native_nonce_classifier_skips_unread_fields_and_preserves_getter_errors() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/signer-helpers-oracle.cjs"
+            ))
+            .output()
+            .expect("maintained invalid nonce classifier");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let (_realm, host) = super::super::tests::classifier_host();
+        let runtime = runtime(&host);
+        let mut actual = vec![];
+        for (label, code, message) in [
+            ("ordinary", 400., "other"),
+            ("code", 21104., "other"),
+            ("message", 400., "INVALID NONCE"),
+        ] {
+            let value = Js::object(vec![
+                ("code", Js::Number(code)),
+                ("message", Js::str(message)),
+                ("details", Js::utf16(&[0xd800])),
+            ]);
+            value.set("cycle", value.clone()).unwrap();
+            let result = (runtime.invalid_nonce)(&host, &to_signing(Thrown::new(value.clone())));
+            actual.push(json!({"label":label,"expected":match result {
+                Ok(value)=>json!({"ok":value}),Err(error)=>json!({"error":to_thrown(error).message()}),
+            }}));
+            value.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+        }
+        for mode in ["message-throw", "string-hint", "inherited", "symbol"] {
+            let trace = Rc::new(RefCell::new(vec![]));
+            let sentinel = Js::object(vec![]);
+            let value = match mode {
+                "message-throw" => {
+                    let value = Js::object(vec![]);
+                    for name in ["code", "message"] {
+                        let (trace, sentinel) = (trace.clone(), sentinel.clone());
+                        value.define_accessor(
+                            name,
+                            Some(Rc::new(move |_| {
+                                trace.borrow_mut().push(name);
+                                if name == "code" {
+                                    Ok(Js::Number(21104.))
+                                } else {
+                                    Err(Thrown::new(sentinel.clone()))
+                                }
+                            })),
+                            None,
+                        );
+                    }
+                    value
+                }
+                "string-hint" => {
+                    let observed = trace.clone();
+                    let failure = sentinel.clone();
+                    let code = Js::object(vec![
+                        (
+                            "toString",
+                            Js::function("input", move |_, _| {
+                                observed.borrow_mut().push("string");
+                                Ok(Js::str("21104"))
+                            }),
+                        ),
+                        (
+                            "valueOf",
+                            Js::function("input", move |_, _| Err(Thrown::new(failure.clone()))),
+                        ),
+                    ]);
+                    Js::object(vec![("code", code), ("message", Js::str("other"))])
+                }
+                "inherited" => {
+                    let value = Js::object(vec![]);
+                    let Js::Object(object) = &value else {
+                        unreachable!()
+                    };
+                    *object.proto.borrow_mut() = Some(Js::object(vec![
+                        ("code", Js::Number(21104.)),
+                        ("message", Js::str("other")),
+                    ]));
+                    value
+                }
+                "symbol" => Js::object(vec![
+                    ("code", Js::SymbolIterator),
+                    ("message", Js::SymbolIterator),
+                ]),
+                _ => unreachable!(),
+            };
+            let result = (runtime.invalid_nonce)(&host, &to_signing(Thrown::new(value)));
+            actual.push(json!({"label":mode,"expected":match result {
+                Ok(value)=>json!({"ok":value}),Err(error)=>json!({"same":to_thrown(error).value.same_reference(&sentinel)}),
+            },"trace":*trace.borrow()}));
+        }
+        assert_eq!(actual.len(), 7);
+        assert_eq!(Value::Array(actual), expected["nativeNonce"]);
+    }
 }
