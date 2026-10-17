@@ -739,3 +739,12 @@ income/range and closed PnL for primary/demo/inverse, historical orders for
 primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
 order history. `history_capability_binding` exercises the actual capability calls
 and signed HTTP; direct trait coverage alone does not witness this dispatch path.
+
+The production `SpotExchangeHost::destructure` consumes the shared JS iterator
+protocol for candle tuples, interval splits and guarded balance arrays. It reads
+only the requested elements, skips value reads for elisions, pads exhausted
+iterators and closes bounded iteration. `native_host_bybit` proves string KLINE
+tuples through the real registry and HTTP reader for all four account variants;
+the maintained TS source check is imported by the Spot read oracle. Noniterable
+rows remain failures. The old array-only adapter compiled but failed this actual
+registry witness at `234567 is not iterable`.
