@@ -242,3 +242,36 @@ fn private_reopen_refreshes_orders_without_starting_another_polling_loop() {
         runtime.errors.borrow()
     );
 }
+
+#[test]
+fn synced_clock_reaches_real_private_authentication() {
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    struct ResetClock;
+    impl Drop for ResetClock {
+        fn drop(&mut self) {
+            VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
+        }
+    }
+    let _reset = ResetClock;
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 40_000.0);
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
+    let f = PrivateFixture::new();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
+    let frame: serde_json::Value = f
+        .socket
+        .sent
+        .borrow()
+        .iter()
+        .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+        .find(|s| s["method"] == "SUBSCRIBE")
+        .unwrap();
+    let timestamp = frame["signature"][2]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!(
+        (before..=after).contains(&timestamp),
+        "real private auth timestamp {timestamp} outside synced {before}..={after}"
+    );
+}
