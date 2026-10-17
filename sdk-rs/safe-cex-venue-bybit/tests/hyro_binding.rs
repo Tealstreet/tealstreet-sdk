@@ -1194,3 +1194,54 @@ fn hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation() 
     assert_eq!(error.message, "HyroTrader seconds candles require a supported trade stream");
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn hyro_inherits_dynamic_history_except_explicit_empty_income() {
+    if configured_child("hyro_inherits_dynamic_history_except_explicit_empty_income") {
+        return;
+    }
+    use safe_cex_exchange::capabilities::{BaseCapabilityMethod, is_base_capability_fallback};
+    let h = support::harness_as(ExchangeName::Hyrotrader, support::options(), |wire| {
+        for path in ["/v5/position/closed-pnl", "/v5/order/history", "/v5/execution/list"] {
+            wire.ok("GET", path, json!({"list":[]}));
+        }
+    });
+    let venue = h.venue();
+    let caps = venue.capabilities();
+    let options = json!({"symbol":"BTCUSDT","from":1,"to":2});
+    assert!(h.drive(caps.fetch_closed_pnl(venue, serde_json::from_value(options.clone()).unwrap())).unwrap().is_empty());
+    assert_eq!(h.wire.calls("/v5/position/closed-pnl").len(), 1, "inherited dynamic closed PnL must reach the simulator");
+    assert!(h.drive(caps.fetch_historical_orders(venue, Some(serde_json::from_value(options.clone()).unwrap()))).unwrap().is_empty());
+    assert_eq!(h.wire.calls("/v5/order/history").len(), 1);
+    assert!(h.drive(caps.fetch_historical_fills(venue, serde_json::from_value(options).unwrap())).unwrap().is_empty());
+    assert_eq!(h.wire.calls("/v5/execution/list").len(), 1);
+    assert!(!is_base_capability_fallback(&caps.fetch_closed_pnl, BaseCapabilityMethod::FetchClosedPnl));
+    assert!(!is_base_capability_fallback(&caps.fetch_historical_orders, BaseCapabilityMethod::FetchHistoricalOrders));
+    assert!(!is_base_capability_fallback(&caps.fetch_historical_fills, BaseCapabilityMethod::FetchHistoricalFills));
+    assert!(is_base_capability_fallback(&caps.fetch_income_history, BaseCapabilityMethod::FetchIncomeHistory));
+    assert!(is_base_capability_fallback(&caps.fetch_income_history_range, BaseCapabilityMethod::FetchIncomeHistoryRange));
+    assert!(h.drive(caps.fetch_income_history(venue, None)).unwrap().is_empty());
+    assert!(h.drive(caps.fetch_income_history_range(venue, 1., 2., None)).unwrap().is_empty());
+    assert!(h.wire.calls("/v5/account/transaction-log").is_empty());
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn hyro_inherits_journal_closed_rows_and_order_join() {
+    if configured_child("hyro_inherits_journal_closed_rows_and_order_join") {
+        return;
+    }
+    use safe_cex_exchange::journal::HistoricalPositionOptions;
+    let h = support::harness_as(ExchangeName::Hyrotrader, support::options(), |wire| {
+        wire.ok("GET", "/v5/position/closed-pnl", json!({"list":[]}));
+        wire.ok("GET", "/v5/order/history", json!({"list":[]}));
+    });
+    let rows = h.drive(h.venue().fetch_historical_positions(HistoricalPositionOptions {
+        account: "hyro-account".into(), from: Some(0.), to: Some(10000.),
+    })).unwrap();
+    assert!(rows.is_empty());
+    assert_eq!(h.wire.calls("/v5/position/closed-pnl").len(), 1);
+    assert_eq!(h.wire.calls("/v5/order/history").len(), 1);
+    assert!(h.wire.calls("/v5/account/transaction-log").is_empty());
+    h.venue().dispose().unwrap();
+}
