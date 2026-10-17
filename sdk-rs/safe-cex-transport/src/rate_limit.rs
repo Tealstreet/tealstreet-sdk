@@ -18,6 +18,10 @@ struct State {
 }
 pub struct RateLimitedAdapter {
     inner: Arc<dyn RestAdapter>,
+    limiter: RateLimiter,
+}
+/// A FIFO rate slot acquired before request signing, shared by adapter and native clients.
+pub struct RateLimiter {
     clock: Arc<dyn RateLimitClock>,
     max_requests: usize,
     per_milliseconds: u64,
@@ -46,14 +50,74 @@ impl RateLimitedAdapter {
         max_requests: usize,
         per_milliseconds: u64,
     ) -> Self {
-        assert!(max_requests > 0 && per_milliseconds > 0);
         Self {
             inner,
+            limiter: RateLimiter::new(clock, max_requests, per_milliseconds),
+        }
+    }
+}
+impl RateLimiter {
+    pub fn new(clock: Arc<dyn RateLimitClock>, max_requests: usize, per_milliseconds: u64) -> Self {
+        assert!(max_requests > 0 && per_milliseconds > 0);
+        Self {
             clock,
             max_requests,
             per_milliseconds,
             state: Mutex::new(State::default()),
         }
+    }
+    /// Reserve one dispatch slot; dropping a pending acquire releases its FIFO ticket.
+    pub async fn acquire(&self) -> Result<(), crate::TransportError> {
+        let ticket = {
+            let mut state = self.state.lock().expect("rate limit lock");
+            let ticket = state.next_ticket;
+            state.next_ticket += 1;
+            state.queue.push_back((ticket, None));
+            ticket
+        };
+        let guard = QueueGuard {
+            state: &self.state,
+            ticket,
+        };
+        loop {
+            let wait = poll_fn(|cx| {
+                let now = self.clock.now_ms();
+                let mut state = self.state.lock().expect("rate limit lock");
+                if state
+                    .queue
+                    .front()
+                    .is_none_or(|(front, _)| *front != ticket)
+                {
+                    if let Some((_, waker)) =
+                        state.queue.iter_mut().find(|(queued, _)| *queued == ticket)
+                    {
+                        *waker = Some(cx.waker().clone());
+                    }
+                    return Poll::Pending;
+                }
+                if state.count == 0 || now.saturating_sub(state.start) >= self.per_milliseconds {
+                    state.start = now;
+                    state.count = 0;
+                }
+                if state.count < self.max_requests {
+                    state.count += 1;
+                    Poll::Ready(None)
+                } else {
+                    Poll::Ready(Some(
+                        self.per_milliseconds
+                            .saturating_sub(now.saturating_sub(state.start)),
+                    ))
+                }
+            })
+            .await;
+            if let Some(wait) = wait {
+                self.clock.sleep_ms(wait).await?;
+            } else {
+                break;
+            }
+        }
+        drop(guard);
+        Ok(())
     }
 }
 impl RestAdapter for RateLimitedAdapter {
@@ -69,58 +133,10 @@ impl RestAdapter for RateLimitedAdapter {
     }
     fn execute_with_receipt(&self, request: RestRequest) -> crate::RestFuture<'_, RestExecution> {
         Box::pin(async move {
-            let ticket = {
-                let mut state = self.state.lock().expect("rate limit lock");
-                let ticket = state.next_ticket;
-                state.next_ticket += 1;
-                state.queue.push_back((ticket, None));
-                ticket
-            };
-            let guard = QueueGuard {
-                state: &self.state,
-                ticket,
-            };
-            loop {
-                let wait = poll_fn(|cx| {
-                    let now = self.clock.now_ms();
-                    let mut state = self.state.lock().expect("rate limit lock");
-                    if state
-                        .queue
-                        .front()
-                        .is_none_or(|(front, _)| *front != ticket)
-                    {
-                        if let Some((_, waker)) =
-                            state.queue.iter_mut().find(|(queued, _)| *queued == ticket)
-                        {
-                            *waker = Some(cx.waker().clone());
-                        }
-                        return Poll::Pending;
-                    }
-                    if state.count == 0 || now.saturating_sub(state.start) >= self.per_milliseconds
-                    {
-                        state.start = now;
-                        state.count = 0;
-                    }
-                    if state.count < self.max_requests {
-                        state.count += 1;
-                        Poll::Ready(None)
-                    } else {
-                        Poll::Ready(Some(
-                            self.per_milliseconds
-                                .saturating_sub(now.saturating_sub(state.start)),
-                        ))
-                    }
-                })
-                .await;
-                if let Some(wait) = wait {
-                    self.clock.sleep_ms(wait).await.map_err(|error| {
-                        crate::RestFailure::from_transport(error, request.clone())
-                    })?;
-                } else {
-                    break;
-                }
-            }
-            drop(guard);
+            self.limiter
+                .acquire()
+                .await
+                .map_err(|error| crate::RestFailure::from_transport(error, request.clone()))?;
             self.inner.execute_with_receipt(request).await
         })
     }

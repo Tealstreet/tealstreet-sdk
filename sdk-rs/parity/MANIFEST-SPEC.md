@@ -1576,14 +1576,18 @@ production JavaScript/transport/Store assembly.
 
 ### WEEX reporting and continuation ownership
 
+`fetchOrders` discards rejected normal/algo legs without reporting, matching the
+maintained Promise.allSettled body. Its constructed HTTP regression observes
+successful orders and zero error events after an algo endpoint rejection.
 Public depth-gap recovery silently discards snapshot rejections and routed-callback
 throws, matching the maintained empty catch. The initial listenOrderBook snapshot
 retains its distinct source warning. Constructed HTTP/socket coverage observes
 no gap warning, no failed replacement delivery and a subsequent valid update.
-The fetchOrders and private-refresh reporting corrections are separate fixes.
+Private refresh reporting is corrected separately in #638.
 
-The returned `fetchOrders` and refresh futures own their aggregation/update/report
-continuations. Dropping one can omit those outcomes, even when host-started
+The returned `fetchOrders` future owns its aggregation/dedup continuation;
+refresh futures own update/report continuations. Dropping one can omit those
+outcomes, even when host-started
 requests survive. This bounds abandoned native work instead of requiring every
 borrowed host context to survive an unobserved Promise. Public snapshot observers
 are different: `observe_snapshot` must retain its callbacks and receiver until

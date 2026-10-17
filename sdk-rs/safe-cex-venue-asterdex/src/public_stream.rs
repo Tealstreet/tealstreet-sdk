@@ -89,6 +89,12 @@ impl WsProtocol for Protocol {
             .map_or(Ok(()), |s| s.subscriptions.on_open());
         Box::pin(async move { result })
     }
+    fn on_error(&self, _: &BaseWebSocket, _: &str) -> Result<(), ExchangeError> {
+        // Source's error listener calls this.onClose() without the error event.
+        self.0
+            .upgrade()
+            .map_or(Ok(()), |stream| stream.socket.on_close(None, ""))
+    }
     fn on_message(&self, _: &Rc<BaseWebSocket>, frame: &SocketFrame) -> Result<(), ExchangeError> {
         self.0.upgrade().map_or(Ok(()), |s| s.on_message(frame))
     }
