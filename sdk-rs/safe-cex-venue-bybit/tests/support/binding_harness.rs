@@ -290,7 +290,13 @@ impl RestAdapter for Wire {
         if self.network_failures.borrow().contains(&path) {
             return Box::pin(async move {
                 Err(safe_cex_transport::RestFailure::from_transport(
-                    safe_cex_transport::TransportError::Network(safe_cex_transport::NetworkFailure::from_code("scripted network".into(), Some("ERR_NETWORK".into()))), request,
+                    safe_cex_transport::TransportError::Network(
+                        safe_cex_transport::NetworkFailure::from_code(
+                            "scripted network".into(),
+                            Some("ERR_NETWORK".into()),
+                        ),
+                    ),
+                    request,
                 ))
             });
         }
