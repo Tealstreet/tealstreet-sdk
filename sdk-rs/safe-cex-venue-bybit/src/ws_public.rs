@@ -383,7 +383,14 @@ impl PublicProtocol {
                 json,
                 socket.emitter().name() == "bybitspot",
             )
-            .map_err(|error| ExchangeError::new(error.to_string()))
+            .map_err(|error| match error {
+                TickerEventError::Store(error) => error.into(),
+                TickerEventError::Source(message) => {
+                    let mut error = ExchangeError::new(message);
+                    error.name = "TypeError".into();
+                    error
+                }
+            })
         });
         let pong_socket = Rc::downgrade(socket);
         let pong: safe_cex_exchange::websocket::MessageHandler =

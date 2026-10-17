@@ -21,6 +21,142 @@ fn signature(payload: &str) -> String {
         .collect()
 }
 
+#[test]
+fn bybit_ticker_socket_preserves_coercion_type_errors_through_native_registry() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_transport::socket::SocketFrame;
+
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(account),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            let slot = if name == ExchangeName::Bybitinverse {
+                SocketSlot::PublicSecondary
+            } else {
+                SocketSlot::Public
+            };
+            let socket = h.exchange.base().get_socket(slot).unwrap();
+            let error = socket.on_message(&SocketFrame::Text(
+                r#"{"topic":"tickers.BTCUSDT","data":{"symbol":{"toString":null},"lastPrice":"42"}}"#.into(),
+            )).unwrap_err();
+            assert_eq!(
+                error.name, "TypeError",
+                "native socket retains coercion error class: {name:?}"
+            );
+            assert_eq!(error.message, "Cannot convert object to primitive value");
+            assert!(
+                h.store.tickers().is_empty(),
+                "coercion fails before ticker mutation"
+            );
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
+    use safe_cex_exchange::{runtime::ExchangeError, socket_lifecycle::SocketSlot};
+    use safe_cex_store::StoreUpdate;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::cell::Cell;
+
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(account),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            h.store
+                .update(
+                    StoreUpdate {
+                        tickers: Some(vec![
+                            serde_json::from_value(json!({
+                                "id":"BTCUSDT","symbol":"BTCUSDT","bid":1,"ask":1,"last":1,
+                                "mark":1,"index":1,"percentage":0,"openInterest":0,
+                                "fundingRate":0,"fundingTime":0,"volume":0,"quoteVolume":0
+                            }))
+                            .unwrap(),
+                        ]),
+                        ..Default::default()
+                    },
+                    false,
+                )
+                .unwrap();
+            let mut original = ExchangeError::new("ticker subscriber rejected");
+            original.name = "TickerSubscriberError".into();
+            original.response = Some(json!({"status":418,"data":{"reason":"listener"}}));
+            original.store_subscriber_ids = vec![71];
+            let cause: safe_cex_types::StoreSubscriberError = original.clone().into();
+            let thrown = cause.clone();
+            let first = h.store.subscribe(Box::new(move |data, _| {
+                if data.tickers[0].last == 42. {
+                    Err(thrown.clone())
+                } else {
+                    Ok(())
+                }
+            }));
+            let later = Rc::new(Cell::new(0));
+            let observed = later.clone();
+            let second = h.store.subscribe(Box::new(move |data, _| {
+                if data.tickers[0].last == 42. {
+                    observed.set(observed.get() + 1);
+                }
+                Ok(())
+            }));
+            let slot = if name == ExchangeName::Bybitinverse {
+                SocketSlot::PublicSecondary
+            } else {
+                SocketSlot::Public
+            };
+            let socket = h.exchange.base().get_socket(slot).unwrap();
+            let error = socket
+                .on_message(&SocketFrame::Text(
+                    r#"{"topic":"tickers.BTCUSDT","data":{"symbol":"BTCUSDT","lastPrice":"42"}}"#
+                        .into(),
+                ))
+                .unwrap_err();
+            assert_eq!(
+                h.store.tickers()[0].last,
+                42.,
+                "mutation commits before rejection: {name:?}"
+            );
+            assert_eq!(later.get(), 0, "the throwing listener stops fanout");
+            assert_eq!(
+                error.name, original.name,
+                "native socket retains error name: {name:?}"
+            );
+            assert_eq!(error.message, original.message);
+            assert_eq!(error.response, original.response);
+            assert_eq!(error.store_subscriber_cause, Some(cause));
+            assert_eq!(error.store_subscriber_ids.len(), 2);
+            assert_eq!(error.store_subscriber_ids[0], 71);
+            first();
+            second();
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
 fn account(request: &support::Seen) -> Option<Value> {
     (request.path == "/v5/user/query-api").then(|| {
         json!({

@@ -213,3 +213,7 @@ isDisposed and returns without recovery or rearm. Core's owned task disposal can
 cancel all work, but its public API cannot remove/replace one topic operation.
 The separate 100ms subscription-retry timer is not one of these three rows.
 No generation guard, local task registry, or invented core API is substituted.
+
+## Production ticker callback consumption
+
+The extracted ticker handler retained `StoreMutationError`, but the production `PublicProtocol::register_handlers` callback still replaced it with a message-only `ExchangeError`. The native-registry regression in `tests/native_host_bybit.rs` now exercises the four actual Bybit-family constructors and the registered ticker callback, asserting the committed update, skipped later subscriber, original error name/response/cause and appended subscriber-ID chain. The callback uses the existing canonical Store-error conversion. `scripts/ticker-event-fixtures.mjs` also asserts that each maintained TS ticker method propagates the exact subscriber error after committing the patch.
