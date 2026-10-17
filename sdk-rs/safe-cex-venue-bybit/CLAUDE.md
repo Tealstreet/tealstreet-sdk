@@ -643,3 +643,12 @@ Spot retains its existing spot-only body. Retirement consumes only `id` and
 `symbol`, including cancellation snapshots, and reports resolved venue rejection
 without throwing or retiring rows. `tests/cancel_all_binding.rs` exercises all
 four production constructors and the real retained receiver/HTTP client path.
+
+The unused `inverse_socket_bodies` adapter and its fake realm/oracle are removed.
+Inverse socket manifest rows point to the live `ws_private` and `ws_public`
+bodies. The real inverse socket witness replays a cumulative fill frame and then
+advances it, checking suppression, USD delta and inverse qty/value price.
+`scripts/inverse-private-tracker-control.py` resets the production tracker per
+frame, requires the duplicate-fill assertion to fail after compilation, restores
+the exact source bytes and requires the same witness to pass. Historical socket
+body evidence describes the removed adapter, not production coverage.
