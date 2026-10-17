@@ -104,6 +104,19 @@ async function run(input){
  return {inputRaw,name:input.name,result,trace:state.trace,positions:store.positions,leverage:store.fetchedLeverage,orders:store.orders};
 }
 (async()=>{
+ if(process.argv[2]==='goneIdLookup'){
+  const cases=[];
+  for(const [label,id,key] of [['normal-number',123,'123'],['normal-string','123','123'],['normal-boolean',true,'true'],['normal-array',[123],'123'],['normal-object',{},'[object Object]'],['normal-zero',0,'0']]){
+   const orders=[order(key),order(key+'4')];
+   cases.push({label,...await run({name:'cancelOrders',args:[[orders[0]]],orders,responses:[{code:'1',data:[{code:'1000',orderId:id,msg:'already gone'}]}]})});
+  }
+  for(const [label,id] of [['algo-number',123],['algo-string','123']]){
+   const orders=[order('123__stop_loss','stop_market'),order('1234__stop_loss','stop_market')];
+   cases.push({label,...await run({name:'cancelOrders',args:[[orders[0]]],orders,responses:[{code:'1',data:[{code:'1000',tpslId:id,msg:'already gone'}]}]})});
+  }
+  assert.equal(cases.length,8);
+  console.log(raw({market,cases}));return;
+ }
  const outputs=[];for(const c of cases)outputs.push(await run(c));
  assert.deepEqual(outputs[0].result.value,['N1','N2']);assert.equal(outputs[1].trace.filter(t=>t[0]==='request')[0][2].length,20);
  assert.deepEqual(outputs[15].result.value,['normal-second','algo-third','trigger-first']);
