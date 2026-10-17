@@ -662,3 +662,65 @@ fn real_private_position_frame_updates_positions_and_balance_upnl() {
     drop(positions);
     h.venue().dispose().unwrap();
 }
+
+#[test]
+fn private_receive_watchdog_obeys_grvt_idle_thresholds() {
+    let h = setup();
+    h.runtime.private_proxy.set(true);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let private = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/private"))
+        .unwrap()
+        .1
+        .clone();
+    private
+        .events
+        .borrow_mut()
+        .push_back(message(json!({"type":"auth_success"}).to_string()));
+    h.runtime.pump();
+    let pings = || {
+        private
+            .sent
+            .borrow()
+            .iter()
+            .filter(|value| **value == json!("ping"))
+            .count()
+    };
+    let initial = pings();
+    h.runtime.advance(8000.0);
+    assert_eq!(
+        pings(),
+        initial,
+        "GRVT private watchdog waits beyond base ping threshold"
+    );
+    h.runtime.advance(23001.0);
+    assert_eq!(
+        pings(),
+        initial + 1,
+        "GRVT private watchdog pings after 30 seconds"
+    );
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|log| log.contains("[GRVT][PWS]") && log.contains("sending ping"))
+    );
+    h.runtime.advance(60000.0);
+    assert!(
+        h.runtime
+            .logs
+            .borrow()
+            .iter()
+            .any(|log| log.starts_with("warning:")
+                && log.contains("[GRVT][PWS]")
+                && log.contains("reconnecting")),
+        "GRVT private watchdog reconnects with source warning after 90 seconds"
+    );
+    assert!(private.closed.get());
+}

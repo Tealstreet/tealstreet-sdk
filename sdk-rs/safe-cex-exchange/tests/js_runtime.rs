@@ -3722,3 +3722,6 @@ fn http_factory_excludes_signing_captures_and_keeps_null_response_rejection_iden
     assert_eq!(owner.store.request_stats().unwrap().network, 1.0);
     assert_eq!(owner.store.request_stats().unwrap().other, 0.0);
 }
+
+#[path = "support/js_socket_receive.rs"]
+mod socket_receive;

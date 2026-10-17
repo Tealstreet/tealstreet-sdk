@@ -1251,3 +1251,13 @@ installed qs package over 96 option/input combinations. The BingX registry
 regression additionally observes final signed GET query ordering through the
 production HTTP client and verifies the signature against the source preimage.
 Other qs options remain outside this imported runtime surface.
+
+The JS socket's lastReceived accessor shares the native core's Number field;
+pre-assembly writes are retained until lazy core creation. Frames and JS session
+resets therefore update the same health timestamp, preserving native f64 bits.
+Receive timers dispatch the instance checkLastReceived method through WsProtocol;
+the inherited facade method calls the base check directly, avoiding recursion.
+Scoped js_runtime witnesses cover lazy initialization, bidirectional reads/writes,
+raw bits, zero reset/reinitialization and a derived watchdog receiver. A real GRVT
+private socket witnesses its 30-second ping / 90-second Warning reconnect behavior;
+all three regressions compile and fail before this bridge/dispatch repair.
