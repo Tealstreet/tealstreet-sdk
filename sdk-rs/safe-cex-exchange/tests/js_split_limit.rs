@@ -52,7 +52,7 @@ fn limit(tag: &str, log: Trace) -> Js {
         _ => panic!("unknown source limit {tag}"),
     }
 }
-fn separator(tag: &str, log: Trace, g: &Js) -> Js {
+fn separator(tag: &str, log: Trace) -> Js {
     match tag {
         "comma" => Js::str(","),
         "empty" => Js::str(""),
@@ -81,10 +81,10 @@ fn separator(tag: &str, log: Trace, g: &Js) -> Js {
                 "regex_optional" => "(,)|(x)",
                 _ => "(?:)",
             };
-            g.get("RegExp")
-                .unwrap()
-                .call(Js::Undefined, vec![Js::str(pattern)])
-                .unwrap()
+            // The production lowering creates regex literals with this parser;
+            // the global RegExp constructor is not installed by this host.
+            let units: Vec<u16> = pattern.encode_utf16().collect();
+            safe_cex_exchange::js_runtime::regexp::regexp(&units, &[]).unwrap()
         }
         _ => panic!("unknown source separator {tag}"),
     }
@@ -135,11 +135,7 @@ fn split_limit_matches_node_uint32_coercion_utf16_and_regex_captures() {
             let result = Js::utf16(&text).call_method(
                 "split",
                 vec![
-                    separator(
-                        row["separatorTag"].as_str().unwrap(),
-                        log.clone(),
-                        &shared.globals,
-                    ),
+                    separator(row["separatorTag"].as_str().unwrap(), log.clone()),
                     limit(row["limitTag"].as_str().unwrap(), log.clone()),
                 ],
             );
