@@ -24,7 +24,7 @@ for (const [exchange, options] of cases) {
     });
     const open = native.nativeAccountOpen({
       exchange,
-      optionsJson: JSON.stringify({ ...options, tealstreetProxy: true, tealstreetTunnel: false }),
+      options: { ...options, tealstreetProxy: true, tealstreetTunnel: false },
     }, () => {}, () => {}).then(id => {
       opened = id;
       return id;
@@ -38,7 +38,7 @@ for (const [exchange, options] of cases.filter(([name]) => ['okx', 'woo'].includ
     let tokenCalls = 0;
     const id = await native.nativeAccountOpen({
       exchange,
-      optionsJson: JSON.stringify({ ...options, tealstreetTunnel: true }),
+      options: { ...options, tealstreetTunnel: true },
     }, () => {}, () => {}, undefined, async () => {
       tokenCalls += 1;
       throw new Error('construction must not request a proxy token');

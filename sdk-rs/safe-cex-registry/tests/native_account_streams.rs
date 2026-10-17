@@ -22,7 +22,7 @@ async fn stream(method: &str, args: Value, channel: &str, data: Value) {
         Rc::new(move |event, data| {
             captured
                 .borrow_mut()
-                .push((event.to_string(), data.clone()))
+                .push((event.to_string(), support::boundary_json(data.clone())))
         }),
         Rc::new(|_| {}),
     );

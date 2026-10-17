@@ -21,3 +21,5 @@ pub fn version() -> String {
 
 #[cfg(feature = "node")]
 mod native_exchange;
+#[cfg(feature = "node")]
+mod native_value;

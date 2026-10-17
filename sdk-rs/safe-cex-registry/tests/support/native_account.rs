@@ -28,9 +28,15 @@ impl Account {
         native_account_call(
             self.account.clone(),
             method.into(),
-            args.as_array().unwrap().clone(),
+            args.as_array()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
         )
         .await
+        .map(crate::support::boundary_json)
     }
     pub async fn ok(&self, method: &str, args: Value) -> Value {
         self.call(method, args)
@@ -101,7 +107,7 @@ pub async fn opened(extra_options: Value) -> Account {
     let account = open_native_account(NativeAccountSpec {
         hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         exchange: "binance".into(),
-        options,
+        options: options.into(),
         account_name: None,
         sign: None,
         proxy_token: None,

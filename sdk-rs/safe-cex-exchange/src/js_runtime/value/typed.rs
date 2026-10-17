@@ -117,6 +117,18 @@ impl<'de> IntoDeserializer<'de, Error> for NativeInput {
         self
     }
 }
+macro_rules! integer_input {
+    ($($method:ident, $visit:ident, $kind:ty, $min:expr, $max:expr);* $(;)?) => {
+        $(fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+            if let Input::Float(value) = self.0
+                && value.is_finite() && value.fract() == 0.0
+                && value >= $min && value < $max {
+                return visitor.$visit(value as $kind);
+            }
+            self.deserialize_any(visitor)
+        })*
+    };
+}
 impl<'de> Deserializer<'de> for NativeInput {
     type Error = Error;
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
@@ -194,8 +206,20 @@ impl<'de> Deserializer<'de> for NativeInput {
             )),
         }
     }
+    integer_input! {
+        deserialize_i8, visit_i8, i8, -128.0, 128.0;
+        deserialize_i16, visit_i16, i16, -32768.0, 32768.0;
+        deserialize_i32, visit_i32, i32, -2147483648.0, 2147483648.0;
+        deserialize_i64, visit_i64, i64, -2.0f64.powi(63), 2.0f64.powi(63);
+        deserialize_i128, visit_i128, i128, -2.0f64.powi(127), 2.0f64.powi(127);
+        deserialize_u8, visit_u8, u8, 0.0, 256.0;
+        deserialize_u16, visit_u16, u16, 0.0, 65536.0;
+        deserialize_u32, visit_u32, u32, 0.0, 4294967296.0;
+        deserialize_u64, visit_u64, u64, 0.0, 2.0f64.powi(64);
+        deserialize_u128, visit_u128, u128, 0.0, 2.0f64.powi(128);
+    }
     serde::forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf
+        bool f32 f64 char str string bytes byte_buf
         unit unit_struct seq tuple tuple_struct map struct identifier ignored_any
     }
 }

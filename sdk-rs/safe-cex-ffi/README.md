@@ -38,7 +38,7 @@ The matching scoped Rust suite is
 
 With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 `nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
-JSON account host. Events and worker Store payloads are forwarded to JS; signing
+owned-value account host. Events and worker Store payloads are forwarded to JS; signing
 and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
@@ -46,6 +46,18 @@ Rejections are JavaScript Error objects with the source `name`, plain `message`
 and optional `code`. An absent source code stays absent; callers do not parse
 error messages as JSON. `tests/native-account-errors.test.mjs` checks this
 through the actual registry and native transport.
+
+The native API takes `nativeAccountOpen({exchange, options}, onEvent, onStore, sign?, proxyToken?)`
+and `nativeAccountCallMethod(id, method, argsArray)`. Options, method results,
+events, Store payloads and signer requests/responses are JavaScript values.
+The boundary retains `NaN`, infinities, negative zero, own `undefined` properties and
+UTF-16 strings. No JSON text API is accepted. Proxy-token callbacks resolve strings.
+The owned tree supports structured data, arrays and BigInts; cycles and functions
+reject visibly. Native builds require Node-API 6 or later.
+Emitter payloads and error codes still use the shared core’s existing JSON models;
+this boundary forwards those models without reconstructing lost values.
+`tests/native-account-values.test.mjs` and the Rust `native_account_values`
+target exercise actual signed Binance reads containing nonfinite prices.
 
 Store delivery uses the shared worker payload preparer and leading/trailing
 throttle (250ms times `tuning.dataUpdateThrottleMultiplier`). Startup posts a
