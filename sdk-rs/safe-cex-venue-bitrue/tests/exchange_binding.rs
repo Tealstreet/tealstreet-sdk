@@ -1023,3 +1023,108 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         f.runtime.reports.borrow()
     );
 }
+
+#[test]
+fn public_candles_keep_singapore_time_and_distinct_fields_through_socket() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/candle-stream-source.cjs"
+        ))
+        .env("TZ", "UTC")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 4);
+    let f = PrivateFixture::new();
+    let core = f
+        .venue
+        .base()
+        .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public)
+        .unwrap();
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    let cleanup = f
+        .venue
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"E-BTC-USDT","interval":"1m"})).unwrap(),
+            Rc::new(move |c| sink.borrow_mut().push(c)),
+        )
+        .unwrap();
+    let public = f
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.contains("listenKey"))
+        .unwrap()
+        .1
+        .clone();
+    let subscription: Value = public
+        .sent
+        .borrow()
+        .iter()
+        .filter_map(|raw| serde_json::from_str::<Value>(raw).ok())
+        .find(|row| {
+            row["event"] == "sub"
+                && row["params"]["channel"]
+                    .as_str()
+                    .is_some_and(|topic| topic.contains("kline"))
+        })
+        .expect("actual candle subscription");
+    let topic = subscription["params"]["channel"].as_str().unwrap();
+    for (index, case) in cases.iter().enumerate() {
+        let raw = format!(
+            "{{\"channel\":{},\"data\":{}}}",
+            serde_json::to_string(topic).unwrap(),
+            case["raw"].as_str().unwrap()
+        );
+        core.on_message(&safe_cex_transport::socket::SocketFrame::Text(raw))
+            .unwrap();
+        f.runtime.pump();
+        assert_eq!(
+            seen.borrow().len(),
+            index + 1,
+            "actual candle callback {index}; reports={:?}, console={:?}",
+            f.runtime.reports.borrow(), f.runtime.console.borrow()
+        );
+        let candle = &seen.borrow()[index];
+        for (field, value) in [
+            ("timestamp", candle.timestamp),
+            ("open", candle.open),
+            ("high", candle.high),
+            ("low", candle.low),
+            ("close", candle.close),
+            ("volume", candle.volume),
+        ] {
+            let expected = case["fields"][field].as_str().unwrap();
+            if expected == "nan" {
+                assert!(value.is_nan(), "case {index}: {field}");
+            } else {
+                assert_eq!(
+                    format!("{:016x}", value.to_bits()),
+                    expected,
+                    "case {index}: {field}"
+                );
+            }
+        }
+    }
+    cleanup().unwrap();
+    core.on_message(&safe_cex_transport::socket::SocketFrame::Text(format!(
+        "{{\"channel\":{},\"data\":{}}}",
+        serde_json::to_string(topic).unwrap(),
+        cases[0]["raw"].as_str().unwrap()
+    )))
+    .unwrap();
+    f.runtime.pump();
+    assert_eq!(
+        seen.borrow().len(),
+        4,
+        "cleanup removes the candle callback"
+    );
+}
