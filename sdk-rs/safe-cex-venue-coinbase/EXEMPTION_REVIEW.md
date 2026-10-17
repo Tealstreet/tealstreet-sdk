@@ -1,6 +1,6 @@
 # Coinbase exemption per-entry ledger
 
-Owner: codex-4ri6pb. Reviewed baseline mirror master `83e92cff633666e35ea071e805ee85d5a45e6c83`; production fixes #671 (UUID), #677 (credential segments), and #691 (fallible health callbacks, on auto-merge at this review). The additional actual-public-socket book-copyback RED is committed as `4ddb05c090`; the repair is in this PR.
+Owner: codex-4ri6pb. Reviewed baseline mirror master `83e92cff633666e35ea071e805ee85d5a45e6c83`; production fixes #671 (UUID), #677 (credential segments), and #691 (fallible health callbacks, merged `3b1e5560f3`). The additional actual-public-socket book-copyback RED is committed as `4ddb05c090`; the repair is #699.
 
 Exact census: **419 unique exemption declarations across 25 files**. SHA-256 of newline-joined sorted `rs` identifiers: `401f56c345e1df752af4e949a9fbd09752d5ceb82e534c58f7fbbbc1709a6b00`. Every declaration appears once below. No exemption was removed.
 
@@ -47,7 +47,7 @@ Source owner: `coinbase.exchange.ts lifecycle fields`. Concrete route: `binding/
 | 022 | `LifecycleHost::last_private_user_stream_message_at` | KEEP: Concrete `binding/lifecycle.rs::LifecycleHost::last_private_user_stream_message_at` supplies this imported call site; source policy remains in mapped caller. |
 | 023 | `LifecycleHost::loaded` | KEEP: Concrete `binding/lifecycle.rs::LifecycleHost::loaded` supplies this imported call site; source policy remains in mapped caller. |
 | 024 | `LifecycleHost::log` | KEEP: Concrete `binding/lifecycle.rs::LifecycleHost::log` supplies this imported call site; source policy remains in mapped caller. |
-| 025 | `LifecycleHost::mark_private_user_stream_degraded` | KEEP: FIXED #691 (on auto-merge): log/warning throws propagate through existing native carrier; real timer/auth frame/latch witnesses. |
+| 025 | `LifecycleHost::mark_private_user_stream_degraded` | KEEP: FIXED #691 (merged `3b1e5560f3`): log/warning throws propagate through existing native carrier; real timer/auth frame/latch witnesses. |
 | 026 | `LifecycleHost::merge_rest_orders_with_fresh_ws_state` | KEEP: Concrete `binding/lifecycle.rs::LifecycleHost::merge_rest_orders_with_fresh_ws_state` supplies this imported call site; source policy remains in mapped caller. |
 | 027 | `LifecycleHost::public_only` | KEEP: Concrete `binding/lifecycle.rs::LifecycleHost::public_only` supplies this imported call site; source policy remains in mapped caller. |
 | 028 | `LifecycleHost::set_timeout` | KEEP: Concrete `binding/lifecycle.rs::LifecycleHost::set_timeout` supplies this imported call site; source policy remains in mapped caller. |
@@ -80,7 +80,7 @@ Source owner: `coinbase.ws-public.ts listenOHLCV/listenOrderBook`. Concrete rout
 | 047 | `PublicMarketDelegateHost::public_listen_order_book` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::public_listen_order_book` supplies this imported call site; source policy remains in mapped caller. |
 | 048 | `PublicMarketListenerHost` | KEEP: Imported BaseWebSocket/dayjs/orderbook/cache callback capability declarations for mapped public candle/book listeners and exchange delegates; source policy remains in the separately mapped field bodies. |
 | 049 | `PublicMarketListenerHost::add` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::add` supplies this imported call site; source policy remains in mapped caller. |
-| 050 | `PublicMarketListenerHost::calc_order_book_total` | KEEP: FIX IN THIS PR: shared helper remains canonical; copyback consumes distinct same-price levels once. Actual socket/source RED 4ddb05c090. |
+| 050 | `PublicMarketListenerHost::calc_order_book_total` | KEEP: FIXED #699: shared helper remains canonical; copyback consumes distinct same-price levels once. Actual socket/source RED 4ddb05c090. |
 | 051 | `PublicMarketListenerHost::cleanup_message_handler_stats` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::cleanup_message_handler_stats` supplies this imported call site; source policy remains in mapped caller. |
 | 052 | `PublicMarketListenerHost::daily_candle` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::daily_candle` supplies this imported call site; source policy remains in mapped caller. |
 | 053 | `PublicMarketListenerHost::dayjs_unix` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::dayjs_unix` supplies this imported call site; source policy remains in mapped caller. |
@@ -90,9 +90,9 @@ Source owner: `coinbase.ws-public.ts listenOHLCV/listenOrderBook`. Concrete rout
 | 057 | `PublicMarketListenerHost::public_data_only_option` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::public_data_only_option` supplies this imported call site; source policy remains in mapped caller. |
 | 058 | `PublicMarketListenerHost::set_daily_candle` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::set_daily_candle` supplies this imported call site; source policy remains in mapped caller. |
 | 059 | `PublicMarketListenerHost::set_timeout` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::set_timeout` supplies this imported call site; source policy remains in mapped caller. |
-| 060 | `PublicMarketListenerHost::sort_order_book` | KEEP: FIX IN THIS PR: shared helper remains canonical; copyback consumes distinct same-price levels once. Actual socket/source RED 4ddb05c090. |
+| 060 | `PublicMarketListenerHost::sort_order_book` | KEEP: FIXED #699: shared helper remains canonical; copyback consumes distinct same-price levels once. Actual socket/source RED 4ddb05c090. |
 | 061 | `PublicMarketListenerHost::timeframe_seconds` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::timeframe_seconds` supplies this imported call site; source policy remains in mapped caller. |
-| 062 | `PublicMarketListenerHost::update_order_book` | KEEP: FIX IN THIS PR: shared helper remains canonical; copyback consumes distinct same-price levels once. Actual socket/source RED 4ddb05c090. |
+| 062 | `PublicMarketListenerHost::update_order_book` | KEEP: FIXED #699: shared helper remains canonical; copyback consumes distinct same-price levels once. Actual socket/source RED 4ddb05c090. |
 | 063 | `PublicMarketListenerHost::utc_end_of_day_ms` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::utc_end_of_day_ms` supplies this imported call site; source policy remains in mapped caller. |
 | 064 | `PublicMarketListenerHost::warn` | KEEP: Concrete `binding/sockets.rs::PublicMarketListenerHost::warn` supplies this imported call site; source policy remains in mapped caller. |
 | 417 | `PublicListenerConnectivity` | KEEP: Native receiver-binding selector for the separately mapped listener bodies: choose the supplied imported getter or the actual owning class socket; no independent listener algorithm. |
@@ -494,7 +494,7 @@ Source owner: `coinbase.ws-private.ts socket/auth/event routing`. Concrete route
 | 304 | `PrivateStreamHost::handle_user_event_orders` | KEEP: Concrete `binding/sockets.rs::PrivateStreamHost::handle_user_event_orders` supplies this imported call site; source policy remains in mapped caller. |
 | 305 | `PrivateStreamHost::is_disposed` | KEEP: Concrete `binding/sockets.rs::PrivateStreamHost::is_disposed` supplies this imported call site; source policy remains in mapped caller. |
 | 306 | `PrivateStreamHost::json_parse` | KEEP: Concrete `binding/sockets.rs::PrivateStreamHost::json_parse` supplies this imported call site; source policy remains in mapped caller. |
-| 307 | `PrivateStreamHost::mark_private_user_stream_auth_failed` | KEEP: FIXED #691 (on auto-merge): log/warning throws propagate through existing native carrier; real timer/auth frame/latch witnesses. |
+| 307 | `PrivateStreamHost::mark_private_user_stream_auth_failed` | KEEP: FIXED #691 (merged `3b1e5560f3`): log/warning throws propagate through existing native carrier; real timer/auth frame/latch witnesses. |
 | 308 | `PrivateStreamHost::mark_private_user_stream_message_received` | KEEP: Concrete `binding/sockets.rs::PrivateStreamHost::mark_private_user_stream_message_received` supplies this imported call site; source policy remains in mapped caller. |
 | 309 | `PrivateStreamHost::options` | KEEP: Concrete `binding/sockets.rs::PrivateStreamHost::options` supplies this imported call site; source policy remains in mapped caller. |
 | 310 | `PrivateStreamHost::reset_order_snapshot_assembly` | KEEP: Concrete `binding/sockets.rs::PrivateStreamHost::reset_order_snapshot_assembly` supplies this imported call site; source policy remains in mapped caller. |
@@ -606,4 +606,4 @@ Source owner: `coinbase.exchange.ts / coinbasespot.exchange.ts bound portfolio a
 
 ## Review outcome
 
-Four concrete gap families emerged from this exemption review: UUID capabilities (#671), credential organization-segment admission (#677), health log/warning propagation (#691), and distinct same-price public-book copyback (this PR). Legitimate receivers/capabilities remain. Historical mapped findings and declared carrier boundaries are not silently promoted to parity by this ledger.
+Four concrete gap families emerged from this exemption review: UUID capabilities (#671), credential organization-segment admission (#677), health log/warning propagation (#691), and distinct same-price public-book copyback (#699). Legitimate receivers/capabilities remain. Historical mapped findings and declared carrier boundaries are not silently promoted to parity by this ledger.
