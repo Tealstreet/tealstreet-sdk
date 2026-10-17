@@ -390,6 +390,15 @@ pub fn harness(
     options: ExchangeOptions,
     script: impl FnOnce(&Http),
 ) -> Harness {
+    harness_with_local_time(name, options, Rc::new(|ms| ms), script)
+}
+
+pub fn harness_with_local_time(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    local_wall_time_to_utc: Rc<dyn Fn(f64) -> f64>,
+    script: impl FnOnce(&Http),
+) -> Harness {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
@@ -404,6 +413,7 @@ pub fn harness(
             runtime: runtime.clone(),
             http: http.clone(),
             external_public_data: None,
+            local_wall_time_to_utc,
         },
     )
     .expect("BingxExchange constructs from real options");
