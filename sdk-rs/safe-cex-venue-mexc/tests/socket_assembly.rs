@@ -444,7 +444,7 @@ fn registered_candle_subscription_routes_native_fields_and_cleanup_unsubscribes(
         venue.as_ref(),
         safe_cex_types::OHLCVOptions {
             symbol: "BTCUSDT".into(),
-            interval: safe_cex_types::Timeframe::M1,
+            interval: safe_cex_types::AnyTimeframe::Variant1(safe_cex_types::Timeframe::M1),
             from: None,
             to: None,
             limit: None,

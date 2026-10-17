@@ -200,7 +200,9 @@ never automatically the market's contract size. Refuse missing/net direction;
 negate the venue fee while retaining rebates, leave funding unattributed, and use
 historyId for round-trip identity. Native callbacks are infallible and row input is
 retained JSON/UTF-8; dynamic executable/getter inputs are excluded. The focused
-live test is --test position_adapter -- --include-ignored. No fetch wiring is claimed.
+source test is --test position_adapter, enabled in ordinary Cargo runs.
+It needs Node and SAFE_CEX_TYPESCRIPT_PATH; no live account or network is used.
+No fetch wiring is claimed.
 
 `src/modes.rs` ports four instance utilities ahead of their REST consumers:
 getPositionSide, applyConfirmedPositionMode, applyConfirmedMarginType and

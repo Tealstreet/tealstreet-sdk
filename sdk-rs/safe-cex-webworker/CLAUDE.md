@@ -675,3 +675,5 @@ value, and log/error events retain their variadic argument array. Assembly hosts
 must supply `post_event(WorkerDataPayload)`; ordinary JSON control payloads keep
 their separate `post_payload` capability. Do not serialize native emitter values
 before invoking the required DATA post.
+
+OHLCV fetch and subscription requests decode the shared AnyTimeframe interval. The exact 27 source literals are checked against the live type AST; both real handlers forward every interval, and native listeners must deliver each candle. Monthly, extended and seconds intervals must never disappear at worker decoding.

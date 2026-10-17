@@ -61,7 +61,7 @@ fn book() -> OrderBook {
 fn options() -> OHLCVOptions {
     OHLCVOptions {
         symbol: "BTC/雪".into(),
-        interval: Timeframe::H12,
+        interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::H12),
         from: Some(-0.0),
         to: Some(1770900000123.75),
         limit: Some(17.25),
@@ -104,7 +104,10 @@ fn assert_book(value: &OrderBook, expected: &Value) {
 }
 fn assert_options(value: &OHLCVOptions, expected: &Value) {
     assert_eq!(value.symbol, expected["symbol"]);
-    assert_eq!(value.interval, Timeframe::H12);
+    assert_eq!(
+        value.interval,
+        safe_cex_types::AnyTimeframe::Variant1(Timeframe::H12)
+    );
     assert_eq!(expected["interval"], "12h");
     for (name, number) in [
         ("from", value.from.unwrap()),

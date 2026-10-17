@@ -498,7 +498,7 @@ fn run(privacy: &str, name: &str) {
                         .listen_ohlcv(
                             OHLCVOptions {
                                 symbol: "BTCUSDC".into(),
-                                interval: Timeframe::M1,
+                                interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
                                 from: None,
                                 to: None,
                                 limit: None,
@@ -687,7 +687,7 @@ fn ws_public_candle_string_boundary() {
         .listen_ohlcv(
             OHLCVOptions {
                 symbol: "BTCUSDC".into(),
-                interval: Timeframe::M1,
+                interval: safe_cex_types::AnyTimeframe::Variant1(Timeframe::M1),
                 from: None,
                 to: None,
                 limit: None,
