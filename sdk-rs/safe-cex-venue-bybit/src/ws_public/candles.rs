@@ -100,7 +100,7 @@ pub(crate) fn listen_ohlcvs(
     options: OHLCVSOptions,
     callback: Rc<dyn Fn(SubscribedCandle)>,
 ) -> Result<(), ExchangeError> {
-    let interval = serde_json::to_value(&options.interval)
+    let interval = serde_json::to_value(options.interval)
         .map_err(|error| ExchangeError::new(error.to_string()))?;
     let wire_interval = crate::types::INTERVAL[interval.as_str().unwrap()]
         .as_str()
