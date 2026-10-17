@@ -131,7 +131,7 @@ export class StopCommand extends TradingBaseCommand {
           triggerPrice,
           amount:
             sizePosition !== -1 && sizePosition < args.length
-              ? this.parseSizeAndConvertIfUsd(exchange, targetSymbol, args[sizePosition])
+              ? this.notionalToSize(exchange, targetSymbol, this.parseUsdAmount(args[sizePosition]), limitPrice)
               : 0,
         };
         await exchange.placeOrder(prepareCliOrder(exchange, stopOrder));

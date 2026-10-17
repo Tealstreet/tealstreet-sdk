@@ -19,6 +19,11 @@ The grammar that fills `<size>` and `<price>` slots in every trading command.
 | `50%bal` | Explicit percent of **free balance**                   |
 | `50%pos` | Explicit percent of **open position**                  |
 
+A `$` or balance-percent `buy` / `sell` size is converted to coin at the
+order's limit or `best` price, and a `$` size for a sized `stop` at its `at`
+price. Market orders use the last price; inverse contracts don't depend on
+price.
+
 ### Default percent scope
 
 Bare `50%` doesn't mean the same thing for every command:

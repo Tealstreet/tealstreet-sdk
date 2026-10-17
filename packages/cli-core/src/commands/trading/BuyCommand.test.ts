@@ -425,6 +425,20 @@ describe('BuyCommand', () => {
     });
   });
 
+  describe('sizing at the order price', () => {
+    it('sizes a balance percentage at the limit price', async () => {
+      const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.0001;
+      exchange.store!.tickers![0].last = 82_000;
+      exchange.store!.balance = { free: 500, total: 500, used: 0, upnl: 0 };
+
+      const result = await command.execute(createMockContext(['buy', '10%', 'at', '60000'], exchange));
+
+      expect(result.success).toBe(true);
+      expect(exchange.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 60_000, amount: 0.0008 }));
+    });
+  });
+
   describe('size conversion', () => {
     it('converts USD notional to contract size', async () => {
       const exchange = createMockExchange();
@@ -496,6 +510,7 @@ describe('BuyCommand', () => {
 
     it('end-to-end: `buy 1000$ at 49000` — limit form with suffix size', async () => {
       const exchange = createMockExchange();
+      exchange.store!.markets![0].precision.amount = 0.000001;
       const ctx = createMockContext(['buy', '1000$', 'at', '49000'], exchange, 'BTCUSDT');
       const result = await command.execute(ctx);
 
@@ -503,7 +518,7 @@ describe('BuyCommand', () => {
       const order = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(order.type).toBe(OrderType.Limit);
       expect(order.price).toBe(49000);
-      expect(order.amount).toBe(0.02);
+      expect(order.amount).toBe(0.020408);
     });
 
     it('end-to-end: `buy 100$` (suffix size, generic case)', async () => {
@@ -741,7 +756,8 @@ describe('BuyCommand', () => {
 
     it('fan-out with limit price applies the same price to every leg', async () => {
       const exchange = createMockExchange();
-      const ctx = createMockContext(['buy', 'BTCUSDT,ETHUSDT', '$100', 'at', '49000'], exchange);
+      // $1000 so the ETH leg, sized at 49000, still clears its 0.01 lot step.
+      const ctx = createMockContext(['buy', 'BTCUSDT,ETHUSDT', '$1000', 'at', '49000'], exchange);
       const result = await command.execute(ctx);
       expect(result.success).toBe(true);
       const orders = (exchange.placeOrder as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
