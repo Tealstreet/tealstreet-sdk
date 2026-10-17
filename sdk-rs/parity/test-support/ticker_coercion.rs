@@ -24,10 +24,12 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
     ["BTC", "ETH", "ADA"]
         .into_iter()
         .map(|asset| {
-            let (id, symbol) = if venue == "bitunix" {
-                (format!("{asset}/USDT"), format!("{asset}USDT"))
-            } else {
-                (format!("E-{asset}-USDT"), format!("E-{asset}-USDT"))
+            let (id, symbol) = match venue {
+                "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
+                "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),
+                "apexomni" => (format!("{asset}-USDC"), format!("{asset}USDC")),
+                "weex" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                _ => panic!("unsupported ticker seed {venue}"),
             };
             serde_json::from_value(json!({"id":id,"symbol":symbol,"bid":101,"ask":102,
             "last":103,"mark":104,"index":105,"percentage":106,"volume":107,
