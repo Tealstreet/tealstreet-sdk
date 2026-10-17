@@ -69,6 +69,3 @@ fn grouping_variants_and_string_only_ingress() {
     literal("positionTpsl", Grouping::PositionTpsl);
     forbidden::<Grouping>();
 }
-
-
-

@@ -27,7 +27,7 @@ struct Corpus {
 #[test]
 fn every_ts_type_parses_its_raw_source_shape() {
     let corpus: Corpus = serde_json::from_str(include_str!("fixtures/types.json")).unwrap();
-    assert_eq!(corpus.cases.len(), 207, "TYPE-CARDINALITY source total");
+    assert_eq!(corpus.cases.len(), 78, "TYPE-CARDINALITY source total");
     assert_eq!(
         corpus
             .cases
@@ -35,11 +35,11 @@ fn every_ts_type_parses_its_raw_source_shape() {
             .map(|case| case.name.as_str())
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        72,
+        42,
         "TYPE-CARDINALITY source roots"
     );
     let mut comparisons = 0;
-    for index in 0..207 {
+    for index in 0..78 {
         let case = corpus
             .cases
             .get(index)
@@ -235,7 +235,7 @@ fn every_ts_type_parses_its_raw_source_shape() {
         );
         comparisons += 1;
     }
-    assert_eq!(comparisons, 207, "TYPE-CARDINALITY completed comparisons");
+    assert_eq!(comparisons, 78, "TYPE-CARDINALITY completed comparisons");
 }
 #[test]
 fn endpoint_tables_match_live_ts() {

@@ -1,5 +1,7 @@
 use safe_cex_num::numeric_ingress::JsNumberOutput;
-use safe_cex_venue_hyperliquid::types::{HyperliquidUserAbstractionMode, WsUserNonFundingLedgerUpdateType};
+use safe_cex_venue_hyperliquid::types::{
+    HyperliquidUserAbstractionMode, WsUserNonFundingLedgerUpdateType,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::fmt::Debug;
@@ -66,10 +68,6 @@ fn user_abstraction_mode_variants_and_string_only_ingress() {
     forbidden::<HyperliquidUserAbstractionMode>();
 }
 
-
-
-
-
 #[test]
 fn websocket_ledger_variants_and_string_only_ingress() {
     literal("deposit", WsUserNonFundingLedgerUpdateType::Deposit);
@@ -78,5 +76,3 @@ fn websocket_ledger_variants_and_string_only_ingress() {
     literal("liquidation", WsUserNonFundingLedgerUpdateType::Liquidation);
     forbidden::<WsUserNonFundingLedgerUpdateType>();
 }
-
-

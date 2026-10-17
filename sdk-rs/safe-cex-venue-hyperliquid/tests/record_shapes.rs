@@ -48,15 +48,13 @@ fn every_record_is_map_only() {
         serde_json::from_str(include_str!("fixtures/record-shapes.json")).unwrap();
     let admitted: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/record-shapes.json")).unwrap();
-    assert_eq!(cases.len(), 77, "RECORD-CARDINALITY source roots");
+    assert_eq!(cases.len(), 43, "RECORD-CARDINALITY source roots");
     let mut actual: Vec<_> = cases.iter().map(|case| case.name.as_str()).collect();
     actual.sort();
     let mut expected = vec![
         "LimitOrderType",
         "TriggerOrderType",
         "OrderType",
-        "Meta",
-        "MetaUniverseItem",
         "ClearinghouseState",
         "ClearinghouseStateAssetPositionsItem",
         "ClearinghouseStateAssetPositionsItemPosition",
@@ -65,14 +63,6 @@ fn every_record_is_map_only() {
         "ClearinghouseStateCrossMarginSummary",
         "ClearinghouseStateMarginSummary",
         "UserFills",
-        "OrderResponseStatusCase0",
-        "OrderResponseStatusCase0Resting",
-        "OrderResponseStatusCase1",
-        "OrderResponseStatusCase1Filled",
-        "OrderResponseStatusCase2",
-        "OrderResponse",
-        "OrderResponseResponseCase1",
-        "OrderResponseResponseCase1Data",
         "WsTrade",
         "WsBook",
         "WsBbo",
@@ -83,35 +73,14 @@ fn every_record_is_map_only() {
         "WsUserFunding",
         "WsLiquidation",
         "WsNonUserCancel",
-        "SpotClearinghouseBalance",
-        "SpotClearinghouseState",
-        "FrontendOpenOrders",
         "L2Book",
         "L2BookLevelsItem0Item",
         "L2BookLevelsItem1Item",
-        "CandleSnapshot",
-        "AssetCtx",
-        "MetaAndAssetCtxs",
-        "UserFundingDelta",
-        "UserFundingEntry",
-        "UserNonFundingLedgerDelta",
-        "UserNonFundingLedgerEntry",
         "FundingHistoryEntry",
-        "SpotToken",
-        "SpotTokenEvmContract",
-        "SpotMarket",
-        "SpotMeta",
-        "SpotAssetCtx",
-        "SpotMetaAndAssetCtxs",
         "UserOpenOrder",
-        "OrderRequest",
-        "OrderWire",
         "CancelOrderRequest",
         "CancelOrderRequestsItem",
         "CancelByCloidRequest",
-        "ModifyRequest",
-        "ModifyWire",
-        "ScheduleCancelAction",
         "Signature",
         "Notification",
         "Candle",
@@ -121,11 +90,8 @@ fn every_record_is_map_only() {
         "WsUserFundings",
         "WsUserNonFundingLedgerUpdate",
         "WsUserNonFundingLedgerUpdates",
-        "PerpDex",
-        "Hip3MarketInfo",
         "BuilderInfo",
         "BuilderFeeApprovalResult",
-        "BuilderFeeCheckResult",
         "CancelOrderResponse",
         "CancelOrderResponseBody",
         "CancelOrderResponseData",
@@ -136,7 +102,7 @@ fn every_record_is_map_only() {
         "exact record corpus coverage and uniqueness"
     );
     let mut comparisons = 0;
-    for index in 0..77 {
+    for index in 0..43 {
         let case = cases
             .get(index)
             .expect("RECORD-CARDINALITY native index coverage");
@@ -505,7 +471,7 @@ fn every_record_is_map_only() {
         );
         comparisons += receipts.len();
     }
-    assert_eq!(comparisons, 539, "RECORD-CARDINALITY native receipt total");
+    assert_eq!(comparisons, 301, "RECORD-CARDINALITY native receipt total");
 }
 #[test]
 fn record_corpus_matches_live_typescript() {

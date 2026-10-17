@@ -1,6 +1,5 @@
 use safe_cex_venue_hyperliquid::types;
 
-
 #[test]
 fn audit_duplicate_root_02() {
     let value: types::ClearinghouseState = serde_json::from_str(r####"{"assetPositions":[{"position":{"coin":"\ud800","coin":"雪😀﻿","cumFunding":{"allTime":"wire-雪\u0000","sinceChange":"wire-雪\u0000","sinceOpen":"wire-雪\u0000"},"entryPx":"wire-雪\u0000","leverage":{"rawUsd":"wire-雪\u0000","type":"wire-雪\u0000","value":17},"liquidationPx":"wire-雪\u0000","marginUsed":"wire-雪\u0000","maxLeverage":17,"positionValue":"wire-雪\u0000","returnOnEquity":"wire-雪\u0000","szi":"wire-雪\u0000","unrealizedPnl":"wire-雪\u0000"},"type":"wire-雪\u0000"}],"crossMaintenanceMarginUsed":"wire-雪\u0000","crossMarginSummary":{"accountValue":"wire-雪\u0000","totalMarginUsed":"wire-雪\u0000","totalNtlPos":"wire-雪\u0000","totalRawUsd":"wire-雪\u0000"},"marginSummary":{"accountValue":"wire-雪\u0000","totalMarginUsed":"wire-雪\u0000","totalNtlPos":"wire-雪\u0000","totalRawUsd":"wire-雪\u0000"},"time":17,"withdrawable":"wire-雪\u0000"}"####)
@@ -22,8 +21,6 @@ fn audit_duplicate_root_03() {
         "HL TYPES native overwritten UserFills /coin"
     );
 }
-
-
 
 #[test]
 fn audit_duplicate_root_06() {
@@ -126,9 +123,6 @@ fn audit_duplicate_root_14() {
     );
 }
 
-
-
-
 #[test]
 fn audit_duplicate_root_18() {
     let value: types::L2Book = serde_json::from_str(r####"{"levels":[[{"px":"\ud800","px":"雪😀﻿","sz":"wire-雪\u0000","n":17}],[{"px":"wire-雪\u0000","sz":"wire-雪\u0000","n":17}]]}"####)
@@ -139,13 +133,6 @@ fn audit_duplicate_root_18() {
         "HL TYPES native overwritten L2Book /levels/0/0/px"
     );
 }
-
-
-
-
-
-
-
 
 #[test]
 fn audit_duplicate_root_26() {
@@ -169,11 +156,6 @@ fn audit_duplicate_root_27() {
     );
 }
 
-
-
-
-
-
 #[test]
 fn audit_duplicate_root_33() {
     let value: types::UserOpenOrder = serde_json::from_str(r####"{"coin":"\ud800","coin":"雪😀﻿","limitPx":"wire-雪\u0000","oid":17,"side":"wire-雪\u0000","sz":"wire-雪\u0000","timestamp":17}"####)
@@ -196,8 +178,6 @@ fn audit_duplicate_root_34() {
     );
 }
 
-
-
 #[test]
 fn audit_duplicate_root_37() {
     let value: types::CancelOrderRequest =
@@ -209,8 +189,6 @@ fn audit_duplicate_root_37() {
         "HL TYPES native overwritten CancelOrderRequest /coin"
     );
 }
-
-
 
 #[test]
 fn audit_duplicate_root_40() {
@@ -301,7 +279,6 @@ fn audit_duplicate_root_47() {
     );
 }
 
-
 #[test]
 fn audit_duplicate_root_49() {
     let value: types::BuilderInfo =
@@ -313,7 +290,6 @@ fn audit_duplicate_root_49() {
         "HL TYPES native overwritten BuilderInfo /b"
     );
 }
-
 
 #[test]
 fn audit_duplicate_selection_retains_last_value_validation_and_key_position() {
@@ -364,7 +340,6 @@ fn audit_duplicate_selection_retains_last_value_validation_and_key_position() {
         "AUDIT surviving depth budget remains enforced"
     );
 }
-
 
 #[test]
 fn audit_any_indexed_roots_preserve_utf16_and_array_native_alternatives() {

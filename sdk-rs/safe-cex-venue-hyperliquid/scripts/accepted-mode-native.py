@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run this eight-owner cohort's actual contract expressions and restore its fixture.
+"""Run this two-owner cohort's actual contract expressions and restore its fixture.
 
 This supplies direct native evidence only. The ordinary accepted-set runner owns
 compiler discovery, trait probes, local scopes, dependencies and target coverage.
@@ -11,7 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 CRATE = ROOT / "safe-cex-venue-hyperliquid"
-IDENTS = ['HyperliquidUserAbstractionMode', 'MetaUniverseItemMarginMode', 'MetaUniverseItemGrowthMode', 'UserFundingDeltaType', 'UserNonFundingLedgerDeltaType', 'WsUserNonFundingLedgerUpdateType', 'Hip3MarketInfoMarginMode', 'Hip3MarketInfoGrowthMode']
+IDENTS = ['HyperliquidUserAbstractionMode', 'WsUserNonFundingLedgerUpdateType', ]
 ROWS = json.loads((ROOT / "safe-cex-parity/accepted-set/contracts/safe-cex-venue-hyperliquid.json").read_text())
 FIXTURE = CRATE / "tests/__accepted_literal_mode_observations.rs"
 assert not FIXTURE.exists(), "refuse to replace an existing fixture"
@@ -42,5 +42,5 @@ try:
 finally:
     FIXTURE.unlink()
     assert not FIXTURE.exists()
-print(f"Eight direct contract tests, {case_count} authored cases, six native routes per case; exit {result.returncode}.", flush=True)
+print(f"Two direct contract tests, {case_count} authored cases, six native routes per case; exit {result.returncode}.", flush=True)
 raise SystemExit(result.returncode)

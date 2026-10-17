@@ -133,10 +133,10 @@ note = "Declared JSON field/type correspondence, bound to live AST-generated sha
 [[symbol]]
 ts = "OidOrCloid"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::OidOrCloid"
-status = "divergent"
-note = "FORCED: public declared value / materializes length1 D800/DFFF, read before serialization; native match Case1(value): value uses String and refuses the whole containing input. sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. This scalar number|string union has no object-extension/depth claim. Source strict assignments and native scalar positives are distinct from a concrete venue/network-consumer claim. Targets: safe-cex-venue-hyperliquid/src/types.rs::OidOrCloid ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "AllMids"
@@ -149,10 +149,10 @@ note = "Raw JSON string records use the shared ordered JsonObject<JsString> carr
 [[symbol]]
 ts = "Meta"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::MetaUniverseItemMarginMode", "safe-cex-venue-hyperliquid/src/types.rs::MetaUniverseItemGrowthMode", "safe-cex-venue-hyperliquid/src/types.rs::MetaUniverseItem", "safe-cex-venue-hyperliquid/src/types.rs::Meta" ]
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /universe/0/name materializes length1 D800/DFFF, read before serialization; native universe[0].name uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::MetaUniverseItemMarginMode safe-cex-venue-hyperliquid/src/types.rs::MetaUniverseItemGrowthMode safe-cex-venue-hyperliquid/src/types.rs::MetaUniverseItem safe-cex-venue-hyperliquid/src/types.rs::Meta ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "ClearinghouseState"
@@ -173,18 +173,18 @@ note = "MIXED: FORCED application: public declared value /coin materializes leng
 [[symbol]]
 ts = "OrderResponseStatus"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase0RestingOid", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase0Resting", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase0", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase1FilledOid", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase1Filled", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase1", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase2", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase3", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase4", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatus" ]
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /resting/oid materializes length1 D800/DFFF, read before serialization; native Case0.resting.oid -> Case1(String) uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase0RestingOid safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase0Resting safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase0 safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase1FilledOid safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase1Filled safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase1 safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase2 safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase3 safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatusCase4 safe-cex-venue-hyperliquid/src/types.rs::OrderResponseStatus ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "OrderResponse"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseResponseCase1Data", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseResponseCase1", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponseResponse", "safe-cex-venue-hyperliquid/src/types.rs::OrderResponse" ]
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /status materializes length1 D800/DFFF, read before serialization; native status uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::OrderResponseResponseCase1Data safe-cex-venue-hyperliquid/src/types.rs::OrderResponseResponseCase1 safe-cex-venue-hyperliquid/src/types.rs::OrderResponseResponse safe-cex-venue-hyperliquid/src/types.rs::OrderResponse ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "WsTrade"
@@ -269,26 +269,26 @@ note = "MIXED: FORCED application: public declared value /coin materializes leng
 [[symbol]]
 ts = "SpotClearinghouseBalance"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::SpotClearinghouseBalance"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /coin materializes length1 D800/DFFF, read before serialization; native coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::SpotClearinghouseBalance ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotClearinghouseState"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::SpotClearinghouseState"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /balances/0/coin materializes length1 D800/DFFF, read before serialization; native balances[0].coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::SpotClearinghouseState ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "FrontendOpenOrders"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::FrontendOpenOrders"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /coin materializes length1 D800/DFFF, read before serialization; native coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::FrontendOpenOrders ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserRateLimit"
@@ -317,74 +317,74 @@ note = "MIXED: FORCED application: public declared value /levels/0/0/px material
 [[symbol]]
 ts = "CandleSnapshot"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::CandleSnapshot"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /c materializes length1 D800/DFFF, read before serialization; native c uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::CandleSnapshot ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "AssetCtx"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::AssetCtx"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /dayNtlVlm materializes length1 D800/DFFF, read before serialization; native day_ntl_vlm uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::AssetCtx ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "MetaAndAssetCtxs"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::MetaAndAssetCtxs"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /meta/universe/0/name materializes length1 D800/DFFF, read before serialization; native meta.universe[0].name uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::MetaAndAssetCtxs ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserFundingDelta"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::UserFundingDeltaType", "safe-cex-venue-hyperliquid/src/types.rs::UserFundingDelta" ]
-status = "ported"
-note = "Declared JSON field/type correspondence, bound to live AST-generated shapes. No reachable numeric overflow or optional-nullable collapse was found for this type. Required nullable fields retain null. This claims declared fields, not preservation of structural excess properties or lone UTF-16 surrogates. Split: UserFundingDeltaType holds a nested wire shape or literal alternative; UserFundingDelta holds the top-level declaration. Renamed to safe-cex-venue-hyperliquid/src/types.rs::UserFundingDeltaType to name the nested type."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserFundingEntry"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::UserFundingEntry"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /delta/coin materializes length1 D800/DFFF, read before serialization; native delta.coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::UserFundingEntry ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserFunding"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::UserFunding"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /0/delta/coin materializes length1 D800/DFFF, read before serialization; native [0].delta.coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::UserFunding ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserNonFundingLedgerDelta"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::UserNonFundingLedgerDeltaType", "safe-cex-venue-hyperliquid/src/types.rs::UserNonFundingLedgerDelta" ]
-status = "ported"
-note = "Declared JSON field/type correspondence, bound to live AST-generated shapes. No reachable numeric overflow or optional-nullable collapse was found for this type. Required nullable fields retain null. This claims declared fields, not preservation of structural excess properties or lone UTF-16 surrogates. Split: UserNonFundingLedgerDeltaType holds a nested wire shape or literal alternative; UserNonFundingLedgerDelta holds the top-level declaration. Renamed to safe-cex-venue-hyperliquid/src/types.rs::UserNonFundingLedgerDeltaType to name the nested type."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserNonFundingLedgerEntry"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::UserNonFundingLedgerEntry"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /delta/coin materializes length1 D800/DFFF, read before serialization; native delta.coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::UserNonFundingLedgerEntry ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserNonFundingLedgerUpdates"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::UserNonFundingLedgerUpdates"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /0/delta/coin materializes length1 D800/DFFF, read before serialization; native [0].delta.coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::UserNonFundingLedgerUpdates ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "FundingHistoryEntry"
@@ -405,42 +405,42 @@ note = "MIXED: FORCED application: public declared value /0/coin materializes le
 [[symbol]]
 ts = "SpotToken"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::SpotTokenEvmContract", "safe-cex-venue-hyperliquid/src/types.rs::SpotToken" ]
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /name materializes length1 D800/DFFF, read before serialization; native name uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::SpotTokenEvmContract safe-cex-venue-hyperliquid/src/types.rs::SpotToken ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotMarket"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::SpotMarket"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /name materializes length1 D800/DFFF, read before serialization; native name uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::SpotMarket ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotMeta"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::SpotMeta"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /tokens/0/name materializes length1 D800/DFFF, read before serialization; native tokens[0].name uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::SpotMeta ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotAssetCtx"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::SpotAssetCtx"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /dayNtlVlm materializes length1 D800/DFFF, read before serialization; native day_ntl_vlm uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::SpotAssetCtx ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "SpotMetaAndAssetCtxs"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::SpotMetaAndAssetCtxs"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /meta/tokens/0/name materializes length1 D800/DFFF, read before serialization; native meta.tokens[0].name uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::SpotMetaAndAssetCtxs ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "UserOpenOrder"
@@ -461,18 +461,18 @@ note = "MIXED: FORCED application: public declared value /0/coin materializes le
 [[symbol]]
 ts = "OrderRequest"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::OrderRequest"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /coin materializes length1 D800/DFFF, read before serialization; native coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::OrderRequest ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "OrderWire"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::OrderWire"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /p materializes length1 D800/DFFF, read before serialization; native p uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::OrderWire ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "CancelOrderRequest"
@@ -501,26 +501,26 @@ note = "Declared JSON field/type correspondence, bound to live AST-generated sha
 [[symbol]]
 ts = "ModifyRequest"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::ModifyRequest"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /order/coin materializes length1 D800/DFFF, read before serialization; native order.coin uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::ModifyRequest ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "ModifyWire"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::ModifyWire"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /order/p materializes length1 D800/DFFF, read before serialization; native order.p uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::ModifyWire ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "ScheduleCancelAction"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::ScheduleCancelActionType", "safe-cex-venue-hyperliquid/src/types.rs::ScheduleCancelAction" ]
-status = "ported"
-note = "Deep numeric adoption: public Deserialize captures JsNumberInput before the private wire decoder; bare from_str/from_slice/owned Value/borrowed Value and js_from_str/js_from_value/js_from_value_ref match actual Node native f64 bits before serialization. Both raw overflow and signed zero are pinned per root by typed_numbers.rs; optional/null acceptance is pinned independently by typed_null_boundaries.rs. No open String field in the declared shape. Renamed targets: `safe-cex-venue-hyperliquid/src/types.rs::ScheduleCancelActionType`."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "Signature"
@@ -597,26 +597,26 @@ note = "MIXED: FORCED application: public declared value /updates/0/coin materia
 [[symbol]]
 ts = "PerpDex"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::PerpDex"
-status = "ported"
-note = "Declared JSON field/type correspondence, bound to live AST-generated shapes. No reachable numeric overflow or optional-nullable collapse was found for this type. Required nullable fields retain null. This claims declared fields, not preservation of structural excess properties or lone UTF-16 surrogates."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "PerpDexs"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::PerpDexs"
-status = "ported"
-note = "Declared JSON field/type correspondence, bound to live AST-generated shapes. No reachable numeric overflow or optional-nullable collapse was found for this type. Required nullable fields retain null. This claims declared fields, not preservation of structural excess properties or lone UTF-16 surrogates."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "Hip3MarketInfo"
 kind = "type"
-layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/types.rs::Hip3MarketInfoMarginMode", "safe-cex-venue-hyperliquid/src/types.rs::Hip3MarketInfoGrowthMode", "safe-cex-venue-hyperliquid/src/types.rs::Hip3MarketInfo" ]
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /name materializes length1 D800/DFFF, read before serialization; native name uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::Hip3MarketInfoMarginMode safe-cex-venue-hyperliquid/src/types.rs::Hip3MarketInfoGrowthMode safe-cex-venue-hyperliquid/src/types.rs::Hip3MarketInfo ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
 
 [[symbol]]
 ts = "BuilderInfo"
@@ -637,7 +637,7 @@ note = "Declared JSON field/type correspondence, bound to live AST-generated sha
 [[symbol]]
 ts = "BuilderFeeCheckResult"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/types.rs::BuilderFeeCheckResult"
-status = "divergent"
-note = "MIXED: FORCED application: public declared value /maxFeeRate materializes length1 D800/DFFF, read before serialization; native max_fee_rate.as_ref().unwrap() uses String and refuses the whole containing input; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. CHOSEN declared-field projection: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; capture budget: safe-cex-venue-hyperliquid/CLAUDE.md#record-capture-budget. Discarded duplicate-value refusal is repaired: the named native public decoder now observes the last valid field directly. This selected-field witness does not enumerate every string field or concrete network consumer. Targets: safe-cex-venue-hyperliquid/src/types.rs::BuilderFeeCheckResult ."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "TypeScript declaration only: production bindings consume dynamic realm values and have no Rust consumer for this standalone DTO. The unused native declaration and its generated children/corpora were removed; this row makes no typed-model parity claim."
