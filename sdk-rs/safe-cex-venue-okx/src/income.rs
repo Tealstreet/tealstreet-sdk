@@ -61,10 +61,10 @@ pub fn okx_income_type_for_category(category: &IncomeCategory) -> &'static str {
     }
 }
 
-pub fn map_okx_bill_to_income_records(
+pub fn map_okx_bill_to_income_records<E: From<JsCoercionError>>(
     row: &serde_json::Map<String, Value>,
-    resolve_symbol: impl Fn(&str) -> Option<String>,
-) -> Result<Vec<IncomeRecord>, JsCoercionError> {
+    resolve_symbol: impl Fn(&str) -> Result<Option<String>, E>,
+) -> Result<Vec<IncomeRecord>, E> {
     let timestamp = safe_cex_num::parse_int(
         &nullish_string(row.get("ts").unwrap_or(&Value::Null), "0")?,
         Some(10),
@@ -79,7 +79,7 @@ pub fn map_okx_bill_to_income_records(
     let symbol = if instrument.is_empty() {
         String::new()
     } else {
-        resolve_symbol(&instrument)
+        resolve_symbol(&instrument)?
             .filter(|s| !s.is_empty())
             .unwrap_or(instrument)
     };
@@ -135,7 +135,7 @@ pub fn map_okx_bill_to_income_records(
     if matches!(category_hit, safe_cex_num::TableHit::Inherited(_))
         && (pnl != 0.0 || residual.abs() > epsilon)
     {
-        return Err(category_refusal());
+        return Err(category_refusal().into());
     }
     Ok(records)
 }

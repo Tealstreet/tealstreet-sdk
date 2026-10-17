@@ -10,7 +10,7 @@ cases=[
  ('ticker-field', '("last", "close")', '("last", "amount")', 'writer native bits'),
  ('bbo-field', '("bid", "bid")', '("bid", "ask")', 'writer native bits'),
  ('mark-field', '("mark", "price")', '("mark", "bid")', 'writer native bits'),
- ('spot-filter', '!symbol.starts_with("PERP_")', '!symbol.starts_with("SPOT_")', 'writer notification order'),
+ ('spot-filter', '!symbol.starts_with(&"PERP_".encode_utf16().collect::<Vec<_>>())', '!symbol.starts_with(&"SPOT_".encode_utf16().collect::<Vec<_>>())', 'writer notification order'),
  ('truncate-batch', 'for row in rows {', 'for row in rows.iter().take(1) {', 'writer notification order'),
  ('eager-refusal', "continue 'rows;", 'if !rows.is_empty() { return Err(ExchangeError::new(refusals.join("; "))); } continue \'rows;', 'later source error wins over typed refusal'),
  ('zero-sign', 'patch.set_number(*target, number);', 'patch.set_number(*target, if number == 0.0 { 0.0 } else { number });', 'writer native bits'),

@@ -236,6 +236,15 @@ TypeError to win with its own identity/text. The unrepresentable patch
 and its notification are still lost (declared); other representable writes are
 retained, and the operation never returns a successful subset.
 
+Public ticker callbacks capture the canonical RetainedJsonInput directly. Native
+number bits and UTF16 strings survive until row admission; ignored metadata cannot
+reject a frame. Symbol normalization runs on UTF16 before the final typed Store
+identifier check, so discarded surrogate segments do not reject valid targets.
+The ordinary UTF8 symbol wrapper uses the same normalizer. Six real socket
+regressions compiled and failed against master, covering all three public topics,
+ignored metadata, overflow/signed zero, and normalized identifier admission.
+Private timestamp callbacks retain their existing JSON input boundary.
+
 `private_socket` extracts the private ping and timestamp helper. Ping keeps the
 source sendWithLog wrapper: diagnostics are checked after sending, and heartbeat
 classification stops diagnostic publication. Disposal prevents both timestamp
