@@ -26,7 +26,6 @@
     "intrinsic instanceof Error",
     "intrinsic iterable spread",
     "intrinsic less than",
-    "intrinsic missingTicker",
     "intrinsic new Map",
     "intrinsic new Set",
     "intrinsic property in",

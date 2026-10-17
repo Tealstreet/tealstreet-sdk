@@ -854,6 +854,8 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             ("error", console("error")),
             ("warn", console("warn")),
             ("log", console("log")),
+            ("info", console("info")),
+            ("debug", console("debug")),
         ]),
     );
     def(
