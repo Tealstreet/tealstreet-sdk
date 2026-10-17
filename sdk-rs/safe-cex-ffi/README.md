@@ -117,3 +117,11 @@ the native registry path. Both use loopback HTTP.
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
+
+Log, error, warning and Grafana event callbacks carry the worker’s rest-argument
+array, including an empty array for zero arguments. A single array argument stays
+one array element; fill payloads retain their scalar shape. Private websocket
+frame/subscription diagnostics (`grafana-pws`, `grafana-pws-sub`) use this same
+bridge. `tests/native-account-events.test.mjs` drives a real Binance preflight
+error and checks its metadata argument; registry event tests cover emitter arity
+and both diagnostic channels through a real native account.
