@@ -13,6 +13,11 @@ gateway factory and UTC date profile, with its existing caller-owned limiter.
 The source's inherited scheduleCancel rejection remains `Not implemented`.
 Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
 native body; batch capability registration invokes the source batch algorithm.
+The trading runtime's `updateStoredOrder` capability binds the real Store's
+`updateOrder` with its Store receiver. Accepted single/batch PostOnly placements
+and TP/SL amendments then apply the source patch and return IDs. Constructed
+regressions check existing and absent rows, batch-result reordering and both
+protective order types; an absent row remains absent.
 
 The explicit Weex bigint response parser consumes original wire tokens on both
 success and HTTP failure before venue status/error handling. Private WS uses the
@@ -32,6 +37,13 @@ oracles and their existing mutation runners remain independent evidence.
 Error reporting and async ownership choices remain priced at
 [weex-async-observation-choice](../parity/MANIFEST-SPEC.md#weex-async-observation-choice);
 normalizer record boundaries keep their existing declarations.
+
+`fetchOrders` retains only fulfilled normal/algo legs and silently discards each
+rejection, matching Promise.allSettled in the maintained source. Its constructed
+regression checks successful rows and the actual error emitter after one HTTP
+leg rejects. The removed reporting capability and old native-only expectation
+are no longer part of the account-read runtime; source order/dedup mutation
+coverage replaces the former reporting-divergence control.
 
 
 The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly and

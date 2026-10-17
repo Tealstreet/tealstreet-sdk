@@ -26,8 +26,12 @@ fn mutation(e: safe_cex_store::StoreMutationError) -> Thrown {
 fn ids(value: &Js) -> Result<Vec<String>, Thrown> {
     let mut out = vec![];
     for v in value.array_values().unwrap_or_default() {
-        let id = if v.is_object() { v.get("id")? } else { v };
-        out.push(id.to_display());
+        let id = v.get("id")?;
+        if !matches!(id, Js::SymbolIterator)
+            && let Ok(id) = String::from_utf16(&id.to_js_string()?)
+        {
+            out.push(id);
+        }
     }
     Ok(out)
 }
@@ -307,7 +311,11 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "removeOrders",
         Rc::new(|st, a| {
-            let ids = ids(&arg(&a, 0))?;
+            let orders = arg(&a, 0);
+            if orders.array_values().is_some_and(|rows| rows.is_empty()) || st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            let ids = ids(&orders)?;
             let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
             st.remove_orders(&refs).map_err(mutation)?;
             Ok(Js::Undefined)
