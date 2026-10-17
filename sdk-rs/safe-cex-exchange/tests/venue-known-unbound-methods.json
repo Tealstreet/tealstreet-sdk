@@ -29,7 +29,6 @@
     "freeze",
     "hasOwn",
     "is",
-    "isSafeInteger",
-    "localeCompare"
+    "isSafeInteger"
   ]
 }
