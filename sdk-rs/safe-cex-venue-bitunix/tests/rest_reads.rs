@@ -169,6 +169,21 @@ fn actual_typescript_rest_reads() {
         assert_eq!(outputs[2]["fields"]["base"]["value"], "ETH");
         assert_eq!(row["traceCount"], 0);
     }
+    let scalar_rows = corpus["scalarRows"].as_array().unwrap();
+    assert_eq!(
+        scalar_rows.len(),
+        6,
+        "independent raw symbol and maximum cases"
+    );
+    for row in scalar_rows {
+        assert_eq!(row["result"]["items"].as_array().unwrap().len(), 3);
+        assert_eq!(row["traceCount"], 0);
+    }
+    assert_eq!(
+        scalar_rows[5]["result"]["items"][1]["fields"]["limits"]["fields"]["amount"]["fields"]["max"]
+            ["type"],
+        "object"
+    );
     let cached_market: Market = js_from_str(&corpus["market"].to_string()).unwrap();
     let cached_ticker: Ticker = js_from_str(&corpus["ticker"].to_string()).unwrap();
     let cached_balance: Balance = js_from_str(&corpus["balance"].to_string()).unwrap();
