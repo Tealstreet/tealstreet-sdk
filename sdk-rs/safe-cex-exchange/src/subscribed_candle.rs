@@ -57,24 +57,24 @@ impl From<Wire> for SubscribedCandle {
         }
     }
 }
+struct RecordVisitor;
+impl<'de> Visitor<'de> for RecordVisitor {
+    type Value = SubscribedCandle;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a subscribed candle record")
+    }
+    fn visit_newtype_struct<D: Deserializer<'de>>(
+        self,
+        decoder: D,
+    ) -> Result<Self::Value, D::Error> {
+        decoder.deserialize_map(self)
+    }
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+        Wire::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Into::into)
+    }
+}
 impl<'de> Deserialize<'de> for SubscribedCandle {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct RecordVisitor;
-        impl<'de> Visitor<'de> for RecordVisitor {
-            type Value = SubscribedCandle;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a subscribed candle record")
-            }
-            fn visit_newtype_struct<D: Deserializer<'de>>(
-                self,
-                decoder: D,
-            ) -> Result<Self::Value, D::Error> {
-                decoder.deserialize_map(self)
-            }
-            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
-                Wire::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(Into::into)
-            }
-        }
         deserializer.deserialize_newtype_struct(MODEL_RECORD, RecordVisitor)
     }
 }
