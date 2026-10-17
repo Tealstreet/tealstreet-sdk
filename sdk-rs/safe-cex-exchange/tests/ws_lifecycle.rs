@@ -836,6 +836,42 @@ mod js_sockets {
         })
     }
 
+    #[test]
+    fn native_recovery_reads_the_live_receiver_policy() {
+        let (venue, runtime, _, _) = fixture();
+        let context = JsSocketContext::new(runtime);
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let core = core_of(&context, &socket).unwrap();
+        let base = core.base().unwrap();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "the base policy defaults to true"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(false))
+            .unwrap();
+        assert!(
+            !base.recover_after_offline(true).unwrap(),
+            "native recovery must read the source receiver false flag"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(true))
+            .unwrap();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "policy reads remain live"
+        );
+        socket
+            .define("recoversAfterOffline", Js::Bool(false))
+            .unwrap();
+        base.dispose();
+        assert!(
+            base.recover_after_offline(true).unwrap(),
+            "disposal precedes the reload policy"
+        );
+    }
+
     fn live_socket(runtime: &Rc<Runtime>) -> Rc<Io> {
         runtime.pump();
         runtime.io.borrow().last().expect("dialed").clone()
