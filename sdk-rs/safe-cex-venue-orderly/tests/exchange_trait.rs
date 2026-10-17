@@ -397,14 +397,24 @@ fn caller_id_preflight_matches_the_source_regex_before_http() {
 #[test]
 fn signed_requests_verify_over_exact_wire_method_url_and_body() {
     use base64::Engine;
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
     let (venue, rt, _, wire) = support::fixture(
         json!({"key":"key","secret":"11111111111111111111111111111111","applicationId":"account"}),
     );
     script(&wire);
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
     drive(&rt, venue.get_account()).unwrap();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
     let requests = wire.requests.borrow();
     let request = &requests[0];
-    let preimage = format!("{}GET/v1/client/info", rt.now.get() as u64);
+    // orderly.api.ts signs the synced timestamp, method, URL and optional body.
+    let timestamp = &request.headers["orderly-timestamp"];
+    let native_timestamp: f64 = timestamp.parse().unwrap();
+    assert!(
+        native_timestamp >= before && native_timestamp <= after,
+        "signed timestamp comes from the synced virtual clock"
+    );
+    let preimage = format!("{timestamp}GET/v1/client/info");
     assert_eq!(request.headers["orderly-textsign"], preimage);
     assert_eq!(request.headers["orderly-account-id"], "account");
     let signature = base64::engine::general_purpose::URL_SAFE
