@@ -1401,3 +1401,8 @@ throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
 installed NativeRuntime bindings, observing getter order, holes, duplicate amount
 reads, inserted identity and reentrant row/length changes. Both regressions compile
 and fail on the prior implementation; their inputs do not replace utility code.
+
+Error prototype thread-local storage stays inside its sole private accessor.
+Module-level item macros are rejected by the parity indexer. The focused
+`safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
+module graph and requires the public Error factory to remain discoverable.
