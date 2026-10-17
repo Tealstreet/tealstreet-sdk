@@ -1,6 +1,7 @@
 # Host boundary probe
 
-`yarn ffi:smoke:node` builds and calls `parity_probe` and `version` from Bun.
+`yarn ffi:smoke:node` builds the addon, runs the Node account regressions, and
+calls `parity_probe` and `version` from Bun.
 `yarn ffi:smoke:web` builds wasm and calls the same exports in a real browser
 module Worker, driven by the headless Puppeteer approach used by
 [the escape suite](../../apps/module-frame/escape/run.mjs).
@@ -42,3 +43,20 @@ and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
 `smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.
+
+The account method table exposes `findOrderByClientOrderId` through the venue's
+lookup implementation so hosts can reconcile a lost placement response. It also
+accepts the worker's `removeOrders([{id}])` and `fetchLastLogsFromWebsockets`, plus
+`setActiveTickerSymbols` / `getActiveTickerSymbols` from the exchange API.
+
+Run the production-path regressions without Bun:
+
+```sh
+cd sdk-rs
+cargo test -p safe-cex-registry --test native_account_methods
+node safe-cex-ffi/scripts/build.mjs node
+node --test safe-cex-ffi/tests/native-account-methods.test.mjs
+```
+
+Both suites construct real registry accounts and read orders over loopback HTTP.
+The Node suite loads the compiled napi addon and observes its Store callbacks.
