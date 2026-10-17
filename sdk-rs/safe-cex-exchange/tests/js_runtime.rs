@@ -3905,3 +3905,6 @@ fn promise_combinators_keep_pending_values_and_native_identity() {
         assert_eq!(value(2).to_number().unwrap().to_bits(), nan.to_bits());
     }
 }
+
+#[path = "support/emitter_retained.rs"]
+mod emitter_retained;
