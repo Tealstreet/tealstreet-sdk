@@ -636,7 +636,7 @@ fn generated_minted_order_id_strips_nanoid_separators() {
     let h = setup();
     *h.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
     assert_eq!(
-        h.venue().base().mint_client_order_id(&place()).as_deref(),
+        h.venue().base().mint_client_order_id(place()).as_deref(),
         Some("tsAbcDefGhiJklM")
     );
 }
