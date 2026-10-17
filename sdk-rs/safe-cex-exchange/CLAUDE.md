@@ -1206,3 +1206,8 @@ mutation bridge. IDs cross the declared typed string boundary without lossy
 surrogate replacement. `tests/js_store_terminal.rs` covers absent IDs, stale
 snapshots, unrelated IDs, native error metadata and that string boundary; OKX's
 real private-frame witnesses cover the production caller and final fill ordering.
+
+`JsProtocol::resyncs_private_state_on_reopen` reads the receiver's
+`resyncsPrivateStateOnReopen` member; undefined keeps the private-socket default.
+OKX's business socket defines it, so a business-only re-open runs the private
+snapshot (`okx/tests/exchange_binding.rs::business_socket_reopen_alone_resyncs_the_private_snapshot`).
