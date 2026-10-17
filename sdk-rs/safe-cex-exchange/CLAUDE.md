@@ -1331,6 +1331,11 @@ including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
 
+Array `slice` applies ToIntegerOrInfinity's NaN-to-zero rule to both bounds,
+including malformed numeric strings. `tests/js_array_slice.rs` compares422 Node
+cases through the installed native builtins, observing each output slot's value
+and presence so copied holes stay distinct from own undefined elements.
+
 The runtime JSON builtin and default encoded-HTTP response parser decode directly
 into existing Js values. JSON strings/keys preserve escaped and raw UTF-16 units,
 including lone surrogates; object members use own data-property definition, and
