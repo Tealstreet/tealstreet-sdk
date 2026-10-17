@@ -227,6 +227,12 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let coins = venue(rt)?.get_settle_coins_for_category(&text(&arg(&a, 0))?)?;
         Ok(Js::array(coins.into_iter().map(Js::str).collect()))
     });
+    method(&this, rt, "validateCandleInterval", |rt, a| {
+        venue(rt)?
+            .validate_candle_interval(&arg(&a, 0))
+            .map_err(Thrown::from)?;
+        Ok(Js::Undefined)
+    });
     // ts: BybitExchange.getCategoryForSymbol
     method(&this, rt, "getCategoryForSymbol", |rt, a| {
         Ok(Js::str(

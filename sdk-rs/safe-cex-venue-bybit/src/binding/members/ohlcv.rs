@@ -2,7 +2,7 @@
 use crate::binding::{
     host::text,
     rt::{Rt, venue},
-    value::{Js, Thrown, to_json},
+    value::{Js, Thrown},
 };
 use safe_cex_types::ExchangeName;
 
@@ -68,21 +68,20 @@ pub(crate) fn fetch_ohlcv(rt: &Rt, options: Js) -> Result<Js, Thrown> {
         let name = venue(&rt)?.base.name.clone();
         let primary = matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo);
         if primary {
-            venue(&rt)?
-                .validate_candle_interval(&to_json(&options.get("interval")?)?)
-                .map_err(Thrown::from)?;
+            rt.this
+                .call_method("validateCandleInterval", vec![options.get("interval")?])?;
         }
         if name == ExchangeName::Bybitspot {
             return crate::spot_exchange_reads::fetch_ohlcv(&rt, &rt.this, options).await;
         }
-        let category = rt
-            .this
-            .call_method("getCategoryForSymbol", vec![options.get("symbol")?])?;
         crate::spot_exchange_reads::fetch_ohlcv_for_category(
             &rt,
             &rt.this,
             options,
-            category,
+            |options| {
+                rt.this
+                    .call_method("getCategoryForSymbol", vec![options.get("symbol")?])
+            },
             !primary,
             |response, data| {
                 if primary {

@@ -289,14 +289,14 @@ pub async fn fetch_ohlcv<H: SpotExchangeHost>(
     r: &H::Value,
     opts: H::Value,
 ) -> Result<H::Value, H::Error> {
-    fetch_ohlcv_for_category(h, r, opts, h.literal("spot"), true, |_, _| Ok(())).await
+    fetch_ohlcv_for_category(h, r, opts, |_| Ok(h.literal("spot")), true, |_, _| Ok(())).await
 }
 
 pub(crate) async fn fetch_ohlcv_for_category<H: SpotExchangeHost>(
     h: &H,
     r: &H::Value,
     opts: H::Value,
-    category: H::Value,
+    category: impl FnOnce(&H::Value) -> Result<H::Value, H::Error>,
     optional_mapping: bool,
     validate_response: impl FnOnce(&H::Value, &H::Value) -> Result<(), H::Error>,
 ) -> Result<H::Value, H::Error> {
@@ -330,7 +330,7 @@ pub(crate) async fn fetch_ohlcv_for_category<H: SpotExchangeHost>(
         )?
     };
     let params = h.object(vec![
-        ("category", category),
+        ("category", category(&opts)?),
         ("symbol", p(h, &opts, "symbol")?),
         ("start", call!(h, start, "valueOf", vec![])),
         ("end", call!(h, end, "valueOf", vec![])),
