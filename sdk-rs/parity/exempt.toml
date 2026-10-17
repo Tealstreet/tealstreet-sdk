@@ -1,6 +1,6 @@
 [[exempt]]
 rs = "safe-cex-crypto/src/zklink.rs::ZkLinkSignature"
-reason = "C3: named packed-byte return shape for the shared Rescue/MuSig primitive; no TypeScript packed-byte record declaration. The source TxSignature string record maps separately to safe-cex-venue-apexomni/src/transaction_records.rs::TxSignature. Packed-to-wire conversion belongs to the unfinished signing adapters, not this primitive return holder."
+reason = "C3: packed-byte return shape for the shared Rescue/MuSig primitive; no local TypeScript packed-byte declaration. The source TxSignature string record maps separately to transaction_records.rs::TxSignature. Native ContractSigner::sign_contract converts the packed result to the source hex wire signature; the constructed Apex placement test compares its complete signed body to the actual pinned SDK."
 
 [[exempt]]
 rs = "safe-cex-ffi/src/lib.rs::parity_probe"
@@ -2177,22 +2177,6 @@ rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::init"
 reason = "C3 host ABI: init capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
 [[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::now_ms"
-reason = "C3 host ABI: now_ms capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pack_amount"
-reason = "C3 host ABI: pack_amount capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pack_fee"
-reason = "C3 host ABI: pack_fee capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::pubkey_hash"
-reason = "C3 host ABI: pubkey_hash capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
 rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::builder"
 reason = "C3 host ABI: builder capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
@@ -2203,22 +2187,6 @@ reason = "C3 host ABI: new_transaction capability corresponds to an imported zkL
 [[exempt]]
 rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::create_signed_contract"
 reason = "C3 host ABI: create_signed_contract capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::create_signed_order"
-reason = "C3 host ABI: create_signed_order capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_transfer"
-reason = "C3 host ABI: sign_transfer capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_withdraw"
-reason = "C3 host ABI: sign_withdraw capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
-
-[[exempt]]
-rs = "safe-cex-venue-apexomni/src/zklink_host.rs::ZkLinkHost::sign_change_pubkey"
-reason = "C3 host ABI: sign_change_pubkey capability corresponds to an imported zkLink wallet/WASM operation used by registered transaction bodies. There is no separate locally exported TypeScript symbol. The actual-source signing corpus compares caller arguments/order and opaque handle flow, without claiming independent host cryptography."
 
 [[exempt]]
 rs = "safe-cex-exchange/src/position_intervals.rs::FundingRow"

@@ -102,7 +102,13 @@ pub(crate) fn socket_ops(weak: Weak<Shared>) -> Rc<SocketOps<Js, Thrown>> {
             }
             out
         }),
-        tuple_two: Rc::new(|v| Ok((v.get("0")?, v.get("1")?))),
+        tuple_two: Rc::new(|value| {
+            let record = iterator_record(value.clone())?;
+            let first = iterator_next(&record)?.unwrap_or(Js::Undefined);
+            let second = iterator_next(&record)?.unwrap_or(Js::Undefined);
+            iterator_close(record)?;
+            Ok((first, second))
+        }),
         await_value: Rc::new(|v| Box::pin(await_js(v))),
     })
 }

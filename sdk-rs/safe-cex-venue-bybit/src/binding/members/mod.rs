@@ -16,6 +16,7 @@ pub(crate) mod lifecycle;
 pub(crate) mod mapping;
 pub(crate) mod markets;
 pub(crate) mod ohlcv;
+pub(crate) mod options;
 pub(crate) mod orders;
 pub(crate) mod spot;
 pub(crate) mod startup;
