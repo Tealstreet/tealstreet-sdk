@@ -1242,3 +1242,11 @@ installed qs package over 96 option/input combinations. The BingX registry
 regression additionally observes final signed GET query ordering through the
 production HTTP client and verifies the signature against the source preimage.
 Other qs options remain outside this imported runtime surface.
+
+Map/Set `forEach` uses stable insertion positions, like the live iterators, and
+releases its collection borrow before each callback. Deletions, clear/reinsert,
+updates and new entries are observed during traversal. Callbacks receive the
+source thisArg and native value/key/owner references; invalid callbacks reject
+even on empty collections. `js_collection_foreach` checks fourteen Node traces,
+nested traversal, abrupt completion, native signed-zero/reference identity and
+thisArg. Both named regressions compiled and failed on the snapshot implementation.
