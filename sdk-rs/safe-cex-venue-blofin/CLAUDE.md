@@ -342,3 +342,11 @@ actual-source cases, including nonstring normal IDs, a falsy-ID refusal and
 numeric/string protective controls. The optional goneIdLookup oracle mode uses
 actual cancelOrders/cancelNormalOrders/cancelAlgoOrders and TS DefaultStore;
 the original53-case orchestration corpus remains unchanged.
+
+Money-path cancellation receipt: native_cancel compiles/fails on master with
+stale string123, then passes all8 source cases after normal-ID coercion. The
+14 existing order_rest tests, native/Wasm all-target strict Clippy, required
+all-features inventories (cancellation6+export-ignore, override7+live-TS-ignore,
+binding25), parity7459/16581 and extraction0 pass after normal master refresh.
+Logs: /tmp/blofin-gone-{native-red,final-native,native-clippy,wasm-clippy,
+inventories,parity,extract}.log. No reviewed fixture or source corpus replaced.
