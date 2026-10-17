@@ -288,3 +288,166 @@ pub fn dispose<W, H, T: DisposeHost<W, H>>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod accepted_helpers {
+    use super::*;
+    use crate::public_subscriptions::OrderedStringSet;
+    type State = PrivateSocketState<(), ()>;
+    type Error = Rc<()>;
+    struct Transport {
+        state: Rc<State>,
+        channel: Vec<u16>,
+        events: RefCell<Vec<&'static str>>,
+        prepared: Rc<()>,
+        error: Error,
+        fail: Option<&'static str>,
+    }
+    impl Transport {
+        fn event(&self, event: &'static str) -> Result<(), Error> {
+            self.events.borrow_mut().push(event);
+            if self.fail == Some(event) {
+                Err(self.error.clone())
+            } else {
+                Ok(())
+            }
+        }
+    }
+    impl SubscriptionTransport for Transport {
+        type Prepared = Rc<()>;
+        type Error = Error;
+        fn prepare(&self) -> Result<Rc<()>, Error> {
+            assert!(
+                values(&self.state).contains(&ChannelValue::String(self.channel.clone())),
+                "private subscribe native insertion before prepare"
+            );
+            self.event("prepare")?;
+            Ok(self.prepared.clone())
+        }
+        fn clock(&self) -> Result<f64, Error> {
+            self.event("clock")?;
+            Ok(-0.)
+        }
+        fn send(&self, prepared: Rc<()>, frame: SubscriptionFrame) -> Result<(), Error> {
+            assert!(
+                Rc::ptr_eq(&prepared, &self.prepared),
+                "private subscribe native prepared identity"
+            );
+            assert_eq!(
+                frame.id.to_bits(),
+                0x8000000000000000,
+                "private subscribe native id bits"
+            );
+            assert_eq!(
+                frame.nonce.to_bits(),
+                0x8000000000000000,
+                "private subscribe native nonce bits"
+            );
+            assert_eq!(frame.method, "subscribe", "private subscribe native method");
+            assert_eq!(
+                frame.params.channels,
+                vec![ArraySlot::Value(ChannelValue::String(self.channel.clone()))],
+                "private subscribe native frame channel"
+            );
+            self.event("send")
+        }
+    }
+    #[test]
+    fn subscribe_one_native_contract() {
+        let cases = [
+            (false, false, false, None),
+            (true, false, false, None),
+            (true, true, false, None),
+            (false, true, false, None),
+            (true, false, true, None),
+            (true, false, false, Some("prepare")),
+            (true, false, false, Some("clock")),
+            (true, false, false, Some("send")),
+        ];
+        assert_eq!(cases.len(), 8, "private subscribe independent cases");
+        let mut executed = 0;
+        for (auth, existing, disposed, fail) in cases {
+            let retained = Rc::new(OrderedStringSet::default());
+            let expected = vec![117, 115, 101, 114, 46, 937];
+            if existing {
+                retained.insert(ChannelValue::String(expected.clone()));
+            }
+            let state = Rc::new(State {
+                channels: SubscriptionState {
+                    subscriptions: RefCell::new(retained.clone()),
+                    message_id: Cell::new(-0.),
+                },
+                is_disposed: Cell::new(disposed),
+                is_authenticated: Cell::new(auth),
+                reconnect_auth_timer: RefCell::new(None),
+                ws: RefCell::new(None),
+            });
+            let transport = Transport {
+                state: state.clone(),
+                channel: expected.clone(),
+                events: RefCell::new(vec![]),
+                prepared: Rc::new(()),
+                error: Rc::new(()),
+                fail,
+            };
+            let result = subscribe_one(&state, "user.Ω", &transport);
+            if fail.is_some() {
+                match result {
+                    Err(error) => assert!(
+                        Rc::ptr_eq(&error, &transport.error),
+                        "private subscribe native original error"
+                    ),
+                    Ok(()) => panic!("private subscribe swallowed error"),
+                }
+            } else {
+                result.unwrap()
+            }
+            assert_eq!(
+                retained.values(),
+                vec![ChannelValue::String(expected)],
+                "private subscribe native membership"
+            );
+            assert!(
+                Rc::ptr_eq(&values(&state), &retained),
+                "private subscribe native retained set"
+            );
+            let sends = auth && !existing;
+            let expected_events = if !sends {
+                &[][..]
+            } else {
+                match fail {
+                    Some("prepare") => &["prepare"][..],
+                    Some("clock") => &["prepare", "clock"][..],
+                    _ => &["prepare", "clock", "send"][..],
+                }
+            };
+            assert_eq!(
+                &*transport.events.borrow(),
+                expected_events,
+                "private subscribe native event order"
+            );
+            let expected_id: f64 = if sends && fail != Some("prepare") {
+                1.
+            } else {
+                -0.
+            };
+            assert_eq!(
+                state.channels.message_id.get().to_bits(),
+                expected_id.to_bits(),
+                "private subscribe native next id"
+            );
+            assert_eq!(
+                state.is_authenticated.get(),
+                auth,
+                "private subscribe auth preserved"
+            );
+            assert_eq!(
+                state.is_disposed.get(),
+                disposed,
+                "private subscribe disposal flag preserved"
+            );
+            executed += 1;
+        }
+        assert_eq!(executed, 8, "private subscribe executed cases");
+    }
+}
