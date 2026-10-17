@@ -1,6 +1,6 @@
 use crate::{
-    CacheRuntime, CandleCacheBackend, CandleCacheChunkAccessOptions, CandleCacheChunkRecord,
-    Chunks, LoadedChunks, LocalFuture, types::validate_chunk_size,
+    CacheRuntime, CandleCacheBackend, CandleCacheChunkAccessOptions, Chunks, LoadedChunks,
+    LocalFuture, types::validate_chunk_size,
 };
 use futures_channel::oneshot;
 use futures_util::future::{FutureExt, Shared};
@@ -38,7 +38,7 @@ pub struct IndexedDBCandleCacheBackend {
     unavailable: Rc<Cell<bool>>,
     database: Rc<RefCell<Option<OpenDatabase>>>,
 }
-fn error(value: JsValue) -> String {
+pub(super) fn error(value: JsValue) -> String {
     format!("IndexedDB: {value:?}")
 }
 // Abort inside the active cursor callback, before its recovered error escapes.
@@ -395,18 +395,14 @@ impl IndexedDBCandleCacheBackend {
         if options.chunk_size == 0 {
             return Ok(Vec::new());
         }
-        let raw = js_sys::JSON::stringify(&value)
-            .map_err(error)?
-            .as_string()
-            .ok_or("invalid record")?;
-        let record: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        let candles = record
-            .get("candles")
-            .and_then(|v| v.as_array())
-            .ok_or("invalid candles record")?;
+        let candles = js_sys::Reflect::get(&value, &JsValue::from_str("candles")).map_err(error)?;
+        if !js_sys::Array::is_array(&candles) {
+            return Err("invalid candles record".into());
+        }
+        let candles: js_sys::Array = candles.unchecked_into();
         let mut sparse = vec![None; options.chunk_size];
-        for value in candles {
-            let Ok(candle) = serde_json::from_value::<safe_cex_types::Candle>(value.clone()) else {
+        for value in candles.iter() {
+            let Some(candle) = crate::codec::decode_js_candle(&value)? else {
                 continue;
             };
             let index = (candle.timestamp / 1000. / options.interval_seconds).floor();
@@ -559,12 +555,7 @@ impl IndexedDBCandleCacheBackend {
                     if candles.is_empty() {
                         continue;
                     }
-                    let raw = serde_json::to_string(&CandleCacheChunkRecord {
-                        candles,
-                        last_accessed: now,
-                    })
-                    .map_err(|e| e.to_string())?;
-                    let value = js_sys::JSON::parse(&raw).map_err(error)?;
+                    let value = crate::codec::encode_js_record(candles, now).map_err(error)?;
                     store
                         .put_with_key(&value, &JsValue::from_str(&format!("{key}::{chunk}")))
                         .map_err(error)?;
