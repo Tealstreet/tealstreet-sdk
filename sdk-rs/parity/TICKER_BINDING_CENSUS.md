@@ -24,9 +24,9 @@ satisfy this corpus.
 | ApexOmni | apexomni/apexomni.ws-public.ts | Truthy-gated parseFloat; missing mark falls back to index | Native proven: safe-cex-venue-apexomni/tests/binding.rs::production_ticker_coercion_matches_constructed_typescript; 64 three-row frames |
 | AsterDEX | asterdex/asterdex.ws-public.ts | Coercion except copied truthy fundingTime; decision-3 row refusal | Pending complete coercion corpus; row policy #807 |
 | Backpack | backpack/backpack.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Binance futures | binance/binance.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Binance PM | binance/binancepm.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Binance Spot | binance/binancespot.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
+| Binance futures | binance/binance.ws-public.ts | parseFloat; distinct market/public socket routes | Native proven: safe-cex-venue-binance/tests/private_classes.rs::production_ticker_coercion_futures_matches_constructed_typescript (--features native); 80 three-row frames |
+| Binance PM | binance/binancepm.ws-public.ts | parseFloat; distinct market/public socket routes | Native proven: safe-cex-venue-binance/tests/private_classes.rs::production_ticker_coercion_pm_matches_constructed_typescript (--features native); 80 three-row frames |
+| Binance Spot | binance/binancespot.ws-public.ts | parseFloat; distinct market/public socket routes; last also populates mark/index | Native proven: safe-cex-venue-binance/tests/private_classes.rs::production_ticker_coercion_spot_matches_constructed_typescript (--features native); 48 three-row frames |
 | BingX | bingx/bingx.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Bitget | bitget/bitget.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Bitrue | bitrue/bitrue.ws-public.ts | Unary Number conversion; rose multiplied by 100 | Native proven: safe-cex-venue-bitrue/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 32 cases / 96 actual frames |
