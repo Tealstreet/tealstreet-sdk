@@ -158,3 +158,11 @@ runtime and joins already-started promises. Market/leverage and order-read bodie
 share that implementation. The real EU binding holds a SWAP response and verifies
 FUTURES starts before it completes for both normal and algorithmic orders, matching
 the actual TypeScript members with the installed p-iteration dependency.
+
+The production networkErrorOnRead import applies the installed axios-retry
+cancellation/timeout exclusions and is-retry-allowed DNS/TLS denial set. Native
+response/code guards preserve source truthiness and repeated property reads;
+code membership compares UTF-16 directly, without invoking conversion hooks.
+The actual constructed HTTP witness compares36 GET profiles and one write guard
+with the maintained wrapper and installed dependencies. All30 denial-set codes
+and ERR_CANCELED stop after one attempt; allowed socket errors still retry.
