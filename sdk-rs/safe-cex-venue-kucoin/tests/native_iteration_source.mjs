@@ -26,6 +26,31 @@ const bits = n => {
   const b = Buffer.alloc(8); b.writeDoubleBE(n); return b.toString('hex');
 };
 const observe = book => Object.fromEntries(['bids','asks'].map(side => [side, book[side].map(row => [bits(row.price),bits(row.amount),bits(row.total)])]));
+if (process.argv.includes('--candles')) {
+  const cases = [];
+  for (const spot of [false, true]) {
+    const source = spot ? tree('exchanges/kucoin/kucoinspot.ws-public.ts') : socket;
+    const table = spot ? tree('exchanges/kucoin/kucoinspot.types.ts') : types;
+    const declaration = (ast, name) => {
+      const found = ast.statements.find(row => ts.isVariableStatement(row) && row.declarationList.declarations.some(d => d.name.getText(ast) === name));
+      assert(found, 'maintained declaration ' + name); return found.getText(ast);
+    };
+    const module = {exports:{}};
+    const code = declaration(table, spot ? 'KUCOIN_SPOT_INTERVAL' : 'WS_INTERVAL')
+      + (spot ? declaration(source, 'normalizeTimestamp') : '')
+      + 'export class Selected {' + member(source, 'listenOHLCV') + '}';
+    vm.runInNewContext(ts.transpileModule(code, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText, {module,exports:module.exports,Date,clearTimeout(){}});
+    const receiver = new module.exports.Selected(), candles = [];
+    Object.assign(receiver, {isConnected:true,isDisposed:false,messageHandlers:{},parent:{toApiSymbol:()=> 'XBTUSDTM'},send(){},subscribeTopic(){},unsubscribeTopic(){},cleanupMessageHandlerStats(){}});
+    const cleanup = receiver.listenOHLCV({symbol:'SYM',interval:'1m'}, candle => candles.push(candle));
+    assert.equal(receiver.messageHandlers.candle_SYM_1min.length,1);
+    receiver.messageHandlers.candle_SYM_1min[0]({data:{candles:['1700000000','11.25','17.5','23.75','5.5','31.125']}});
+    assert.equal(candles.length,1); assert.equal(Object.keys(candles[0]).length,6);
+    cases.push({spot, fields:Object.fromEntries(Object.entries(candles[0]).map(([key,value])=>[key,bits(value)]))});
+    cleanup(); assert.equal(receiver.messageHandlers.candle_SYM_1min?.length || 0,0);
+  }
+  process.stdout.write(JSON.stringify(cases)); process.exit(0);
+}
 const cases = [];
 for (const side of ['bids','asks']) for (const [index, payload] of payloads.entries()) {
   const handlers = {}, books = []; let requests = 0;
