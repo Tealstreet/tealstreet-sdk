@@ -292,6 +292,7 @@ impl BybitExchange {
                 | ExchangeName::Bybitdemo
                 | ExchangeName::Bybitspot
                 | ExchangeName::Bybitinverse
+                | ExchangeName::Hyrotrader
         ) {
             return Err(ExchangeError::new(format!(
                 "BybitExchange cannot construct {}",
@@ -301,6 +302,24 @@ impl BybitExchange {
                     .unwrap_or_default()
             )));
         }
+        let hyro_rest = if name == ExchangeName::Hyrotrader {
+            let network = if options.testnet == Some(true) {
+                "testnet"
+            } else {
+                "livenet"
+            };
+            let origin = crate::types::HYROTRADER_SIMULATOR_URL[network]
+                .as_str()
+                .unwrap_or_default();
+            if origin.is_empty() {
+                return Err(ExchangeError::new(
+                    "HyroTrader simulator REST URL is not configured",
+                ));
+            }
+            Some(origin.to_owned())
+        } else {
+            None
+        };
         let runtime = deps.runtime.clone();
         let exchange_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
         let clock = deps.clock.clone();
@@ -315,10 +334,14 @@ impl BybitExchange {
                 globals::build(weak.clone(), clock.clone()),
                 BybitExtra {
                     venue: RefCell::new(Weak::new()),
+                    private_protocol: RefCell::new(Weak::new()),
                 },
             )
         });
         let mut class_settings = settings();
+        if name == ExchangeName::Hyrotrader {
+            class_settings.client_order_id_rule = None;
+        }
         if name == ExchangeName::Bybitspot {
             class_settings.positions_supported = Some(false);
             class_settings
@@ -348,7 +371,7 @@ impl BybitExchange {
             store::facade(store.clone()),
             |this| {
                 // bybitdemo.exchange.ts initializes this field after super().
-                if name == ExchangeName::Bybitdemo {
+                if matches!(name, ExchangeName::Bybitdemo | ExchangeName::Hyrotrader) {
                     this.define("isDemo", Js::Bool(true))?;
                 }
                 // bybitspot.exchange.ts initializes its own isSpot field.
@@ -380,6 +403,7 @@ impl BybitExchange {
         let api_account_name = account_name.clone();
         let relay_enabled = deps.relay_enabled;
         let public_base = core.clone();
+        let private_shared = shared.clone();
         let venue = BybitExchange::new(
             core,
             runtime.clone(),
@@ -417,7 +441,7 @@ impl BybitExchange {
                         },
                         owner,
                         is_demo: base.name == ExchangeName::Bybitdemo || base.is_demo,
-                        rest_base_url: None,
+                        rest_base_url: hyro_rest.clone(),
                         clock: api_clock.clone(),
                         retry_clock: retry_clock.clone(),
                         payload_signer: base.signers.payload_signer.clone(),
@@ -447,7 +471,7 @@ impl BybitExchange {
                 }
             },
             move |parent| {
-                Rc::new(crate::ws_private::protocol::PrivateProtocol::new(
+                let protocol = Rc::new(crate::ws_private::protocol::PrivateProtocol::new(
                     parent,
                     runtime.clone(),
                     crate::ws_private::protocol::PrivateProtocolConfig {
@@ -462,10 +486,15 @@ impl BybitExchange {
                         account_name,
                         relay_enabled,
                     },
-                ))
+                ));
+                *private_shared.extra.private_protocol.borrow_mut() = Rc::downgrade(&protocol);
+                protocol
             },
         )
         .map_err(|error| ExchangeError::new(error.to_string()))?;
+        if venue.base.name == ExchangeName::Hyrotrader {
+            venue.position_mode.set(Some(PositionMode::OneWay));
+        }
         for slot in [
             safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
             safe_cex_exchange::socket_lifecycle::SocketSlot::PublicSecondary,
@@ -558,6 +587,9 @@ impl Exchange for BybitExchange {
         &self.capabilities
     }
     fn class_name(&self) -> &'static str {
+        if self.base.name == ExchangeName::Hyrotrader {
+            return "HyrotraderExchange";
+        }
         if self.base.name == ExchangeName::Bybitspot {
             "BybitSpotExchange"
         } else if self.base.name == ExchangeName::Bybitinverse {

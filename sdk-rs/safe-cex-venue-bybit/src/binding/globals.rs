@@ -21,6 +21,26 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
+    let status_rt = rt.clone();
+    def(
+        "getBybitResponseMeta",
+        Js::function("getBybitResponseMeta", move |_, args| {
+            let scope = scope_of(&status_rt)?;
+            super::members::orders::position_response_meta(&scope, &arg(&args, 0))
+        }),
+    );
+    let json = g.get("JSON").expect("installed JSON builtin");
+    def("jsonParse", Js::function("jsonParse", move |_, args| {
+        Ok(json.call_method("parse", args).unwrap_or(Js::Null))
+    }));
+    def("RegExp", Js::function("RegExp", |_, args| {
+        let pattern = arg(&args, 0);
+        let flags = arg(&args, 1);
+        safe_cex_exchange::js_runtime::regexp::regexp(
+            &if pattern.is_undefined() { vec![] } else { pattern.to_js_string()?.to_vec() },
+            &if flags.is_undefined() { vec![] } else { flags.to_js_string()?.to_vec() },
+        )
+    }));
     // The source import omits literal top-level keys from object-literal requests.
     def(
         "omit",

@@ -88,7 +88,7 @@ fn market(rt: &Rt, symbol: &str) -> Result<Option<safe_cex_types::Market>, Throw
 
 // ts: BybitExchange.submitCreateOrders — sequential; a failed send is reported and
 // dropped, except a lost response on a single order carrying the caller's id.
-pub(crate) async fn submit_create_orders(
+pub(crate) async fn submit_create_orders_body(
     rt: &Rt,
     payloads: Vec<Js>,
     opts: &Js,
@@ -293,7 +293,8 @@ async fn place_option_order(
         ("reduceOnly", Js::Bool(base.reduce_only.unwrap_or(false))),
         ("orderLinkId", link_id),
     ]);
-    let responses = submit_create_orders(rt, vec![payload], opts).await?;
+    let responses = await_js(rt.this.call_method("submitCreateOrders", vec![Js::array(vec![payload]), opts.clone()])?).await?;
+    let responses = responses.array_values().ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
     let Some(response) = responses.first().cloned() else {
         return Err(Thrown::new(error_object(
             "Error",
@@ -312,7 +313,7 @@ fn kind_side(base: &PlaceOrderOpts) -> String {
 
 // ts: getBybitResponseMeta and its normalization helpers. Retained status
 // values share the receiver's JSON.parse capability for raw proxy envelopes.
-fn position_response_meta(rt: &Rt, data: &Js) -> Result<Js, Thrown> {
+pub(crate) fn position_response_meta(rt: &Rt, data: &Js) -> Result<Js, Thrown> {
     let envelope = if data.is_object() || data.is_array() {
         data.clone()
     } else {
@@ -870,13 +871,9 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
             0.
         };
         let lot_size = adjust((amount - rest) / lots, p_amount);
-        let link_id = || -> Js {
-            if !client_order_id.is_undefined() {
-                return client_order_id.clone();
-            }
-            venue
-                .generated_order_link_id()
-                .map_or(Js::Undefined, |id| Js::str(&id))
+        let link_id = || -> Result<Js, Thrown> {
+            if !client_order_id.is_undefined() { return Ok(client_order_id.clone()); }
+            Ok(venue.generated_order_link_id().map_err(Thrown::from)?.map_or(Js::Undefined, |id| Js::str(&id)))
         };
         // Lodash times returns no lots outside 1..=MAX_SAFE_INTEGER, including Infinity.
         let count = if (1. ..=9_007_199_254_740_991.).contains(&lots) {
@@ -893,20 +890,21 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                 }
             }
             payload.set("qty", num(lot_size))?;
-            payload.set("orderLinkId", link_id())?;
+            payload.set("orderLinkId", link_id()?)?;
             payloads.push(payload);
         }
         if rest != 0. && !rest.is_nan() {
             let payload = req_object.spread_object()?;
             payload.set("qty", num(rest))?;
-            payload.set("orderLinkId", link_id())?;
+            payload.set("orderLinkId", link_id()?)?;
             payloads.push(payload);
         }
         rt.this.call_method(
             "assertSingleNativeClientOrderId",
             vec![client_order_id.clone(), Js::Number(payloads.len() as f64)],
         )?;
-        let responses = submit_create_orders(&rt, payloads, &opts).await?;
+        let responses = await_js(rt.this.call_method("submitCreateOrders", vec![Js::array(payloads), opts.clone()])?).await?;
+        let responses = responses.array_values().ok_or_else(|| Thrown::type_error("submitCreateOrders did not return an array"))?;
         collect_ids(&rt, &opts, responses)
     })))
 }

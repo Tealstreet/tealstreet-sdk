@@ -42,6 +42,8 @@ pub struct Runtime {
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
     pub logs: RefCell<Vec<String>>,
+    /// Optional deterministic entropy stream for session/identity race witnesses.
+    pub random_sequence: Cell<Option<u64>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -51,12 +53,26 @@ impl ExchangeTask for Task {
 }
 impl Runtime {
     pub fn pump(&self) {
+        // Promise settlement during an event task can wake a driver polled
+        // earlier in this same pass; drain that microtask before returning.
+        struct WakeFlag(std::sync::atomic::AtomicBool);
+        impl std::task::Wake for WakeFlag {
+            fn wake(self: Arc<Self>) {
+                self.wake_by_ref();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let flag = Arc::new(WakeFlag(std::sync::atomic::AtomicBool::new(false)));
+        let waker = Waker::from(flag.clone());
         for _ in 0..64 {
+            flag.0.store(false, std::sync::atomic::Ordering::Relaxed);
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -71,7 +87,7 @@ impl Runtime {
             }
             let added = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !added {
+            if !progressed && !added && !flag.0.load(std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
         }
@@ -112,7 +128,12 @@ impl ExchangeRuntime for Runtime {
         false
     }
     fn random(&self) -> f64 {
-        0.5
+        if let Some(next) = self.random_sequence.get() {
+            self.random_sequence.set(Some(next.wrapping_add(1)));
+            (next % 64) as f64 / 64.0
+        } else {
+            0.5
+        }
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.message.clone());
@@ -213,10 +234,13 @@ pub struct Request {
 #[derive(Default)]
 pub struct Wire {
     pub network_failures: RefCell<Vec<String>>,
+    pub reject_http_errors: Cell<bool>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(u16, Value)>)>>,
     /// (METHOD, path, query key, query value) routes, checked before the plain ones.
     pub param_routes: RefCell<Vec<(String, String, String, String, (u16, Value))>>,
     pub requests: RefCell<Vec<Request>>,
+    /// Hold selected responses after dispatch; release explicitly from the test.
+    pub response_gates: RefCell<Vec<(String, Rc<Cell<bool>>)>>,
 }
 impl Wire {
     pub fn route(&self, method: &str, path: &str, status: u16, body: Value) {
@@ -323,8 +347,31 @@ impl RestAdapter for Wire {
                     }
                 })
         });
+        let gate = self
+            .response_gates
+            .borrow()
+            .iter()
+            .find(|(gated_path, _)| *gated_path == path)
+            .map(|(_, gate)| gate.clone());
+        let reject_http_errors = self.reject_http_errors.get();
         Box::pin(async move {
+            if let Some(gate) = gate {
+                std::future::poll_fn(move |_| {
+                    if gate.get() {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                })
+                .await;
+            }
             match reply {
+                Some((status, body)) if reject_http_errors && status >= 400 => Err(safe_cex_transport::RestFailure {
+                    code: Some("ERR_BAD_REQUEST".into()), transport_error: None,
+                    message: format!("Request failed with status code {status}"),
+                    response: Some(Box::new(RestResponse { status, reason: None, headers: Default::default(), body: RestResponseBody::Encoded(body.to_string().into_bytes()) })),
+                    request: Box::new(request), context: None,
+                }),
                 Some((status, body)) => Ok(RestResponse {
                     status,
                     reason: None,
