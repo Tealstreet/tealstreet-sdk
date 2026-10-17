@@ -500,8 +500,9 @@ The override contract has two independent gates in `tests/override_contract.rs`:
 `override-inventory.cjs` resolves TypeScript class ancestry and inventories every
 callable override of a BaseExchange member; each must have a dynamic hook (or the
 explicit typed-placement binding). The Rust source audit rejects direct base
-bypasses and captured base method references, and pins hook call sites plus their
-enclosing function token fingerprints in `override-call-sites.json`. This is a
+bypasses and captured base method references, and pins each function's hook call
+edges (kind, hook, receiver base/dynamic/path, count) in `override-call-sites.json`;
+unrelated body edits keep the pin, edge changes fail. This is a
 syntax/alias audit with review-required inventory changes, not Rust type inference.
 It sees local receiver/alias syntax, not ambient type-alias or field-type changes
 outside the function; macros are unexpanded. Those still need semantic review.
