@@ -13,7 +13,8 @@ Both variants remain in this family crate. `types.rs` maps `kraken.types.ts`;
 in `binding/members.rs`, to its ported body; the host traits are implemented
 over `Js` in `binding/host*.rs` (REST family on the receiver scope) and
 `binding/sockets.rs` (one `SocketHost` per socket object, owning the slots the
-traits borrow). The Exchange trait's sixteen methods call the assembled members;
+traits borrow). Every Exchange trait method either source class overrides calls
+its assembled member (`--test trait_dispatch` drives each through the trait);
 the five members Kraken inherits from base.ts reject with its `Not implemented`.
 The host supplies two module-scoped values, never per instance: the Futures nonce
 counter (`api::FuturesModule`) and the Spot client-ID generator (`spot_client_ids`).
