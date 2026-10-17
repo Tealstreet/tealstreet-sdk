@@ -1,8 +1,6 @@
 use safe_cex_num::numeric_ingress::JsNumberOutput;
 use safe_cex_venue_hyperliquid::types::{
-    Hip3MarketInfoGrowthMode, Hip3MarketInfoMarginMode, HyperliquidUserAbstractionMode,
-    MetaUniverseItemGrowthMode, MetaUniverseItemMarginMode, UserFundingDeltaType,
-    UserNonFundingLedgerDeltaType, WsUserNonFundingLedgerUpdateType,
+    HyperliquidUserAbstractionMode, WsUserNonFundingLedgerUpdateType,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -71,53 +69,10 @@ fn user_abstraction_mode_variants_and_string_only_ingress() {
 }
 
 #[test]
-fn meta_margin_mode_variants_and_string_only_ingress() {
-    literal("strictIsolated", MetaUniverseItemMarginMode::StrictIsolated);
-    literal("noCross", MetaUniverseItemMarginMode::NoCross);
-    forbidden::<MetaUniverseItemMarginMode>();
-}
-
-#[test]
-fn meta_growth_mode_variants_and_string_only_ingress() {
-    literal("enabled", MetaUniverseItemGrowthMode::Enabled);
-    literal("disabled", MetaUniverseItemGrowthMode::Disabled);
-    forbidden::<MetaUniverseItemGrowthMode>();
-}
-
-#[test]
-fn funding_delta_variants_and_string_only_ingress() {
-    literal("funding", UserFundingDeltaType::Funding);
-    forbidden::<UserFundingDeltaType>();
-}
-
-#[test]
-fn ledger_delta_variants_and_string_only_ingress() {
-    literal("deposit", UserNonFundingLedgerDeltaType::Deposit);
-    literal("withdraw", UserNonFundingLedgerDeltaType::Withdraw);
-    literal("transfer", UserNonFundingLedgerDeltaType::Transfer);
-    literal("liquidation", UserNonFundingLedgerDeltaType::Liquidation);
-    forbidden::<UserNonFundingLedgerDeltaType>();
-}
-
-#[test]
 fn websocket_ledger_variants_and_string_only_ingress() {
     literal("deposit", WsUserNonFundingLedgerUpdateType::Deposit);
     literal("withdraw", WsUserNonFundingLedgerUpdateType::Withdraw);
     literal("transfer", WsUserNonFundingLedgerUpdateType::Transfer);
     literal("liquidation", WsUserNonFundingLedgerUpdateType::Liquidation);
     forbidden::<WsUserNonFundingLedgerUpdateType>();
-}
-
-#[test]
-fn hip3_margin_mode_variants_and_string_only_ingress() {
-    literal("strictIsolated", Hip3MarketInfoMarginMode::StrictIsolated);
-    literal("noCross", Hip3MarketInfoMarginMode::NoCross);
-    forbidden::<Hip3MarketInfoMarginMode>();
-}
-
-#[test]
-fn hip3_growth_mode_variants_and_string_only_ingress() {
-    literal("enabled", Hip3MarketInfoGrowthMode::Enabled);
-    literal("disabled", Hip3MarketInfoGrowthMode::Disabled);
-    forbidden::<Hip3MarketInfoGrowthMode>();
 }

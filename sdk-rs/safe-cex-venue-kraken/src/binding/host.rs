@@ -783,14 +783,14 @@ impl ApiHost for Rt {
         &self,
         config: Handle<Self>,
         options: Handle<Self>,
-        exchange: Handle<Self>,
+        _exchange: Handle<Self>,
     ) -> ReadResult<Self, Handle<Self>> {
         Ok(h(client::factory::create(
             self.shared.http.clone(),
             self.shared.runtime.transport().as_ref(),
             (*config).clone(),
             &options,
-            super::value::to_typed(&exchange.get("name")?)?,
+            self.base(),
         )?))
     }
     // ts: utils/retryReadsOnly networkErrorOnRead(isRead): reads (and the listed
@@ -1028,14 +1028,6 @@ impl ConstructorHost for Rt {
             vec![(*name).clone(), (*options).clone(), (*store).clone()],
         )?))
     }
-    fn initialize(&self, venue: Venue, receiver: Handle<Self>) -> ReadResult<Self, ()> {
-        let kind = match venue {
-            Venue::Futures => crate::classes::Kind::FuturesExchange,
-            Venue::Spot => crate::classes::Kind::SpotExchange,
-        };
-        crate::classes::initialize(self, kind, receiver)
-    }
-    // ts: BaseExchange.createXhrWithSecondaryKey(opts, createAPI, { rateLimit }).
     fn secondary_client<'a>(
         &'a self,
         options: Handle<Self>,

@@ -481,6 +481,7 @@ impl MexcExchange {
             sockets.runtime,
             handlers,
             sockets.remote_account_name,
+            sockets.current_time_ms,
         );
         exchange.base.set_socket(
             safe_cex_exchange::socket_lifecycle::SocketSlot::Private,

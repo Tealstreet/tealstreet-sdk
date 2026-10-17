@@ -220,11 +220,9 @@ fn private_trade_frame_emits_incremental_fill_and_commits_order() {
     let f = PrivateFixture::new();
     let fills = Rc::new(RefCell::new(vec![]));
     let capture = fills.clone();
-    f.venue.base().on(
+    f.venue.base().on_args(
         "fill",
-        Rc::new(move |_, fill| {
-            // The shared JS emitter bridge exposes its argument list here.
-            let args = fill.as_array().expect("JS emitter argument list");
+        Rc::new(move |_, args| {
             assert_eq!(args.len(), 1);
             capture.borrow_mut().push(args[0].clone());
             Ok(())

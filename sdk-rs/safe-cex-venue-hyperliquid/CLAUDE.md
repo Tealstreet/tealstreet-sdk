@@ -328,3 +328,22 @@ callback dispatcher. Default journal bounds use realm Date.now (integer ms) and
 the source 30-day window, with shared 14-day straddle lookback. Returned journal
 records retain the shared typed output boundary. This is distinct from the
 venue's `deriveClosedPositions` and `fetchClosedPnl` capability.
+
+
+### Standalone declaration cleanup
+
+Unused standalone DTOs and their generated children are removed. Keep
+`scripts/not-modeled-types.cjs` aligned with the core generators; the spot model
+writer/oracle retain WsFill, WsUserFunding, WsLiquidation and WsNonUserCancel.
+Five spot order aliases still resolve through `spot_types` to core models; deleting
+their duplicate spot_models definitions does not make those rows not-applicable.
+The current census and reduced fixed corpus counts are in README.md. Historical
+controls for deleted owners are removed from active scripts and contract/schema
+files; earlier audit documents retain their measured trees and original counts.
+
+The unused `spot_rate_limiter` duplicate and its fake-host fixture/oracle are
+removed. Spot limiter rows now name only the production `spot_client` bodies.
+`realm::spot_limiter_tests` constructs the class with the concrete Realm host and
+checks per-instance tokens, default weight, the exact minute refill and recursive
+Promise/timer acquisition. Historical SPOT_LIMITER_BODIES_EVIDENCE.json records
+the removed adapter; it does not establish production binding coverage.

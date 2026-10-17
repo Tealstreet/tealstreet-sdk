@@ -6,8 +6,8 @@ ROOT=Path(__file__).resolve().parents[2]
 CRATE=ROOT/'safe-cex-venue-hyperliquid'
 SOURCE=CRATE/'src/types.rs'
 SCHEMA=json.loads((CRATE/'tests/fixtures/accepted_flat_record_schema.json').read_text())
-NAMES=('ClearinghouseStateAssetPositionsItemPositionCumFunding','ClearinghouseStateAssetPositionsItemPositionLeverage','ClearinghouseStateCrossMarginSummary','ClearinghouseStateMarginSummary','OrderResponseStatusCase2','WsTrade','WsLevel','WsOrderOrder','WsUserFunding','WsLiquidation','WsNonUserCancel','L2BookLevelsItem0Item','L2BookLevelsItem1Item','FundingHistoryEntry','SpotTokenEvmContract','UserOpenOrder','CancelOrderRequest','CancelOrderRequestsItem','Signature','Notification','BuilderInfo','BuilderFeeApprovalResult')
-assert set(SCHEMA)==set(NAMES),'only the exact reviewed 22-owner cohort is supported'
+NAMES=('ClearinghouseStateAssetPositionsItemPositionCumFunding','ClearinghouseStateAssetPositionsItemPositionLeverage','ClearinghouseStateCrossMarginSummary','ClearinghouseStateMarginSummary','WsTrade','WsLevel','WsOrderOrder','WsUserFunding','WsLiquidation','WsNonUserCancel','L2BookLevelsItem0Item','L2BookLevelsItem1Item','FundingHistoryEntry','UserOpenOrder','CancelOrderRequest','CancelOrderRequestsItem','Signature','Notification','BuilderInfo','BuilderFeeApprovalResult')
+assert set(SCHEMA)==set(NAMES),'only the exact reviewed 20-owner cohort is supported'
 ORIGINAL=SOURCE.read_bytes()
 ENV={**os.environ,'RUSTUP_TOOLCHAIN':'1.99.0','RUSTC_BOOTSTRAP':'1','CARGO_BUILD_JOBS':'1'}
 def test_name(ident):return ident.lower()+'_native_fields_and_map_only'
@@ -47,9 +47,9 @@ try:
    SOURCE.write_bytes(ORIGINAL)
    assert SOURCE.read_bytes()==ORIGINAL
  # The exact baseline is shared by all restored owners. One complete replay
- # supplies all22 named restored passes without recompiling the same baseline22times.
+ # supplies all20 named restored passes without recompiling the same baseline20times.
  run()
 finally:
  SOURCE.write_bytes(ORIGINAL)
  assert SOURCE.read_bytes()==ORIGINAL
-print('22 compiled individually named array-admission failures; exact source restoration after every control; final22 restored native passes.',flush=True)
+print('20 compiled individually named array-admission failures; exact source restoration after every control; final20 restored native passes.',flush=True)

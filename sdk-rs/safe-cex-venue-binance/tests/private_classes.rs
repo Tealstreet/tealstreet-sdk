@@ -3624,3 +3624,33 @@ fn production_native_private_balance_frames_follow_each_source_family() {
         assert!(fills.borrow().is_empty(), "balance topic must emit no fill");
     }
 }
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_private_post_only_rejection_keeps_the_rejection_reason() {
+    let owner = production_native_owner(Venue::Futures);
+    let fills = native_fill_events(&owner);
+    owner
+        .private
+        .on_message(string(
+            native_order_frame(Venue::Futures, false).to_string(),
+        ))
+        .unwrap();
+    let mut frame = native_order_frame(Venue::Futures, false);
+    frame["o"]["X"] = json!("CANCELED");
+    frame["o"]["r"] = json!("GTX order rejected");
+    owner.private.on_message(string(frame.to_string())).unwrap();
+    let rows = owner.base.store.orders();
+    assert_eq!(
+        rows.len(),
+        1,
+        "production canceled order remains observable"
+    );
+    assert_eq!(rows[0].status, safe_cex_types::OrderStatus::Canceled);
+    assert_eq!(
+        rows[0].extra.as_ref().and_then(|extra| extra.reject_reason),
+        Some(safe_cex_types::OrderRejectReason::PostOnly),
+        "production rejection classifier updates the real Store extra"
+    );
+    assert!(fills.borrow().is_empty(), "cancel rejection emits no fill");
+}

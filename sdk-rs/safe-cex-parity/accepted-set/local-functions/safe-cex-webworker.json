@@ -2,11 +2,11 @@
   "safe-cex-webworker/src/positions.rs::LOCAL_FUNCTION:number": {
     "category": "non-decoder",
     "reason": "Inside positions_equal: f64 equality treating NaN as equal to NaN. Typed comparison only.",
-    "sourceSha256": "13fc01190a6f3a77521997b1a6740ce8e833fec27b47d3604da863b5f01bb2c5"
+    "sourceSha256": "9bda41513a03fe5369b509601fe898d737e8753df08352ce598b7c9206f77b86"
   },
   "safe-cex-webworker/src/positions.rs::LOCAL_FUNCTION:optional": {
     "category": "non-decoder",
     "reason": "Inside positions_equal: Option<f64> equality via number. Typed comparison only.",
-    "sourceSha256": "13fc01190a6f3a77521997b1a6740ce8e833fec27b47d3604da863b5f01bb2c5"
+    "sourceSha256": "9bda41513a03fe5369b509601fe898d737e8753df08352ce598b7c9206f77b86"
   }
 }
