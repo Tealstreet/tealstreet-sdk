@@ -1329,3 +1329,10 @@ transforms and fulfilled response interceptors run; default native HTTP response
 still undergo the existing status rejection. `tests/js_tunnel_status.rs` drives
 the actual native runtime, factory, transport and HOW protocol against scripted
 socket I/O and compares four statuses with the maintained HOW adapter and Axios.
+
+For array inputs, JS Store `removeOrders` reads each element's `id` and applies
+source object-key coercion; it never treats a bare element as the ID itself.
+Property access and string-hint conversion failures propagate after the source's
+empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
+24 maintained Store cases through the production facade, including numeric keys,
+primitive elements, nullish elements and throwing getters/conversions.
