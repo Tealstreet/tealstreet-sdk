@@ -1378,3 +1378,14 @@ output in a child process and compares its payloads with Node, including exact
 info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
+
+BigNumber's private value representation distinguishes finite decimals, signed
+infinities and NaN; finite zero retains its sign. Arithmetic and comparisons use
+that representation directly, including zero division and infinity operations.
+Rounding a negative nonzero value to zero retains the minus in toFixed, while an
+actual negative zero formats unsigned. valueOf/toJSON and toNumber preserve its
+sign, and cloning uses the same value representation. The installed native
+`js_bignumber_special_values` target compares18 scalar inputs,49 operand pairs
+across all six bound arithmetic/comparison aliases, and five min/max argument
+sets against the actual npm dependency. Positive finite precision stays decimal;
+the public shared model types are unchanged.
