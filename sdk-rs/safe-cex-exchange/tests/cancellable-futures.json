@@ -1906,15 +1906,6 @@
       "reason": "std write! formatting is synchronous; no future is constructed."
     },
     {
-      "owner": "src/js_runtime/value/typed.rs::opaque-macro:macro_rules:0",
-      "boundaries": [
-        "opaque-macro-review"
-      ],
-      "producer_sha256": "a925d90ee33b615a9e15fb2025a6f673647a8f94016f71e9cbfdc2bc5bd6a8d3",
-      "classification": "immediate",
-      "reason": "Reviewed integer_input definition and invocation: only synchronous finite/whole/range checks and Serde visitor calls. No future, poll, task, waiter, timer or owned pending state is created."
-    },
-    {
       "owner": "src/loop_util.rs::loop_once",
       "boundaries": [
         "async-function",
