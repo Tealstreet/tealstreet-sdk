@@ -287,7 +287,7 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.fetchOHLCV
     pub async fn fetch_ohlcv(&self, opts: &OHLCVOptions) -> Result<Vec<Candle>, ExchangeError> {
-        let key = serde_json::to_value(opts.interval)
+        let key = serde_json::to_value(&opts.interval)
             .map_err(|e| failure(e.to_string()))?
             .as_str()
             .ok_or_else(|| failure("Invalid interval".into()))?
