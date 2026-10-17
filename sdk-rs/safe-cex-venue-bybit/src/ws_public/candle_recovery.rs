@@ -91,7 +91,8 @@ impl Recovery {
                     self.timers.borrow_mut().insert(
                         topic.into(),
                         pending
-                            .into_inner()
+                            .borrow_mut()
+                            .take()
                             .expect("source timer factory runs before assignment"),
                     );
                     Ok(())
@@ -156,7 +157,7 @@ impl Recovery {
             },
             || Ok(socket.is_connected()),
             |message, severity| parent.log(message, severity),
-            || socket.connect_and_subscribe(true),
+            || socket.reconnect(),
             |payload| {
                 let payload = payload.borrow();
                 socket.send_with_log(

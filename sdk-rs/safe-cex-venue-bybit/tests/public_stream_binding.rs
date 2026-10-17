@@ -772,3 +772,28 @@ fn bulk_candle_malformed_data_preserves_source_type_errors() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn disconnected_candle_watchdog_uses_existing_transport_reconnect() {
+    let (h, socket, symbol) = setup(ExchangeName::Bybit);
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":symbol,"interval":"1m"})).unwrap(),
+            Rc::new(|_| {}),
+        )
+        .unwrap();
+    let wire = h.runtime.sockets.borrow()[0].1.clone();
+    safe_cex_exchange::websocket::WsSocket::close(wire.as_ref());
+    assert!(!socket.is_connected());
+    let dials = h.runtime.sockets.borrow().len();
+    h.runtime.now.set(h.runtime.now.get() + 25_000.);
+    h.runtime.pump();
+    assert_eq!(
+        h.runtime.sockets.borrow().len(),
+        dials,
+        "source reconnect operates on the existing closed native transport"
+    );
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}

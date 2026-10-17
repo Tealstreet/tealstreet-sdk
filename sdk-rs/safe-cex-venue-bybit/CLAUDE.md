@@ -685,3 +685,12 @@ send chunks of 50; delayed connections use core-owned retries. Callback metadata
 uses the shared String search position implementation. The output interval is
 ModelField<AnyTimeframe>, retaining monthly and own-undefined source values while
 public OHLCV(S) request intervals retain their existing strict type.
+
+Single-candle listeners now bind all four Exchange families to real kline/trade
+handlers. The live mapper consumes native Js values and preserves source numeric
+coercions. Primary/Demo own a shared per-socket 25-second silence watchdog and
+10-second recovery cooldown over the maintained recovery operations. Reopen
+rearms existing handlers, and final cleanup cancels the primary timer/retry.
+Dedicated Spot/Inverse retain their delayed-retry and topic/stats cleanup quirks.
+The sequence oracle replays 72 maintained source frames through actual bindings;
+the wired kline mapper retains its 2172-outcome source corpus.

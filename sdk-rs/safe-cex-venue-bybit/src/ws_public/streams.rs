@@ -17,7 +17,7 @@ fn send(socket: &Rc<BaseWebSocket>, op: &str, topic: &str) -> Result<(), Exchang
     socket.send(&json!({"op":op,"args":[topic]}).to_string())
 }
 
-fn append(socket: &BaseWebSocket, topic: &str, parser: MessageHandler) {
+pub(super) fn append(socket: &BaseWebSocket, topic: &str, parser: MessageHandler) {
     let mut handlers = socket.message_handlers.borrow_mut();
     let mut next = handlers
         .get(topic)
@@ -27,7 +27,7 @@ fn append(socket: &BaseWebSocket, topic: &str, parser: MessageHandler) {
     handlers.insert(topic.into(), Rc::new(RefCell::new(next)));
 }
 
-fn remove(socket: &BaseWebSocket, topic: &str, parser: &MessageHandler) -> bool {
+pub(super) fn remove(socket: &BaseWebSocket, topic: &str, parser: &MessageHandler) -> bool {
     let mut handlers = socket.message_handlers.borrow_mut();
     let next: Vec<_> = handlers
         .get(topic)
