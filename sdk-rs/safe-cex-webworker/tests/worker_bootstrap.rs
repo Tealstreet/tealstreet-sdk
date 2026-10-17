@@ -1,5 +1,7 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
+use safe_cex_exchange::delivery_timers::WorkerPortTimers;
+use safe_cex_exchange::store_delivery::StoreFrame;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
@@ -7,16 +9,19 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::Store;
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use safe_cex_webworker::{
-    chaser_manager::{ChaserOrderManager, ChaserSupervisor},
-    exchange_worker::*,
-    exchange_worker_start::*,
-    payload::{StoreWorkerOp, StoreWorkerPayload},
-    postprocessor_registry::{ImportedPostprocessors, PostprocessorRegistry},
-    telegram::TelegramHost,
-    worker_ports::{WorkerConfigHandler, WorkerPort, WorkerPortTimers, WorkerPorts},
-    worker_session::*,
-};
+use safe_cex_webworker::chaser_manager::ChaserOrderManager;
+use safe_cex_webworker::chaser_manager::ChaserSupervisor;
+use safe_cex_webworker::exchange_worker::*;
+use safe_cex_webworker::exchange_worker_start::*;
+use safe_cex_webworker::payload::StoreWorkerOp;
+use safe_cex_webworker::payload::StoreWorkerPayload;
+use safe_cex_webworker::postprocessor_registry::ImportedPostprocessors;
+use safe_cex_webworker::postprocessor_registry::PostprocessorRegistry;
+use safe_cex_webworker::telegram::TelegramHost;
+use safe_cex_webworker::worker_ports::WorkerConfigHandler;
+use safe_cex_webworker::worker_ports::WorkerPort;
+use safe_cex_webworker::worker_ports::WorkerPorts;
+use safe_cex_webworker::worker_session::*;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -298,6 +303,11 @@ impl WorkerPortTimers for Host {
         *id != 0
     }
 }
+impl safe_cex_exchange::store_delivery::StoreUpdateThrottleHost for Host {
+    fn report_store_timer_error(&self, e: &ExchangeError) {
+        self.event(e.message.clone());
+    }
+}
 impl ExchangeWorkerHost for Host {
     fn post_store(&self, m: WorkerStoreMessage) -> Result<(), ExchangeError> {
         self.state.stores.borrow_mut().push(m);
@@ -309,9 +319,6 @@ impl ExchangeWorkerHost for Host {
     }
     fn chaser_supervisor(&self) -> Rc<dyn ChaserSupervisor> {
         Rc::new(NoChasers)
-    }
-    fn report_timer_error(&self, e: &ExchangeError) {
-        self.event(e.message.clone());
     }
 }
 impl WorkerBootstrapHost for Host {

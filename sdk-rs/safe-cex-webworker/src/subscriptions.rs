@@ -584,7 +584,7 @@ impl OHLCVSubscriptionsHandler {
 }
 
 #[cfg(test)]
-#[path = "../tests/support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod test_runtime;
 #[cfg(test)]
 mod tests {
