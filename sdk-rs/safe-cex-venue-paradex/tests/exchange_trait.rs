@@ -303,6 +303,15 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
         runtime.pump();
     }
     let socket = runtime.sockets.borrow()[1].1.clone();
+    let fills = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let observed = fills.clone();
+    venue.base().on(
+        "fill",
+        std::rc::Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
     let position_writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let capture = position_writes.clone();
     let unsubscribe = store.subscribe(std::sync::Arc::new(move |data, _| {
@@ -329,6 +338,22 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
     assert_eq!(order.remaining, 0.009);
     assert_eq!(order.filled.to_bits(), (0.012_f64 - 0.009).to_bits());
     assert_eq!(order.info.as_ref().unwrap()["market"], "BTC-USD-PERP");
+    drop(orders);
+    push(
+        "orders.ALL",
+        json!({"id":"ws-order-7","market":"BTC-USD-PERP","side":"SELL","type":"LIMIT","status":"FILLED","price":"109.25","size":"0.012","remaining_size":"0","reduce_only":false,"time_in_force":"GoodTillCancel"}),
+    );
+    let orders = store.orders();
+    let terminal = orders
+        .iter()
+        .find(|order| order.id == "ws-order-7")
+        .unwrap();
+    assert_eq!(
+        terminal.status.value(),
+        Some(&safe_cex_types::OrderStatus::Closed)
+    );
+    assert_eq!(terminal.filled, 0.012);
+    assert_eq!(terminal.remaining, 0.0);
     drop(orders);
     // The source immediately starts a REST refresh too. Observe the feed's
     // native notification independently of the subsequent snapshot replacement.
@@ -373,6 +398,11 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
             .iter()
             .any(|message| message.contains("Error handling")),
         "PARADEX source ingress must not swallow a binding error"
+    );
+    assert_eq!(
+        fills.get(),
+        0,
+        "source private orders update Store without emitting fills"
     );
     unsubscribe();
     venue.dispose().unwrap();
