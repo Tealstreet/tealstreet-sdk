@@ -153,13 +153,15 @@ where
                 last_side: None,
             });
         }
-        if candles.iter().any(|c| c.timestamp.is_nan())
-            && candles.iter().any(|c| !c.timestamp.is_nan())
-        {
-            return Err(type_error(
-                "Kraken Futures mixed NaN timestamps are outside sortable timestamp profile",
-            ));
+        for (index, candle) in candles.iter().enumerate() {
+            if candle.timestamp.is_nan() {
+                let error = type_error(format!(
+                    "Kraken Futures candle {index}: refused timestamp=NaN"
+                ));
+                report("[Kraken] fetchOHLCV row refusal:", None, Some(&error))?;
+            }
         }
+        candles.retain(|candle| !candle.timestamp.is_nan());
         candles.sort_by(|a, b| {
             (a.timestamp - b.timestamp)
                 .partial_cmp(&0.0)
