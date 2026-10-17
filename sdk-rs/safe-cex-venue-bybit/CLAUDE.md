@@ -669,3 +669,9 @@ The Spot binding installs its source `omit` import over native object-literal
 requests, so later split lots drop SL/TP fields without mutating the first lot.
 `spot_binding::split_spot_orders_omit_brackets_only_after_the_first_lot` proves the
 pre-fix missing-import rejection and validates both signed placement payloads.
+
+The Exchange order-book listener now selects the source public socket and installs
+real snapshot/delta subscriptions: depth 200 for Spot and 1000 for derivatives.
+Core-owned retry/resync timers and retained topic maps preserve delayed connection,
+sequence-gap recovery, reconnect and cleanup. `public_stream_binding` exercises all
+four families; the maintained source book oracle includes array-like level lists.

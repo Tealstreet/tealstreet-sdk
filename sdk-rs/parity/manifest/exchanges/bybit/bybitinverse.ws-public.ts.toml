@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitinverse.ws-public.ts"
-rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs" , "safe-cex-venue-bybit/src/ws_public/streams.rs", "safe-cex-venue-bybit/src/book_mapping.rs"]
 
 [[symbol]]
 ts = "BybitInversePublicWebsocket"
@@ -141,7 +141,7 @@ note = ""
 [[symbol]]
 ts = "BybitInversePublicWebsocket.listenOrderBook"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = ["safe-cex-venue-bybit/src/ws_public/streams.rs::listen_order_book", "safe-cex-venue-bybit/src/book_mapping.rs::BookState::apply"]
+status = "ported"
+note = "Rust rename: safe-cex-venue-bybit/src/ws_public/streams.rs::listen_order_book composes core-owned subscription and resync timers, handler replacement and cleanup; safe-cex-venue-bybit/src/book_mapping.rs::BookState::apply maps source snapshots/deltas. Real socket tests cover each family and the maintained source oracle covers 996 cases/1755 outcomes."
