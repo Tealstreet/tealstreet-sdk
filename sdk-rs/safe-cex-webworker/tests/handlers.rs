@@ -783,51 +783,117 @@ fn offline_recovery_reports_exchange_hook_failure() {
     );
 }
 
-
 #[test]
 fn invalid_command_payloads_never_call_the_registered_executor() {
     let (venue, runtime, _) = venue();
     let events = Rc::new(RefCell::new(Vec::<(String, Value)>::new()));
     for event in ["exec-log", "exec-result"] {
         let sink = events.clone();
-        venue.base.on(event, Rc::new(move |name, data| {
-            sink.borrow_mut().push((name.into(), data.clone()));
-            Ok(())
-        }));
+        venue.base.on(
+            event,
+            Rc::new(move |name, data| {
+                sink.borrow_mut().push((name.into(), data.clone()));
+                Ok(())
+            }),
+        );
     }
     let calls = Rc::new(Cell::new(0));
     let capture = calls.clone();
     register_command_executor(Rc::new(move |_, _, _, _| {
-        capture.set(capture.get()+1);
+        capture.set(capture.get() + 1);
         Box::pin(async { Ok(()) })
     }));
     let handler = CommandHandler::new(venue);
-    for data in [None,Some(Value::Null),Some(json!(false)),Some(json!(true)),Some(json!(0)),Some(json!(1)),Some(json!("")),Some(json!("buy 1"))] {
+    for data in [
+        None,
+        Some(Value::Null),
+        Some(json!(false)),
+        Some(json!(true)),
+        Some(json!(0)),
+        Some(json!(1)),
+        Some(json!("")),
+        Some(json!("buy 1")),
+    ] {
         events.borrow_mut().clear();
-        handler.handle(StoreWorkerPayload {op:StoreWorkerOp::Exec,instance_id:None,data}).unwrap();
+        handler
+            .handle(StoreWorkerPayload {
+                op: StoreWorkerOp::Exec,
+                instance_id: None,
+                data,
+            })
+            .unwrap();
         runtime.advance(100_000);
-        assert_eq!(calls.get(),0,"invalid data must never invoke the executor");
-        assert_eq!(*events.borrow(),[("exec-log".into(),json!({"message":"Invalid command payload."}))]);
+        assert_eq!(
+            calls.get(),
+            0,
+            "invalid data must never invoke the executor"
+        );
+        assert_eq!(
+            *events.borrow(),
+            [(
+                "exec-log".into(),
+                json!({"message":"Invalid command payload."})
+            )]
+        );
     }
-    handler.handle(StoreWorkerPayload {op:StoreWorkerOp::Exec,instance_id:None,data:Some(json!([]))}).unwrap();
-    assert_eq!(calls.get(),1,"arrays are truthy objects under the maintained typeof check");
+    handler
+        .handle(StoreWorkerPayload {
+            op: StoreWorkerOp::Exec,
+            instance_id: None,
+            data: Some(json!([])),
+        })
+        .unwrap();
+    assert_eq!(
+        calls.get(),
+        1,
+        "arrays are truthy objects under the maintained typeof check"
+    );
     reset_command_executor();
 }
 
 #[test]
 fn position_failure_reason_uses_javascript_error_string_for_empty_fields() {
-    for (name,message,expected) in [("Error","","Error"),("","",""),("","failed","failed"),("TypeError","failed","TypeError: failed")] {
-        let (venue,_,_)=venue();
-        let mut error=ExchangeError::new(message);
-        error.name=name.into();
-        *venue.failure.borrow_mut()=Some(error);
-        let messages=Rc::new(RefCell::new(vec![]));
-        let sink=messages.clone();
-        let handler=UpdatePositionsHandler::new(venue,Rc::new(move |msg|sink.borrow_mut().push(msg)));
-        ready(handler.handle_update_positions("string-error".into(),None));
-        let messages=messages.borrow();
-        let data=messages.last().unwrap().data.as_ref().unwrap();
-        assert_eq!(data["success"],false);
-        assert_eq!(data["reason"],expected);
+    for (name, message, expected) in [
+        ("Error", "", "Error"),
+        ("", "", ""),
+        ("", "failed", "failed"),
+        ("TypeError", "failed", "TypeError: failed"),
+    ] {
+        let (venue, _, _) = venue();
+        let mut error = ExchangeError::new(message);
+        error.name = name.into();
+        *venue.failure.borrow_mut() = Some(error);
+        let messages = Rc::new(RefCell::new(vec![]));
+        let sink = messages.clone();
+        let handler =
+            UpdatePositionsHandler::new(venue, Rc::new(move |msg| sink.borrow_mut().push(msg)));
+        ready(handler.handle_update_positions("string-error".into(), None));
+        let messages = messages.borrow();
+        let data = messages.last().unwrap().data.as_ref().unwrap();
+        assert_eq!(data["success"], false);
+        assert_eq!(data["reason"], expected);
+    }
+}
+
+#[test]
+fn actual_source_command_admission_and_position_error_strings() {
+    for script in [
+        "command-admission-source.cjs",
+        "position-error-string-source.cjs",
+    ] {
+        let output = std::process::Command::new("node")
+            .arg(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join(script),
+            )
+            .output()
+            .expect("execute maintained worker source");
+        assert!(
+            output.status.success(),
+            "{script}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
