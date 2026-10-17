@@ -223,3 +223,13 @@ matching the API's `virtualClock.getCurrentTimeMs()`. `PrivateHost::now` remains
 raw for the private order-event `Date.now()` fallback. Registry
 `native_host_bitrue_clock` proves the distinction with a 90-second server offset
 and independently verifies the HMAC on a real native signed account request.
+
+
+`exchange_binding::production_ticker_coercion_matches_constructed_typescript` exercises
+32 field-independent cases through the constructed venue's actual socket and
+DefaultStore. Null, numeric/prefix/NaN strings, objects, overflow, signed zero and
+false arrive beside good rows as consecutive single-row protocol frames. The
+maintained TS exchange and actual TS DefaultStore produce the comparison values;
+eleven native number fields are checked before JSON. The shared ticker census
+records the witness; `parity/scripts/ticker-native-controls.py bitrue` compiles
+a production binding fault, requires the named assertion, restores and reruns.
