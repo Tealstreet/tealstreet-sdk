@@ -14,9 +14,7 @@
   "safe-cex-venue-bybit": [],
   "safe-cex-venue-coinbase": [],
   "safe-cex-venue-cryptocom": [],
-  "safe-cex-venue-grvt": [
-    "pop"
-  ],
+  "safe-cex-venue-grvt": [],
   "safe-cex-venue-kraken": [],
   "safe-cex-venue-kucoin": [],
   "safe-cex-venue-lighter": [

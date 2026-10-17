@@ -239,6 +239,15 @@ pub fn fixture_with_settings(
     external: External,
     supports_public_only: bool,
 ) -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) {
+    fixture_with_settings_and_local_time(options, external, supports_public_only, Rc::new(|v| v))
+}
+
+pub fn fixture_with_settings_and_local_time(
+    options: Value,
+    external: External,
+    supports_public_only: bool,
+    local_to_utc: Rc<dyn Fn(f64) -> f64>,
+) -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) {
     let runtime = Rc::new(Runtime {
         diagnostics: Cell::new(false),
         now: Rc::new(Cell::new(1_700_000_000_000.0)),
@@ -266,7 +275,7 @@ pub fn fixture_with_settings(
     let venue = MexcExchange::new(
         base,
         wire.clone(),
-        Rc::new(|v| v),
+        local_to_utc,
         MexcSocketDependencies {
             current_time_ms: {
                 let runtime = runtime.clone();
