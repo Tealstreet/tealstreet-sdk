@@ -56,6 +56,17 @@ pub(super) fn sign(key: Js, typed: Js) -> JsResult<Js> {
     let key = value(key.to_js_string())?;
     let mut typed = value(to_json(&typed))?;
     typed_numbers(&mut typed);
+    // MetaMask encodes this SDK address as bytes without EIP-55 validation.
+    // Normalize only the local signing copy before the shared ethers-style guard.
+    if typed["primaryType"].as_str() == Some("OrderWithBuilderFee")
+        && let Some(builder) = typed.get_mut("message").and_then(|v| v.get_mut("builder"))
+        && let Some(address) = builder.as_str()
+        && address.len() == 42
+        && address.starts_with("0x")
+        && address[2..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        *builder = Value::String(address.to_ascii_lowercase());
+    }
     let raw = typed.to_string();
     safe_cex_crypto::eip712::sign_typed_data(&raw, &String::from_utf16_lossy(&key))
         .map(|signature| Js::str(&signature))
@@ -261,11 +272,27 @@ mod tests {
         let cases = corpus["cases"].as_array().unwrap();
         assert_eq!(
             cases.len(),
-            8,
-            "independent network/order-kind/integer-boundary floor"
+            24,
+            "independent network/order-kind/integer-boundary/address-casing floor"
         );
         for case in cases {
-            let signature = sign(from_json(&case["key"]), from_json(&case["typed"])).unwrap();
+            let typed = from_json(&case["typed"]);
+            let result = sign(from_json(&case["key"]), typed.clone());
+            assert!(
+                result.is_ok(),
+                "GRVT SDK builder casing {:?}: native signer refused actual SDK input",
+                case["typed"]["message"]["builder"]
+            );
+            let signature = result.unwrap();
+            assert!(
+                typed
+                    .get("message")
+                    .unwrap()
+                    .get("builder")
+                    .unwrap()
+                    .strict_equals(&from_json(&case["typed"]["message"]["builder"])),
+                "SDK signing must not mutate the caller's address spelling"
+            );
             assert_eq!(
                 to_json(&signature).unwrap(),
                 case["signature"],

@@ -144,6 +144,13 @@ history, disposal during a pending read, public-only startup and remote signing
 failure/acknowledgement ordering against a scripted transport. Amount and price
 steps differ in the fixtures so selecting the wrong axis changes the payload.
 
+Cancellation also uses the unlimited client. Single and batch replies validate
+the response envelope's code/msg, leaving live Store orders untouched on a
+rejected batch. The assembled placeOrders member checks all caller IDs before
+placing its first order, matching the inherited source batch preflight.
+The four order_regressions unit tests run the real assembled binding/clients;
+they cover both batch outcomes, a full read-limiter window, and duplicate IDs.
+
 The production symbol helpers and raw ticker reader use the shared Js carrier.
 `utilities::{format_symbol_in_value, format_symbol_out_value}` retain lone UTF-16
 surrogates and raw info values, while `ticker_reads::fetch_tickers_raw_value`
@@ -153,6 +160,13 @@ helpers for all 2048 lone-surrogate units, raw info output and raw response iden
 The private reconciliation prefix resets its timer, snapshots/clears its symbol
 queue and begins the account read before returning a future. A detached AccountRead
 keeps the continuation from borrowing mutable host state across that boundary.
+
+The Exchange trait binds candle history and public candle/book listeners to the
+venue readers and production public socket, applying source symbol formatting.
+The socket reads its parent's timeframes and xhr. Snapshot await continuation
+yields before consuming buffered deltas, including an already settled response.
+The bound_chart regressions cover REST candle rows, socket frames, snapshot-plus-
+delta merging and unsubscribe cleanup through the real assembled binding.
 
 Five preexisting typed-edge FINDING rows remain: response-envelope msg,
 account.currency, getAccount.userId, validateAccount.error, and parseTickers' symbol
@@ -193,3 +207,11 @@ non-decoder/typed roles. See safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for t
 scope and commands. This is not full current discovery: post-census binding
 owners, aliases, local scopes, feature combinations and WASM remain explicit
 obligations rather than inheriting the selected contracts.
+
+Order-side and reduceOnly formatting use BaseExchange's
+getOrFetchPositionsForSymbol with a scalar symbol. Stored rows avoid REST;
+missing rows fetch and populate the cache only after loaded.positions is true.
+Before positions load, only order-side raw-mode recovery reads the account,
+and the empty positions result keeps reduceOnly omitted as in the source.
+The production binding tests cover cached placement/cancellation, unloaded
+formatting, and the single cached recovery read after positions load.

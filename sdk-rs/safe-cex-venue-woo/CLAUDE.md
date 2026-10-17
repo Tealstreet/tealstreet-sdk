@@ -411,3 +411,14 @@ additional exact free-function APIs, native bit/presence/borrow observations and
 their independent live TypeScript corpora. Its focused runner retains full
 compiler/source preflight and supplies copied-source controls; it does not claim
 whole-package accepted-set clearance.
+
+Live `mapLimitOrder` now returns runtime values in `binding/hosts/order_mapping`.
+The closed `orders::map_limit_order` facade remains separately typed; it no longer
+blocks terminal execution reports on IOC/FOK's undefined type or MARKET's
+undefined price fallback. Three real private-socket/mapper/host regressions emit
+fills and close prior orders; `scripts/terminal-report-control.py` restores the
+old typed binding, requires three compiled named failures, restores exact bytes
+and reruns the stream suite. `scripts/terminal-report-source.cjs` observes the
+actual TypeScript mapper before JSON projection. NEW/PARTIAL insertion and
+snapshot fields still depend on the shared Order domain; this change does not
+widen that domain or silently invent types/prices.

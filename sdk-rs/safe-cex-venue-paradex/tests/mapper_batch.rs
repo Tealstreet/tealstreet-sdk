@@ -144,11 +144,65 @@ fn definitions() -> Vec<(String, bool)> {
         json!({"side":"unknown"}),
         json!({"side":""}),
         json!({"id":null}),
-        json!({"created_at":7}),
     ] {
         add(patch, &[], true);
     }
+    add(json!({"created_at":7}), &[], false);
     defs.splice(68..68, numeric_defs);
+    for raw in [
+        "1784505600000",
+        "-1784505600000",
+        "7.9",
+        "-7.9",
+        "0",
+        "-0",
+        "8640000000000000",
+        "8640000000000001",
+        "-8640000000000000",
+        "-8640000000000001",
+        "1e400",
+        "-1e400",
+    ] {
+        let mut row = base();
+        row["created_at"] = json!("TOKEN");
+        defs.push((row.to_string().replace("\"TOKEN\"", raw), false));
+    }
+    for date in [Value::Null, json!(false), json!(true)] {
+        let mut row = base();
+        row["created_at"] = date;
+        defs.push((row.to_string(), false));
+    }
+    let mut row = base();
+    row.as_object_mut().unwrap().shift_remove("created_at");
+    defs.push((row.to_string(), false));
+    for field in ["size", "remaining_size"] {
+        for raw in [
+            "0.006",
+            "-0",
+            "null",
+            "true",
+            "false",
+            "[\"17.25tail\"]",
+            "{}",
+        ] {
+            let mut row = base();
+            row[field] = json!("TOKEN");
+            defs.push((row.to_string().replace("\"TOKEN\"", raw), false));
+        }
+        let mut row = base();
+        row.as_object_mut().unwrap().shift_remove(field);
+        defs.push((row.to_string(), false));
+    }
+    for date in [
+        json!({}),
+        json!([]),
+        json!([null]),
+        json!(["2026-07-20T00:00:00Z"]),
+    ] {
+        let mut row = base();
+        row["created_at"] = date;
+        defs.push((row.to_string(), false));
+    }
     defs
 }
 fn decode(raw: &str) -> Value {
@@ -309,9 +363,9 @@ fn actual_typescript_mapper_batch() {
     assert_eq!(corpus["header"]["timezone"], "UTC");
     assert!(corpus["header"]["nodeMajor"].as_u64().unwrap() > 0);
     let expected = definitions();
-    assert_eq!(expected.len(), 116, "batch_independent_fixture_count");
+    assert_eq!(expected.len(), 152, "batch_independent_fixture_count");
     let orders = corpus["orders"].as_array().unwrap();
-    assert_eq!(orders.len(), 116, "batch_source_order_count");
+    assert_eq!(orders.len(), 152, "batch_source_order_count");
     let (mut mapped, mut refused, mut local_dates) = (0, 0, 0);
     for (i, (raw, reject)) in expected.iter().enumerate() {
         let case = &orders[i];
@@ -351,17 +405,11 @@ fn actual_typescript_mapper_batch() {
                     "undefined",
                     "order_source_unknown_side"
                 );
-            } else if i == 114 {
+            } else {
                 assert_eq!(
                     source_field(source, "id")["kind"],
                     "null",
                     "order_source_null_id"
-                );
-            } else {
-                assert_eq!(
-                    source_field(source, "lastUpdate")["kind"],
-                    "number",
-                    "order_source_numeric_date"
                 );
             }
             refused += 1;
@@ -384,8 +432,8 @@ fn actual_typescript_mapper_batch() {
         );
         local_dates += local_calls.get();
     }
-    assert_eq!(mapped, 76, "batch_completed_native_orders");
-    assert_eq!(refused, 40, "batch_completed_refusals");
+    assert_eq!(mapped, 113, "batch_completed_native_orders");
+    assert_eq!(refused, 39, "batch_completed_refusals");
     assert_eq!(local_dates, 1, "batch_completed_local_dates");
     let mut tif_keys = vec![None, Some("")];
     tif_keys.extend(

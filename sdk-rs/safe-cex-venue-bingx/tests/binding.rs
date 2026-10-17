@@ -584,3 +584,90 @@ fn account_http_error_keeps_status_and_request() {
 }
 
 include!("support/binding_factory.rs");
+
+#[test]
+fn bound_batch_attempts_stop_loss_after_take_profit_rejection() {
+    let h = fixture();
+    let positions = h.drive(h.venue().fetch_positions(None)).unwrap();
+    Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            positions: Some(positions),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(m, p, _)| !(m == "POST" && p == ORDER));
+    let mut accepted = raw_order();
+    accepted["orderId"] = json!("entry-accepted");
+    h.http.ok("POST", ORDER, json!({"order":accepted}));
+    h.http.route(
+        "POST",
+        ORDER,
+        200.0,
+        json!({"code":10002,"msg":"take profit rejected"}),
+    );
+    accepted["orderId"] = json!("stop-accepted");
+    accepted["type"] = json!("STOP_MARKET");
+    accepted["side"] = json!("SELL");
+    accepted["stopPrice"] = json!("90");
+    h.http.ok("POST", ORDER, json!({"order":accepted}));
+    let entry = placed();
+    let mut tp = entry.clone();
+    tp.client_order_id = None;
+    tp.r#type = OrderType::TakeProfit;
+    tp.side = OrderSide::Sell;
+    tp.reduce_only = Some(true);
+    tp.amount = 0.5;
+    tp.price = Some(110.0);
+    let mut sl = tp.clone();
+    sl.r#type = OrderType::StopLoss;
+    sl.price = Some(90.0);
+    let error = h
+        .drive(
+            h.venue()
+                .base()
+                .place_orders(h.venue(), vec![entry, tp, sl]),
+        )
+        .unwrap_err();
+    assert_eq!(error.message, "take profit rejected");
+    let calls = h.http.calls(ORDER);
+    assert_eq!(
+        calls.len(),
+        3,
+        "a rejected take profit must not suppress the stop loss"
+    );
+    assert_eq!(calls[1].data["type"], "TAKE_PROFIT_MARKET");
+    assert_eq!(calls[2].data["type"], "STOP_MARKET");
+    assert!(h.store.orders().iter().any(|o| o.id == "stop-accepted"));
+    assert_eq!(h.http.calls("/openApi/swap/v1/positionSide/dual").len(), 1);
+    h.runtime.reports.borrow_mut().clear();
+    done(&h);
+}
+
+#[test]
+fn bound_batch_formats_every_order_before_sending_the_first_payload() {
+    let h = fixture();
+    let entry = placed();
+    let mut stop = entry.clone();
+    stop.client_order_id = None;
+    stop.r#type = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = Some(90.0);
+    stop.amount = 0.0;
+    stop.close = Some(true);
+    let error = h
+        .drive(h.venue().base().place_orders(h.venue(), vec![entry, stop]))
+        .unwrap_err();
+    assert!(error.message.contains("without an open position"));
+    assert!(
+        h.http.calls(ORDER).is_empty(),
+        "whole-batch formatting must finish before any submission"
+    );
+    h.runtime.reports.borrow_mut().clear();
+    done(&h);
+}

@@ -82,8 +82,7 @@ impl OrderSideHost for Host {
         o.get("symbol")
     }
     async fn positions(&mut self, s: Js) -> Result<Js, Thrown> {
-        self.invoke("fetchPositions", vec![Js::array(vec![s])])
-            .await
+        self.invoke("getOrFetchPositionsForSymbol", vec![s]).await
     }
     fn length(&mut self, p: &Js) -> Result<usize, Thrown> {
         Ok(rows(p)?.len())

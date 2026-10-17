@@ -1,4 +1,6 @@
 //! Phemex source-by-source port; see CLAUDE.md for current coverage.
+#[cfg(test)]
+extern crate self as safe_cex_venue_phemex;
 pub mod account;
 pub mod constants;
 pub mod ticker_reads;

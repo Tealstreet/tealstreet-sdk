@@ -233,7 +233,7 @@ ports through the shared `js_runtime`. The Rust registry constructs it without a
 module-host fallback. Its SDK adapter uses the consumed lite schema maps, SDK
 OrderWithBuilderFee signing domain, cookie refresh and endpoint paths; legacy
 signing helpers keep their separate source domain. Live vendored-source oracles
-compare signatures, bidirectional schema mapping and cookie parsing. The 21
+compare signatures, bidirectional schema mapping and cookie parsing. The 23
 production Exchange tests cover startup, all required methods, SDK wire requests,
 nonce reconciliation and public/private socket behavior; 17 compiling dispatch
 controls fail their named test before exact restoration.
@@ -293,3 +293,17 @@ further markers. The four inherited-refusal policies retain their exact compiler
 APIs, method bodies, TypeScript sources and native witnesses; only the import-driven
 Rust line spans and whole-file hash change. This visibility repair does not
 classify the remaining unreviewed owners.
+
+GRVT SDK OrderWithBuilderFee signing treats its 20-byte 0x-prefixed builder
+address as bytes, matching the vendored MetaMask signer rather than ethers'
+checksum admission. Normalize only that address's casing in the local typed-data
+copy before calling shared EIP-712; preserve the caller's original spelling and
+all existing integer conversion. The 24-case actual-SDK signature matrix covers
+three address spellings across both networks, order kinds and integer ranges.
+Shared ethers address validation and legacy signing retain their own boundaries.
+
+The native `Exchange::refresh_markets` entry calls the existing GRVT receiver
+override, which always replaces stored markets. It must not inherit the shared
+membership-only refresh: unchanged IDs can carry new tick, limit and ih/bd/qd
+signing metadata. Constructed trait regressions cover that replacement and the
+added/removed native result projection.
