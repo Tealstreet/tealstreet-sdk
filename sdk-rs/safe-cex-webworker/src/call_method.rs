@@ -48,17 +48,17 @@ impl ReplyGuard {
 impl Drop for ReplyGuard {
     fn drop(&mut self) {
         // Drop settles exactly once, including when the host discards an unpolled task.
-        if !self.sent {
-            if let Err(error) = self.send(
+        if !self.sent
+            && let Err(error) = self.send(
                 false,
                 Some(Js::object(vec![
                     ("name", Js::str("Error")),
                     ("message", Js::str("Worker request cancelled")),
                 ])),
-            ) {
-                self.runtime
-                    .report_exception(&error, &json!({"operation":"worker cancelled reply"}));
-            }
+            )
+        {
+            self.runtime
+                .report_exception(&error, &json!({"operation":"worker cancelled reply"}));
         }
     }
 }

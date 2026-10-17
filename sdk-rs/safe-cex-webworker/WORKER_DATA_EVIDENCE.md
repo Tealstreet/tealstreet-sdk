@@ -65,3 +65,8 @@ still impose their existing owned-object, enum and string boundaries. This work
 does not widen shared Candle, incoming commands, Store models or other ordinary
 JSON worker channels. Legacy finite trace tests explicitly opt into the separate
 test-only `support/data_trace.rs`; native DATA tests bypass that lossy adapter.
+
+This is the outgoing worker sender boundary. The main-thread Exchange RPC
+`call_method_in_worker` result and request-argument APIs retain their current
+Value ABI and require a separate consumer cutover. The local emitter/code
+carrier work is owned separately; this change does not claim that ABI is widened.

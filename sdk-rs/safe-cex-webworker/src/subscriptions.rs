@@ -525,13 +525,13 @@ impl OHLCVSubscriptionsHandler {
                 let runtime = self.exchange.base().runtime.clone();
                 let throttle =
                     StreamThrottle::new(runtime.clone(), 60.0 * multiplier, move |candle| {
-                        if let Some(sub) = weak.upgrade() {
-                            if let Err(error) = Self::send_candle_update(&post, &sub, candle) {
-                                runtime.report_exception(
-                                    &error,
-                                    &json!({"operation":"worker candle post"}),
-                                );
-                            }
+                        if let Some(sub) = weak.upgrade()
+                            && let Err(error) = Self::send_candle_update(&post, &sub, candle)
+                        {
+                            runtime.report_exception(
+                                &error,
+                                &json!({"operation":"worker candle post"}),
+                            );
                         }
                     });
                 *sub.throttle.borrow_mut() = Some(throttle.clone());
