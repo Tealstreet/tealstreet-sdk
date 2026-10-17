@@ -966,7 +966,10 @@ fn real_trait_candles_propagate_original_http_failure() {
             serde_json::from_value(json!({"symbol":"BTCUSD","interval":"1m"})).unwrap(),
         ))
         .expect_err("source rethrows the candle refusal");
-    assert_eq!(error.response.as_ref().unwrap()["status"], 400);
+    assert_eq!(
+        error.response.as_ref().unwrap()["status"].as_f64(),
+        Some(400.0)
+    );
     assert_eq!(
         error.response.as_ref().unwrap()["data"]["msg"],
         "candle refusal"
@@ -1053,7 +1056,10 @@ fn real_trait_candle_listener_receives_polling_ticks_then_cleans_up() {
         (row.open, row.high, row.low, row.close, row.volume),
         (99.0, 99.0, 99.0, 99.0, 0.0)
     );
-    assert_eq!(row.timestamp, 60.0, "clock-aligned minute from real polling host");
+    assert_eq!(
+        row.timestamp, 60.0,
+        "clock-aligned minute from real polling host"
+    );
     cleanup().unwrap();
     let count = seen.borrow().len();
     advance_real_poll(&f);
@@ -1073,4 +1079,30 @@ fn real_trait_candle_listener_receives_polling_ticks_then_cleans_up() {
     );
     f.exchange.dispose().unwrap();
     assert!(f.runtime.exceptions.borrow().is_empty());
+}
+
+#[test]
+fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
+    let f = fixture();
+    let venue: &dyn Exchange = f.exchange.as_ref();
+    let error = f
+        .run(
+            venue.fetch_ohlcv(
+                serde_json::from_value(
+                    json!({"symbol":"BTCUSD","interval":"1m","from":8640000000000001.0}),
+                )
+                .unwrap(),
+            ),
+        )
+        .expect_err("source Date.toISOString refuses outside TimeClip");
+    assert_eq!(error.name, "RangeError");
+    assert_eq!(error.message, "Invalid time value");
+    assert!(
+        f.wire
+            .requests
+            .borrow()
+            .iter()
+            .all(|request| request["url"] != "marketdata")
+    );
+    f.exchange.dispose().unwrap();
 }
