@@ -114,12 +114,12 @@ pub(crate) fn fields(value: &J) -> Result<serde_json::Value, ExchangeError> {
             J::Null => R::Null,
             J::Bool(v) => R::Bool(*v),
             J::Number(v) => R::Float(*v),
-            J::String(v) => R::Text(v.clone()),
+            J::String(v) => R::Text(v.encode_utf16().collect()),
             J::Array(v) => R::Array(v.iter().map(retained).collect::<Result<_, _>>()?),
             J::Object(v) => R::Object(
                 v.iter()
                     .filter(|(_, v)| !matches!(v, J::Undefined))
-                    .map(|(k, v)| Ok((k.clone(), retained(v)?)))
+                    .map(|(k, v)| Ok((k.encode_utf16().collect(), retained(v)?)))
                     .collect::<Result<_, ExchangeError>>()?,
             ),
             _ => {
