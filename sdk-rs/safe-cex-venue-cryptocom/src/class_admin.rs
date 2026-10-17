@@ -219,3 +219,76 @@ pub fn change_margin_type<V: Clone + 'static, E: 'static>(
     })();
     Box::pin(async move { result })
 }
+
+#[cfg(test)]
+mod accepted_control_flow {
+    use super::*;
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    use std::cell::RefCell;
+    #[test]
+    fn optional_native_contract() {
+        let events = Rc::new(RefCell::new(vec![]));
+        let mut ops = crate::accepted_test_support::binding(Js::object(vec![]));
+        let t = events.clone();
+        Rc::get_mut(&mut ops.value).unwrap().get = Rc::new(move |v, k| {
+            t.borrow_mut().push("get");
+            v.get(k)
+        });
+        let mut nullish_executed = 0;
+        for value in [Js::Undefined, Js::Null] {
+            events.borrow_mut().clear();
+            assert!(
+                matches!(optional(&ops, value, "field").unwrap(), Js::Undefined),
+                "class optional native nullish result"
+            );
+            assert!(
+                events.borrow().is_empty(),
+                "class optional nullish skips getter"
+            );
+            nullish_executed += 1;
+        }
+        assert_eq!(nullish_executed, 2, "class optional nullish executed cases");
+        let parent = Js::object(vec![]);
+        let child = Js::object(vec![]);
+        parent
+            .define_key(&"field".encode_utf16().collect::<Vec<_>>(), child.clone())
+            .unwrap();
+        assert!(
+            optional(&ops, parent, "field")
+                .unwrap()
+                .same_reference(&child),
+            "class optional native child identity"
+        );
+        assert_eq!(*events.borrow(), ["get"], "class optional native getter");
+        let mut falsey_executed = 0;
+        for value in [Js::Bool(false), Js::Number(-0.), Js::str("")] {
+            events.borrow_mut().clear();
+            assert!(matches!(
+                optional(&ops, value, "missing").unwrap(),
+                Js::Undefined
+            ));
+            assert_eq!(
+                *events.borrow(),
+                ["get"],
+                "class optional falsey is not nullish"
+            );
+            falsey_executed += 1;
+        }
+        assert_eq!(falsey_executed, 3, "class optional falsey executed cases");
+        let error = Js::object(vec![]);
+        let e = error.clone();
+        let parent = Js::object(vec![]);
+        parent.define_accessor(
+            "field",
+            Some(Rc::new(move |_| Err(Thrown::new(e.clone())))),
+            None,
+        );
+        match optional(&ops, parent, "field") {
+            Err(e) => assert!(
+                e.value.same_reference(&error),
+                "class optional native original error"
+            ),
+            Ok(_) => panic!("class optional swallowed error"),
+        }
+    }
+}

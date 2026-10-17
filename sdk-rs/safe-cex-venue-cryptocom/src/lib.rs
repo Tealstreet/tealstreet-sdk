@@ -46,3 +46,6 @@ pub mod public_endpoints;
 pub mod signing_value;
 
 mod wire_record;
+
+#[cfg(test)]
+mod accepted_test_support;

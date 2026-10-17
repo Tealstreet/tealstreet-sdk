@@ -405,3 +405,9 @@ The V3 public mapper's five numeric validations are expanded from their former
 local macro so source discovery can inspect ordinary Rust. Its existing typed
 candle-sort helper retains its reviewed local role and exact source pin. See
 [record review and focused controls](ACCEPTED_RECORD_REVIEW.md).
+
+The [validator contract review](ACCEPTED_VALIDATOR_REVIEW.md) documents 30
+additional exact free-function APIs, native bit/presence/borrow observations and
+their independent live TypeScript corpora. Its focused runner retains full
+compiler/source preflight and supplies copied-source controls; it does not claim
+whole-package accepted-set clearance.

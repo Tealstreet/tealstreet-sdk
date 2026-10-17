@@ -3,6 +3,6 @@
     "category": "non-decoder",
     "file": "safe-cex-transport/src/signing.rs",
     "reason": "Reviewed signing.rs: the default ignores its typed HttpSigningRequest and returns TransportError::Host refusing native query signing. It reads no raw input and produces no decoded value; implementors that override it are inventoried at their own impls.",
-    "sourceSha256": "93ca2a64d3d87d9a85bcb61d8c91c8ce59b5f9f46ae07f705e39f94c34a6d1eb"
+    "itemSha256": "5dd004fe9ebf22513e32f96b22a02781fbd3c0a4de8f20483796fe257896afbc"
   }
 }

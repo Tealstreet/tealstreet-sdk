@@ -1,8 +1,8 @@
 {
   "safe-cex-venue-hyperliquid/src/rate_limit.rs::LOCAL_FUNCTION:text": {
     "category": "decoder-helper",
-    "runtimeOwner": "safe_cex_venue_hyperliquid::rate_limit::raw_number",
-    "reason": "Inside raw_number: JS String coercion of a raw JsonValue to UTF-16 units, refusing objects with own toString. Raw JSON coercion; its runtime owner's probes exercise it.",
+    "runtimeOwner": "safe_cex_venue_hyperliquid::rate_limit::get_hyperliquid_rest_request_weight",
+    "reason": "The unchanged private text coercer is reached by the actual inventoried get_hyperliquid_rest_request_weight caller through raw_request_weight -> raw_number. Its direct native weight bits/text and thrown-error observations cover nested arrays and own-toString errors; the compiled comma-separator mutation proves this exact helper is exercised. No private function is renamed, exposed or omitted.",
     "sourceSha256": "b147ca525ffac1439ed6d128d5d2779b4be6a964540f3e5c592bec461a3a103a"
   }
 }
