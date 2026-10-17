@@ -212,6 +212,9 @@
     "accepted-telemetry-defaults.test.mjs": [
       "telemetry defaults execute inherited native results and reject body drift"
     ],
+    "accepted-transport-socket-native.test.mjs": [
+      "Transport socket and provider contracts execute all four owners and reject production disconnects"
+    ],
     "accepted-weex-kline-alias.test.mjs": [
       "exact Weex kline tuple policy refuses slot root and caller redirects",
       "Weex kline tuple executes actual native slots identity and trait probes"
@@ -396,6 +399,10 @@
     "projection selected workspace source",
     "projection native concrete owner identity",
     "receiver item pin widened to whole file",
-    "receiver item source check removed"
+    "receiver item source check removed",
+    "transport HOW auth wire token",
+    "transport relay close code",
+    "transport registry instance precedence",
+    "transport provider foreign URL refusal"
   ]
 }
