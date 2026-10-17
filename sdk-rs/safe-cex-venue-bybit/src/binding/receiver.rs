@@ -419,6 +419,23 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(&this, rt, "fetchOptionMarkets", |rt, _| {
         members::markets::fetch_option_markets(rt)
     });
+    if matches!(
+        venue(rt)?.base.name,
+        safe_cex_types::ExchangeName::Bybit | safe_cex_types::ExchangeName::Bybitdemo
+    ) {
+        method(&this, rt, "assertOptionsEnabled", |rt, _| {
+            members::options::assert_options_enabled(rt)
+        });
+        method(&this, rt, "fetchOptionChain", |rt, a| {
+            members::options::fetch_option_chain(rt, arg(&a, 0))
+        });
+        method(&this, rt, "fetchOptionExpiries", |rt, a| {
+            members::options::fetch_option_expiries(rt, arg(&a, 0))
+        });
+        method(&this, rt, "fetchAccountGreeks", |rt, _| {
+            members::options::fetch_account_greeks(rt)
+        });
+    }
     method(&this, rt, "fetchMarkets", |rt, _| {
         members::markets::fetch_markets(rt)
     });

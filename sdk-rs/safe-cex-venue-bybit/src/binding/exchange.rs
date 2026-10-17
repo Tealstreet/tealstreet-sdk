@@ -730,6 +730,39 @@ impl Exchange for BybitExchange {
     ) -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
         self.invoke("fetchClosedPnl", args!(js(&options)))
     }
+    fn fetch_option_chain(
+        &self,
+        query: OptionChainQuery,
+    ) -> ExchangeFuture<'_, Vec<OptionChainRow>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo
+        ) {
+            self.invoke("fetchOptionChain", args!(js(&query)))
+        } else {
+            ExchangeCapabilities::default().fetch_option_chain(self, query)
+        }
+    }
+    fn fetch_option_expiries(&self, underlying: String) -> ExchangeFuture<'_, Vec<f64>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo
+        ) {
+            self.invoke("fetchOptionExpiries", args!(js(&underlying)))
+        } else {
+            ExchangeCapabilities::default().fetch_option_expiries(self, underlying)
+        }
+    }
+    fn fetch_account_greeks(&self) -> ExchangeFuture<'_, Vec<AccountGreeks>> {
+        if matches!(
+            self.base.name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo
+        ) {
+            self.invoke("fetchAccountGreeks", vec![])
+        } else {
+            ExchangeCapabilities::default().fetch_account_greeks(self)
+        }
+    }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
         self.invoke("fetchTickers", vec![])
     }

@@ -193,3 +193,126 @@ fn dedicated_families_keep_source_options_refusals() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn option_reads_match_maintained_methods_and_helpers() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_json};
+    fn encode(value: Js) -> Value {
+        match value {
+            Js::Number(n) => json!({"numberBits":format!("{:016x}",n.to_bits())}),
+            Js::Array(_) => Value::Array(
+                value
+                    .array_values()
+                    .unwrap()
+                    .into_iter()
+                    .map(encode)
+                    .collect(),
+            ),
+            Js::Object(_) => Value::Object(
+                value
+                    .own_keys()
+                    .into_iter()
+                    .filter_map(|key| {
+                        let field = value.get_key(&key).unwrap();
+                        (!field.is_undefined())
+                            .then(|| (String::from_utf16(&key).unwrap(), encode(field)))
+                    })
+                    .collect(),
+            ),
+            _ => to_json(&value).unwrap(),
+        }
+    }
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/option-read-fixtures.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 69);
+    let mut failures = vec![];
+    for (index, case) in cases.iter().enumerate() {
+        let mut opts = options();
+        opts.enable_option_markets = case["enabled"].as_bool();
+        let path = if case["method"] == "fetchAccountGreeks" {
+            "/v5/asset/coin-greeks"
+        } else {
+            "/v5/market/tickers"
+        };
+        let h = harness_as(ExchangeName::Bybit, opts, |wire| {
+            let response=case.get("response").cloned().unwrap_or_else(||json!({"retCode":0,"result":{"list":case.get("list").cloned().unwrap_or(Value::Null)}}));
+            wire.route("GET", path, 200, response);
+        });
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                markets: Some(serde_json::from_value(case["markets"].clone()).unwrap()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let result = match case["method"].as_str().unwrap() {
+            "fetchOptionChain" => h
+                .drive(
+                    h.venue()
+                        .fetch_option_chain(serde_json::from_value(case["query"].clone()).unwrap()),
+                )
+                .map(|rows| from_typed(&rows).unwrap()),
+            "fetchOptionExpiries" => h
+                .drive(
+                    h.venue()
+                        .fetch_option_expiries(case["query"].as_str().unwrap().into()),
+                )
+                .map(|rows| from_typed(&rows).unwrap()),
+            "fetchAccountGreeks" => h
+                .drive(h.venue().fetch_account_greeks())
+                .map(|rows| from_typed(&rows).unwrap()),
+            _ => unreachable!(),
+        };
+        match result {
+            Ok(result) => {
+                let actual = encode(result);
+                if actual != case["result"] {
+                    failures.push(format!(
+                        "case{index} result {actual}, expected {}",
+                        case["result"]
+                    ));
+                }
+            }
+            Err(error) => {
+                if error.name != case["error"]["name"].as_str().unwrap_or("")
+                    || (error.name == "Error"
+                        && error.message != case["error"]["message"].as_str().unwrap_or(""))
+                {
+                    failures.push(format!(
+                        "case{index} {}: {}; expected {}",
+                        error.name, error.message, case["error"]
+                    ));
+                }
+            }
+        }
+        let calls = h.wire.calls(path);
+        assert_eq!(
+            calls.len(),
+            case["calls"].as_array().unwrap().len(),
+            "case{index} request count"
+        );
+        if let Some(call) = calls.first() {
+            if case["method"] == "fetchOptionChain" {
+                assert_eq!(call.params["category"], "option");
+                assert_eq!(call.params["baseCoin"], case["query"]["underlying"]);
+            } else {
+                assert!(call.params.as_object().unwrap().is_empty(),"case{index}: {:?}",call.params);
+            }
+        }
+        h.venue().dispose().unwrap();
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
