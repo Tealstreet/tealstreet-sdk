@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/hyrotrader.ws-private.ts"
-rust_files = [ "safe-cex-venue-bybit/src/hyro_private_session.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/hyro_private_session.rs", "safe-cex-exchange/src/websocket.rs" ]
 
 [[symbol]]
 ts = "HyroPrivateWebsocket"
@@ -70,6 +70,6 @@ note = "Generates request ID before Promise allocation, executes timer/map regis
 ts = "HyroPrivateWebsocket.dispose"
 kind = "method"
 layer = "adapted"
-rs = [ "safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::dispose", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose" ]
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose", "safe-cex-exchange/src/websocket.rs::WsProtocol::dispose", "safe-cex-venue-bybit/src/hyro_private_session.rs::reset_session" ]
 status = "ported"
-note = "Live composition: safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose invokes safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::dispose, which selects the actual Hyro receiver and its current resetSession before shared owned-task/timer/socket cleanup. It retains the existing infallible WsProtocol contract documented in safe-cex-exchange/CLAUDE.md: a reset error is reported through the runtime and core transport cleanup continues. The prior generic hyro_private_session::dispose wrapper had no production caller and only three oracle-only cases; it and those cases are deleted. Source export and native protocol cleanup remain live; configured tests/hyro_binding.rs exercises actual pending acknowledgement, reconnect, disposal and timer retirement. This is a mapping to the existing concrete hook/core composition, not a fabricated super.dispose intrinsic."
+note = "Concrete split targets: safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose, safe-cex-exchange/src/websocket.rs::WsProtocol::dispose, safe-cex-venue-bybit/src/hyro_private_session.rs::reset_session. Trait implementation bodies are not indexed separately; the concrete hook is identified below. Live composition: safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose invokes safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::dispose, which selects the actual Hyro receiver and its current resetSession before shared owned-task/timer/socket cleanup. It retains the existing infallible WsProtocol contract documented in safe-cex-exchange/CLAUDE.md: a reset error is reported through the runtime and core transport cleanup continues. The prior generic hyro_private_session::dispose wrapper had no production caller and only three oracle-only cases; it and those cases are deleted. Source export and native protocol cleanup remain live; configured tests/hyro_binding.rs exercises actual pending acknowledgement, reconnect, disposal and timer retirement. This is a mapping to the existing concrete hook/core composition, not a fabricated super.dispose intrinsic."
