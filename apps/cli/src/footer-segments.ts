@@ -17,7 +17,8 @@ export type FooterConnection = 'connected' | 'connecting' | 'auth-failed' | 'fai
 
 export interface FooterPosition {
   side: 'long' | 'short';
-  contracts: number;
+  /** Base size with its asset, formatted by the snapshot builder (e.g. `240 DOGE`). */
+  size: string;
   entryPrice: number;
   notional: number;
   unrealizedPnl: number;
@@ -184,7 +185,7 @@ export function renderSegment(seg: FooterSegment, state: FooterState): string {
       if (!pos) return '';
       const color = pos.side === 'long' ? POS_GREEN : POS_RED;
       const tag = pos.side === 'long' ? 'LONG' : 'SHORT';
-      return chalk.hex(color)(`${tag} ${pos.contracts} @ ${fmtPrice(pos.entryPrice)}`);
+      return chalk.hex(color)(`${tag} ${pos.size} @ ${fmtPrice(pos.entryPrice)}`);
     }
 
     case 'mark':

@@ -40,7 +40,8 @@ export class OrdersCommand extends BaseCommand {
     const filteredExchange = {
       ...ctx.exchange,
       store: {
-        ...ctx.exchange?.store,
+        // SDK stores expose markets through a prototype getter, which object spread drops.
+        markets: ctx.exchange?.store?.markets,
         orders: openOrders,
       },
     };
