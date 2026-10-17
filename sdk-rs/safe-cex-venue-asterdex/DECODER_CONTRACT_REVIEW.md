@@ -102,7 +102,7 @@ and policy shard readers, one Cargo job, and requires eleven runtime receipts,
 zero classifications and zero failures. The source gate first executes the
 150 actual-runtime null comparisons, then the 738 independent shape/bit checks.
 
-`scripts/accepted-decoder-controls.py` plans eleven isolated compiled faults:
+`scripts/accepted-decoder-controls.py` executed eleven isolated compiled faults:
 remove only each repaired DTO object guard; bypass ExecutionOrder whole-input
 capture; lose a filter, market, position, order, ticker, kline or WS numeric sign;
 and discard STP presence in order options. The filter fault also reaches the
@@ -116,7 +116,10 @@ classifications and zero failures. Fresh ordinary inventory still discovers the
 original 184 owners and eight aliases, with no new decoder owners from the three
 remote companions or the private output projection. The final distinct corpus
 contains 738 inputs; its source gate and the 150 runtime null comparisons pass.
-The isolated compiled controls are still being measured.
+All eleven faults compiled and failed the exact named native observations. The
+filter and STP faults each failed two related owners; the other nine each failed
+one. The baseline and all eleven byte-exact restorations passed all eleven
+runtime owners with zero classifications and failures (23 receipt sets total).
 
 Other original Aster owners, lexical Wire decoders, private companions' separate
 capabilities, aliases, features and WASM remain outside this selected execution.

@@ -83,6 +83,9 @@ async function main() {
         signerPrivateKey: `0x${'0'.repeat(63)}1`, testnet: true, userAddress: user,
       };
       delete params[field];
+      // Exercise builderConfig's fee fallback as well as its address chain;
+      // an explicit requiredFeeRate would otherwise short-circuit this use.
+      if (field === 'builderConfig' && variant === 'approved') delete params.requiredFeeRate;
       if (variant === 'invalid-address') params.userAddress = 'invalid';
       if (variant === 'config-only' && field !== 'builderAddress') delete params.builderAddress;
       const rows = [{ builderAddress: builder, maxFeeRate: variant === 'insufficient' ? '0.00005' : '0.0003' }];
