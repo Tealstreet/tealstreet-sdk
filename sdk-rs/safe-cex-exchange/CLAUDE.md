@@ -1387,8 +1387,11 @@ For array inputs, JS Store `removeOrders` reads each element's `id` and applies
 source object-key coercion; it never treats a bare element as the ID itself.
 Property access and string-hint conversion failures propagate after the source's
 empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
-24 maintained Store cases through the production facade, including numeric keys,
-primitive elements, nullish elements and throwing getters/conversions.
+30 maintained Store cases through the production facade, including numeric keys,
+primitive elements, nullish elements and throwing getters/conversions. Direct
+Symbols and object IDs converting to Symbols stay unmatched to native string IDs;
+conversion uses the shared string-hint property-key operation. The object-to-Symbol
+case compiles and fails on master before this repair.
 
 The numeric patch witnesses pass entity selectors (`{id}`), matching the source
 Store signatures, while retaining all numeric-bit, null and omission assertions.
