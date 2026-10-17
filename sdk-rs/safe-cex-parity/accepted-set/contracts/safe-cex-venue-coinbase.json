@@ -1,0 +1,3570 @@
+{
+  "safe_cex_venue_coinbase::types::MarketResponseProductsItemFcmTradingSessionDetails": {
+    "shape": "map",
+    "sample": {
+      "open_time": "2026-01-02T03:04:05Z",
+      "close_time": "2026-01-02T09:10:11Z",
+      "is_session_open": "true"
+    },
+    "evidence": "Reviewed coinbase.types.ts MARKET_RESPONSE.products[].fcm_trading_session_details: required open_time string, close_time string, is_session_open string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the concrete object guard compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "open_time",
+          "close_time",
+          "is_session_open"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"open_time\":decoded.open_time,\"close_time\":decoded.close_time,\"is_session_open\":decoded.is_session_open}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "open_time": "2026-01-02T03:04:05Z",
+              "close_time": "2026-01-02T09:10:11Z",
+              "is_session_open": "true"
+            },
+            "output": {
+              "ok": true,
+              "open_time": "2026-01-02T03:04:05Z",
+              "close_time": "2026-01-02T09:10:11Z",
+              "is_session_open": "true"
+            }
+          },
+          {
+            "input": {
+              "open_time": "2026-05-06T07:08:09Z",
+              "close_time": "2026-05-06T13:14:15Z",
+              "is_session_open": "false"
+            },
+            "output": {
+              "ok": true,
+              "open_time": "2026-05-06T07:08:09Z",
+              "close_time": "2026-05-06T13:14:15Z",
+              "is_session_open": "false"
+            }
+          },
+          {
+            "input": {
+              "open_time": null,
+              "close_time": "2026-01-02T09:10:11Z",
+              "is_session_open": "true"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "close_time": "2026-01-02T09:10:11Z",
+              "is_session_open": "true"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"open_time\":decoded.open_time,\"close_time\":decoded.close_time,\"is_session_open\":decoded.is_session_open}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "open_time",
+        "close_time",
+        "is_session_open"
+      ],
+      "cases": [
+        {
+          "input": "{\"open_time\":\"2026-01-02T03:04:05Z\",\"close_time\":\"2026-01-02T09:10:11Z\",\"is_session_open\":\"true\"}",
+          "output": {
+            "ok": true,
+            "open_time": "2026-01-02T03:04:05Z",
+            "close_time": "2026-01-02T09:10:11Z",
+            "is_session_open": "true"
+          }
+        },
+        {
+          "input": "{\"open_time\":\"2026-05-06T07:08:09Z\",\"close_time\":\"2026-05-06T13:14:15Z\",\"is_session_open\":\"false\"}",
+          "output": {
+            "ok": true,
+            "open_time": "2026-05-06T07:08:09Z",
+            "close_time": "2026-05-06T13:14:15Z",
+            "is_session_open": "false"
+          }
+        },
+        {
+          "input": "[\"2026-01-02T03:04:05Z\",\"2026-01-02T09:10:11Z\",\"true\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"open_time\":null,\"close_time\":\"2026-01-02T09:10:11Z\",\"is_session_open\":\"true\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"close_time\":\"2026-01-02T09:10:11Z\",\"is_session_open\":\"true\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::MarketResponseProductsItemFutureProductDetailsPerpetualDetails": {
+    "shape": "map",
+    "sample": {
+      "funding_rate": "0.000125",
+      "open_interest": "123.5",
+      "funding_time": "1730000000"
+    },
+    "evidence": "Reviewed coinbase.types.ts MARKET_RESPONSE.products[].future_product_details.perpetual_details: required funding_rate string, open_interest string, funding_time string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the concrete object guard compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "funding_rate",
+          "open_interest",
+          "funding_time"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"funding_rate\":decoded.funding_rate,\"open_interest\":decoded.open_interest,\"funding_time\":decoded.funding_time}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "funding_rate": "0.000125",
+              "open_interest": "123.5",
+              "funding_time": "1730000000"
+            },
+            "output": {
+              "ok": true,
+              "funding_rate": "0.000125",
+              "open_interest": "123.5",
+              "funding_time": "1730000000"
+            }
+          },
+          {
+            "input": {
+              "funding_rate": "-0.00025",
+              "open_interest": "987.25",
+              "funding_time": "1730003600"
+            },
+            "output": {
+              "ok": true,
+              "funding_rate": "-0.00025",
+              "open_interest": "987.25",
+              "funding_time": "1730003600"
+            }
+          },
+          {
+            "input": {
+              "funding_rate": null,
+              "open_interest": "123.5",
+              "funding_time": "1730000000"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "open_interest": "123.5",
+              "funding_time": "1730000000"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"funding_rate\":decoded.funding_rate,\"open_interest\":decoded.open_interest,\"funding_time\":decoded.funding_time}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "funding_rate",
+        "open_interest",
+        "funding_time"
+      ],
+      "cases": [
+        {
+          "input": "{\"funding_rate\":\"0.000125\",\"open_interest\":\"123.5\",\"funding_time\":\"1730000000\"}",
+          "output": {
+            "ok": true,
+            "funding_rate": "0.000125",
+            "open_interest": "123.5",
+            "funding_time": "1730000000"
+          }
+        },
+        {
+          "input": "{\"funding_rate\":\"-0.00025\",\"open_interest\":\"987.25\",\"funding_time\":\"1730003600\"}",
+          "output": {
+            "ok": true,
+            "funding_rate": "-0.00025",
+            "open_interest": "987.25",
+            "funding_time": "1730003600"
+          }
+        },
+        {
+          "input": "[\"0.000125\",\"123.5\",\"1730000000\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"funding_rate\":null,\"open_interest\":\"123.5\",\"funding_time\":\"1730000000\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"open_interest\":\"123.5\",\"funding_time\":\"1730000000\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::CandlesResponseCandlesItem": {
+    "shape": "map",
+    "sample": {
+      "start": "1730000123",
+      "low": "17.25",
+      "high": "29.5",
+      "open": "18.75",
+      "close": "27.125",
+      "volume": "42.5"
+    },
+    "evidence": "Reviewed coinbase.types.ts CANDLES_RESPONSE.candles[]: required start string, low string, high string, open string, close string, volume string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "start",
+          "low",
+          "high",
+          "open",
+          "close",
+          "volume"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"start\":decoded.start,\"low\":decoded.low,\"high\":decoded.high,\"open\":decoded.open,\"close\":decoded.close,\"volume\":decoded.volume}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "start": "1730000123",
+              "low": "17.25",
+              "high": "29.5",
+              "open": "18.75",
+              "close": "27.125",
+              "volume": "42.5"
+            },
+            "output": {
+              "ok": true,
+              "start": "1730000123",
+              "low": "17.25",
+              "high": "29.5",
+              "open": "18.75",
+              "close": "27.125",
+              "volume": "42.5"
+            }
+          },
+          {
+            "input": {
+              "start": "1730000723",
+              "low": "0",
+              "high": "11.25",
+              "open": "-0",
+              "close": "1e-7",
+              "volume": "63.75"
+            },
+            "output": {
+              "ok": true,
+              "start": "1730000723",
+              "low": "0",
+              "high": "11.25",
+              "open": "-0",
+              "close": "1e-7",
+              "volume": "63.75"
+            }
+          },
+          {
+            "input": {
+              "start": null,
+              "low": "17.25",
+              "high": "29.5",
+              "open": "18.75",
+              "close": "27.125",
+              "volume": "42.5"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "low": "17.25",
+              "high": "29.5",
+              "open": "18.75",
+              "close": "27.125",
+              "volume": "42.5"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"start\":decoded.start,\"low\":decoded.low,\"high\":decoded.high,\"open\":decoded.open,\"close\":decoded.close,\"volume\":decoded.volume}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "start",
+        "low",
+        "high",
+        "open",
+        "close",
+        "volume"
+      ],
+      "cases": [
+        {
+          "input": "{\"start\":\"1730000123\",\"low\":\"17.25\",\"high\":\"29.5\",\"open\":\"18.75\",\"close\":\"27.125\",\"volume\":\"42.5\"}",
+          "output": {
+            "ok": true,
+            "start": "1730000123",
+            "low": "17.25",
+            "high": "29.5",
+            "open": "18.75",
+            "close": "27.125",
+            "volume": "42.5"
+          }
+        },
+        {
+          "input": "{\"start\":\"1730000723\",\"low\":\"0\",\"high\":\"11.25\",\"open\":\"-0\",\"close\":\"1e-7\",\"volume\":\"63.75\"}",
+          "output": {
+            "ok": true,
+            "start": "1730000723",
+            "low": "0",
+            "high": "11.25",
+            "open": "-0",
+            "close": "1e-7",
+            "volume": "63.75"
+          }
+        },
+        {
+          "input": "[\"1730000123\",\"17.25\",\"29.5\",\"18.75\",\"27.125\",\"42.5\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"start\":null,\"low\":\"17.25\",\"high\":\"29.5\",\"open\":\"18.75\",\"close\":\"27.125\",\"volume\":\"42.5\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"low\":\"17.25\",\"high\":\"29.5\",\"open\":\"18.75\",\"close\":\"27.125\",\"volume\":\"42.5\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListAccountsResponseItemAvailableBalance": {
+    "shape": "map",
+    "sample": {
+      "value": "17.25",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_ACCOUNTS_RESPONSE[].available_balance: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "17.25",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "17.25",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "29.5",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "29.5",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"17.25\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "17.25",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"29.5\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "29.5",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"17.25\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListAccountsResponseItemHold": {
+    "shape": "map",
+    "sample": {
+      "value": "3.125",
+      "currency": "BTC"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_ACCOUNTS_RESPONSE[].hold: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "3.125",
+              "currency": "BTC"
+            },
+            "output": {
+              "ok": true,
+              "value": "3.125",
+              "currency": "BTC"
+            }
+          },
+          {
+            "input": {
+              "value": "7.5",
+              "currency": "ETH"
+            },
+            "output": {
+              "ok": true,
+              "value": "7.5",
+              "currency": "ETH"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "BTC"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "BTC"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"3.125\",\"currency\":\"BTC\"}",
+          "output": {
+            "ok": true,
+            "value": "3.125",
+            "currency": "BTC"
+          }
+        },
+        {
+          "input": "{\"value\":\"7.5\",\"currency\":\"ETH\"}",
+          "output": {
+            "ok": true,
+            "value": "7.5",
+            "currency": "ETH"
+          }
+        },
+        {
+          "input": "[\"3.125\",\"BTC\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"BTC\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"BTC\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPortfoliosResponsePortfoliosItem": {
+    "shape": "map",
+    "sample": {
+      "name": "native portfolio A",
+      "uuid": "synthetic-portfolio-a",
+      "type": "DEFAULT",
+      "deleted": false
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_PORTFOLIOS_RESPONSE.portfolios[]: required name string, uuid string, type string, deleted boolean. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "name",
+          "uuid",
+          "type",
+          "deleted"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"name\":decoded.name,\"uuid\":decoded.uuid,\"type\":decoded.r#type,\"deleted\":decoded.deleted}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "name": "native portfolio A",
+              "uuid": "synthetic-portfolio-a",
+              "type": "DEFAULT",
+              "deleted": false
+            },
+            "output": {
+              "ok": true,
+              "name": "native portfolio A",
+              "uuid": "synthetic-portfolio-a",
+              "type": "DEFAULT",
+              "deleted": false
+            }
+          },
+          {
+            "input": {
+              "name": "native portfolio B",
+              "uuid": "synthetic-portfolio-b",
+              "type": "CONSUMER",
+              "deleted": true
+            },
+            "output": {
+              "ok": true,
+              "name": "native portfolio B",
+              "uuid": "synthetic-portfolio-b",
+              "type": "CONSUMER",
+              "deleted": true
+            }
+          },
+          {
+            "input": {
+              "name": null,
+              "uuid": "synthetic-portfolio-a",
+              "type": "DEFAULT",
+              "deleted": false
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "uuid": "synthetic-portfolio-a",
+              "type": "DEFAULT",
+              "deleted": false
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"name\":decoded.name,\"uuid\":decoded.uuid,\"type\":decoded.r#type,\"deleted\":decoded.deleted}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "name",
+        "uuid",
+        "type",
+        "deleted"
+      ],
+      "cases": [
+        {
+          "input": "{\"name\":\"native portfolio A\",\"uuid\":\"synthetic-portfolio-a\",\"type\":\"DEFAULT\",\"deleted\":false}",
+          "output": {
+            "ok": true,
+            "name": "native portfolio A",
+            "uuid": "synthetic-portfolio-a",
+            "type": "DEFAULT",
+            "deleted": false
+          }
+        },
+        {
+          "input": "{\"name\":\"native portfolio B\",\"uuid\":\"synthetic-portfolio-b\",\"type\":\"CONSUMER\",\"deleted\":true}",
+          "output": {
+            "ok": true,
+            "name": "native portfolio B",
+            "uuid": "synthetic-portfolio-b",
+            "type": "CONSUMER",
+            "deleted": true
+          }
+        },
+        {
+          "input": "[\"native portfolio A\",\"synthetic-portfolio-a\",\"DEFAULT\",false]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"name\":null,\"uuid\":\"synthetic-portfolio-a\",\"type\":\"DEFAULT\",\"deleted\":false}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"uuid\":\"synthetic-portfolio-a\",\"type\":\"DEFAULT\",\"deleted\":false}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemEntryVwap": {
+    "shape": "map",
+    "sample": {
+      "value": "103.25",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].entry_vwap: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "103.25",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "103.25",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "207.5",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "207.5",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"103.25\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "103.25",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"207.5\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "207.5",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"103.25\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemVwap": {
+    "shape": "map",
+    "sample": {
+      "value": "109.125",
+      "currency": "USDC"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].vwap: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "109.125",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "109.125",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": "211.75",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "211.75",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"109.125\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "109.125",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "{\"value\":\"211.75\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "211.75",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "[\"109.125\",\"USDC\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemUnrealizedPnl": {
+    "shape": "map",
+    "sample": {
+      "value": "-13.25",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].unrealized_pnl: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "-13.25",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "-13.25",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "27.5",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "27.5",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"-13.25\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "-13.25",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"27.5\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "27.5",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"-13.25\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemMarkPrice": {
+    "shape": "map",
+    "sample": {
+      "value": "117.25",
+      "currency": "USDC"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].mark_price: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "117.25",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "117.25",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": "229.5",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "229.5",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"117.25\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "117.25",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "{\"value\":\"229.5\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "229.5",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "[\"117.25\",\"USDC\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemLiquidationPrice": {
+    "shape": "map",
+    "sample": {
+      "value": "37.125",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].liquidation_price: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "37.125",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "37.125",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "49.75",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "49.75",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"37.125\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "37.125",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"49.75\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "49.75",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"37.125\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemImNotional": {
+    "shape": "map",
+    "sample": {
+      "value": "53.25",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].im_notional: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "53.25",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "53.25",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "67.5",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "67.5",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"53.25\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "53.25",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"67.5\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "67.5",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"53.25\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemMmNotional": {
+    "shape": "map",
+    "sample": {
+      "value": "19.125",
+      "currency": "USDC"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].mm_notional: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "19.125",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "19.125",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": "31.75",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "31.75",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"19.125\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "19.125",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "{\"value\":\"31.75\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "31.75",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "[\"19.125\",\"USDC\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPositionNotional": {
+    "shape": "map",
+    "sample": {
+      "value": "307.25",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].position_notional: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "307.25",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "307.25",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "419.5",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "419.5",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"307.25\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "307.25",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"419.5\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "419.5",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"307.25\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPortfolioSummaryPortfolioImNotional": {
+    "shape": "map",
+    "sample": {
+      "value": "71.125",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].portfolio_summary.portfolio_im_notional: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "71.125",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "71.125",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "83.75",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "83.75",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"71.125\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "71.125",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"83.75\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "83.75",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"71.125\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPortfolioSummaryPortfolioMmNotional": {
+    "shape": "map",
+    "sample": {
+      "value": "23.25",
+      "currency": "USDC"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].portfolio_summary.portfolio_mm_notional: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "23.25",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "23.25",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": "41.5",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "41.5",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"23.25\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "23.25",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "{\"value\":\"41.5\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "41.5",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "[\"23.25\",\"USDC\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPortfolioSummaryUnrealizedPnl": {
+    "shape": "map",
+    "sample": {
+      "value": "-47.125",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].portfolio_summary.unrealized_pnl: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "-47.125",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "-47.125",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "59.75",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "59.75",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"-47.125\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "-47.125",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"59.75\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "59.75",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"-47.125\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPortfolioSummaryBuyingPower": {
+    "shape": "map",
+    "sample": {
+      "value": "509.25",
+      "currency": "USDC"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].portfolio_summary.buying_power: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "509.25",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "509.25",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": "631.5",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "631.5",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"509.25\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "509.25",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "{\"value\":\"631.5\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "631.5",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "[\"509.25\",\"USDC\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPortfolioSummaryTotalBalance": {
+    "shape": "map",
+    "sample": {
+      "value": "701.125",
+      "currency": "USD"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].portfolio_summary.total_balance: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "701.125",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "701.125",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": "823.75",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "823.75",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USD"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"701.125\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "701.125",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "{\"value\":\"823.75\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "823.75",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "[\"701.125\",\"USD\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USD\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_coinbase::types::ListPositionsIntxResponsePositionsItemPortfolioSummaryMaxWithdrawal": {
+    "shape": "map",
+    "sample": {
+      "value": "137.25",
+      "currency": "USDC"
+    },
+    "evidence": "Reviewed coinbase.types.ts LIST_POSITIONS_INTX_RESPONSE.positions[].portfolio_summary.max_withdrawal: required value string, currency string. Reviewed concrete Deserialize and actual TryFrom<Map> bodies; no defaults or optional keys. Monetary values remain strings without numeric coercion. Direct native fields and independently authored declaration-order full-array refusal cover the public owner. This cohort does not classify separate local helpers or clear the whole package inventory. Native/default and target-specific Wasm selected-owner production probes pass. Disconnecting only the public serde TryFrom<Map> admission attribute compiled and failed the named native complete-valid-positional-array assertion; exact source restoration passed that owner and the final twenty-test baseline. Existing shared UTF-8 and owned declared-field DTO boundaries remain explicit. This record grants no permission to receivers, aliases, construction policies or separate local helper decoders.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::TryFrom",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "serde_json::map::Map",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the actual public TryFrom<Map<String,Value>> implementation on two distinct TS-record objects and malformed field maps; inspect all returned native fields rather than serializing/redecoding the owner.",
+        "nativeFields": [
+          "value",
+          "currency"
+        ],
+        "call": "{let map=$value.as_object().unwrap().clone();match <$type as TryFrom<serde_json::Map<String,serde_json::Value>>>::try_from(map){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": {
+              "value": "137.25",
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": true,
+              "value": "137.25",
+              "currency": "USDC"
+            }
+          },
+          {
+            "input": {
+              "value": "251.5",
+              "currency": "USD"
+            },
+            "output": {
+              "ok": true,
+              "value": "251.5",
+              "currency": "USD"
+            }
+          },
+          {
+            "input": {
+              "value": null,
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          },
+          {
+            "input": {
+              "currency": "USDC"
+            },
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"value\":decoded.value,\"currency\":decoded.currency}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "value",
+        "currency"
+      ],
+      "cases": [
+        {
+          "input": "{\"value\":\"137.25\",\"currency\":\"USDC\"}",
+          "output": {
+            "ok": true,
+            "value": "137.25",
+            "currency": "USDC"
+          }
+        },
+        {
+          "input": "{\"value\":\"251.5\",\"currency\":\"USD\"}",
+          "output": {
+            "ok": true,
+            "value": "251.5",
+            "currency": "USD"
+          }
+        },
+        {
+          "input": "[\"137.25\",\"USDC\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "17",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"scalar\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"value\":null,\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"currency\":\"USDC\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  }
+}

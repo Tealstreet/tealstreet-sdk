@@ -1,3 +1,102 @@
+# Three fixed future and callback alias reviews
+
+The ordinary package preflight previously stopped at
+`spot_account_reads::AccountFuture` with `fixed local future alias probe:
+lifetime then output parameter required`. These three reviewed declarations use
+two type parameters, so their exact identities belong in the existing finite
+`generic-aliases` registry. No scanner, alias helper or validator is widened.
+All six existing fixed Realm projection records remain unchanged.
+
+| Actual alias | Fixed reviewed instantiation | Independent expected container |
+| --- | --- | --- |
+| `spot_account_reads::AccountFuture<V,E>` | production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>>>>` |
+| `income::IncomeFuture<'a,V,E>` | `'static`, production `Value, Value` | `Pin<Box<dyn Future<Output=Result<Value,Value>> + 'static>>` |
+| `startup_timeout::TimeoutCallback<V,E>` | production `Value, Value` | `Rc<dyn Fn(Vec<Value>)->Result<Value,Value>>` |
+
+The registry fixes the actual source file, compiler generic bounds, raw and
+expanded targets, parameter order, canonical Pin/Rc roots, sizedness and expected
+native type. Fresh ordinary compiler discovery retains every 534 owner and 36
+alias before selecting the three. Artifact authentication and all ordinary Serde
+and conversion detectors run through the maintained `runProbes` implementation.
+
+`tests/support/accepted_future_aliases.rs` additionally runs three actual native
+witnesses. Compile-time Realm host bounds authenticate Value/Error bindings;
+invariant mutable references and TypeId pin the independently authored expected
+container. Both futures preserve Pending, a real waker call, Ready success/error,
+exact numeric bits, lone UTF-16 units, undefined and object/error identity. Poll,
+wake and drop counts include unpolled cancellation. The callback preserves shared
+Rc allocation/clone identity, ordered native arguments and returned/thrown object
+identity. These are distinct runtime witnesses, not classification-only receipts.
+They do not exercise the host bodies that supply those executable containers.
+
+The three actual alias contracts pass ordinary native and target-specific Wasm capability classifications (three classifications, zero failures on each target). Separate native ownership/result tests pass 3/3. Strict all-target native clippy, formatting and parity pass; parity indexes 7459 rows and 17214 public Rust items.
+
+Removing each of the three exact finite registry entries independently restores its original ordinary preflight refusal in a fresh process using actual compiler/artifact context. Each policy file is restored byte-for-byte in finally, and all three native capability probes pass after restoration. No validator guard is removed or widened.
+
+After integrating merged #378, all 79 master contracts and six master projection records remain unchanged. The branch has 73 reviewed owners, nine aliases and two construction obligations: 84 of 572 reviewed, 488 remaining. Ordinary preflight advances past the three aliases and retains `rate_limit.rs::LOCAL_FUNCTION:text: decoder helper requires its inventoried production decoder`; its existing policy points to non-indexed `rate_limit::raw_number`. The inventoried request-weight caller and its native observations require a separate review.
+
+Only these three fixed Value/Value monomorphizations are classified; other
+arguments, IncomeFuture lifetimes, host bodies, local helpers, dependencies and
+the remaining feature/target matrix retain their separate obligations. No whole
+package clearance is claimed.
+
+# Twenty-two required-field record reviews
+
+This cohort reviews 22 concrete records individually against their maintained TS
+field declarations, native fields, private remote renames and required-field
+attributes. Every selected member is a required, non-nullable String, f64 or bool.
+The existing JsNumberInput capture and OnlyMap admission remain unchanged.
+`tests/fixtures/accepted_flat_record_schema.json` records the manually reviewed
+field mappings and exact public decoder body pins; it grants no policy permission.
+
+| Native owner | Maintained TS declaration | Required wire fields |
+| --- | --- | --- |
+| `ClearinghouseStateAssetPositionsItemPositionCumFunding` | `ClearinghouseState.assetPositions[].position.cumFunding` | `allTime`, `sinceChange`, `sinceOpen` |
+| `ClearinghouseStateAssetPositionsItemPositionLeverage` | `ClearinghouseState.assetPositions[].position.leverage` | `rawUsd`, `type`, `value` |
+| `ClearinghouseStateCrossMarginSummary` | `ClearinghouseState.crossMarginSummary` | `accountValue`, `totalMarginUsed`, `totalNtlPos`, `totalRawUsd` |
+| `ClearinghouseStateMarginSummary` | `ClearinghouseState.marginSummary` | `accountValue`, `totalMarginUsed`, `totalNtlPos`, `totalRawUsd` |
+| `OrderResponseStatusCase2` | `OrderResponseStatus error branch` | `error` |
+| `WsTrade` | `WsTrade` | `coin`, `side`, `px`, `sz`, `hash`, `time`, `tid` |
+| `WsLevel` | `WsLevel` | `px`, `sz`, `n` |
+| `WsOrderOrder` | `WsOrder.order` | `coin`, `side`, `limitPx`, `sz`, `oid`, `timestamp`, `origSz` |
+| `WsUserFunding` | `WsUserFunding` | `time`, `coin`, `usdc`, `szi`, `fundingRate` |
+| `WsLiquidation` | `WsLiquidation` | `lid`, `liquidator`, `liquidated_user`, `liquidated_ntl_pos`, `liquidated_account_value` |
+| `WsNonUserCancel` | `WsNonUserCancel` | `coin`, `oid` |
+| `L2BookLevelsItem0Item` | `L2Book.levels[0][]` | `px`, `sz`, `n` |
+| `L2BookLevelsItem1Item` | `L2Book.levels[1][]` | `px`, `sz`, `n` |
+| `FundingHistoryEntry` | `FundingHistoryEntry` | `coin`, `fundingRate`, `premium`, `time` |
+| `SpotTokenEvmContract` | `SpotToken.evmContract concrete object branch` | `address`, `evm_extra_wei_decimals` |
+| `UserOpenOrder` | `UserOpenOrder` | `coin`, `limitPx`, `oid`, `side`, `sz`, `timestamp` |
+| `CancelOrderRequest` | `CancelOrderRequest` | `coin`, `o` |
+| `CancelOrderRequestsItem` | `CancelOrderRequests[]` | `a`, `o` |
+| `Signature` | `Signature` | `r`, `s`, `v` |
+| `Notification` | `Notification` | `notification`, `user` |
+| `BuilderInfo` | `BuilderInfo` | `b`, `f` |
+| `BuilderFeeApprovalResult` | `BuilderFeeApprovalResult` | `success`, `message` |
+
+The permanent typed projections read every native member before owner serialization.
+Distinct values catch swapped field mappings. The 549 independently authored cases
+include changed Unicode/boolean/number values, reversed object keys, ignored extra
+keys, omission/null/wrong primitive for every required member, negative-zero,
+overflow and negative-underflow bits for every numeric member, complete valid
+Serde-declaration-order arrays and invalid scalar roots. All six native ingress
+routes are checked for each case. The typed fixture passes 22 tests, and the actual
+installed contract expressions independently pass 22 tests / 549 cases / 3294
+native route observations. `OrderResponseStatusCase2` additionally reads the actual
+error string's UTF-16 units; native fields are never success/count placeholders.
+
+Each of the 22 public map-only guards was removed independently while retaining numeric capture and private wire metadata. Every compiled mutation failed its named complete-valid-array assertion; exact source restoration then passed all 22 native tests.
+
+Integrated native tests pass 22/22; strict native all-target clippy and formatting pass. parity:check passes with 7459 rows and 17214 public Rust items. Static compiler checks confirm exact scalar field identities, reviewed decoder bodies and all existing master rows.
+
+The current compiler inventory contains 534 owners, 36 aliases and two construction obligations (572 total). This branch reviews 73 owners, six aliases and two construction obligations: 81 reviewed, 491 remaining. Every original census key is retained.
+
+The ordinary package gate retains the AccountFuture refusal (`fixed local future alias probe: lifetime then output parameter required`). This cohort changes only the
+22 reviewed contracts and their evidence; private helpers, other records, aliases,
+local scopes, dependencies and the feature/target matrix retain separate reviews.
+No whole-package acceptance is claimed.
+
+
 # Six fixed Realm associated-projection contracts
 
 Six accepted contracts classify only `PrivateValue<Realm>`, `PrivateError<Realm>`,

@@ -758,3 +758,110 @@ exact discovery after reviewing just the two constructor fingerprints.
 The shared form-string prerequisite is landed #232. Its actual-source remote
 adapter/Axios witness covers four string representations; original bridge fails
 and repaired bridge passes. Opaque encoded bytes still refuse before signing.
+
+
+## Twenty-six independently reviewed map-record owners (2026-10-17)
+
+Fresh native/default compiler proposals at master `68af3fa734` identify these
+26 previously unclassified concrete record decoders: public12, private8 and
+config6. The report is metadata for manual review, not executable contract
+input. Every declaration and full decoder body was reviewed against the actual
+public/private/index TypeScript interfaces. All 303 declared native fields,
+including inherited SymbolInfo fields, keep their types, declaration order,
+renames and default/presence/custom-passthrough attributes. Serialize, all output
+registrations and surrounding production bodies are unchanged. The ordinary
+function-local derived Fields schemas become private serde(remote) companions;
+the existing owner numeric capture and object guards remain.
+
+The original boundaries already rejected all 26 independently authored complete
+valid positional arrays. The original native baseline passes **26 tests / zero
+failed / zero ignored** on **494 cases through seven decoder routes**. The remote
+conversion passes the same suite. There are 248 positive direct-native-field
+observations and 246 negative field/shape cases; each owner has its own test.
+Native observations precede owner Serialize and cover every field, Option
+presence, nested nonempty collections and retained JSON leaves, 20 individually
+false required booleans and their omission refusals, unknown ignored fields,
+optional absence/present-null behavior and all 34 direct f64 fields with -0,
+binary64 rounding, subnormal and positive/negative overflow inputs. Opaque values
+stay within the existing retained JSON domain.
+
+The first draft test compile exhausted the default json! macro recursion depth;
+the observation output now constructs an ordinary Map from field/value pairs.
+That compile refusal is excluded from runtime proof. A formatting invocation
+with SDK-prefixed paths from the sdk-rs directory found no files and is also
+excluded; the corrected explicit pinned rustfmt and workspace check pass.
+
+Independent draft review verifies all 26 remote schemas equal their former
+Fields schemas after whitespace normalization, all surrounding production code
+is unchanged and all 494 fixture expectations/complete arrays match the reviewed
+source types, presence and bits. Actual production probes and isolated semantic
+controls are recorded separately once executed; no pending run counts as proof.
+
+
+The first production attempt refused all contracts before native observations:
+the expected native fields were nested below `fields` instead of the required
+top-level keys. No result from that refusal counts as successful production
+proof. Actual direct-native getters and independently authored expected fields
+now use the maintained top-level observation shape, and the lane runner
+preflights all actual owner contracts through maintained `contractFor` before
+compiling probes. The corrected fresh production run passes **26 actual runtime
+results / zero classifications / zero failed owners**, with **394 independently
+authored actual production cases** and complete compiler checks on all 26 private
+companions. Independent review of this correction is clean.
+
+Native all-target Clippy passes with warnings denied after replacing seven
+redundant test-only mapping closures with function pointers. The native harness
+now has fixed per-owner case/positive counts and an actual route counter:
+26 owners, 494 cases and 3458 decoder observations. Workspace format passes.
+Global structural verification passes **7459 rows / 17214 public Rust items**.
+Scoped invention verification retains the complete workspace resolution and
+passes **287 public Apex items**, preserving all 82 existing owned exemptions
+and adding none. Its temporary exemption input selects only the existing owned
+rows; the original full-exemption invocation reported unrelated foreign names
+outside the selected invention scope and is excluded. These parser checks reuse
+the maintained binary after unchanged Rust/Cargo/lock/config inputs were verified.
+
+
+`scripts/accepted-map-record-controls.py` completed all **26 isolated compiled
+controls**. Each removes only its exact owner's object wrapper, requires Cargo
+exit101 and its named failure containing the exact complete valid literal array,
+then restores all three original source files byte-for-byte and passes all26
+native tests. The final exact-source check and all26 native tests pass again.
+No sibling mutation is installed during any owner's control. Initial preflights
+refused rustfmt-wrapped calls and the CurrencyObject suffix inside
+PerpetualCurrencyObject; both happened before mutation and are excluded from
+negative evidence. The corrected anchors require the exact owner boundary and
+allow only formatting whitespace/trailing-comma spelling.
+
+Master `87c99c175c` integrates as `8edda0a135` without conflicts, retaining all
+master contract/policy shards, including merged #365. The actual Apex source,
+fixtures, production runner and independently authored observations
+are byte-identical to the checkpoint that completed the controls and production
+run. The 26 genuinely new Apex rows remain the only additions to their shard;
+no flat file, exemption or previously removed row is restored.
+
+
+Independent readiness review found a P2 in the maintenance controller: global
+byte replacement discarded the regex's owner boundary. The completed v3 run
+used unique old byte sequences for every owner, so each executed mutation was
+isolated. The controller now replaces only its exact matched span. A focused
+same-format CurrencyObject/PerpetualCurrencyObject fixture fails with the former
+global replacement and passes after the span fix; all three Python tests pass,
+including wrapped-call and missing/ambiguous-owner refusal cases. For all 26
+actual production owners, the fixed span selector's entire mutant bytes equal
+the mutant bytes executed in v3. Sources are unchanged; no hypothetical collision
+is counted as a native guard failure. Importing the controller for its pure test
+now performs no source write or Cargo invocation.
+
+Final integration readiness: full scoped ApexOmni tests pass **215 / zero failed /
+zero ignored**, across 13 target receipts including docs and all maintained live
+TypeScript oracles. Separate host and wasm32 all-target Clippy pass with warnings
+denied (12.30s and 37.04s). Fresh post-integration production passes **26 actual
+runtime results / zero classifications / zero failed owners** on the reviewed
+394-case production corpus; private companion checks run again. Frozen install,
+workspace format, global structural **7459 rows / 17214 public items** and scoped
+invention **287 Apex public items** with the same 82 existing exemptions all pass.
+CodeRabbit's manual review returned a rate limit; it did not execute a completed
+review. The other 103 originally censused owners, aliases, receiver policies,
+local functions, construction, features and wasm behavior remain independent
+obligations. No whole-venue completion is claimed.

@@ -41,6 +41,21 @@ const cases = [
   { apiVersion: 'v1', response: [null] },
   { apiVersion: 'v3', response: [{ symbol: 'BAD', brackets: [null] }] },
   { apiVersion: 'v1', error: 'offline' },
+  // Equal JSON contents are distinct object identities at the source Map boundary.
+  { apiVersion: 'v3', response: [
+    { symbol: { market: 'BTCUSDT' }, brackets: [{ initialLeverage: 125 }] },
+    { symbol: { market: 'BTCUSDT' }, brackets: [{ initialLeverage: 75 }] },
+  ] },
+  { apiVersion: 'v3', response: [
+    { symbol: ['BTCUSDT'], brackets: [{ initialLeverage: 125 }] },
+    { symbol: ['BTCUSDT'], brackets: [{ initialLeverage: 75 }] },
+  ] },
+  { apiVersion: 'v3', response: [
+    { brackets: [{ initialLeverage: 125 }] },
+    { symbol: null, brackets: [{ initialLeverage: 100 }] },
+    { brackets: [{ initialLeverage: 75 }] },
+    { symbol: null, brackets: [{ initialLeverage: 50 }] },
+  ] },
 ];
 (async () => {
   const output = [];

@@ -29,7 +29,13 @@ fn text(v: &Js) -> Result<String, Thrown> {
 fn request(config: &Js) -> Result<RestRequest, Thrown> {
     let params = config.get("params")?;
     let data = config.get("data")?;
+    let retry = config.get("axios-retry")?;
+    let mut config_extensions = Default::default();
+    if !retry.is_undefined() {
+        config_extensions = [("axios-retry".into(), to_json(&retry)?)].into();
+    }
     Ok(RestRequest {
+        config_extensions,
         method: text(&config.get("method")?)?.to_ascii_lowercase(),
         url: text(&config.get("url")?)?,
         params: (!params.is_nullish())
@@ -100,5 +106,36 @@ impl JsHttpHost for TypedHttpHost {
                 Err(error) => failure(error, config),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_keeps_per_request_retry_namespace() {
+        let config = Js::object(vec![
+            ("method", Js::str("post")),
+            ("url", Js::str("/v5/order/create")),
+            ("data", Js::object(vec![("symbol", Js::str("BTCUSDT"))])),
+            (
+                "axios-retry",
+                Js::object(vec![("retries", Js::Number(0.0))]),
+            ),
+        ]);
+        let built = request(&config).unwrap();
+        assert_eq!(
+            built.config_extensions.get("axios-retry"),
+            Some(&serde_json::json!({"retries":0.0})),
+            "binding_retry_namespace_reaches_typed_factory"
+        );
+        config.set("axios-retry", Js::Undefined).unwrap();
+        assert!(
+            !request(&config)
+                .unwrap()
+                .config_extensions
+                .contains_key("axios-retry")
+        );
     }
 }

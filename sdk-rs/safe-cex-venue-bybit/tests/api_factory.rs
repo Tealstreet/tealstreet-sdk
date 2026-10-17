@@ -1590,3 +1590,97 @@ fn native_resolved_signature_rejection_resends_once() {
         }
     }
 }
+
+// The per-request namespace overrides axios-retry's default, while resolved
+// signature envelopes use the independent response interceptor.
+#[test]
+fn native_request_retry_override_retains_source_budget() {
+    const SIGN: &str = r#"{"retCode":10004,"retMsg":"error sign!"}"#;
+    let cases = [
+        ("rejected-sign-zero", json!(0), true, false, 1, true),
+        ("resolved-sign-zero", json!(0), false, false, 2, false),
+        ("network-zero", json!(0), false, true, 1, true),
+        ("network-one", json!(1), false, true, 2, true),
+        ("network-fraction", json!(1.5), false, true, 3, true),
+        ("network-five", json!(5), false, true, 6, true),
+    ];
+    let mut native = Vec::new();
+    for (id, budget, rejected_sign, network, attempts, rejects) in cases {
+        let replies = if network {
+            (0..7)
+                .map(|_| Reply::Network {
+                    url: None,
+                    method: None,
+                })
+                .collect()
+        } else if rejected_sign {
+            vec![
+                Reply::Rejected(RestResponseBody::Encoded(SIGN.as_bytes().to_vec())),
+                response(r#"{"retCode":0,"retMsg":"OK"}"#),
+            ]
+        } else {
+            vec![response(SIGN), response(r#"{"retCode":0,"retMsg":"OK"}"#)]
+        };
+        let f = fixture(replies);
+        let mut request = get("/private");
+        if !network {
+            request.method = "post".into();
+            request.body = Some(RestBody::Untransformed(json!({"request":true})));
+        }
+        request
+            .config_extensions
+            .insert("axios-retry".into(), json!({"retries": budget}));
+        let result = ready(f.api.execute_with_receipt(request));
+        assert_eq!(
+            f.wire.requests.borrow().len(),
+            attempts,
+            "request_retry_budget_attempts {id}"
+        );
+        assert_eq!(
+            result.is_err(),
+            rejects,
+            "request_retry_budget_outcome {id}"
+        );
+        native.push(json!({"id":id, "attempts":attempts, "rejected":rejects}));
+    }
+    let source = source("create-api-request-retry-boundaries.cjs", 6);
+    for (index, case) in native.iter().enumerate() {
+        assert_eq!(
+            source["cases"][index]["id"], case["id"],
+            "request_retry_budget_source_inventory"
+        );
+        for field in ["attempts", "rejected"] {
+            assert_eq!(
+                source["cases"][index]["source"][field], case[field],
+                "request_retry_budget_source {index}/{field}"
+            );
+        }
+    }
+    for budget in [0, 1] {
+        let network = || Reply::Network {
+            url: None,
+            method: None,
+        };
+        let mut replies: Vec<_> = (0..budget).map(|_| network()).collect();
+        replies.push(response(
+            r#"{"retCode":10002,"retMsg":"recv window rejected"}"#,
+        ));
+        replies.push(network());
+        replies.push(response(r#"{"retCode":0,"retMsg":"OK"}"#));
+        let f = fixture(replies);
+        let mut request = get("/private");
+        request
+            .config_extensions
+            .insert("axios-retry".into(), json!({"retries":budget}));
+        assert!(
+            ready(f.api.execute_with_receipt(request)).is_err(),
+            "request_retry_clock_budget_exhausted {budget}"
+        );
+        assert_eq!(
+            f.wire.requests.borrow().len(),
+            budget + 2,
+            "request_retry_clock_budget_retained {budget}"
+        );
+        assert_eq!(f.clock_fetches.load(Ordering::SeqCst), 1);
+    }
+}
