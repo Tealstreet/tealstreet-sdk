@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Paths below are relative to apps/cli; the release workflow invokes this
+# script by path from the repo root.
+cd "$(dirname "$0")/.."
+
 # Find bun - check PATH first, then common locations
 BUN=$(which bun 2>/dev/null || echo "")
 if [ -z "$BUN" ]; then
