@@ -1,6 +1,7 @@
 //! Real production class members, with native values observed before projection.
 use crate::binding_test_harness as binding_harness;
 use binding_harness::{Harness, harness, options};
+use safe_cex_exchange::exchange::Exchange;
 use safe_cex_exchange::js_runtime::{
     promise::await_js,
     value::{Js, from_json},
