@@ -4206,6 +4206,7 @@ dependencies = [
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-candle-cache",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",

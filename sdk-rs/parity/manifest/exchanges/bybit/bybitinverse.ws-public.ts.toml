@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitinverse.ws-public.ts"
-rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs", "safe-cex-venue-bybit/src/ws_public/streams.rs", "safe-cex-venue-bybit/src/book_mapping.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/public_ticker_topics.rs", "safe-cex-venue-bybit/src/public_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_public.rs", "safe-cex-venue-bybit/src/ws_public/topics.rs", "safe-cex-venue-bybit/src/ws_public/streams.rs", "safe-cex-venue-bybit/src/book_mapping.rs", "safe-cex-venue-bybit/src/ws_public/candles.rs", "safe-cex-venue-bybit/src/ws_public/single_candles.rs", "safe-cex-venue-bybit/src/candle_mapping.rs" ]
 
 [[symbol]]
 ts = "BybitInversePublicWebsocket"
@@ -117,18 +117,18 @@ note = "MIXED Shared ticker patch operation extracted to safe-cex-venue-bybit/sr
 [[symbol]]
 ts = "BybitInversePublicWebsocket.listenOHLCVs"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public/candles.rs::listen_ohlcvs", "safe-cex-venue-bybit/src/ws_public/candles.rs::map_bulk" ]
+status = "ported"
+note = "Live bulk kline subscription retains topics, replaces the prefix handler and sends source chunks of 50 with core-owned connection retries. Native JS coercions and shared UTF-16 String search parse wire metadata; ModelField<AnyTimeframe> retains monthly and own-undefined interval output. Maintained source member corpus and real socket binding tests cover the production composition. Renamed source member to safe-cex-venue-bybit/src/ws_public/candles.rs::listen_ohlcvs, safe-cex-venue-bybit/src/ws_public/candles.rs::map_bulk."
 
 [[symbol]]
 ts = "BybitInversePublicWebsocket.listenOHLCV"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ws_public/single_candles.rs::listen_ohlcv", "safe-cex-venue-bybit/src/candle_mapping.rs::apply_kline" ]
+status = "ported"
+note = "Live kline/trade state and subscription lifecycle run through the real socket. Dedicated class retry and cleanup quirks remain distinct from primary active/retry cancellation and diagnostics. Native calendar helper extends source bars without losing numeric bits; 12 maintained-source sequences and 2172 mapper outcomes cover the wired behavior. Renamed source member to safe-cex-venue-bybit/src/ws_public/single_candles.rs::listen_ohlcv, safe-cex-venue-bybit/src/candle_mapping.rs::apply_kline."
 
 [[symbol]]
 ts = "BybitInversePublicWebsocket.listenOHLCVOld"
