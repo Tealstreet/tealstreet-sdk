@@ -55,17 +55,27 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
     Ok(out)
 }
 
-fn in_operator(obj: &Js, key: &str) -> bool {
+fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
+    if !obj.is_object() {
+        let rhs = if matches!(obj, Js::SymbolIterator) {
+            "Symbol(Symbol.iterator)".to_owned()
+        } else {
+            obj.to_display()
+        };
+        return Err(Thrown::type_error(&format!(
+            "Cannot use 'in' operator to search for '{key}' in {rhs}"
+        )));
+    }
+    if obj.has_own(key) {
+        return Ok(true);
+    }
     match obj {
-        Js::Object(o) => {
-            obj.has_own(key)
-                || o.proto
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|p| in_operator(p, key))
-        }
-        Js::Array(_) => key == "length" || obj.has_own(key),
-        _ => obj.has_own(key),
+        Js::Object(o) => match o.proto.borrow().as_ref() {
+            Some(proto) if !matches!(proto, Js::Null) => in_operator(proto, key),
+            _ => Ok(false),
+        },
+        Js::Array(_) => Ok(key == "length"),
+        _ => Ok(false),
     }
 }
 
@@ -1330,8 +1340,12 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             let wait = arg(&a, 1).to_number()?;
             let wait = if wait.is_nan() { 0. } else { wait };
             let options = arg(&a, 2);
-            let leading = !in_operator(&options, "leading") || options.get("leading")?.truthy();
-            let trailing = !in_operator(&options, "trailing") || options.get("trailing")?.truthy();
+            let leading = !options.is_object()
+                || !in_operator(&options, "leading")?
+                || options.get("leading")?.truthy();
+            let trailing = !options.is_object()
+                || !in_operator(&options, "trailing")?
+                || options.get("trailing")?.truthy();
             Ok(super::throttle::new(rt, function, wait, leading, trailing))
         }),
     );
@@ -1628,16 +1642,23 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     def(
         "v",
         func("v", |a| {
-            let (obj, key) = (arg(&a, 0), text(&arg(&a, 1))?);
+            let obj = arg(&a, 0);
             if obj.is_nullish() {
                 return Ok(Js::Undefined);
             }
+            let key = arg(&a, 1);
+            if !obj.is_object() && !key.is_string() {
+                return Err(Thrown::type_error(
+                    "Right-hand side of 'in' is not an object",
+                ));
+            }
+            let key = text(&key)?;
             for k in [
                 key.clone(),
                 safe_cex_num::lodash_snake_case(&key),
                 safe_cex_num::lodash_camel_case(&key),
             ] {
-                if in_operator(&obj, &k) {
+                if in_operator(&obj, &k)? {
                     return obj.get(&k);
                 }
             }

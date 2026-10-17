@@ -115,11 +115,11 @@ where
             store
                 .update_positions(&[
                     (
-                        create_position_id(symbol, Some(PositionSide::Long), None),
+                        Some(create_position_id(symbol, Some(PositionSide::Long), None)),
                         patch.clone(),
                     ),
                     (
-                        create_position_id(symbol, Some(PositionSide::Short), None),
+                        Some(create_position_id(symbol, Some(PositionSide::Short), None)),
                         patch,
                     ),
                 ])

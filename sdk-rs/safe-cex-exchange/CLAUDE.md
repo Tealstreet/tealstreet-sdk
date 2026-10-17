@@ -1346,6 +1346,23 @@ including 1M, and omits undefined intervals from JSON. Candle number bits remain
 native through that codec; strict public OHLCV(S) request options are unchanged.
 The scoped subscribed_candle_fields witness exercises the actual native bridge.
 
+Singular JS Store order/position/market mutators read the selector's `id` and
+compare it strictly with native string IDs. Non-string IDs and bare primitives
+do not identify those rows; nullish selectors and throwing getters propagate
+when the source actually reads them. Empty order/position arrays retain their
+findIndex short circuit. Ticker mutation follows its distinct object-key lookup
+with property-key coercion. `tests/js_store_id_matching.rs` compares132 actual
+maintained Store outcomes through DefaultStore's production facade. Bulk order
+lookup and the adaptive multi-position index are separate paths.
+
+JS `updatePositions` keeps the maintained adaptive lookup: strict IDs for a
+single update or stored position, property-key coercion only when both counts
+exceed one. It resolves every selector before patches, preserves unmatched rows
+as `None` in the Store batch, and avoids reading patches for unmatched IDs.
+`tests/js_store_position_batch_ids.rs` compares168 maintained Store cases with
+real DefaultStore, including empty, single, distinct and duplicate-ID states.
+
+
 The JS Axios dispatcher lets installed callable adapters own response settlement,
 as Axios does. HOW fulfills non-2xx and zero-status responses, so their configured
 transforms and fulfilled response interceptors run; default native HTTP responses
@@ -1388,6 +1405,10 @@ empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compa
 24 maintained Store cases through the production facade, including numeric keys,
 primitive elements, nullish elements and throwing getters/conversions.
 
+The numeric patch witnesses pass entity selectors (`{id}`), matching the source
+Store signatures, while retaining all numeric-bit, null and omission assertions.
+Bare primitive selectors remain negative cases in the source ID corpus.
+
 Standard Error instances inherit stock names and define supplied messages with
 writable/configurable, non-enumerable descriptors. Omitted or undefined constructor
 messages stay inherited; string coercion preserves UTF-16 and propagates failures.
@@ -1407,6 +1428,15 @@ output in a child process and compares its payloads with Node, including exact
 info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
+
+Number.toString applies radix coercion and range validation before formatting,
+including for NaN, infinities and zero. Radix 10 uses the existing number formatter;
+other radices use the private V8-derived precision/rounding algorithm documented
+in THIRD_PARTY_NOTICES.md. The installed-native `js_number_radix` witness compares
+5,320 Node outputs across all radices 2..36, fixed boundaries and deterministic
+binary64 samples, plus 60 coercion/error cases. Its test-only commit compiles and
+fails on the original binding at `(255).toString(2)`. This does not change the separate
+BigInt formatter or the existing Number method receiver profile.
 
 BigNumber's private value representation distinguishes finite decimals, signed
 infinities and NaN; finite zero retains its sign. Arithmetic and comparisons use
@@ -1433,6 +1463,17 @@ throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
 installed NativeRuntime bindings, observing getter order, holes, duplicate amount
 reads, inserted identity and reentrant row/length changes. Both regressions compile
 and fail on the prior implementation; their inputs do not replace utility code.
+
+The imported get-key `v` helper rejects non-null primitive right-hand operands
+with TypeError before key conversion can execute user code. Null/undefined
+short-circuit without coercing the key. Property traversal stops at an explicit
+null prototype; existing own/inherited keys and alias precedence remain intact.
+The internal `in` helper is fallible, and lodash throttle checks whether options
+are objects before using it, as the maintained implementation does.
+`tests/js_get_key_in.rs` executes the complete maintained get-key module and
+installed lodash through 126 real native-host scenes, including poisonous keys,
+null prototypes and primitive/default throttle options. String-key diagnostics
+match Node; malformed non-string keys use an engine-neutral TypeError diagnostic.
 
 BigNumber.isFinite reads the private decimal/Infinity/NaN variant directly; it
 never converts through f64. The Node oracle includes finite values at +/-1e1000
