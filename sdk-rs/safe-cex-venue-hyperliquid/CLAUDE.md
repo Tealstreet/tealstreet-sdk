@@ -367,3 +367,9 @@ Registry `native_host_hyperliquid_clock` performs a real signed leverage update,
 checks the transmitted action/signature, and requires its nonce to reflect a
 90-second server correction. The binding schedule-cancel fixture uses a deadline
 relative to that synced clock; the fractional Date nonce regression stays raw.
+
+The unused hyperliquidspot.api factory/interceptors and their fake HTTP fixtures
+are removed. Source Spot construction imports the perp API, as does the native
+binding; the Spot API module has only a TS test consumer and no package export.
+Keep the separate RateLimiter class and its real Realm witness. spot_runtime
+retains23 source cases across8 files after removing only7 API cases and1 source.
