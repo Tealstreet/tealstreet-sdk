@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { inventory } from './accepted-inventory.mjs';
 import { loadContracts, defaultContractDirectory } from './accepted-contract-files.mjs';
 import { runProbes } from './accepted-probes.mjs';
-import { reviewedLocalHelper, requireNativeDecoderObservations } from './accepted-local-helpers.mjs';
+import { reviewedLocalHelper, reviewedGenericDecoderHelper, requireNativeDecoderObservations } from './accepted-local-helpers.mjs';
 import { aliasClaim, aliasTargetIdentity, toolingAliasExemption } from './accepted-aliases.mjs';
 import { verifiedMacroOrigins } from './accepted-macro-origins.mjs';
 import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutputDefinitionCovers } from './accepted-number-output.mjs';
@@ -146,11 +146,15 @@ for (const pkg of members) {
       return null;
     }
     if (numberOutputDefinitionCovers(numberOutputDefinition, file, ident, row, column)) return null;
+    const helper = { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
+    if (reviewedGenericDecoderHelper(helper, localTypeHelpers, fs.readFileSync(file), result.types, allContracts)) {
+      delegatedLocals.push({ name: helper.label, runtimeOwner: localTypeHelpers[helper.label].runtimeOwner });
+      return null;
+    }
     const scopeReason = ident.startsWith('UNSUPPORTED_MODULE_MACRO')
       ? 'module-scope macro may introduce decoder declarations and needs production coverage'
       : 'unsupported local scope needs module-scope production coverage';
     assert.ok(!ident.startsWith('UNSUPPORTED_'), `${file}::${ident}: accepted-set assertion: ${scopeReason}`);
-    const helper = { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
     if (reviewedLocalHelper(helper, localTypeHelpers, fs.readFileSync(file), result.types, allContracts)) {
       delegatedLocals.push({ name: helper.label, runtimeOwner: localTypeHelpers[helper.label].runtimeOwner });
       return null;
