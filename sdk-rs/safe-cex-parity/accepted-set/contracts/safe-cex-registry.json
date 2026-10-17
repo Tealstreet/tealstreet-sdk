@@ -809,6 +809,150 @@
       }
     }
   },
+  "safe_cex_registry::native_account::NativeHistoricalPositionOptions": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "account": "sample-account",
+      "from": 1,
+      "to": 2
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"account\":row.account,\"fromBits\":row.from.map(|v|v.to_bits().to_string()),\"toBits\":row.to.map(|v|v.to_bits().to_string()),\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "account",
+        "fromBits",
+        "toBits",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"account\":\"first\",\"from\":-0.0,\"to\":1.5,\"tag\":true}",
+          "output": {
+            "ok": true,
+            "account": "first",
+            "fromBits": "9223372036854775808",
+            "toBits": "4609434218613702656",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"account\":\"second\"}",
+          "output": {
+            "ok": true,
+            "account": "second",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "{\"account\":\"third\",\"from\":null,\"to\":null}",
+          "output": {
+            "ok": true,
+            "account": "third",
+            "fromBits": null,
+            "toBits": null,
+            "extraKeys": []
+          }
+        },
+        {
+          "input": "[\"first\",1,2]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":\"a\",\"from\":\"1\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_registry::native_account::NativeOrderId": {
+    "shape": "map",
+    "evidence": "The production native JSON command surface accepts the TS declared object record, retaining its existing ignored surplus fields. This module-scope concrete decoder replaces the hidden local derive and refuses positional struct arrays. Finite raw JSON observations inspect actual native members and surplus keys; history bounds retain the existing omitted/explicit-null None semantics and numeric bits. Native_account_records dispatches through an actual registry TxFlow account before its existing venue refusal; native_account_methods proves real Binance Store removal over HTTP. This is a typed native JSON boundary, not source-side runtime validation.",
+    "sample": {
+      "id": "sample-id"
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw account record witness\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"id\":row.id,\"extraKeys\":row._extra.keys().collect::<Vec<_>>()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "extraKeys"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"first\",\"tag\":true}",
+          "output": {
+            "ok": true,
+            "id": "first",
+            "extraKeys": [
+              "tag"
+            ]
+          }
+        },
+        {
+          "input": "{\"id\":\"second\",\"nested\":[]}",
+          "output": {
+            "ok": true,
+            "id": "second",
+            "extraKeys": [
+              "nested"
+            ]
+          }
+        },
+        {
+          "input": "[\"first\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"id\":7}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_registry::native_host::AdapterFactory": {
     "category": "non-decoder",
     "evidence": "safe-cex-registry/src/native_host.rs::AdapterFactory: reviewed production capability alias; ordinary native alias Serde/conversion probes remain mandatory.",
@@ -895,6 +1039,84 @@
         }
       }
     }
+  },
+  "safe_cex_registry::native_host::query": {
+    "api": {
+      "kind": "function",
+      "name": "query",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::query_value::QueryValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
+    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
+    "cases": [
+      {
+        "input": null,
+        "output": "Null"
+      },
+      {
+        "input": false,
+        "output": "Bool(false)"
+      },
+      {
+        "input": 2.5,
+        "output": "Number(2.5)"
+      },
+      {
+        "input": "BTC $",
+        "output": "String(\"BTC $\")"
+      },
+      {
+        "input": [
+          true,
+          3,
+          "ETH",
+          null
+        ],
+        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
+      },
+      {
+        "input": {
+          "coin": [
+            "BTC",
+            "ETH"
+          ],
+          "nested": {
+            "enabled": false
+          }
+        },
+        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
+      }
+    ]
   },
   "safe_cex_registry::public_data::get_candle_subscription_key": {
     "api": {
@@ -1957,83 +2179,5 @@
         }
       }
     }
-  },
-  "safe_cex_registry::native_host::query": {
-    "api": {
-      "kind": "function",
-      "name": "query",
-      "signature": {
-        "inputs": [
-          [
-            "value",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "serde_json::value::Value",
-                    "args": null
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "safe_cex_types::query_value::QueryValue",
-            "args": null
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "category": "decoder",
-    "evidence": "The concrete native Hyperliquid transport adapts already-owned JSON params into QueryValue before the source qs repeat serializer. This is a total JSON-to-query carrier conversion, not a raw JSON parser. Moving it from block to module scope exposes its actual decoder signature and enum outputs; native_host_hyperliquid observes the installed production serializer over loopback HTTP. No undefined or nonfinite input is claimed at the owned Value boundary.",
-    "call": "serde_json::json!(format!(\"{:?}\", $type($value)))",
-    "cases": [
-      {
-        "input": null,
-        "output": "Null"
-      },
-      {
-        "input": false,
-        "output": "Bool(false)"
-      },
-      {
-        "input": 2.5,
-        "output": "Number(2.5)"
-      },
-      {
-        "input": "BTC $",
-        "output": "String(\"BTC $\")"
-      },
-      {
-        "input": [
-          true,
-          3,
-          "ETH",
-          null
-        ],
-        "output": "Array([Bool(true), Number(3.0), String(\"ETH\"), Null])"
-      },
-      {
-        "input": {
-          "coin": [
-            "BTC",
-            "ETH"
-          ],
-          "nested": {
-            "enabled": false
-          }
-        },
-        "output": "Object(JsObjectMap({\"coin\": Array([String(\"BTC\"), String(\"ETH\")]), \"nested\": Object(JsObjectMap({\"enabled\": Bool(false)}))}))"
-      }
-    ]
   }
 }
