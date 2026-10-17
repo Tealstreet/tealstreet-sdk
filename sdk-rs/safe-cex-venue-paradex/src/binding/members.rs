@@ -285,7 +285,7 @@ fn sync(rt: &Rt, n: &str, a: &[Js], c: &[Js]) -> Result<Option<Js>, Thrown> {
                 &crate::order_mapper::map_order(
                     raw.as_object()
                         .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
-                    |ms| ms,
+                    |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
                 )
                 .map_err(|e| Thrown::error("Error", &e))?,
             )?
@@ -640,7 +640,7 @@ async fn orders(rt: &Rt) -> Result<Js, Thrown> {
             crate::order_mapper::map_order(
                 row.as_object()
                     .ok_or_else(|| Thrown::type_error("Order row must be an object"))?,
-                |ms| ms,
+                |ms| (rt.shared.extra.deps.local_wall_time_to_utc)(ms),
             )
             .map_err(|e| Thrown::error("Error", &e))
         },

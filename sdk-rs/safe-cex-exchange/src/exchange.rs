@@ -128,12 +128,11 @@ impl<V: Exchange> ValidatedBatch<V> {
         &self.orders
     }
 }
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SubscribedCandle {
-    #[serde(flatten)]
     pub candle: Candle,
     pub symbol: String,
-    pub interval: Timeframe,
+    pub interval: safe_cex_types::ModelField<safe_cex_types::AnyTimeframe>,
 }
 
 #[derive(Default)]
@@ -2046,7 +2045,7 @@ impl BaseExchange {
                 "Network came online - triggering WebSocket reconnection",
                 "info",
             )?;
-            self.reconnect()?;
+            self.recover_after_offline(|socket| socket.recover_after_offline(true).map(Some))?;
         } else if !online {
             self.log(
                 "Network went offline - WebSocket reconnects will be paused",

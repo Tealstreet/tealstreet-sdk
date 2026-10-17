@@ -1,4 +1,7 @@
-use crate::error_post::WorkerErrorPost;
+use crate::{
+    data_post::{WorkerDataPayload, WorkerDataPost},
+    error_post::WorkerErrorPost,
+};
 use crate::{
     handler::BaseHandler,
     order_book_post::{OrderBookPost, OrderBookUpdateError, OrderBookWorkerPost},
@@ -7,6 +10,7 @@ use crate::{
 use indexmap::{IndexMap, IndexSet};
 use safe_cex_exchange::{
     exchange::Exchange,
+    js_runtime::value::{Js, from_json, from_typed},
     runtime::{ExchangeError, ExchangeRuntime, ExchangeTask, ListenerCleanup},
 };
 use safe_cex_types::OrderBook;
@@ -387,13 +391,13 @@ struct SymbolIntervalSub {
 pub struct OHLCVSubscriptionsHandler {
     pub base: Rc<BaseHandler>,
     exchange: Rc<dyn Exchange>,
-    post: Rc<dyn Fn(StoreWorkerPayload)>,
+    post: WorkerDataPost,
     subs: RefCell<IndexMap<String, Rc<SymbolIntervalSub>>>,
 }
 impl OHLCVSubscriptionsHandler {
     pub fn new(
         exchange: Rc<dyn Exchange>,
-        post: Rc<dyn Fn(StoreWorkerPayload)>,
+        post: WorkerDataPost,
         error_post: WorkerErrorPost,
     ) -> Rc<Self> {
         Rc::new_cyclic(|weak: &Weak<Self>| {
@@ -422,10 +426,11 @@ impl OHLCVSubscriptionsHandler {
         })
     }
     fn send_candle_update(
-        post: &dyn Fn(StoreWorkerPayload),
+        post: &WorkerDataPost,
         sub: &SymbolIntervalSub,
         candle: safe_cex_types::Candle,
-    ) {
+    ) -> Result<(), ExchangeError> {
+        let candle = from_typed(&candle).map_err(|e| e.to_exchange_error())?;
         let mut cursor = 0;
         loop {
             // JS Map iteration observes deletions and newly appended entries during post.
@@ -435,18 +440,21 @@ impl OHLCVSubscriptionsHandler {
                 .iter()
                 .find(|(_, (ordinal, _))| *ordinal >= cursor)
                 .map(|(id, (ordinal, data))| (id.clone(), *ordinal, data.clone()));
-            let Some((id, ordinal, mut data)) = next else {
+            let Some((id, ordinal, data)) = next else {
                 break;
             };
             cursor = ordinal + 1;
-            data["subId"] = json!(id);
-            data["candle"] = json!(candle);
-            post(StoreWorkerPayload {
+            let data = from_json(&data);
+            data.define("subId", Js::str(&id))
+                .map_err(|e| e.to_exchange_error())?;
+            data.define("candle", candle.clone())
+                .map_err(|e| e.to_exchange_error())?;
+            post.send(WorkerDataPayload {
                 op: StoreWorkerOp::ListenOHLCV,
-                instance_id: None,
-                data: Some(data),
-            });
+                data,
+            })?;
         }
+        Ok(())
     }
     fn get_key(symbol: &str, interval: &str) -> String {
         format!("{symbol}:{interval}")
@@ -514,15 +522,18 @@ impl OHLCVSubscriptionsHandler {
                     .and_then(|t| t.data_update_throttle_multiplier)
                     .filter(|v| *v != 0.0 && !v.is_nan())
                     .unwrap_or(1.0);
-                let throttle = StreamThrottle::new(
-                    self.exchange.base().runtime.clone(),
-                    60.0 * multiplier,
-                    move |candle| {
-                        if let Some(sub) = weak.upgrade() {
-                            Self::send_candle_update(post.as_ref(), &sub, candle);
+                let runtime = self.exchange.base().runtime.clone();
+                let throttle =
+                    StreamThrottle::new(runtime.clone(), 60.0 * multiplier, move |candle| {
+                        if let Some(sub) = weak.upgrade()
+                            && let Err(error) = Self::send_candle_update(&post, &sub, candle)
+                        {
+                            runtime.report_exception(
+                                &error,
+                                &json!({"operation":"worker candle post"}),
+                            );
                         }
-                    },
-                );
+                    });
                 *sub.throttle.borrow_mut() = Some(throttle.clone());
                 let listener_sub = sub.clone();
                 let unsub = self.exchange.listen_ohlcv(

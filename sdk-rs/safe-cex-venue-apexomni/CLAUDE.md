@@ -443,3 +443,10 @@ Unknown private statuses still follow the source’s ignore branch after mapping
 unknown type/side with an OPEN status reach Store. Inherited callable/object
 lookup results retain their separately documented closed-field refusal.
 The unmapped_order_enums target exercises both production entry paths.
+
+Native HTTP auth, socket URLs/login and fallback pong, mapped model timestamps,
+private snapshot grace and order expiration read the shared synchronized clock.
+Raw Date.now remains separate for cancellation caches, fill freshness, client IDs
+and zkLink transaction timestamps; ping timing remains monotonic. The isolated
+native_clock target syncs the actual singleton and covers signed REST/placement,
+socket authentication and a terminal private order frame after a clock advance.

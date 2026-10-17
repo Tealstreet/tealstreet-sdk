@@ -339,7 +339,8 @@ impl ApexOmniExchange {
             position_mode: (Some(PositionMode::Hedged)).into(),
             margin_type: (Some(MarginType::Cross)).into(),
             info: (Some(fields(row)?)).into(),
-            last_update: (Some(self.base.runtime.now_ms())).into(),
+            last_update: (Some(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()))
+                .into(),
             margin_size: (None).into(),
             extra: (None).into(),
             option: (None).into(),
@@ -398,7 +399,7 @@ impl ApexOmniExchange {
             numeric(&nullish_zero(property(row, "size")?))?,
             numeric(&nullish_zero(data::v(row, "cumSuccessFillSize")?))?,
         );
-        let last_update = self.base.runtime.now_ms();
+        let last_update = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         let trigger_type = |part: &J| -> Result<Option<OrderStopTriggerType>, ExchangeError> {
             let key = text(data::v(part, "triggerPriceType")?)?;
             Ok(match js_table_lookup(&protocol::ORDER_TRIGGER_TYPE, &key) {
@@ -435,7 +436,7 @@ impl ApexOmniExchange {
         ] {
             if price > 0.0 {
                 let id = format!("{}{suffix}", text(raw_id)?);
-                let updated = self.base.runtime.now_ms();
+                let updated = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
                 brackets.push((id, price, kind, updated, trigger_type(part)?));
             }
         }

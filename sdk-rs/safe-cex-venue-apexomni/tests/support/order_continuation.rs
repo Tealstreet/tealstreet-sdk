@@ -178,7 +178,11 @@ fn order_coercions_and_clocks_precede_typed_admission() {
             );
             positive += 1;
         }
-        assert_eq!(host.now_calls.get(), clocks, "{marker} native clock count");
+        assert_eq!(
+            host.now_calls.get(),
+            0,
+            "{marker} virtual clock must not read the raw runtime"
+        );
         assert_eq!(row["clocks"], clocks, "{marker} source clock count");
         native::check(
             &J::Array(host.operations.borrow().clone()),

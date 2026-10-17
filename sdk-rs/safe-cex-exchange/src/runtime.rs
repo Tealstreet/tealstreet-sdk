@@ -154,9 +154,22 @@ impl From<safe_cex_store::StoreMutationError> for ExchangeError {
         projected
     }
 }
+impl From<safe_cex_num::JsCoercionError> for ExchangeError {
+    fn from(error: safe_cex_num::JsCoercionError) -> Self {
+        let mut projected = Self::new(error.message);
+        projected.name = error.name.into();
+        projected.origin = Some(ExchangeErrorOrigin::new(error));
+        projected
+    }
+}
 impl From<safe_cex_transport::RestFailure> for ExchangeError {
     fn from(error: safe_cex_transport::RestFailure) -> Self {
         let mut projected = Self::new(error.message.clone());
+        if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =
+            error.transport_error.as_deref()
+        {
+            projected.name = cause.name.into();
+        }
         projected.code = error
             .code
             .as_ref()
