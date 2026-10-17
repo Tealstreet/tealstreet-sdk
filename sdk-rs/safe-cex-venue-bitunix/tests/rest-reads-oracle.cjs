@@ -88,5 +88,14 @@ async function run(method,fixture){
  for(const f of accounts)rows.push(await run('fetchBalance',f));
  for(const f of accounts)rows.push(await run('fetchPositionMode',f));
  assert.equal(rows.length,33,'REST fixed source total');
- process.stdout.write(JSON.stringify({rows,market,ticker,balance,positions}));
+ const assetRows=[];
+ for(const value of [false,{asset:'wrong'},null,17,undefined]){
+  const bad={...base,symbol:'BADUSDT',base:value};
+  const result=await run('fetchMarkets',{data:[base,bad,{...base,symbol:'ETHUSDT',base:'ETH'}]});
+  assert.equal(result.result.items.length,3,'source retains malformed base and siblings');
+  assert.equal(result.traceCount,0,'source accepts the raw asset');
+  assetRows.push(result);
+ }
+ assert.equal(assetRows.length,5,'asset boundary source corpus');
+ process.stdout.write(JSON.stringify({rows,market,ticker,balance,positions,assetRows}));
 })().catch(e=>{console.error(e);process.exitCode=1;});
