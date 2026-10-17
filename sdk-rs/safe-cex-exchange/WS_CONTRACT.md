@@ -107,3 +107,9 @@ receive work even when the venue does not delegate to the base close handler.
 An offline-to-online transition runs each registered socket’s offline recovery.
 That path clears native retry backoff, failure pauses and close/reconnect counters,
 then runs a pending reconnect immediately. Repeated online notifications do nothing.
+
+Typed `BaseWebSocket::reconnect` dispatches through `WsProtocol::reconnect`.
+The JS protocol calls the live receiver member, so venue arrow-field overrides
+run for watchdogs, send recovery and explicit native reconnects. The inherited
+JS member calls the shared base algorithm directly, preserving superclass calls
+without recursion. Native protocols inherit that same base algorithm by default.

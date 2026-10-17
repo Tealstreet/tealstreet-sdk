@@ -28,6 +28,10 @@ use safe_cex_types::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "../tests/support/native_reconnect.rs"]
+mod native_reconnect_tests;
+
 /// Host collaborators of both KuCoin classes.
 pub struct KucoinDependencies {
     pub runtime: Rc<dyn WsRuntime>,

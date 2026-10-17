@@ -510,9 +510,9 @@ note = "Split: BaseWebSocket::dispose holds the shared teardown; WsProtocol::dis
 ts = "BaseWebSocket.reconnect"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::reconnect"
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::reconnect", "safe-cex-exchange/src/websocket.rs::WsProtocol::reconnect" ]
 status = "ported"
-note = ""
+note = "Split dynamic receiver dispatch: `safe-cex-exchange/src/websocket.rs::BaseWebSocket::reconnect`, `safe-cex-exchange/src/websocket.rs::WsProtocol::reconnect`. Typed callers dispatch the live JS reconnect override; the inherited JS base member calls the shared base algorithm directly, preserving superclass semantics without recursion. Real KuCoin native HTTP/WebSocket regressions verify both futures socket overrides renew bullet tokens, with compiled master failures."
 
 [[symbol]]
 ts = "BaseWebSocket#reconnectNow"
