@@ -428,7 +428,7 @@ impl ReadHost for Rt {
         Ok(())
     }
     fn now(&self) -> ReadResult<Self, f64> {
-        Ok(self.now())
+        Ok(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms())
     }
     fn read(
         &self,
@@ -645,9 +645,11 @@ impl TradingHost for Rt {
         };
         Ok(safe_cex_num::adjust(value.to_number()?, step))
     }
-    // ts: `uuid()` (v4) from the `uuid` package.
+    // ts: utils/uuid removes the nanoid URL separators.
     fn uuid(&self) -> ReadResult<Self, Vec<u16>> {
-        Ok(units(&self.shared.runtime.unique_id()))
+        Ok(units(
+            &self.shared.runtime.unique_id().replace(['-', '_'], ""),
+        ))
     }
     fn spot_client_id(&self) -> ReadResult<Self, Handle<Self>> {
         let id = (self.shared.extra.spot_ids.borrow_mut())().map_err(Thrown::from)?;
@@ -780,13 +782,16 @@ impl ApiHost for Rt {
     fn create_client(
         &self,
         config: Handle<Self>,
-        _options: Handle<Self>,
-        _exchange: Handle<Self>,
+        options: Handle<Self>,
+        exchange: Handle<Self>,
     ) -> ReadResult<Self, Handle<Self>> {
-        Ok(h(client::create(
+        Ok(h(client::factory::create(
             self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
             (*config).clone(),
-        )))
+            &options,
+            super::value::to_typed(&exchange.get("name")?)?,
+        )?))
     }
     // ts: utils/retryReadsOnly networkErrorOnRead(isRead): reads (and the listed
     // posted reads) retried on axios-retry's isNetworkError only.
@@ -866,14 +871,21 @@ impl ApiHost for Rt {
         let pending = client.call_method("request", vec![(*config).clone()])?;
         Ok(async move { Ok(h(await_js(pending).await?)) })
     }
-    // ts: installTransportAdapter — the binding's JsHttpHost owns transport selection.
+    // ts: installTransportAdapter(xhr, options, exchange.name).
     fn install_transport(
         &self,
-        _client: Handle<Self>,
-        _options: Handle<Self>,
-        _name: Handle<Self>,
+        client: Handle<Self>,
+        options: Handle<Self>,
+        name: Handle<Self>,
     ) -> ReadResult<Self, ()> {
-        Ok(())
+        client::factory::install_transport_adapter(
+            self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
+            &client,
+            &options,
+            super::value::to_typed(&name)?,
+            safe_cex_transport::RestAdapterVariant::Default,
+        )
     }
     fn request_use(&self, client: Handle<Self>, api: Rc<Api<Self>>) -> ReadResult<Self, ()> {
         let interceptor = Js::function("krakenRequest", move |_, a| {
