@@ -1,4 +1,4 @@
-#[path = "support/runtime.rs"]
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
 mod runtime;
 use runtime::Runtime;
 use safe_cex_exchange::{

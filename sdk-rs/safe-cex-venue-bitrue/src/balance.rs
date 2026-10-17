@@ -14,6 +14,7 @@ fn type_error(message: &'static str) -> JsCoercionError {
 pub fn parse_balance<'a>(
     data: Option<&Value>,
     stored_balance: &'a Balance,
+    mut warn: impl FnMut(&str),
 ) -> Result<Cow<'a, Balance>, JsCoercionError> {
     if !js_truthy(data) {
         return Ok(Cow::Borrowed(stored_balance));
@@ -79,24 +80,21 @@ pub fn parse_balance<'a>(
         .into_iter()
         .reduce(math_max)
         .expect("nonempty candidates");
-        reduced.insert(
-            coin.to_owned(),
-            (total, free, used, account.get("sumOpenRealizedAmount")),
-        );
-    }
-    // CHOSEN: shared Balance has numeric upnl. Defer this refusal until after
-    // source reduction, so overwritten raw values and later coercion errors
-    // retain their source ordering. Never silently Number-coerce raw upnl.
-    let mut currencies = JsObjectMap::new();
-    for (coin, (total, free, used, raw_upnl)) in reduced {
+        let raw_upnl = account.get("sumOpenRealizedAmount");
         let upnl = match raw_upnl {
             Some(value @ Value::Number(_)) => js_number(Some(value))?,
-            _ => {
-                return Err(type_error(
-                    "Bitrue balance upnl is outside shared numeric Balance",
+            value => {
+                let value = value.map_or_else(|| "undefined".to_owned(), Value::to_string);
+                warn(&format!(
+                    "Bitrue refused account row {coin}: Balance.upnl requires a number, got {value}"
                 ));
+                continue;
             }
         };
+        reduced.insert(coin.to_owned(), (total, free, used, upnl));
+    }
+    let mut currencies = JsObjectMap::new();
+    for (coin, (total, free, used, upnl)) in reduced {
         currencies.insert(
             coin,
             Balance {

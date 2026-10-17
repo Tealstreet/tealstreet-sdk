@@ -41,8 +41,18 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
         false,
     )
     .unwrap();
-    let old = ready(fetch_balance(&store, || Ok(async { Ok(None) }))).unwrap();
-    let same_old = ready(fetch_balance(&store, || Ok(async { Ok(None) }))).unwrap();
+    let old = ready(fetch_balance(
+        &store,
+        || Ok(async { Ok(None) }),
+        |warning| panic!("unexpected refusal: {warning}"),
+    ))
+    .unwrap();
+    let same_old = ready(fetch_balance(
+        &store,
+        || Ok(async { Ok(None) }),
+        |warning| panic!("unexpected refusal: {warning}"),
+    ))
+    .unwrap();
     assert_eq!(
         [old.total, old.free, old.used, old.upnl],
         [101., 37., 64., -11.],
@@ -127,7 +137,12 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
         same_old.total, 101.,
         "BITRUE-FALLBACK second old alias survives replacement"
     );
-    let current = ready(fetch_balance(&store, || Ok(async { Ok(None) }))).unwrap();
+    let current = ready(fetch_balance(
+        &store,
+        || Ok(async { Ok(None) }),
+        |warning| panic!("unexpected refusal: {warning}"),
+    ))
+    .unwrap();
     assert_eq!(
         [current.total, current.free, current.used, current.upnl],
         [211., 43., 168., -19.],
@@ -156,7 +171,12 @@ fn fallback_retains_balance_across_ticker_and_balance_writes() {
         current.total, 211.,
         "BITRUE-FALLBACK replaced object survives reset"
     );
-    let reset = ready(fetch_balance(&store, || Ok(async { Ok(None) }))).unwrap();
+    let reset = ready(fetch_balance(
+        &store,
+        || Ok(async { Ok(None) }),
+        |warning| panic!("unexpected refusal: {warning}"),
+    ))
+    .unwrap();
     assert_eq!(
         [reset.total, reset.free, reset.used, reset.upnl],
         [0., 0., 0., 0.],
