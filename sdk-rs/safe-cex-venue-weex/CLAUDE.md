@@ -477,3 +477,8 @@ Snapshot rulings cite [§16](../parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-a
 Market/response admission rulings cite the record-shape declaration above.
 Native assertions precede oracle-wire comparisons, and existing corpora remain
 unchanged.
+
+The typed Exchange `fetch_leverage_for_symbol` entrypoint uses the existing WEEX
+symbol-config member. Cross leverage and separate isolated buy/sell values update
+`fetchedLeverage`; the market maximum belongs only to `fetch_symbol_max_leverage`.
+The production binding tests distinguish those paths through the public trait.
