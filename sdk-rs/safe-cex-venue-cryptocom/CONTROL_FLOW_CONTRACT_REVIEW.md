@@ -87,8 +87,8 @@ Selected validation passed: all four new direct witnesses, nine unchanged socket
 helper witnesses after the test-only fixture extraction, the three actual-source
 composition targets (252 admitted scenarios), all twenty body controls and the
 two fixture-walk controls. The fresh closed selector produced twenty explicit
-classifications and zero failures. Integrated readiness is recorded in the PR
-validation record.
+classifications and zero failures. Integrated readiness is recorded in the
+[PR validation record](https://github.com/Tealstreet/tealstreet-sdk/pull/394).
 
 The closed fresh selector accounts for precisely these twenty owners as explicit
 non-decoder classifications, with zero runtime decoder probes. Compiler receipts
