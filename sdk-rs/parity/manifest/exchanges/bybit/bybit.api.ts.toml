@@ -88,7 +88,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/api_factory.rs::retry_bybit"
 status = "divergent"
-note = "The production factory inlines this predicate in retry_bybit; its unused api.rs copy and fake-only optional-config supplement were removed. Real factory tests assert actual attempt counts, response/error preservation, signature retry and effective failure-config classification before source comparisons. CHOSEN original-read-token guard: an original POST rewritten to GET remains one native network attempt while TypeScript retries. The source signature helper also stamps config; native stores its one-shot stamp in the factory Cell. RestFailure always retains a typed request, so absent JS error.config is not represented. These existing factory boundaries are declared on createAPI; no pure predicate equivalence is claimed."
+note = "Renamed target `safe-cex-venue-bybit/src/api_factory.rs::retry_bybit`. The production factory inlines this predicate there; its unused api.rs copy and fake-only optional-config supplement were removed. Real factory tests assert actual attempt counts, response/error preservation, signature retry and effective failure-config classification before source comparisons. CHOSEN original-read-token guard: an original POST rewritten to GET remains one native network attempt while TypeScript retries. The source signature helper also stamps config; native stores its one-shot stamp in the factory Cell. RestFailure always retains a typed request, so absent JS error.config is not represented. These existing factory boundaries are declared on createAPI; no pure predicate equivalence is claimed."
 
 [[symbol]]
 ts = "createAPI"
