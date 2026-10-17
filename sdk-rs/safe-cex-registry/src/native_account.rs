@@ -2,6 +2,7 @@
 //! cannot name SDK types (the napi binding). Values cross as JSON; failures cross as
 //! `{name, message, code?}`. Requires a tokio `LocalSet`, like the native host.
 use crate::native_host::{bind_http_events, native_venue_host_signed, native_venue_host_with};
+use crate::native_store::NativeStoreDelivery;
 use crate::rust_venues::rust_constructor;
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
@@ -25,7 +26,7 @@ use std::{
     collections::BTreeMap,
     future::Future,
     pin::Pin,
-    rc::Rc,
+    rc::{Rc, Weak},
     sync::Arc,
 };
 
@@ -47,6 +48,7 @@ pub struct NativeAccount {
     signer: Option<Rc<HostSigner>>,
     streams: RefCell<BTreeMap<u32, NativeStream>>,
     next_stream: Cell<u32>,
+    store_deliveries: Rc<RefCell<Vec<Weak<NativeStoreDelivery>>>>,
 }
 
 struct NativeStream {
@@ -199,6 +201,7 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
         signer,
         streams: RefCell::default(),
         next_stream: Cell::new(1),
+        store_deliveries: Rc::default(),
     }))
 }
 
@@ -220,7 +223,6 @@ const NATIVE_ACCOUNT_EVENTS: &[&str] = &[
     "log",
     "warning",
     "fill",
-    "update",
     "updatePositions",
     "ws-reconnected",
     "remoteSignerStatus",
@@ -235,7 +237,7 @@ const NATIVE_ACCOUNT_EVENTS: &[&str] = &[
     "listenOHLCVs",
     "listenOrderBook",
 ];
-/// Forwards emitter events and private Store slices until the returned cleanup runs.
+/// Forwards emitter events and worker Store payloads until cleanup runs.
 pub fn native_account_watch(
     account: &NativeAccount,
     on_event: Rc<dyn Fn(&str, &Value)>,
@@ -243,21 +245,19 @@ pub fn native_account_watch(
 ) -> Box<dyn Fn()> {
     let base = account.exchange.base();
     let active = Rc::new(Cell::new(true));
-    let store_active = active.clone();
+    let delivery = NativeStoreDelivery::new(&account.exchange, &account.store, on_store);
+    account
+        .store_deliveries
+        .borrow_mut()
+        .push(Rc::downgrade(&delivery));
+    let store_delivery = delivery.clone();
     let unsubscribe: Rc<dyn Fn()> = account
         .store
         .subscribe(Box::new(move |data, _| {
-            if store_active.get() {
-                on_store(json!({
-                    "latency": data.latency,
-                    "balance": data.balance,
-                    "orders": data.orders,
-                    "positions": data.positions,
-                    "loaded": data.loaded,
-                    "updateIds": data.update_ids,
-                }));
-            }
-            Ok(())
+            store_delivery.update(data).map_err(|error| {
+                safe_cex_types::StoreSubscriberError::new(error.message.clone())
+                    .with_cause(Rc::new(error))
+            })
         }))
         .into();
     let ids: Vec<(&str, String)> = NATIVE_ACCOUNT_EVENTS
@@ -266,6 +266,7 @@ pub fn native_account_watch(
             let forward = on_event.clone();
             let active = active.clone();
             let unsubscribe = unsubscribe.clone();
+            let delivery = delivery.clone();
             let exchange = Rc::downgrade(&account.exchange);
             let id = base.on(
                 event,
@@ -277,6 +278,7 @@ pub fn native_account_watch(
                         // ExchangeWorker clears its delivery pipeline before disposal,
                         // including the Store reset that disposal performs.
                         active.set(false);
+                        delivery.cancel();
                         unsubscribe();
                         if let Some(exchange) = exchange.upgrade() {
                             exchange.dispose()?;
@@ -292,8 +294,13 @@ pub fn native_account_watch(
         })
         .collect();
     let exchange = account.exchange.clone();
+    let deliveries = account.store_deliveries.clone();
     Box::new(move || {
         active.set(false);
+        delivery.cancel();
+        deliveries
+            .borrow_mut()
+            .retain(|item| !item.ptr_eq(&Rc::downgrade(&delivery)));
         unsubscribe();
         for (event, id) in &ids {
             exchange.base().off(event, Some(id));
@@ -369,10 +376,30 @@ pub fn native_account_call(
         let venue = account.exchange.as_ref();
         let base = venue.base();
         match method.as_str() {
-            "start" => done(venue.start().await).map(|_| Value::Null),
+            "start" => {
+                done(venue.start().await)?;
+                let deliveries: Vec<_> = account
+                    .store_deliveries
+                    .borrow()
+                    .iter()
+                    .filter_map(Weak::upgrade)
+                    .collect();
+                for delivery in deliveries {
+                    done(delivery.snapshot())?;
+                }
+                Ok(Value::Null)
+            }
             "dispose" => {
                 let streams = account.dispose_streams();
                 let disposed = venue.dispose();
+                for delivery in account
+                    .store_deliveries
+                    .borrow()
+                    .iter()
+                    .filter_map(Weak::upgrade)
+                {
+                    delivery.cancel();
+                }
                 done(streams.and(disposed)).map(|_| Value::Null)
             }
             "listenOHLCV" => listen(&account, "listenOHLCV", &args),

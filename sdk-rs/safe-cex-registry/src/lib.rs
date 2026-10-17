@@ -10,5 +10,7 @@ pub mod module_host;
 pub mod native_account;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_host;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_store;
 pub mod public_data_host;
 pub mod rust_venues;

@@ -3,6 +3,13 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openStartedAccount } from './support/native-account.mjs';
 
+test('Store notifications have one worker delivery channel', { timeout: 10000 }, async t => {
+  const h = await openStartedAccount(t);
+  await h.call('fetchAndSetOrders');
+  await delay(30);
+  assert.equal(h.events.some(event => event.event === 'update'), false, 'the TS worker does not forward full Store update events');
+});
+
 test('startup posts a complete worker Store snapshot after the loaded flags settle', { timeout: 10000 }, async t => {
   const h = await openStartedAccount(t);
   await delay(30);
@@ -19,16 +26,19 @@ test('startup posts a complete worker Store snapshot after the loaded flags sett
   assert.equal(snapshot.loaded.orders, true);
 });
 
-test('worker Store delivery strips raw order info and omits stable snapshots', { timeout: 10000 }, async t => {
-  const h = await openStartedAccount(t, { hostedMode: true });
+for (const hostedMode of [false, true]) {
+  test(`worker Store delivery strips raw order info and omits stable snapshots (hostedMode=${hostedMode})`, { timeout: 10000 }, async t => {
+  const h = await openStartedAccount(t, { hostedMode });
   await h.call('fetchAndSetOrders');
   await delay(350);
   const snapshot = h.stores.findLast(store => store.orders?.some(order => order.id === '77'));
   assert.ok(snapshot, 'real native order read reaches the Store callback');
   assert.equal(Object.hasOwn(snapshot.orders[0], 'info'), false);
   assert.equal(Object.hasOwn(snapshot, 'markets'), false);
-  assert.equal(snapshot.tickers[0].symbol, 'BTCUSDT', 'hosted updates retain full tickers');
-});
+  if (hostedMode) assert.equal(snapshot.tickers[0].symbol, 'BTCUSDT', 'hosted updates retain full tickers');
+  else assert.equal(Object.hasOwn(snapshot, 'tickers'), false, 'unchanged browser tickers are omitted');
+  });
+}
 
 for (const hostedMode of [false, true]) {
   test(`ticker bursts use the worker leading/trailing throttle (hostedMode=${hostedMode})`, { timeout: 10000 }, async t => {
@@ -49,11 +59,7 @@ for (const hostedMode of [false, true]) {
     assert.equal(Object.hasOwn(latest, 'markets'), false);
     assert.equal(Object.hasOwn(latest, 'orders'), false);
     assert.equal(Object.hasOwn(latest, 'positions'), false);
-    if (hostedMode) assert.equal(latest.tickers[0].last, 16);
-    else {
-      assert.equal(Object.hasOwn(latest, 'tickers'), false);
-      assert.deepEqual(latest.tickerDeltas, [[0, 4, 16]]);
-    }
+    assert.equal(latest.tickers[0].last, 16, 'gateway snapshots replace the array and advance the worker ticker version');
   });
 }
 

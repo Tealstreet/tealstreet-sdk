@@ -95,7 +95,10 @@ fn removes_orders_by_id_and_posts_the_mutated_store() {
             call(&account, "removeOrders", json!([[{"id":"77"}]])).await,
             Value::Null
         );
-        assert_eq!(stores.borrow().last().unwrap()["orders"], json!([]));
+        support::eventually("throttled order removal Store post", || {
+            stores.borrow().last().unwrap()["orders"] == json!([])
+        })
+        .await;
         unwatch();
         call(&account, "dispose", json!([])).await;
     });

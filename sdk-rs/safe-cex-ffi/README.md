@@ -38,7 +38,7 @@ The matching scoped Rust suite is
 
 With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 `nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
-JSON account host. Events and private Store slices are forwarded to JS; signing
+JSON account host. Events and worker Store payloads are forwarded to JS; signing
 and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
 Calls and repeated closes against a removed account reject.
@@ -46,6 +46,16 @@ Rejections are JavaScript Error objects with the source `name`, plain `message`
 and optional `code`. An absent source code stays absent; callers do not parse
 error messages as JSON. `tests/native-account-errors.test.mjs` checks this
 through the actual registry and native transport.
+
+Store delivery uses the shared worker payload preparer and leading/trailing
+throttle (250ms times `tuning.dataUpdateThrottleMultiplier`). Startup posts a
+forced full snapshot; live posts omit stable markets, orders and positions.
+Browser-mode tickers use packed deltas, while `hostedMode` sends full tickers.
+Payloads include public markets, socket health and message statistics, and omit
+truthy raw `info` on orders, positions and displayed positions. Closing or
+deactivating the account cancels pending delivery. The Rust `native_account_store`
+and Node `tests/native-account-store.test.mjs` targets drive actual Binance
+gateway frames and signed HTTP reads through the account boundary.
 
 Venue `deactivate` requests clear host delivery, dispose the exchange, and post
 `{event: "deactivate-status", data: true}`, matching the TS worker. The Store

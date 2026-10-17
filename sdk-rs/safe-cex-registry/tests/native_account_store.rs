@@ -55,7 +55,7 @@ fn startup_forces_the_complete_worker_snapshot_and_order_updates_strip_info() {
 }
 
 #[test]
-fn gateway_bursts_are_throttled_and_latest_ticker_is_packed() {
+fn gateway_bursts_are_throttled_and_latest_ticker_snapshot_is_delivered() {
     account::run(async {
         let h = account::opened(json!({"tuning":{"dataUpdateThrottleMultiplier":2}})).await;
         let posts = Rc::new(RefCell::new(Vec::<Value>::new()));
@@ -82,8 +82,8 @@ fn gateway_bursts_are_throttled_and_latest_ticker_is_packed() {
             let posts = posts.borrow();
             assert_eq!(posts.len() - initial, 2, "one latest-state trailing update");
             let latest = posts.last().unwrap();
-            assert_eq!(latest["tickerDeltas"], json!([[0.0, 4.0, 16.0]]));
-            for omitted in ["markets", "tickers", "orders", "positions"] {
+            assert_eq!(latest["tickers"][0]["last"], 16.0);
+            for omitted in ["markets", "orders", "positions"] {
                 assert!(latest.get(omitted).is_none(), "{omitted}");
             }
         }
