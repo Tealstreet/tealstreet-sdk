@@ -236,7 +236,7 @@ impl ApexApiHost for ApiHost {
     }
 
     fn now_ms(&self) -> f64 {
-        self.scope.runtime.now_ms()
+        safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()
     }
     fn legacy_timestamp_ms(&self, now: f64) -> Result<f64, ExchangeError> {
         Ok((safe_cex_num::js_time_clip(now) / 1000.).floor() * 1000.)
