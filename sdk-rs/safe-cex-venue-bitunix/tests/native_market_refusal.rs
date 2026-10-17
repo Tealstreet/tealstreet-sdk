@@ -143,3 +143,30 @@ fn market_refresh_commits_valid_rows_around_a_refused_base() {
     );
     venue.dispose().unwrap();
 }
+
+#[test]
+fn refused_base_does_not_coerce_an_unused_maximum() {
+    let (venue, rt, _, wire) = support::fixture();
+    let mut bad = instrument("BADUSDT", "BAD");
+    bad["base"] = json!(false);
+    bad["maxLimitOrderVolume"] = json!({"toString":null});
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/futures/market/trading_pairs".into(),
+        json!({"code":0,"data":[instrument("BTCUSDT","BTC"),bad,instrument("ETHUSDT","ETH")]}),
+    );
+    let markets = drive(&rt, venue.fetch_markets()).unwrap();
+    assert_eq!(
+        markets
+            .iter()
+            .map(|m| m.symbol.as_str())
+            .collect::<Vec<_>>(),
+        ["BTCUSDT", "ETHUSDT"]
+    );
+    assert!(
+        rt.console
+            .borrow()
+            .iter()
+            .any(|(severity, line)| severity == "warning" && line.contains("base=false"))
+    );
+    venue.dispose().unwrap();
+}

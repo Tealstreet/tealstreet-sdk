@@ -111,13 +111,13 @@ where
             let id = format!("{}/USDT", js_string(key(row, "base"))?);
             let amount_precision = precision(key(row, "basePrecision"))?;
             let price_precision = precision(key(row, "quotePrecision"))?;
-            let max_amount = js_number(key(row, "maxLimitOrderVolume"))?;
             let Some(base) = key(row, "base").and_then(Value::as_str) else {
                 let value = key(row, "base").map_or_else(|| "undefined".into(), Value::to_string);
                 let symbol = row.get("symbol").map_or_else(|| "undefined".into(), Value::to_string);
                 refusals.push(format!("Refused Bitunix market row {index} symbol={symbol}: base={value}: expected string"));
                 continue;
             };
+            let max_amount = js_number(key(row, "maxLimitOrderVolume"))?;
             let symbol = row
                 .get("symbol")
                 .and_then(Value::as_str)

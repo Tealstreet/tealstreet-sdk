@@ -151,6 +151,24 @@ fn actual_typescript_rest_reads() {
     let corpus: Value = serde_json::from_slice(&out.stdout).unwrap();
     let rows = corpus["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 33, "REST independent source total");
+    let asset_rows = corpus["assetRows"].as_array().unwrap();
+    assert_eq!(asset_rows.len(), 5, "independent source asset cases");
+    for (row, expected_type) in
+        asset_rows
+            .iter()
+            .zip(["boolean", "object", "null", "number", "undefined"])
+    {
+        let outputs = row["result"]["items"].as_array().unwrap();
+        assert_eq!(
+            outputs.len(),
+            3,
+            "TS retains the bad row and valid siblings"
+        );
+        assert_eq!(outputs[1]["fields"]["base"]["type"], expected_type);
+        assert_eq!(outputs[0]["fields"]["base"]["value"], "BTC");
+        assert_eq!(outputs[2]["fields"]["base"]["value"], "ETH");
+        assert_eq!(row["traceCount"], 0);
+    }
     let cached_market: Market = js_from_str(&corpus["market"].to_string()).unwrap();
     let cached_ticker: Ticker = js_from_str(&corpus["ticker"].to_string()).unwrap();
     let cached_balance: Balance = js_from_str(&corpus["balance"].to_string()).unwrap();
