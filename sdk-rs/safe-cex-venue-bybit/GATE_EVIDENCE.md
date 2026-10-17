@@ -4134,3 +4134,14 @@ proof, not a claimed behavioral RED for a path that production cannot reach.
 Actual configured Hyro, private refresh and all6 retained source-body witnesses
 exercise the preserved production behavior separately. Both old references are
 absent from production source after the cutover; owned baselines are unchanged.
+
+
+Validation at the normally refreshed head: scoped native37pass, including actual
+Hyro22 +actual four-family private refresh4 and six source suites11tests; native
+and WASM strict all-target Clippy pass; full parity7459/16592 and extractor0updates
+pass. Final current-master inventory after the clean unrelated test/CI merge passes:
+cancellation6pass/1explicit export-ignore, override7pass/1live-TS-ignore and
+binding25pass (/tmp/bybit-unbound-refreshed-inventories.log). No changed body has a stale
+cancellation/override pin. Actual final inventory lists only the11 owned names.
+The parity manifest uses indexed core WsProtocol/BaseWebSocket/reset-body targets;
+its note identifies the actual non-indexed PrivateProtocol trait implementation.
