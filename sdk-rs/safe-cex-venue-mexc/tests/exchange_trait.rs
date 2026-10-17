@@ -590,3 +590,102 @@ fn external_public_data_on_a_venue_without_public_only_support_rejects_start() {
     );
     assert!(calls(&wire).is_empty(), "nothing sent");
 }
+
+#[test]
+fn leverage_refresh_prefers_stored_settings_over_stale_positions() {
+    use safe_cex_store::Store;
+    use safe_cex_types::{Position, PositionMode};
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/leverage_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source leverage oracle: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected["storedConfig"].as_object().unwrap().len(), 3);
+    for name in ["emptyRows", "untypedRows", "missingMarket"] {
+        let (o, rt, store, wire) = support::fixture();
+        let venue: &dyn Exchange = o.as_ref();
+        script_venue(&wire);
+        let markets = drive(&rt, venue.fetch_markets()).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        drive(&rt, venue.set_leverage("BTCUSDT".into(), 50.0, None)).unwrap();
+        assert_eq!(
+            store.fetched_leverage()["BTCUSDT"].buy_leverage,
+            50.0,
+            "{name}: real setter seeds settings"
+        );
+        assert_eq!(store.fetched_leverage()["BTCUSDT"].sell_leverage, 50.0);
+        let stale: Position = serde_json::from_value(json!({"id":"stale","symbol":"BTCUSDT","side":"long","contracts":2,"leverage":20,"marginType":"isolated","positionMode":"oneway","entryPrice":50000,"notional":100000,"unrealizedPnl":0,"liquidationPrice":0,"info":{"openType":1}})).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                positions: Some(vec![stale]),
+                markets: (name == "missingMarket").then(Vec::new),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        script(
+            &wire,
+            "/api/v1/private/position/leverage",
+            if name == "untypedRows" {
+                json!([{}])
+            } else {
+                json!([])
+            },
+        );
+        calls(&wire);
+        let fetched = drive(&rt, venue.fetch_leverage_for_symbol("BTCUSDT".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            fetched.buy_leverage, 50.0,
+            "{name}: stored settings win over stale position"
+        );
+        assert_eq!(fetched.sell_leverage, 50.0, "{name}");
+        assert_eq!(fetched.margin_type, Some(MarginType::Cross), "{name}");
+        assert_eq!(fetched.position_mode, Some(PositionMode::Hedged), "{name}");
+        assert_eq!(
+            serde_json::to_value(&fetched).unwrap(),
+            expected["storedConfig"][name]["fetched"],
+            "{name}: actual source result"
+        );
+        assert_eq!(
+            serde_json::to_value(&store.fetched_leverage()["BTCUSDT"]).unwrap(),
+            expected["storedConfig"][name]["stored"],
+            "{name}: source Store result"
+        );
+        let log = calls(&wire);
+        assert_eq!(
+            log.len(),
+            usize::from(name != "missingMarket"),
+            "{name}: source request count"
+        );
+        assert_eq!(
+            log.len() as u64,
+            expected["storedConfig"][name]["requests"].as_u64().unwrap()
+        );
+        assert_eq!(
+            store.positions()[0].leverage,
+            20.0,
+            "{name}: stale position remains untouched"
+        );
+        venue.dispose().unwrap();
+    }
+}
