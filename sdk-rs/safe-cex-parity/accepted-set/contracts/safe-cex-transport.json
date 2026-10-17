@@ -14923,5 +14923,70 @@
         }
       }
     ]
+  },
+  "safe_cex_transport::rate_limit::RateLimiter": {
+    "shape": "typed",
+    "evidence": "Reviewed rate_limit.rs constructor initializes only quota state. acquire uses the same pre-existing FIFO QueueGuard to reserve dispatch capacity; its pending-drop behavior and native consumer ordering are executed by tests/p2c.rs::signing_rate_slots_release_cancelled_waiters_without_spending_capacity and the Backpack/Bitunix rate_limit_signing tests. This classification covers the constructor API; it is not a raw JSON admission claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "clock",
+                {
+                  "resolved_path": {
+                    "path": "alloc::sync::Arc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_transport::rate_limit::RateLimitClock",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "max_requests",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "per_milliseconds",
+                {
+                  "primitive": "u64"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Constructs FIFO window state from an existing RateLimitClock capability and typed usize/u64 budget; accepts no serialized domain model. Native slot cancellation, failure accounting, and queued venue timestamp witnesses execute the resulting state."
+      }
+    ]
   }
 }

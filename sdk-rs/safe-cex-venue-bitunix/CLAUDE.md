@@ -155,6 +155,8 @@ raises the source trace-only diagnostic at the existing typed Market boundary;
 it does not admit or replace the refused row. The production-binding witness is
 `tests/native_market_refusal.rs`; its control restores trace-only logging.
 
+The native HTTP lane acquires its rate slot before each signing attempt, including retries and signature resends. `tests/rate_limit_signing.rs` fills the constructed venue’s five-request window and changes the synced clock while a private read is queued; its transmitted timestamp must come from dequeue time.
+
 The production native query signer uses the shared JsRoot query profile rather
 than pre-sorting UTF-8 bytes. Sorting applies recursively to objects and array
 index keys, so repeat arrays with at least 11 entries follow localeCompare too.
