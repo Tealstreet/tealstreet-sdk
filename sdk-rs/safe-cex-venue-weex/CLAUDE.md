@@ -28,6 +28,11 @@ and private cleanup cancels all three refresh timers before core disposal.
 Source-own methods retain weak receivers; externally returned unsubscribe closures
 and pending snapshot observers retain their host until cleanup or settlement.
 
+Positions and historical fills use the source's default extractArray admission:
+raw arrays and the `data` array only. Extra `items`, `list` and `rows` wrappers
+are ignored. Constructed HTTP regressions cover all six direct/nested extra
+wrappers plus the two accepted forms, retaining fake zero positions when needed.
+
 `tests/exchange_binding.rs` drives production methods through scripted native HTTP
 and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
 request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
