@@ -35,6 +35,9 @@ impl BitunixVenue {
 }
 impl Exchange for BitunixVenue {
     type PlaceOpts = PlaceOrderOpts;
+    fn validate_order_capabilities(&self, options: &Self::PlaceOpts) -> Result<(), ExchangeError> {
+        self.validate_placement_input(options)
+    }
     fn base(&self) -> &BaseExchange {
         &self.base
     }
