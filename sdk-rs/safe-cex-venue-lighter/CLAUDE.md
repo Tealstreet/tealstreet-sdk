@@ -426,6 +426,9 @@ Private market-payload flattening retains native JS rows and skips array holes
 without copying through JSON. The orders wrapper applies its object guard before
 calling the live owner helper; source oracles cover identity, numeric bits and UTF16.
 
+The TransactionClient JS decoder treats null trigger/expiry fields as absent and
+maps unknown order-type/time-in-force values to the source limit/GTC defaults.
+The real SDK/crypto regression compares 31 exact preimages and computed defaults.
 Nonce retry classification reads the original error's code and message directly.
 Both String conversions precede the final OR, so matching codes still observe
 message coercion failures. Unread surrogate fields and cycles stay untouched.
