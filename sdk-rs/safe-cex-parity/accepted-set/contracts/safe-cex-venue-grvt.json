@@ -24798,7 +24798,7 @@
       }
     },
     "category": "decoder",
-    "evidence": "Reviewed complete maintained fetchMarkets:744-795 over configured transformed response.data. Post is eager; rows map before fetched logging and source catch. An earlier native representation refusal cannot hide a later null-row source error, while an isolated representation refusal occurs after successful fetched logging. Native fields/Number bits, response and logger origin identity and every effect phase are independently observed. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage.",
+    "evidence": "Reviewed complete maintained fetchMarkets:744-795 over configured transformed response.data. Post is eager; rows map before fetched logging and source catch. An earlier native representation refusal cannot hide a later null-row source error, while an isolated representation refusal now reports the exact row/asset values at Warning after successful fetched logging and omits that row only. This is the expressly approved strict-field/per-row divergence from TS, which retains malformed base/quote. Native fields/Number bits, response and logger origin identity and every effect phase are independently observed. Every adapter calls this actual indexed production function; fixture helpers only construct native values or observe fields/callbacks. Independently authored native expectations precede serialization. Fixed ready callback/typed Store domains retain parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary, not arbitrary executable host-object or wider generic coverage.",
     "call": "{ #[allow(dead_code)] mod fixture {include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/accepted_store_harness.rs\"));} let events=fixture::events();let remote=fixture::error(\"RemoteError\",\"request failed\");let logger=fixture::error(\"LogError\",\"log failed\");let remote_origin=remote.origin.clone();let logger_origin=logger.origin.clone();let data=$value[\"data\"].clone();let failed=$value[\"fail\"].as_bool().unwrap();let post_events=events.clone();let future=$type(move |url,body|{fixture::push(&post_events,serde_json::json!([\"post\",url,body]));async move{fixture::push(&post_events,serde_json::json!([\"response\"]));if failed{Err(remote)}else{Ok(data)}}},fixture::log_with(events.clone(),if $value[\"log_fail\"].as_bool().unwrap(){Some(1)}else{None},logger));let before=fixture::observed(&events);let result=match fixture::ready(future){Ok(rows)=>serde_json::json!({\"ok\":true,\"markets\":rows.iter().map(fixture::view_market).collect::<Vec<_>>()}),Err(error)=>serde_json::json!({\"ok\":false,\"error\":fixture::view_error(&error),\"same_remote\":error.origin.is_some()&&error.origin==remote_origin,\"same_logger\":error.origin.is_some()&&error.origin==logger_origin})};serde_json::json!({\"before\":before,\"events\":fixture::observed(&events),\"result\":result}) }",
     "cases": [
       {
@@ -25118,22 +25118,16 @@
               "log",
               "Fetched 1 GRVT markets",
               "debug"
+            ],
+            [
+              "log",
+              "Refused GRVT market row 0 id=\"x\": base=false quote=\"USD\": GRVT market base and quote must be strings for the shared Market model",
+              "warning"
             ]
           ],
           "result": {
-            "ok": false,
-            "error": {
-              "name": "RepresentationError",
-              "message": "GRVT market base and quote must be strings for the shared Market model",
-              "code": null,
-              "response": null,
-              "stack": null,
-              "origin": false,
-              "subscriber": false,
-              "subscriber_ids": 0
-            },
-            "same_remote": false,
-            "same_logger": false
+            "ok": true,
+            "markets": []
           }
         }
       },
@@ -25383,6 +25377,151 @@
             },
             "same_remote": false,
             "same_logger": true
+          }
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "r": [
+              {
+                "i": "btc_usdt_Perp",
+                "k": "PERPETUAL",
+                "b": "BTC",
+                "q": "USDT",
+                "ms": "0.01",
+                "ts": "0.2",
+                "mp": "9",
+                "ih": "0x11",
+                "bd": 3,
+                "qd": 6
+              },
+              {
+                "i": "bad_asset",
+                "b": false,
+                "q": "USD"
+              },
+              {
+                "i": "eth_usdt",
+                "k": "FUTURE",
+                "b": "ETH",
+                "q": "USD",
+                "ms": "",
+                "ts": false,
+                "mp": 0,
+                "mxs": "7.5",
+                "ia": false,
+                "ih": null
+              }
+            ]
+          },
+          "fail": false,
+          "log_fail": false
+        },
+        "output": {
+          "before": [
+            [
+              "post",
+              "/lite/v1/all_instruments",
+              {}
+            ]
+          ],
+          "events": [
+            [
+              "post",
+              "/lite/v1/all_instruments",
+              {}
+            ],
+            [
+              "response"
+            ],
+            [
+              "log",
+              "Fetched 3 GRVT markets",
+              "debug"
+            ],
+            [
+              "log",
+              "Refused GRVT market row 1 id=\"bad_asset\": base=false quote=\"USD\": GRVT market base and quote must be strings for the shared Market model",
+              "warning"
+            ]
+          ],
+          "result": {
+            "ok": true,
+            "markets": [
+              {
+                "id": "btc_usdt_Perp",
+                "symbol": "BTC_USDT_PERP",
+                "base": "BTC",
+                "quote": "USDT",
+                "active": true,
+                "pretty": null,
+                "precision": [
+                  "3f847ae147ae147b",
+                  "3fc999999999999a"
+                ],
+                "amount": [
+                  "3f847ae147ae147b",
+                  "4022000000000000"
+                ],
+                "leverage": [
+                  "3ff0000000000000",
+                  "4059000000000000"
+                ],
+                "price_limits": false,
+                "flags": [
+                  false,
+                  true,
+                  null,
+                  null,
+                  null
+                ],
+                "contract_size": null,
+                "option": false,
+                "taker": null,
+                "maker": null,
+                "info": {
+                  "ih": "0x11",
+                  "bd": 3,
+                  "qd": 6
+                }
+              },
+              {
+                "id": "eth_usdt",
+                "symbol": "ETH_USDT",
+                "base": "ETH",
+                "quote": "USD",
+                "active": false,
+                "pretty": null,
+                "precision": [
+                  "3f50624dd2f1a9fc",
+                  "3fb999999999999a"
+                ],
+                "amount": [
+                  "3f50624dd2f1a9fc",
+                  "401e000000000000"
+                ],
+                "leverage": [
+                  "3ff0000000000000",
+                  "4059000000000000"
+                ],
+                "price_limits": false,
+                "flags": [
+                  false,
+                  false,
+                  null,
+                  null,
+                  null
+                ],
+                "contract_size": null,
+                "option": false,
+                "taker": null,
+                "maker": null,
+                "info": {
+                  "ih": null
+                }
+              }
+            ]
           }
         }
       }
