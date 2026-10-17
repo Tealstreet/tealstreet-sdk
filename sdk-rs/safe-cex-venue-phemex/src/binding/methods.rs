@@ -136,6 +136,7 @@ fn async_method(mut h: Host, name: &'static str, a: Vec<Js>) -> JsFuture<'static
                 .unwrap_or(Js::Undefined)),
             "placeOrder" => order::place_order(&mut h, arg(&a, 0)).await,
             "placeOrders" => {
+                h.call("assertCallerClientOrderIds", vec![arg(&a, 0)])?;
                 let mut ids = vec![];
                 for order in rows(&arg(&a, 0))? {
                     ids.extend(rows(&h.invoke("placeOrder", vec![order]).await?)?);

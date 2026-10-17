@@ -141,3 +141,23 @@ alone cannot identify agents; chronology and the explicit lane assignment set
 this attribution boundary. Pending-row porting is not added to this audit of
 already-divergent rows, and incidental dependency reads do not certify extra
 manifest rows. All unlisted rows remain outside this finite audit claim.
+
+## Production terminal-report follow-up
+
+The live `mapLimitOrder` binding previously called the closed typed facade, so
+IOC/FOK's missing ORDER_TYPE hit and MARKET's `0 || undefined` price threw before
+terminal status/fill handling. The runtime mapper now preserves the actual source
+values, including own undefined fields and the original info referent. Real
+private-socket regressions for IOC, FOK and zero-price MARKET compile and fail
+before the repair, then emit the exact fill and close the existing order after
+it. A maintained old-binding control reproduces all three failures and restores
+the stream suite. The source oracle executes actual TypeScript method bodies.
+This is one production defect family, not three new discovery identities; the
+separate typed facade retains its documented representation boundary.
+
+NEW/PARTIAL inserts and snapshots still cross the shared typed Order boundary.
+Three independent actual-host diagnostics reproduce NEW IOC, NEW zero-price
+MARKET and PARTIAL IOC failures there; the shared-type owner has those fixtures.
+No missing type is replaced with Market, and no undefined price becomes zero or
+NaN in this repair. String/null quantity and other copied dynamic fields remain
+separate measured obligations.

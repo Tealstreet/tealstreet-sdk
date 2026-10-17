@@ -362,6 +362,61 @@ fn execution_reports_update_store_orders_and_emit_fills() {
     assert_eq!(order(&h, "77").unwrap()["status"], "closed");
 }
 
+// No mapper override: reports pass through the real socket -> fill host -> mapper.
+fn terminal_market_report(kind: &str, price: f64) {
+    let (h, private) = authed("HEDGE_MODE", |http| {
+        http.ok("GET", LEVERAGE, json!({"details":[{"leverage":"10"}]}));
+    });
+    let fills = listen(&h, "fill");
+    let errors = listen(&h, "error");
+    let base = json!({"symbol":"PERP_BTC_USDT","orderId":811,"side":"BUY",
+        "type":"LIMIT","status":"NEW","quantity":2,"price":100,
+        "reduceOnly":false,"executedQuantity":0,"executedPrice":0});
+    push(&h, &private, json!({"topic":"executionreport","data":base}));
+    assert_eq!(order(&h, "811").unwrap()["status"], "open");
+    let terminal = json!({"symbol":"PERP_BTC_USDT","orderId":811,"side":"BUY",
+        "type":kind,"status":"FILLED","quantity":2,"price":price,
+        "reduceOnly":false,"executedQuantity":0.1,"executedPrice":100.5,
+        "executedTimestamp":1700000001234.0});
+    push(
+        &h,
+        &private,
+        json!({"topic":"executionreport","data":terminal}),
+    );
+    assert_eq!(
+        fills.borrow().len(),
+        1,
+        "{kind}: terminal report must emit fill through the real mapper; errors={:?}",
+        errors.borrow()
+    );
+    assert_eq!(
+        fills.borrow()[0],
+        json!({"id":"811","orderId":"811","side":"buy",
+        "symbol":"BTCUSDT","price":100.5,"amount":0.1,"timestamp":1700000001.0})
+    );
+    assert_eq!(
+        order(&h, "811").unwrap()["status"],
+        "closed",
+        "{kind}: terminal status must survive mapping"
+    );
+    assert!(errors.borrow().is_empty(), "{kind}: {:?}", errors.borrow());
+}
+
+#[test]
+fn ioc_execution_report_emits_fill_and_closes_order_through_real_mapper() {
+    terminal_market_report("IOC", 101.0);
+}
+
+#[test]
+fn fok_execution_report_emits_fill_and_closes_order_through_real_mapper() {
+    terminal_market_report("FOK", 101.0);
+}
+
+#[test]
+fn zero_price_market_execution_report_emits_fill_and_closes_order_through_real_mapper() {
+    terminal_market_report("MARKET", 0.0);
+}
+
 fn position_rows(h: &Harness) -> Vec<Value> {
     json_of(&*h.store.positions()).as_array().unwrap().clone()
 }
