@@ -254,7 +254,7 @@ fn orders(a: &SyncedOrders, e: &Value, indices: &Value, roots: &[ReadItem], n: &
             num(v, &e[k], &format!("{n}.{k}"))
         }
         assert_eq!(
-            Some(o.reduce_only),
+            o.reduce_only.into_value(),
             e["reduceOnly"].as_bool(),
             "{n}: reduceOnly"
         );

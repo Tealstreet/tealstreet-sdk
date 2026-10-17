@@ -493,7 +493,7 @@ pub fn infer_stop_loss_type_from_reduce_only_limit(
 ) -> Option<safe_cex_types::OrderType> {
     use safe_cex_types::{OrderSide, OrderType};
     if order.r#type != OrderType::Limit
-        || !order.reduce_only
+        || order.reduce_only != true
         || !order.price.to_number().is_finite()
         || order.price.to_number() <= 0.0
     {

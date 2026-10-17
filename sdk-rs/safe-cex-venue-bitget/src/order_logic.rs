@@ -263,7 +263,7 @@ pub fn build_uta_strategy_place_opts_from_order(
         side: order.side.into_property(),
         price: order.price.into_value(),
         amount: order.amount,
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: (order.time_in_force).into_value(),
         tp_trigger_type: (order.tp_trigger_type).into_value(),
         sl_trigger_type: (order.sl_trigger_type).into_value(),

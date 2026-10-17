@@ -51,6 +51,7 @@ pub struct MexcExchange {
     capabilities: ExchangeCapabilities,
     xhr: Rc<dyn RestAdapter>,
     local_to_utc: Rc<dyn Fn(f64) -> f64>,
+    current_time_ms: Rc<dyn Fn() -> f64>,
     placed: RefCell<BTreeMap<String, f64>>,
     canceled: RefCell<BTreeMap<String, f64>>,
     rejected: RefCell<BTreeMap<String, f64>>,
@@ -424,6 +425,7 @@ impl MexcExchange {
             external,
             xhr,
             local_to_utc: local_to_utc.clone(),
+            current_time_ms: sockets.current_time_ms.clone(),
             capabilities: Self::capabilities_table(),
             placed: RefCell::default(),
             canceled: RefCell::default(),
@@ -470,7 +472,7 @@ impl MexcExchange {
                 let found = crate::exchange_helpers::is_recently_canceled_stop_like_order_id(
                     &mut parent.canceled.borrow_mut(),
                     id,
-                    &|| parent.base.runtime.now_ms(),
+                    &|| (parent.current_time_ms)(),
                 );
                 Ok(found)
             }),
@@ -723,7 +725,7 @@ impl MexcExchange {
                 &mut self.canceled.borrow_mut(),
                 &mut self.placed.borrow_mut(),
                 &accepted_stop_like_cancels,
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             );
             let ids: Vec<_> = orders.iter().map(|order| order.id.as_str()).collect();
             self.base
@@ -1348,7 +1350,7 @@ impl MexcExchange {
         let clean_id = order_id.split("__").next().unwrap_or_default();
         self.rejected
             .borrow_mut()
-            .insert(clean_id.to_owned(), self.base.runtime.now_ms());
+            .insert(clean_id.to_owned(), (self.current_time_ms)());
 
         if self
             .base
@@ -1621,7 +1623,7 @@ impl MexcExchange {
                     ("PLAN_ORDER_LIST", "plan orders", true),
                     ("STOP_ORDER_LIST", "position TP/SL orders", false),
                 ] {
-                    let now = self.base.runtime.now_ms();
+                    let now = (self.current_time_ms)();
                     let mut params = json!({"start_time":now - 89.0*24.0*60.0*60.0*1000.0,"end_time":now,"page_num":1,"page_size":100});
                     if let Some(symbol) = &venue {
                         params["symbol"] = json!(symbol);
@@ -1654,7 +1656,7 @@ impl MexcExchange {
             Ok(filter_recently_canceled_stop_like_orders(
                 &mut self.canceled.borrow_mut(),
                 &unique_orders(orders),
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             ))
         })
     }
@@ -1826,7 +1828,7 @@ impl MexcExchange {
                             && !is_recently_canceled_stop_like_order(
                                 &mut self.canceled.borrow_mut(),
                                 o,
-                                &|| self.base.runtime.now_ms(),
+                                &|| (self.current_time_ms)(),
                             )
                     })
                     .cloned()
@@ -1842,12 +1844,12 @@ impl MexcExchange {
                         && !is_recently_canceled_stop_like_order(
                             &mut self.canceled.borrow_mut(),
                             o,
-                            &|| self.base.runtime.now_ms(),
+                            &|| (self.current_time_ms)(),
                         )
                         && is_recently_placed_stop_like_order(
                             &mut self.placed.borrow_mut(),
                             o,
-                            &|| self.base.runtime.now_ms(),
+                            &|| (self.current_time_ms)(),
                         )
                 })
                 .cloned()
@@ -1863,7 +1865,7 @@ impl MexcExchange {
             && !is_recently_canceled_stop_like_order(
                 &mut self.canceled.borrow_mut(),
                 order,
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             )
     }
     // ts: MexcExchange.shouldPreserveRecentRegularOrder
@@ -1880,7 +1882,7 @@ impl MexcExchange {
             || is_recently_rejected_regular_order(
                 &mut self.rejected.borrow_mut(),
                 &order.id,
-                &|| self.base.runtime.now_ms(),
+                &|| (self.current_time_ms)(),
             )
         {
             return false;
@@ -1890,7 +1892,7 @@ impl MexcExchange {
         } else {
             0.0
         };
-        last != 0.0 && self.base.runtime.now_ms() - last <= 15000.0
+        last != 0.0 && (self.current_time_ms)() - last <= 15000.0
     }
 }
 
