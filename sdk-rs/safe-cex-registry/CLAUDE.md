@@ -235,3 +235,7 @@ with the selected family name bound before requests. Preserve the source local
 signing requirement on private HTTP even with hosted signing. Private WS stays
 local-only; empty-secret recovery follows the existing approved onOpen contract.
 `native_host_orderly_hosted` covers all six names with valid/empty local secrets.
+
+Gateway candle requests use AnyTimeframe like worker OHLCVOptions. The maintained
+source forwards every chart interval despite its narrower gateway annotation;
+provider tests retain all 27 values through reconnect, delivery and cleanup.
