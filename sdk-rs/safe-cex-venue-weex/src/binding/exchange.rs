@@ -305,3 +305,7 @@ impl Exchange for WeexExchange {
         self.listen("listenOrderBook", js(&symbol)?, callback)
     }
 }
+
+#[cfg(test)]
+#[path = "actions_tests.rs"]
+mod actions_tests;
