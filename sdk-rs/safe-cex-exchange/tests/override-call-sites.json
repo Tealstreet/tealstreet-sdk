@@ -1040,6 +1040,18 @@
     ]
   },
   {
+    "file": "safe-cex-registry/src/native_account.rs",
+    "function": "native_account_watch",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-registry/src/native_host.rs",
     "function": "dispose",
     "edges": [
