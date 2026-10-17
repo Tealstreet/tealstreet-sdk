@@ -16,7 +16,8 @@ fn native_transport_error_retains_axios_name_message_and_code() {
         let account = open_native_account(NativeAccountSpec {
             hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
             exchange: "bitrue".into(),
-            options: json!({"key":"native-key","secret":"native-secret","overrideProxyUrl":origin}),
+            options: json!({"key":"native-key","secret":"native-secret","overrideProxyUrl":origin})
+                .into(),
             account_name: None,
             sign: None,
             proxy_token: None,

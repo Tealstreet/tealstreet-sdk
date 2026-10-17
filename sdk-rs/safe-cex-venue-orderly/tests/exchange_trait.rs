@@ -4,6 +4,181 @@ mod support;
 use safe_cex_exchange::exchange::Exchange;
 use serde_json::json;
 use support::drive;
+
+#[test]
+fn public_books_and_candles_reach_each_family_binding() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use safe_cex_types::ExchangeName;
+    use std::{cell::RefCell, rc::Rc};
+    for name in [
+        ExchangeName::Kodiakfi,
+        ExchangeName::Mode,
+        ExchangeName::Salsadex,
+        ExchangeName::TealstreetDex,
+        ExchangeName::What,
+        ExchangeName::Woofi,
+    ] {
+        let (venue, rt, _, wire) = support::fixture_for(
+            name.clone(),
+            json!({
+                "key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"
+            }),
+        );
+        script(&wire);
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let capture = errors.clone();
+        venue.base().on(
+            "error",
+            Rc::new(move |_, error| {
+                capture.borrow_mut().push(error.clone());
+                Ok(())
+            }),
+        );
+        wire.responses.borrow_mut().insert("/v1/orderbook/PERP_BTC_USDC".into(), json!({"success":true,"data":{
+            "timestamp":100,"bids":[{"price":99,"quantity":2}],"asks":[{"price":101,"quantity":4}]
+        }}));
+        drive(&rt, venue.start()).unwrap();
+        // Startup fills the real 10-RPS limiter; advance its deterministic clock.
+        let pump = || {
+            for _ in 0..16 {
+                rt.now.set(rt.now.get() + 100.0);
+                rt.pump();
+            }
+        };
+        pump();
+        let socket = rt
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("private"))
+            .unwrap()
+            .1
+            .clone();
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let seen = books.clone();
+        let close_book = venue
+            .listen_order_book(
+                "BTCUSDC".into(),
+                Rc::new(move |book| seen.borrow_mut().push(book)),
+            )
+            .unwrap();
+        let candles = Rc::new(RefCell::new(Vec::new()));
+        let seen = candles.clone();
+        let close_candle = venue
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":"BTCUSDC","interval":"1m"})).unwrap(),
+                Rc::new(move |candle| seen.borrow_mut().push(candle)),
+            )
+            .unwrap();
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("PERP_BTC_USDC@orderbookupdate"))
+        );
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("PERP_BTC_USDC@kline_1m"))
+        );
+        let frame = |topic: &str, ts: u64, data: serde_json::Value| {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    json!({"topic":topic,"ts":ts,"data":data}).to_string(),
+                )));
+            pump();
+            assert!(
+                rt.errors.borrow().is_empty(),
+                "{name:?}: {:?}",
+                rt.errors.borrow()
+            );
+        };
+        frame(
+            "PERP_BTC_USDC@kline_1m",
+            103,
+            json!({"startTime":1700000000000u64,"open":100,"high":104,"low":99,"close":103,"volume":9}),
+        );
+        assert_eq!(candles.borrow().len(), 1);
+        assert_eq!(
+            (
+                candles.borrow()[0].timestamp,
+                candles.borrow()[0].close,
+                candles.borrow()[0].volume
+            ),
+            (1700000000.0, 103.0, 9.0)
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            99,
+            json!({"bids":[[99,999]],"asks":[]}),
+        );
+        assert_eq!(
+            books.borrow().len(),
+            1,
+            "{name:?} snapshot errors: {:?}; runtime errors: {:?}",
+            errors.borrow(),
+            rt.errors.borrow(),
+        );
+        assert_eq!(
+            books.borrow()[0].bids[0].amount,
+            2.0,
+            "buffered older update is discarded against snapshot timestamp100"
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            101,
+            json!({"bids":[[99,3],[98,5]],"asks":[]}),
+        );
+        assert_eq!(books.borrow().len(), 2);
+        assert_eq!(
+            (
+                books.borrow()[1].bids[0].amount,
+                books.borrow()[1].bids[1].total
+            ),
+            (3.0, 8.0)
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            102,
+            json!({"bids":[[99,0]],"asks":[[101,6]]}),
+        );
+        assert_eq!(books.borrow().len(), 3);
+        assert_eq!(
+            (
+                books.borrow()[2].bids.len(),
+                books.borrow()[2].bids[0].price,
+                books.borrow()[2].asks[0].amount
+            ),
+            (1, 98.0, 6.0)
+        );
+        close_book().unwrap();
+        close_candle().unwrap();
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("unsubscribe")
+                    && frame.contains("PERP_BTC_USDC@orderbookupdate"))
+        );
+        frame(
+            "PERP_BTC_USDC@orderbookupdate",
+            104,
+            json!({"bids":[[97,1]],"asks":[]}),
+        );
+        frame(
+            "PERP_BTC_USDC@kline_1m",
+            105,
+            json!({"startTime":1700000060000u64,"open":100,"high":104,"low":99,"close":104,"volume":10}),
+        );
+        assert_eq!((books.borrow().len(), candles.borrow().len()), (3, 1));
+        venue.dispose().unwrap();
+    }
+}
+
 fn script(wire: &support::Wire) {
     let mut responses = wire.responses.borrow_mut();
     responses.insert(
@@ -582,26 +757,67 @@ fn trait_cancel_symbol_attempts_algo_after_a_normal_cancel_failure() {
     );
 }
 
+fn private_topic_names() -> [safe_cex_types::ExchangeName; 6] {
+    use safe_cex_types::ExchangeName::*;
+    [Kodiakfi, Mode, Salsadex, TealstreetDex, What, Woofi]
+}
 fn private_frame(
     venue: &safe_cex_venue_orderly::native_exchange::OrderlyExchange,
+    rt: &support::Runtime,
     frame: serde_json::Value,
 ) {
-    venue.base().get_private_sockets()[0]
-        .on_message(&safe_cex_transport::socket::SocketFrame::Text(
-            frame.to_string(),
-        ))
-        .unwrap();
+    assert_eq!(venue.base().get_private_sockets().len(), 1);
+    for _ in 0..16 {
+        rt.pump();
+    }
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("private"))
+        .unwrap()
+        .1
+        .clone();
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(frame.to_string()),
+        ));
+    for _ in 0..16 {
+        rt.pump();
+    }
+    assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+}
+fn acknowledge_private(
+    venue: &safe_cex_venue_orderly::native_exchange::OrderlyExchange,
+    rt: &support::Runtime,
+) {
+    private_frame(venue, rt, json!({"event":"auth","success":true}));
+    for topic in ["executionreport", "algoexecutionreportv2", "position"] {
+        assert!(
+            rt.sent
+                .borrow()
+                .iter()
+                .filter_map(|frame| serde_json::from_str::<serde_json::Value>(frame).ok())
+                .any(|frame| frame["event"] == "subscribe" && frame["topic"] == topic)
+        );
+    }
 }
 
-#[test]
-fn private_execution_report_updates_orders_in_the_real_store() {
-    let (venue, rt, store, wire) = support::fixture(
+fn private_execution_report_updates_orders_in_the_real_store_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"executionreport","data":{"orderId":777,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":97.5,"quantity":2,"totalExecutedQuantity":0,"reduceOnly":false}}),
     );
     let orders = store.orders();
@@ -614,13 +830,23 @@ fn private_execution_report_updates_orders_in_the_real_store() {
 }
 
 #[test]
-fn private_partial_execution_updates_store_and_emits_fill() {
+fn private_execution_report_updates_orders_in_the_real_store() {
+    for name in private_topic_names() {
+        private_execution_report_updates_orders_in_the_real_store_for_name(name);
+    }
+}
+
+fn private_partial_execution_updates_store_and_emits_fill_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
     use std::{cell::RefCell, rc::Rc};
-    let (venue, rt, store, wire) = support::fixture(
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     let fills = Rc::new(RefCell::new(vec![]));
     let seen = fills.clone();
     venue.base().on(
@@ -632,6 +858,7 @@ fn private_partial_execution_updates_store_and_emits_fill() {
     );
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"executionreport","data":{"orderId":778,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"PARTIAL_FILLED","price":101.5,"quantity":2,"totalExecutedQuantity":0.5,"executedPrice":101.5,"executedQuantity":0.5,"reduceOnly":false}}),
     );
     let orders = store.orders();
@@ -648,15 +875,26 @@ fn private_partial_execution_updates_store_and_emits_fill() {
 }
 
 #[test]
-fn private_position_report_updates_store_and_keeps_rest_account_balance() {
-    let (venue, rt, store, wire) = support::fixture(
+fn private_partial_execution_updates_store_and_emits_fill() {
+    for name in private_topic_names() {
+        private_partial_execution_updates_store_and_emits_fill_for_name(name);
+    }
+}
+
+fn private_position_report_updates_store_and_keeps_rest_account_balance_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     assert_eq!(store.balance().total, 100.0);
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"position","data":{"positions":[{"symbol":"PERP_BTC_USDC","position_qty":"3","average_open_price":"100","mark_price":"102","margin_mode":"CROSS","leverage":"20","est_liq_price":"50"}]}}),
     );
     let positions = store.positions();
@@ -672,14 +910,25 @@ fn private_position_report_updates_store_and_keeps_rest_account_balance() {
 }
 
 #[test]
-fn private_algo_execution_report_updates_the_real_store() {
-    let (venue, rt, store, wire) = support::fixture(
+fn private_position_report_updates_store_and_keeps_rest_account_balance() {
+    for name in private_topic_names() {
+        private_position_report_updates_store_and_keeps_rest_account_balance_for_name(name);
+    }
+}
+
+fn private_algo_execution_report_updates_the_real_store_for_name(
+    name: safe_cex_types::ExchangeName,
+) {
+    let (venue, rt, store, wire) = support::fixture_for(
+        name,
         json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
     );
     script(&wire);
     drive(&rt, venue.start()).unwrap();
+    acknowledge_private(&venue, &rt);
     private_frame(
         &venue,
+        &rt,
         json!({"topic":"algoexecutionreportv2","data":{"algoOrderId":779,"rootAlgoOrderId":779,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","side":"SELL","quantity":2,"triggerPrice":108.5,"totalExecutedQuantity":0,"reduceOnly":true}}),
     );
     let orders = store.orders();
@@ -690,6 +939,13 @@ fn private_algo_execution_report_updates_the_real_store() {
     assert_eq!(actual.parent_id.as_deref(), Some("779"));
     drop(orders);
     venue.dispose().unwrap();
+}
+
+#[test]
+fn private_algo_execution_report_updates_the_real_store() {
+    for name in private_topic_names() {
+        private_algo_execution_report_updates_the_real_store_for_name(name);
+    }
 }
 
 #[test]
@@ -775,4 +1031,235 @@ fn trait_set_all_leverage_emits_and_swallows_failed_account_write() {
         2,
         "failed write did not advance the account leverage cache"
     );
+}
+
+#[test]
+fn private_balance_topic_preserves_rest_owned_account_for_each_subclass() {
+    for name in private_topic_names() {
+        let (venue, rt, store, wire) = support::fixture_for(
+            name,
+            json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+        );
+        script(&wire);
+        drive(&rt, venue.start()).unwrap();
+        acknowledge_private(&venue, &rt);
+        let before = store.balance().clone();
+        let orders = store.orders().to_vec();
+        let positions = store.positions().to_vec();
+        let fills = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let observed = fills.clone();
+        venue.base().on(
+            "fill",
+            std::rc::Rc::new(move |_, _| {
+                observed.set(observed.get() + 1);
+                Ok(())
+            }),
+        );
+        private_frame(
+            &venue,
+            &rt,
+            json!({"topic":"balance","data":{
+            "total_collateral_value":"999999","free_collateral":"888888"}}),
+        );
+        assert_eq!(
+            *store.balance(),
+            before,
+            "source has no private balance handler"
+        );
+        assert_eq!(store.orders().to_vec(), orders);
+        assert_eq!(store.positions().to_vec(), positions);
+        assert_eq!(fills.get(), 0);
+        venue.dispose().unwrap();
+    }
+}
+
+fn ticker_frame_keeps_valid_rows(
+    topic: &str,
+    source: &str,
+    target: &str,
+    source_error: bool,
+    inherited: bool,
+) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    for name in private_topic_names() {
+        let (venue, rt, store, wire) = support::fixture_for(
+            name.clone(),
+            json!({
+                "key":"fixture-key", "secret":"11111111111111111111111111111111", "applicationId":"fixture-account"
+            }),
+        );
+        script(&wire);
+        drive(&rt, venue.start()).unwrap();
+        let btc = store.tickers()[0].clone();
+        let mut eth = btc.clone();
+        eth.id = "PERP_ETH_USDC".into();
+        eth.symbol = "ETHUSDC".into();
+        let mut ltc = btc.clone();
+        ltc.id = "PERP_LTC_USDC".into();
+        ltc.symbol = "LTCUSDC".into();
+        let mut ada = btc.clone();
+        ada.id = "PERP_ADA_USDC".into();
+        ada.symbol = "ADAUSDC".into();
+        let unchanged_btc = serde_json::to_value(&btc).unwrap();
+        let unchanged_ltc = serde_json::to_value(&ltc).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(vec![btc, eth, ltc, ada]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let mut rows = vec![
+            json!({"symbol":"PERP_BTC_USDC", "close":30,"amount":300,"volume":3,"bid":29,"ask":31,"price":30}),
+            json!({"symbol":"PERP_ETH_USDC", "close":40,"amount":400,"volume":4,"bid":39,"ask":41,"price":40}),
+            json!({"symbol":"PERP_LTC_USDC", "close":50,"amount":500,"volume":5,"bid":49,"ask":51,"price":50}),
+            json!({"symbol":"PERP_ADA_USDC", "close":60,"amount":600,"volume":6,"bid":59,"ask":61,"price":60}),
+        ];
+        if inherited {
+            rows[0]["symbol"] = json!("PERP_constructor_");
+            rows[2]["symbol"] = json!("PERP_toString_");
+        }
+        rows[0][source] = serde_json::Value::Null;
+        rows[2][source] = json!("123");
+        if source_error {
+            rows.push(serde_json::Value::Null);
+        }
+        for _ in 0..16 {
+            rt.pump();
+        }
+        let socket = rt
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| !url.contains("private"))
+            .unwrap()
+            .1
+            .clone();
+        rt.console.borrow_mut().clear();
+        rt.errors.borrow_mut().clear();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({"topic":topic,"data":rows}).to_string(),
+            )));
+        for _ in 0..16 {
+            rt.pump();
+        }
+        let tickers = store.tickers();
+        let projected = serde_json::to_value(&*tickers).unwrap();
+        let expected_ada = rows[3][source].as_f64().unwrap();
+        let expected_eth = rows[1][source].as_f64().unwrap();
+        let btc = projected
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["symbol"] == "BTCUSDC")
+            .unwrap();
+        let eth = projected
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["symbol"] == "ETHUSDC")
+            .unwrap();
+        let ltc = projected
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["symbol"] == "LTCUSDC")
+            .unwrap();
+        let ada = projected
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["symbol"] == "ADAUSDC")
+            .unwrap();
+        assert_eq!(
+            ada[target], expected_ada,
+            "{name:?}/{topic}: later valid ADA row survives"
+        );
+        assert_eq!(
+            *btc, unchanged_btc,
+            "bad null row cannot partially update BTC"
+        );
+        assert_eq!(
+            *ltc, unchanged_ltc,
+            "bad string row cannot partially update LTC"
+        );
+        assert_eq!(
+            eth[target], expected_eth,
+            "{name:?}/{topic}: valid ETH sibling survives"
+        );
+        let reports = rt
+            .errors
+            .borrow()
+            .iter()
+            .chain(rt.console.borrow().iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        if inherited {
+            assert!(
+                reports.is_empty(),
+                "inherited targets remain source no-ops: {reports}"
+            );
+        } else if source_error {
+            assert!(
+                reports.contains("Cannot read properties of null (reading 'symbol')"),
+                "{reports}"
+            );
+            assert!(
+                !reports.contains("typed field"),
+                "source error takes precedence: {reports}"
+            );
+        } else {
+            assert!(
+                reports.contains("BTCUSDC")
+                    && reports.contains("LTCUSDC")
+                    && reports.contains(target)
+                    && reports.contains("null")
+                    && reports.contains("\"123\""),
+                "{name:?}/{topic}: {reports}"
+            );
+        }
+        venue.dispose().unwrap();
+    }
+}
+#[test]
+fn ticker_rows_refuse_only_null_and_string_values() {
+    ticker_frame_keeps_valid_rows("tickers", "close", "last", false, false);
+}
+#[test]
+fn bbo_rows_refuse_only_null_and_string_values() {
+    ticker_frame_keeps_valid_rows("bbos", "bid", "bid", false, false);
+}
+#[test]
+fn mark_rows_refuse_only_null_and_string_values() {
+    ticker_frame_keeps_valid_rows("markprices", "price", "mark", false, false);
+}
+
+#[test]
+fn ticker_row_refusals_preserve_later_source_errors() {
+    for (topic, source, target) in [
+        ("tickers", "close", "last"),
+        ("bbos", "bid", "bid"),
+        ("markprices", "price", "mark"),
+    ] {
+        ticker_frame_keeps_valid_rows(topic, source, target, true, false);
+    }
+}
+
+#[test]
+fn ticker_row_admission_preserves_inherited_target_no_ops() {
+    for (topic, source, target) in [
+        ("tickers", "close", "last"),
+        ("bbos", "bid", "bid"),
+        ("markprices", "price", "mark"),
+    ] {
+        ticker_frame_keeps_valid_rows(topic, source, target, false, true);
+    }
 }

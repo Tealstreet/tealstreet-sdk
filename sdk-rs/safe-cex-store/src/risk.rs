@@ -445,7 +445,7 @@ fn process_orders_risk_for_positions(
                 && order.r#type == OrderType::Limit
                 && order.side == closing_side(p.side)
                 && hedged
-                && !order.reduce_only
+                && order.reduce_only != true
             {
                 if !safe_cex_num::js_table_lookup::<&str, ()>(&[], &order.id).is_present() {
                     result.entry(order.id.clone()).or_default();
@@ -479,7 +479,7 @@ fn process_orders_risk_for_positions(
                 total += pnl;
                 let next_size = size - order.remaining;
                 let mut text = risk_line(pnl, rolling)?;
-                if !hedged && order.remaining > size && !order.reduce_only {
+                if !hedged && order.remaining > size && order.reduce_only != true {
                     text.push_str(&format!(", Opens {}", side_name(opposite(p.side))));
                 }
                 rows.push(profile(
@@ -568,7 +568,7 @@ fn process_orders_risk_for_positions(
                     break;
                 }
             } else {
-                let triggered = if order.reduce_only {
+                let triggered = if order.reduce_only == true {
                     js_min(size, order.remaining)
                 } else {
                     order.remaining
@@ -646,7 +646,7 @@ pub fn calculate_risk_at_price(
                 o.status == OrderStatus::Open
                     && o.symbol == symbol
                     && o.side == OrderSide::Sell
-                    && !o.reduce_only
+                    && o.reduce_only != true
             })
             .collect();
         js_sort(&mut sells, |a, b| {
@@ -658,7 +658,7 @@ pub fn calculate_risk_at_price(
                 o.status == OrderStatus::Open
                     && o.symbol == symbol
                     && o.side == OrderSide::Buy
-                    && !o.reduce_only
+                    && o.reduce_only != true
             })
             .collect();
         js_sort(&mut buys, |a, b| {
@@ -845,7 +845,7 @@ mod tests {
                 if i % 11 == 0 {
                     row.price = (f64::NAN).into();
                 }
-                row.reduce_only = false;
+                row.reduce_only = false.into();
                 row
             })
             .collect();

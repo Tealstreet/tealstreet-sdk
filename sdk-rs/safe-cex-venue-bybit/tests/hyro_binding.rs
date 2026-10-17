@@ -1484,3 +1484,60 @@ fn hyro_option_reads_reject_with_inherited_source_guard() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
+    if configured_child("hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events")
+    {
+        return;
+    }
+    use std::{cell::Cell, rc::Rc};
+    let (h, private, _) = start_private();
+    ack_private(&h, &private, "auth");
+    ack_private(&h, &private, "subscribe");
+    let before = h.store.balance().clone();
+    assert_eq!(before.upnl, 5.0);
+    let fills = Rc::new(Cell::new(0));
+    let observed = fills.clone();
+    h.venue().base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            observed.set(observed.get() + 1);
+            Ok(())
+        }),
+    );
+    let mut row = private_position("12");
+    row["unrealisedPnl"] = json!("17.25");
+    row["size"] = json!("0.75");
+    let requests = h.wire.requests.borrow().len();
+    feed_private(&h, &private, json!({"topic":"position","data":[row]}));
+    assert_eq!(h.store.positions()[0].contracts, 0.75);
+    assert_eq!(h.store.positions()[0].leverage, 12.0);
+    assert_eq!(h.store.positions()[0].unrealized_pnl, 17.25);
+    let mut expected = before;
+    expected.upnl = 17.25;
+    assert_eq!(
+        *h.store.balance(),
+        expected,
+        "acknowledged Hyro position frame updates only the unified balance PnL"
+    );
+    feed_private(
+        &h,
+        &private,
+        json!({"topic":"wallet","data":[{
+        "accountType":"UNIFIED","totalEquity":"999999","totalPerpUPL":"999"}]}),
+    );
+    assert_eq!(
+        *h.store.balance(),
+        expected,
+        "source does not subscribe to wallet updates"
+    );
+    assert_eq!(fills.get(), 0, "position and wallet frames emit no fills");
+    assert_eq!(
+        h.wire.requests.borrow().len(),
+        requests,
+        "private frame values did not come from REST"
+    );
+    assert!(h.runtime.reports.borrow().is_empty());
+    h.venue().dispose().unwrap();
+}

@@ -69,3 +69,24 @@ cargo clippy --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-orderl
 node sdk-rs/safe-cex-registry/scripts/check.mjs
 node --test sdk-rs/scripts/check-layers.test.mjs
 ```
+
+
+## Strict ticker frame rows
+
+The three `*_rows_refuse_only_null_and_string_values` production socket tests
+compile against master 1334785318 and fail at the later valid ADA update. With
+the admission fix, each runs all six account subclasses and preserves complete
+BTC/LTC rows refused for null/string fields, updates both valid ETH/ADA siblings,
+and reports both symbols with the original field/value. Only HTTP, sockets and
+the deterministic scheduler are terminal scripted inputs; the binding, source
+stream body, typed Store and class lifecycle are real.
+
+Two additional actual-socket controls cover later source-property errors taking
+precedence over deferred typed reports, and inherited lookup names remaining
+no-ops while good siblings update. Each covers all three topics and six classes.
+The four existing private-topic regressions pass across those same subclasses.
+All eight maintained-source stream comparisons pass with their raw-value Store;
+that helper oracle is separate from the native typed-boundary proof. Normal Node
+module resolution replaces its broken worktree-root-only lodash path. Scoped
+strict Clippy, cancellation inventory (6), override inventory, parity (7459 rows)
+and TS extractor checks pass. No shared model or transport API is changed.

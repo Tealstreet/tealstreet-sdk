@@ -23,7 +23,7 @@ use crate::{
 };
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg, from_typed, to_json, to_typed};
 use safe_cex_num::{JsBigIntError, JsCoercionError};
-use safe_cex_types::{ExchangeName, Market, Order, Timeframe};
+use safe_cex_types::{ExchangeName, Timeframe};
 use std::rc::Rc;
 
 fn coercion(e: JsCoercionError) -> Thrown {
@@ -191,25 +191,16 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
                 .map_err(coercion)
         }),
         helper("getLighterAmountDecimals", |a| {
-            let market: Market = to_typed(&arg(&a, 0))?;
-            get_lighter_amount_decimals(&market)
-                .map(Js::Number)
-                .map_err(coercion)
+            get_lighter_amount_decimals(&arg(&a, 0)).map(Js::Number)
         }),
         helper("getLighterPriceDecimals", |a| {
-            let market: Market = to_typed(&arg(&a, 0))?;
-            get_lighter_price_decimals(&market)
-                .map(Js::Number)
-                .map_err(coercion)
+            get_lighter_price_decimals(&arg(&a, 0)).map(Js::Number)
         }),
         helper("getLighterOrderMinimums", |a| {
-            let market: Market = to_typed(&arg(&a, 0))?;
-            from_typed(&get_lighter_order_minimums(&market).map_err(coercion)?)
+            from_typed(&get_lighter_order_minimums(&arg(&a, 0))?)
         }),
         helper("resolveLighterCancelTargets", |a| {
-            let orders: Vec<Order> = to_typed(&arg(&a, 0))?;
-            let markets: indexmap::IndexMap<String, Market> = to_typed(&arg(&a, 1))?;
-            from_typed(&resolve_lighter_cancel_targets(&orders, &markets))
+            resolve_lighter_cancel_targets(&arg(&a, 0), &arg(&a, 1))
         }),
         helper("resolveLighterInterval", |a| {
             let interval: Timeframe = to_typed(&arg(&a, 0))?;
@@ -296,11 +287,9 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
             Ok(Js::Bool(has_non_zero_lighter_integrator_fee(maker, taker)))
         }),
         helper("extractLighterAccountTierFromPayload", |a| {
-            let payload = optional_json(&arg(&a, 0))?;
+            let payload = arg(&a, 0);
             Ok(
-                match extract_lighter_account_tier_from_payload(payload.as_ref())
-                    .map_err(coercion)?
-                {
+                match extract_lighter_account_tier_from_payload(Some(&payload))? {
                     None => Js::Undefined,
                     Some(tier) => from_typed(&tier)?,
                 },

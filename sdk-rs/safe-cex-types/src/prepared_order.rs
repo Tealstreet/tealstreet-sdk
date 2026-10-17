@@ -1,6 +1,6 @@
 //! Internal venue input after public validation or an Order replacement copy.
 //! This carrier is not a second public placement contract: source amendments
-//! can copy undefined type/side, while PlaceOrderOpts retains strict enums.
+//! can copy undefined type/side/reduceOnly, while PlaceOrderOpts retains strict inputs.
 use crate::{
     ModelField, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PlaceOrderOpts,
 };
@@ -9,7 +9,7 @@ use serde::{Serialize, Serializer, ser::SerializeStruct};
 /// Symbol/ID and amount shapes retain existing native venue interfaces (including
 /// UTF-16 symbols and a property-present optional amendment amount).
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct PreparedOrderOpts<S = String, A = f64, R = Option<bool>> {
+pub struct PreparedOrderOpts<S = String, A = f64, R = ModelField<bool>> {
     pub symbol: S,
     pub r#type: ModelField<OrderType>,
     pub side: ModelField<OrderSide>,
@@ -40,7 +40,7 @@ impl From<&PlaceOrderOpts> for PreparedOrderOpts {
             trigger_price: opts.trigger_price,
             stop_loss: opts.stop_loss,
             take_profit: opts.take_profit,
-            reduce_only: opts.reduce_only,
+            reduce_only: opts.reduce_only.into(),
             time_in_force: opts.time_in_force,
             trigger_type: opts.trigger_type,
             tp_trigger_type: opts.tp_trigger_type,
@@ -82,9 +82,8 @@ impl Serialize for PreparedOrderOpts {
         if let Some(value) = &self.take_profit {
             record.serialize_field("takeProfit", value)?;
         }
-        if let Some(value) = &self.reduce_only {
-            record.serialize_field("reduceOnly", value)?;
-        }
+        self.reduce_only
+            .serialize_field(&mut record, "reduceOnly")?;
         if let Some(value) = &self.time_in_force {
             record.serialize_field("timeInForce", value)?;
         }
@@ -136,8 +135,8 @@ struct PreparedWire {
     stop_loss: Option<f64>,
     #[serde(default, deserialize_with = "deserialize_optional")]
     take_profit: Option<f64>,
-    #[serde(default, deserialize_with = "deserialize_optional")]
-    reduce_only: Option<bool>,
+    #[serde(default)]
+    reduce_only: ModelField<bool>,
     #[serde(default, deserialize_with = "deserialize_optional")]
     time_in_force: Option<OrderTimeInForce>,
     #[serde(default, deserialize_with = "deserialize_optional")]

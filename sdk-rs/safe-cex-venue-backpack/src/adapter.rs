@@ -627,7 +627,7 @@ impl actions::Host for Frame {
             amount: o.amount,
             price: o.price.into_value(),
             time_in_force: (o.time_in_force).into_value(),
-            reduce_only: o.reduce_only,
+            reduce_only: o.reduce_only.into_property(),
             trigger_price: None,
             take_profit: None,
             stop_loss: None,

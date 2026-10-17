@@ -282,7 +282,7 @@ fn replacement(opts: &UpdateOrderOpts) -> Result<PreparedOrderOpts, ExchangeErro
         side: order.side.into_property(),
         amount,
         price,
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: Some(time_in_force),
         trigger_price: None,
         stop_loss: None,

@@ -319,22 +319,51 @@ impl BingxDataReads {
                     ))
                 })
                 .collect::<Result<Vec<_>, ExchangeError>>()?;
-            prepared
-                .into_iter()
-                .map(|(mut market, base, quote, leverage)| {
-                    market.base = strict_string(base.as_ref(), "base")?;
-                    market.quote = strict_string(quote.as_ref(), "quote")?;
-                    if js_truthy(leverage.as_ref()) {
-                        market.limits.leverage.max =
-                            strict_number(leverage.as_ref(), "max leverage")?;
-                    }
-                    Ok(market)
-                })
-                .collect::<Result<Vec<_>, ExchangeError>>()
+            let mut markets = Vec::new();
+            let mut refusals = Vec::new();
+            for (index, (mut market, base, quote, leverage)) in prepared.into_iter().enumerate() {
+                let invalid = [("base", base.as_ref()), ("quote", quote.as_ref())]
+                    .into_iter()
+                    .filter(|(_, value)| value.and_then(Value::as_str).is_none())
+                    .map(|(field, value)| {
+                        format!(
+                            "{field}={}",
+                            value.map_or_else(|| "undefined".into(), Value::to_string)
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if !invalid.is_empty() {
+                    refusals.push(format!(
+                        "Refused BingX market row {index} symbol={}: {}: expected string",
+                        market.id,
+                        invalid.join(", ")
+                    ));
+                    continue;
+                }
+                market.base = strict_string(base.as_ref(), "base")?;
+                market.quote = strict_string(quote.as_ref(), "quote")?;
+                if js_truthy(leverage.as_ref()) {
+                    market.limits.leverage.max = match strict_number(leverage.as_ref(), "max leverage") {
+                        Ok(value) => value,
+                        Err(cause) => {
+                            let value = leverage.as_ref().map_or_else(|| "undefined".into(), Value::to_string);
+                            refusals.push(format!("Refused BingX market row {index} symbol={}: limits.leverage.max={value}: {}", market.id, cause.message));
+                            continue;
+                        }
+                    };
+                }
+                markets.push(market);
+            }
+            Ok::<_, ExchangeError>((markets, refusals))
         }
         .await;
         match result {
-            Ok(markets) => Ok(markets),
+            Ok((markets, refusals)) => {
+                for message in refusals {
+                    self.report(message, None)?;
+                }
+                Ok(markets)
+            }
             Err(error) => {
                 self.report(error_message(&error)?, None)?;
                 Ok(self.base.store.markets().to_vec())

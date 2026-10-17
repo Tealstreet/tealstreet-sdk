@@ -170,9 +170,11 @@ fn terminal_typed_ids_refuse_lone_surrogates_before_mutation() {
             ],
         )
         .expect_err("terminal typed ID must refuse rather than replace a surrogate");
-    assert!(
-        error.message().contains("lone UTF-16 surrogate"),
-        "terminal typed ID must refuse rather than replace a surrogate"
+    assert_eq!(error.to_exchange_error().name, "TypeError");
+    assert_eq!(
+        error.message(),
+        "invalid utf-16: lone surrogate found",
+        "the native String decoder must refuse rather than replace a surrogate"
     );
     Store::update(
         native.as_ref(),

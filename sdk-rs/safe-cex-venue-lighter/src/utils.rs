@@ -1,3 +1,4 @@
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use safe_cex_num::{PrecisionInput, js_number_string, number_from_string};
 
 // ts: getPrecision
@@ -11,6 +12,10 @@ pub fn get_precision(num: impl Into<PrecisionInput>) -> f64 {
     if value.is_nan() {
         return 0.0;
     }
+    precision_from_text(&text)
+}
+
+fn precision_from_text(text: &str) -> f64 {
     let text = text.to_lowercase();
     if let Some(exponent) = text.split("e-").nth(1) {
         let exponent = number_from_string(exponent);
@@ -179,14 +184,12 @@ pub fn is_lighter_l1_address(
 }
 
 // ts: normalizeNonNegativeNumber
-pub fn normalize_non_negative_number(
-    value: Option<&serde_json::Value>,
-) -> Result<f64, safe_cex_num::JsCoercionError> {
-    let text = match value.filter(|value| !value.is_null()) {
-        Some(value) => safe_cex_num::js_string(Some(value))?,
-        None => String::new(),
+pub fn normalize_non_negative_number(value: &Js) -> Result<f64, Thrown> {
+    let parsed = if value.is_nullish() || matches!(value, Js::SymbolIterator) {
+        f64::NAN
+    } else {
+        value.parse_float()?
     };
-    let parsed = safe_cex_num::parse_float(&text);
     Ok(if !parsed.is_finite() || parsed < 0.0 {
         0.0
     } else {
@@ -194,41 +197,57 @@ pub fn normalize_non_negative_number(
     })
 }
 
+fn nullish_property(value: &Js, key: &str) -> Result<Js, Thrown> {
+    if value.is_nullish() {
+        Ok(Js::Undefined)
+    } else {
+        value.get(key)
+    }
+}
+
+fn minimum(info: &Js, primary: &str, alias: &str) -> Result<f64, Thrown> {
+    let value = nullish_property(info, primary)?;
+    let value = if value.is_nullish() {
+        nullish_property(info, alias)?
+    } else {
+        value
+    };
+    normalize_non_negative_number(&value)
+}
+
 // ts: getLighterOrderMinimums
-pub fn get_lighter_order_minimums(
-    market: &safe_cex_types::Market,
-) -> Result<LighterOrderMinimums, safe_cex_num::JsCoercionError> {
-    let info = market.info.as_ref();
-    let base = info
-        .and_then(|info| info.get("min_base_amount"))
-        .filter(|value| !value.is_null())
-        .or_else(|| info.and_then(|info| info.get("minBaseAmount")));
-    let quote = info
-        .and_then(|info| info.get("min_quote_amount"))
-        .filter(|value| !value.is_null())
-        .or_else(|| info.and_then(|info| info.get("minQuoteAmount")));
+pub fn get_lighter_order_minimums(market: &Js) -> Result<LighterOrderMinimums, Thrown> {
+    let info = market.get("info")?;
     Ok(LighterOrderMinimums {
-        min_base_amount: normalize_non_negative_number(base)?,
-        min_quote_amount: normalize_non_negative_number(quote)?,
+        min_base_amount: minimum(&info, "min_base_amount", "minBaseAmount")?,
+        min_quote_amount: minimum(&info, "min_quote_amount", "minQuoteAmount")?,
     })
 }
 
 // ts: resolveLighterCancelTargets
-pub fn resolve_lighter_cancel_targets(
-    orders: &[safe_cex_types::Order],
-    markets_by_symbol: &indexmap::IndexMap<String, safe_cex_types::Market>,
-) -> Vec<LighterCancelTarget> {
-    orders
-        .iter()
-        .filter_map(|order| {
-            let market = markets_by_symbol.get(&order.symbol)?;
-            let market_id = safe_cex_num::parse_int(&market.id, Some(10));
-            market_id.is_finite().then(|| LighterCancelTarget {
-                order_id: order.id.clone(),
-                market_id,
-            })
-        })
-        .collect()
+pub fn resolve_lighter_cancel_targets(orders: &Js, markets_by_symbol: &Js) -> Result<Js, Thrown> {
+    let markets = markets_by_symbol.clone();
+    orders.call_method(
+        "flatMap",
+        vec![Js::function("cancel target", move |_, args| {
+            let order = arg(&args, 0);
+            let market = markets.get_property(&order.get("symbol")?)?;
+            if !market.truthy() {
+                return Ok(Js::array(vec![]));
+            }
+            let market_id = safe_cex_num::parse_int(
+                &String::from_utf16_lossy(&market.get("id")?.to_js_string()?),
+                Some(10),
+            );
+            if !market_id.is_finite() {
+                return Ok(Js::array(vec![]));
+            }
+            Ok(Js::array(vec![Js::object(vec![
+                ("orderId", order.get("id")?),
+                ("marketId", Js::Number(market_id)),
+            ])]))
+        })],
+    )
 }
 
 // ts: generateLighterClientId.accountIndex
@@ -268,21 +287,21 @@ pub fn big_int_to_string(value: &num_bigint::BigInt) -> String {
 
 // ts: readNumber
 pub fn read_number(
-    source: Option<&serde_json::Map<String, serde_json::Value>>,
+    source: &Js,
     keys: &[&str],
     allow_zero: Option<bool>,
-) -> Result<Option<f64>, safe_cex_num::JsCoercionError> {
-    let Some(source) = source else {
+) -> Result<Option<f64>, Thrown> {
+    if !source.truthy() {
         return Ok(None);
-    };
+    }
     for key in keys {
-        let value = safe_cex_num::js_number(source.get(*key))?;
-        let is_valid = if allow_zero.unwrap_or(false) {
+        let value = source.get(key)?.to_number()?;
+        let valid = if allow_zero.unwrap_or(false) {
             value >= 0.0
         } else {
             value > 0.0
         };
-        if value.is_finite() && is_valid {
+        if value.is_finite() && valid {
             return Ok(Some(value));
         }
     }
@@ -304,13 +323,32 @@ pub fn decimals_from_scale(scale: Option<f64>) -> Option<f64> {
     Some(log10_scale)
 }
 
+fn market_decimals(
+    market: &Js,
+    decimals: &[&str],
+    scales: &[&str],
+    precision: &str,
+) -> Result<f64, Thrown> {
+    let info = market.get("info")?;
+    if let Some(value) = read_number(&info, decimals, Some(true))? {
+        return Ok(clamp_decimals(value));
+    }
+    if let Some(value) = decimals_from_scale(read_number(&info, scales, None)?) {
+        return Ok(clamp_decimals(value));
+    }
+    let value = market.get("precision")?.get(precision)?;
+    let decimals = if value.to_number()?.is_nan() {
+        0.0
+    } else {
+        precision_from_text(&String::from_utf16_lossy(&value.to_js_string()?))
+    };
+    Ok(clamp_decimals(decimals))
+}
+
 // ts: getLighterAmountDecimals
-pub fn get_lighter_amount_decimals(
-    market: &safe_cex_types::Market,
-) -> Result<f64, safe_cex_num::JsCoercionError> {
-    let info = market.info.as_ref().and_then(serde_json::Value::as_object);
-    let amount_decimals = read_number(
-        info,
+pub fn get_lighter_amount_decimals(market: &Js) -> Result<f64, Thrown> {
+    market_decimals(
+        market,
         &[
             "amountDecimals",
             "quantityDecimals",
@@ -318,45 +356,24 @@ pub fn get_lighter_amount_decimals(
             "sizeDecimals",
             "sizePrecision",
         ],
-        Some(true),
-    )?;
-    if let Some(amount_decimals) = amount_decimals {
-        return Ok(clamp_decimals(amount_decimals));
-    }
-    let amount_scale = read_number(
-        info,
         &["amountScale", "quantityScale", "baseScale", "sizeScale"],
-        None,
-    )?;
-    if let Some(amount_decimals) = decimals_from_scale(amount_scale) {
-        return Ok(clamp_decimals(amount_decimals));
-    }
-    Ok(clamp_decimals(get_precision(market.precision.amount)))
+        "amount",
+    )
 }
 
 // ts: getLighterPriceDecimals
-pub fn get_lighter_price_decimals(
-    market: &safe_cex_types::Market,
-) -> Result<f64, safe_cex_num::JsCoercionError> {
-    let info = market.info.as_ref().and_then(serde_json::Value::as_object);
-    let price_decimals = read_number(
-        info,
+pub fn get_lighter_price_decimals(market: &Js) -> Result<f64, Thrown> {
+    market_decimals(
+        market,
         &[
             "priceDecimals",
             "quoteDecimals",
             "tickDecimals",
             "pricePrecision",
         ],
-        Some(true),
-    )?;
-    if let Some(price_decimals) = price_decimals {
-        return Ok(clamp_decimals(price_decimals));
-    }
-    let price_scale = read_number(info, &["priceScale", "quoteScale", "tickScale"], None)?;
-    if let Some(price_decimals) = decimals_from_scale(price_scale) {
-        return Ok(clamp_decimals(price_decimals));
-    }
-    Ok(clamp_decimals(get_precision(market.precision.price)))
+        &["priceScale", "quoteScale", "tickScale"],
+        "price",
+    )
 }
 
 // ts: stringToBigInt
