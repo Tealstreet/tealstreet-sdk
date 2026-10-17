@@ -1273,9 +1273,31 @@ fn portfolio_array_like_root_retains_order_and_position_info() {
     queue_portfolio(&f, data.clone());
     let orders = f.run(f.exchange.fetch_orders(None)).unwrap();
     assert_eq!(orders.len(), 1);
-    assert_eq!(orders[0].info.value(), Some(&data["portfolios"]["0"]["orders"][0]));
+    assert_eq!(
+        orders[0].info.value(),
+        Some(&data["portfolios"]["0"]["orders"][0])
+    );
     queue_portfolio(&f, data.clone());
-    let positions = f.run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()]))).unwrap();
+    let positions = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .unwrap();
     assert_eq!(positions.len(), 1);
-    assert_eq!(positions[0].info.value(), Some(&data["portfolios"]["0"]["positions"][0]));
+    assert_eq!(
+        positions[0].info.value(),
+        Some(&data["portfolios"]["0"]["positions"][0])
+    );
+}
+
+#[test]
+fn portfolio_absent_open_positions_retains_filter_type_error() {
+    let f = fixture();
+    queue_portfolio(&f, json!({"portfolios":[]}));
+    let error = f
+        .run(f.exchange.fetch_positions(Some(vec!["BTCUSD".into()])))
+        .unwrap_err();
+    assert_eq!(error.name, "TypeError");
+    assert_eq!(
+        error.message,
+        "Cannot read properties of undefined (reading 'filter')"
+    );
 }

@@ -60,13 +60,15 @@ pub fn format_open_positions(
         let rows = rows.array_values().ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.positions.map is not a function")
         })?;
-        let raw_portfolio = raw["portfolios"].get(0)
+        let raw_portfolio = raw["portfolios"]
+            .get(0)
             .or_else(|| raw["portfolios"].get("0"))
             .expect("native portfolio zero has a retained counterpart");
         let mut positions = Vec::with_capacity(rows.len());
         for (index, position) in rows.iter().enumerate() {
             let side_key = to_typed::<String>(&Js::String(position.get("side")?.to_js_string()?))?;
-            let symbol: String = to_typed(&position.get("symbol")?).inspect_err(|_| refusal = true)?;
+            let symbol: String =
+                to_typed(&position.get("symbol")?).inspect_err(|_| refusal = true)?;
             let open_price = position.get("openPrice")?;
             let ticker = tickers.get(&symbol);
             let mark_price = ticker
@@ -103,7 +105,8 @@ pub fn format_open_positions(
             positions.push(Position {
                 symbol: symbol.clone(),
                 side,
-                entry_price: to_typed(&position.get("openPrice")?).inspect_err(|_| refusal = true)?,
+                entry_price: to_typed(&position.get("openPrice")?)
+                    .inspect_err(|_| refusal = true)?,
                 notional,
                 leverage,
                 unrealized_pnl,
@@ -175,7 +178,8 @@ pub fn format_balance(
         let upnl = positions
             .iter()
             .fold(0.0, |total, p| total + p.unrealized_pnl);
-        let total: f64 = to_typed(&ops::add(&cash_balance, &Js::Number(upnl))?).inspect_err(|_| projection_refusal = true)?;
+        let total: f64 = to_typed(&ops::add(&cash_balance, &Js::Number(upnl))?)
+            .inspect_err(|_| projection_refusal = true)?;
         Ok(Balance {
             total,
             free: total - used,
@@ -206,7 +210,9 @@ pub fn format_positions(
     report: &dyn Fn(&str) -> Result<(), ExchangeError>,
 ) -> Result<Vec<Position>, ExchangeError> {
     let open = format_open_positions(input, store, local_to_utc, report)?.ok_or_else(|| {
-        ExchangeError::new("Cannot read properties of undefined (reading 'filter')")
+        ExchangeError::from(Thrown::type_error(
+            "Cannot read properties of undefined (reading 'filter')",
+        ))
     })?;
     let default_symbols;
     let symbols = if let Some(symbols) = symbols {
@@ -272,7 +278,8 @@ pub fn format_orders(
         let rows = rows.array_values().ok_or_else(|| {
             Thrown::type_error("data.portfolios[0]?.orders.map is not a function")
         })?;
-        let raw_portfolio = raw["portfolios"].get(0)
+        let raw_portfolio = raw["portfolios"]
+            .get(0)
             .or_else(|| raw["portfolios"].get("0"))
             .expect("native portfolio zero has a retained counterpart");
         let mut orders = Vec::with_capacity(rows.len());
