@@ -918,17 +918,17 @@ note = "Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::income_
 ts = "BybitExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv" ]
 status = "ported"
-note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv. Routes through publicSocketFor(opts.symbol): the inverse socket for inverse symbols when it exists, else publicWebsocket; forwards original options and callback handles and returns the socket method result."
+note = "Concrete Exchange listener routes to the maintained socket and returns its real cleanup. Four master-red binding controls now deliver klines and trades; native sequence corpus covers minute/week buckets, stale frames and nonfinite values. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv."
 
 [[symbol]]
 ts = "BybitExchange.listenOHLCVs"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs" ]
 status = "ported"
-note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs. Groups symbols by publicSocketFor in first-seen socket order (Map identity), then calls listenOHLCVs once per socket with {...opts, symbols}; discards the socket returns."
+note = "Concrete Exchange bulk listener selects the maintained category socket and installs the live public kline handler. Real binding regressions fail on master and cover callback metadata, source topic grouping, replacement, reconnect and delayed connection. Strict public interval inputs remain unchanged. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs."
 
 [[symbol]]
 ts = "BybitExchange.listenOrderBook"

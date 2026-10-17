@@ -192,7 +192,12 @@ refusals remain explicit in the manifest rather than claiming SDK-wide parity.
 are explicit constructor dependencies. See [BINDING_GATES.md](BINDING_GATES.md)
 for constructed trait coverage, actual SDK signatures and compiled controls.
 Preserve source fetchPositions balance writes and exchange disposal without base
-cleanup. Only constructed private onOpen uses the approved shared authentication
+cleanup. The required `local_wall_time_to_utc` dependency reaches both exchange
+order-mapper callers. Embeddings supply their host timezone policy; the native
+registry explicitly chooses UTC. The constructed UTC-7 regression compares REST
+and stored dates with Node Date, checks explicit-Z/date-only bypass, and keeps
+private order updates on their separate raw Date.now clock.
+Only constructed private onOpen uses the approved shared authentication
 recovery contract; direct authenticate keeps the original catch and log behavior.
 
 Native `cancel_all_orders` and `cancel_symbol_orders` call the venue receiver

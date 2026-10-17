@@ -470,17 +470,17 @@ note = "Renamed target safe-cex-venue-bybit/src/inverse_read_surface.rs::income_
 ts = "BybitInverseExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcv"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcv", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv" ]
 status = "ported"
-note = "Exact synchronous BybitInverseExchange body: resolves publicInverseWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcv."
+note = "Concrete Exchange listener routes to the maintained socket and returns its real cleanup. Four master-red binding controls now deliver klines and trades; native sequence corpus covers minute/week buckets, stale frames and nonfinite values. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcv, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcv."
 
 [[symbol]]
 ts = "BybitInverseExchange.listenOHLCVs"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs"
+rs = [ "safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs" ]
 status = "ported"
-note = "Exact synchronous BybitInverseExchange bulk candle wrapper: forwards original options and callback to publicInverseWebsocket.listenOHLCVs, deliberately discards the method return and propagates original lookup/call/callback errors. Native unit corresponds to source undefined. Receiver replacement and argument mutation are checked; full class/socket composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs."
+note = "Concrete Exchange bulk listener selects the maintained category socket and installs the live public kline handler. Real binding regressions fail on master and cover callback metadata, source topic grouping, replacement, reconnect and delayed connection. Strict public interval inputs remain unchanged. Renamed source member to safe-cex-venue-bybit/src/stream_delegation.rs::listen_inverse_ohlcvs, safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::listen_public_ohlcvs."
 
 [[symbol]]
 ts = "BybitInverseExchange.listenOrderBook"
