@@ -322,7 +322,7 @@ fn spot_private_frames_deliver_live_orders_and_fills_without_positions() {
     h.venue().base().on(
         "fill",
         Rc::new(move |_, value| {
-            observed.borrow_mut().push(value[0].clone());
+            observed.borrow_mut().push(value.clone());
             Ok(())
         }),
     );
