@@ -33071,7 +33071,7 @@
         "shortExposure": 42,
         "totalNotional": 43
       },
-      "ordersRisk": [],
+      "ordersRisk": {},
       "activeChasers": [],
       "activeTWAPs": [],
       "updateIds": {
@@ -33154,7 +33154,7 @@
               "shortExposure": 42,
               "totalNotional": 43
             },
-            "ordersRisk": [],
+            "ordersRisk": {},
             "activeChasers": [],
             "activeTWAPs": [],
             "updateIds": {
@@ -33245,7 +33245,7 @@
               "shortExposure": 42,
               "totalNotional": 43
             },
-            "ordersRisk": [],
+            "ordersRisk": {},
             "activeChasers": [],
             "activeTWAPs": [],
             "updateIds": {
