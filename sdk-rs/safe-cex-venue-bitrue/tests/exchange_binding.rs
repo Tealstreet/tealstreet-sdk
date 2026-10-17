@@ -1091,7 +1091,8 @@ fn public_candles_keep_singapore_time_and_distinct_fields_through_socket() {
             seen.borrow().len(),
             index + 1,
             "actual candle callback {index}; reports={:?}, console={:?}",
-            f.runtime.reports.borrow(), f.runtime.console.borrow()
+            f.runtime.reports.borrow(),
+            f.runtime.console.borrow()
         );
         let candle = &seen.borrow()[index];
         for (field, value) in [
@@ -1126,5 +1127,20 @@ fn public_candles_keep_singapore_time_and_distinct_fields_through_socket() {
         seen.borrow().len(),
         4,
         "cleanup removes the candle callback"
+    );
+}
+
+#[test]
+fn shared_dayjs_exposes_the_utc_offset_used_by_live_candles() {
+    let globals = Js::object(vec![]);
+    safe_cex_exchange::js_runtime::library::install_library::<()>(&globals, std::rc::Weak::new());
+    let date = globals
+        .get("dayjs")
+        .unwrap()
+        .call(Js::Undefined, vec![Js::str("2024-06-08 01:23:45")])
+        .unwrap();
+    assert!(
+        date.get("utcOffset").unwrap().is_callable(),
+        "shared Dayjs must expose source utcOffset"
     );
 }
