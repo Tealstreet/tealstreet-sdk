@@ -714,3 +714,8 @@ maintained transaction-log helpers. Spot retains inherited empty history. Keep
 linear/inverse context order, source combined-category sort/limit rules, inclusive
 windows and repeated IDs. The mapper stays native until the typed public output;
 its ordinary lookup tables retain actual Object.prototype members.
+
+Spot trailing-order placement retains the source `Ticker <symbol> not found`
+error when market or ticker data is missing. The SessionHost intrinsic builds
+the source template in UTF-16 before the existing Error construction. The real
+Spot binding witness seeds a market without tickers and verifies no order write.
