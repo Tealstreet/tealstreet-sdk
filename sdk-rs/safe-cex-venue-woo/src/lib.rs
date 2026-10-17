@@ -104,3 +104,8 @@ pub use binding::exchange::{WooDependencies, WooExchange};
 
 #[cfg(test)]
 extern crate self as safe_cex_venue_woo;
+
+#[cfg(test)]
+#[path = "../tests/support/binding_harness.rs"]
+#[allow(dead_code)]
+mod binding_test_harness;

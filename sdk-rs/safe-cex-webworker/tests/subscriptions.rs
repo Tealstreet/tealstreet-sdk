@@ -1,3 +1,5 @@
+#[path = "support/data_trace.rs"]
+mod data_trace;
 #[path = "support/error_post.rs"]
 mod error_post_support;
 #[path = "support/runtime.rs"]
@@ -333,8 +335,11 @@ fn subscriptions_match_live_source_dedup_fanout_flush_and_first_envelope() {
             100.0,
             error_post_support::unexpected(),
         );
-        let candles =
-            OHLCVSubscriptionsHandler::new(venue.clone(), post, error_post_support::unexpected());
+        let candles = OHLCVSubscriptionsHandler::new(
+            venue.clone(),
+            data_trace::post(post),
+            error_post_support::unexpected(),
+        );
         *target.borrow_mut() = Some(Rc::downgrade(&candles));
         let ob = s["kind"] == "orderbook";
         for a in s["actions"].as_array().unwrap() {
@@ -1025,8 +1030,11 @@ fn listener_setup_failure_propagates_but_cleanup_failure_keeps_source_catch_orde
             100.0,
             error_post_support::unexpected(),
         );
-        let candles =
-            OHLCVSubscriptionsHandler::new(venue.clone(), post, error_post_support::unexpected());
+        let candles = OHLCVSubscriptionsHandler::new(
+            venue.clone(),
+            data_trace::post(post),
+            error_post_support::unexpected(),
+        );
         let payload = |subscribe, id: &str| StoreWorkerPayload {
             op: match (book, subscribe) {
                 (true, true) => StoreWorkerOp::SubscribeOrderBook,

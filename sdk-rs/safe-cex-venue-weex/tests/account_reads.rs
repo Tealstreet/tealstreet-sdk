@@ -62,7 +62,6 @@ struct State {
     original_cache: V,
     leverage: V,
     cache_index: usize,
-    reports: Vec<Error>,
     typed_configs: Vec<WeexDefaultSymbolConfig>,
     market_tag: V,
 }
@@ -669,7 +668,6 @@ fn runtime() -> RT {
         push_spread,
         error_message: |_, e| Ok(e.units.clone()),
         warning,
-        report_order_error: |h, e| h.borrow_mut().reports.push(e.clone()),
     }
 }
 fn tick(h: &H) {
@@ -838,7 +836,6 @@ fn native_account_reads_match_typescript() {
             original_cache: cached_entries,
             leverage: decode(&input["fetchedLeverage"]),
             cache_index: 0,
-            reports: vec![],
             typed_configs: vec![],
             market_tag: text("OLD"),
         });
@@ -930,13 +927,6 @@ fn native_account_reads_match_typescript() {
             .map(|j| (decode(&j["symbol"]), j["refetch"].as_bool().unwrap()))
             .collect::<Vec<_>>();
         assert_eq!(s.config_calls, config_calls, "native_config_calls::{id}");
-        let reports = match id {
-            "orders_normal_failure" => vec![err("request:1:end")],
-            "orders_algo_failure" => vec![err("request:2:end")],
-            "orders_both_failure" => vec![err("request:1:end"), err("request:2:end")],
-            _ => vec![],
-        };
-        assert_eq!(s.reports, reports, "native_order_failures_visible::{id}");
         assert_eq!(
             s.tasks.iter().filter(|t| t.done.is_none()).count(),
             0,

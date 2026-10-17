@@ -45,7 +45,7 @@ impl ExternalPublicData for Socket {
         );
         assert_eq!(
             options.interval,
-            Timeframe::M1,
+            Timeframe::M1.into(),
             "SUBSCRIPTION native interval"
         );
         assert_eq!(

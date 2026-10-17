@@ -330,11 +330,11 @@ fn run_lifecycle(name: &str) {
             .unwrap();
         }
         if variant == 1 && name.contains("Snapshot") {
-            venue
-                .last_websocket_positions_update
-                .set(Some(1700001234067.));
+            let stamp = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms() - 500.;
+            FIXTURE_STAMPS.with(|stamps| stamps.borrow_mut().push((stamp, 1700001234067.)));
+            venue.last_websocket_positions_update.set(Some(stamp));
             let mut p = Store::positions(store.as_ref()).to_vec();
-            p[0].last_update = (Some(1700001234067.)).into();
+            p[0].last_update = Some(stamp).into();
             p[0].id = "BTC-USDC:short".into();
             p[0].side = safe_cex_types::ModelField::Value(PositionSide::Short);
             Store::update(
@@ -361,9 +361,10 @@ fn run_lifecycle(name: &str) {
         };
         let actual = futures::executor::block_on(async {
             match name {
-                "validateAccount" => {
-                    obj(vec![("error", s(venue.validate_account().await.unwrap()))])
-                }
+                "validateAccount" => obj(vec![(
+                    "error",
+                    J::from(venue.validate_account().await.unwrap().into_value()),
+                )]),
                 "start" => {
                     venue.start().await.unwrap();
                     J::Undefined

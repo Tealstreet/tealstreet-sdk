@@ -250,6 +250,41 @@ fn change_position_mode_e2e() {
     assert!(h.store.options().is_hedged);
 }
 #[test]
+fn rejected_order_leg_keeps_successful_orders_without_error_event() {
+    let h = harness(options(), |http| {
+        http.route(
+            "GET",
+            endpoint("OPEN_ALGO_ORDERS"),
+            400,
+            json!({"msg":"algo endpoint unavailable"}),
+        );
+        script(http);
+    });
+    seed(&h);
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let captured = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, value: &Value| {
+            captured.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let orders = h
+        .drive(h.venue().fetch_orders(None))
+        .expect("allSettled retains the successful order leg");
+    assert_eq!(h.http.calls(endpoint("OPEN_ORDERS")).len(), 1);
+    assert_eq!(h.http.calls(endpoint("OPEN_ALGO_ORDERS")).len(), 1);
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].id, "native-9");
+    assert!(
+        errors.borrow().is_empty(),
+        "source allSettled must swallow rejected legs, emitted {:?}",
+        errors.borrow()
+    );
+}
+
+#[test]
 fn place_order_e2e() {
     let h = setup();
     let ids = h
@@ -263,6 +298,152 @@ fn place_order_e2e() {
     assert_eq!(body(&calls[0])["symbol"], "BTCUSDT");
     assert_eq!(body(&calls[0])["newClientOrderId"], "synthetic-client-1");
 }
+#[test]
+fn accepted_post_only_placement_updates_the_real_store() {
+    for has_stored_order in [false, true] {
+        let h = harness(options(), |http| {
+            // Queue the accepted response before the generic fallback fixture.
+            http.ok("POST", endpoint("ORDER"), json!({"orderId":"1008"}));
+            script(http);
+        });
+        seed(&h);
+        if has_stored_order {
+            let mut existing = order();
+            existing.id = "1008".into();
+            existing.time_in_force = ModelField::Value(OrderTimeInForce::GoodTillCancel);
+            Store::update(
+                h.store.as_ref(),
+                serde_json::from_value(json!({"orders":[existing]})).unwrap(),
+                false,
+            )
+            .unwrap();
+        }
+        let mut opts = place();
+        opts.time_in_force = Some(OrderTimeInForce::PostOnly);
+        let outcome = h.drive(Box::pin(
+            h.venue().base().place_order(h.exchange.as_ref(), opts),
+        ));
+        let calls = h.http.calls(endpoint("ORDER"));
+        assert_eq!(
+            calls.len(),
+            1,
+            "venue accepted the actual placement before local Store update"
+        );
+        assert_eq!(body(&calls[0])["timeInForce"], "POST_ONLY");
+        let ids = outcome.expect("accepted PostOnly placement must resolve after Store update");
+        assert_eq!(ids, ["1008"]);
+        let stored = h.store.orders();
+        assert_eq!(stored.len(), usize::from(has_stored_order));
+        if has_stored_order {
+            assert_eq!(
+                stored[0].time_in_force,
+                ModelField::Value(OrderTimeInForce::PostOnly)
+            );
+            assert_eq!(stored[0].filled, 0.25, "only patch the source's TIF field");
+        }
+    }
+}
+
+#[test]
+fn accepted_post_only_batch_updates_only_the_matching_store_row() {
+    let h = harness(options(), |http| {
+        http.ok(
+            "POST",
+            endpoint("BATCH_ORDERS"),
+            json!([
+                {"orderId":"1009","clientOrderId":"synthetic-client-2","success":true},
+                {"orderId":"1008","clientOrderId":"synthetic-client-1","success":true}
+            ]),
+        );
+        script(http);
+    });
+    seed(&h);
+    let rows: Vec<_> = ["1008", "1009"]
+        .into_iter()
+        .map(|id| {
+            let mut row = order();
+            row.id = id.into();
+            row.time_in_force = ModelField::Value(OrderTimeInForce::GoodTillCancel);
+            row
+        })
+        .collect();
+    Store::update(
+        h.store.as_ref(),
+        serde_json::from_value(json!({"orders":rows})).unwrap(),
+        false,
+    )
+    .unwrap();
+    let mut post_only = place();
+    post_only.time_in_force = Some(OrderTimeInForce::PostOnly);
+    let mut regular = place();
+    regular.client_order_id = Some("synthetic-client-2".into());
+    let outcome = h.drive(Box::pin(
+        h.venue()
+            .base()
+            .place_orders(h.exchange.as_ref(), vec![post_only, regular]),
+    ));
+    let calls = h.http.calls(endpoint("BATCH_ORDERS"));
+    assert_eq!(calls.len(), 1, "venue accepted both actual batch rows");
+    assert_eq!(body(&calls[0])["batchOrders"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        outcome.expect("accepted PostOnly batch must resolve after Store update"),
+        ["1008", "1009"]
+    );
+    let stored = h.store.orders();
+    assert_eq!(stored.len(), 2);
+    assert_eq!(
+        stored
+            .iter()
+            .find(|o| o.id == "1008")
+            .unwrap()
+            .time_in_force,
+        ModelField::Value(OrderTimeInForce::PostOnly)
+    );
+    assert_eq!(
+        stored
+            .iter()
+            .find(|o| o.id == "1009")
+            .unwrap()
+            .time_in_force,
+        ModelField::Value(OrderTimeInForce::GoodTillCancel)
+    );
+}
+
+#[test]
+fn accepted_tpsl_amendment_updates_the_real_store_price() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let h = setup();
+        h.http.ok(
+            "POST",
+            endpoint("MODIFY_TP_SL_ORDER"),
+            json!({"success":true}),
+        );
+        let mut protective = order();
+        protective.r#type = ModelField::Value(kind);
+        Store::update(
+            h.store.as_ref(),
+            serde_json::from_value(json!({"orders":[protective.clone()]})).unwrap(),
+            false,
+        )
+        .unwrap();
+        let update =
+            serde_json::from_value(json!({"order":protective,"update":{"price":103.5}})).unwrap();
+        let outcome = h.drive(h.venue().update_order(update));
+        let calls = h.http.calls(endpoint("MODIFY_TP_SL_ORDER"));
+        assert_eq!(calls.len(), 1, "venue accepted the actual TP/SL amendment");
+        assert_eq!(body(&calls[0])["triggerPrice"], "103.5");
+        assert_eq!(
+            outcome.expect("accepted TP/SL amendment must resolve after Store update"),
+            ["native-9"]
+        );
+        let stored = h.store.orders();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].price, ModelField::Value(103.5));
+        assert_eq!(stored[0].amount, 2.0);
+        assert_eq!(stored[0].r#type, ModelField::Value(kind));
+    }
+}
+
 #[test]
 fn cancel_orders_e2e() {
     let h = setup();

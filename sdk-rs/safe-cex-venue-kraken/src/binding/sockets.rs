@@ -388,9 +388,12 @@ impl MessageHost for SocketHost {
         value.to_js_string().map(|s| s.to_vec()).map_err(ex)
     }
     fn stringify(&self, value: &Js) -> Result<Vec<u16>, ExchangeError> {
-        let json = serde_json::to_string(&to_json(value).map_err(ex)?)
-            .map_err(|e| ExchangeError::new(e.to_string()))?;
-        Ok(units(&json))
+        self.rt
+            .global("JSON.stringify")
+            .and_then(|stringify| stringify.call(Js::Undefined, vec![value.clone()]))
+            .and_then(|json| json.to_js_string())
+            .map(|json| json.to_vec())
+            .map_err(ex)
     }
     fn includes(&self, value: &Js, text: &'static str) -> Result<bool, ExchangeError> {
         if value.is_nullish() {

@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-weex/src/account_reads.rs::fetch_orders" ]
 status = "divergent"
-note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#weex-async-observation-choice. Each rejected normal/algo branch reaches report_order_error; the source allSettled body returns only fulfilled orders without a report. tests/account_reads.rs covers normal-only, algo-only and dual rejection alongside ordering and first-id dedupe. Started HTTP jobs and caller-owned spread/report/uniq continuations have different lifetimes; imported settled supplies its reaction/peer-retention contract. Public-only returns the empty result without starting either request. Split: safe-cex-venue-weex/src/account_reads.rs::fetch_orders."
+note = "CHOSEN continuation ownership: sdk-rs/parity/MANIFEST-SPEC.md#weex-async-observation-choice. Rejected normal/algo legs are silently discarded, matching source Promise.allSettled; successful legs retain source order and first-id dedupe. The real constructed exchange regression observes returned regular orders and zero error events after an algo HTTP rejection. tests/account_reads.rs covers normal-only, algo-only and dual rejection alongside ordering and first-id dedupe. Started HTTP jobs and caller-owned spread/uniq continuations have different lifetimes; imported settled supplies its reaction/peer-retention contract. Public-only returns the empty result without starting either request. Split: safe-cex-venue-weex/src/account_reads.rs::fetch_orders."
 
 [[symbol]]
 ts = "WeexExchange.fetchNormalOrders"

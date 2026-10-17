@@ -754,3 +754,36 @@ The serialized post-split parity command exits zero: 7,459 rows and 17,204 publi
 Rust items, with zero invention/status findings. Native all-targets clippy, wasm32
 library clippy, formatting and the 76-test venue suite pass. No accepted-set
 completion is claimed while the named shared and inherited-method reviews remain.
+
+
+# Native trait candle reads and polling listeners
+
+The constructed production-host tests in `tests/binding.rs` expose the actual
+Exchange trait defaults: four regressions fail before installing the hooks.
+The repaired native hooks dispatch candle reads through the existing
+`candles::fetch_ohlcv` orchestration and attach listeners to the actual polling
+container. Two distinct candle rows are inspected natively, independently of the
+ignored request limit. Request body/auth, original HTTP rejection metadata,
+polling ticks and cleanup-handler removal are checked at the real host boundary.
+An additional invalid-date test checks the original RangeError and absence of a
+marketdata POST. Login and account discovery retain their source ordering.
+
+`scripts/stream-binding-controls.py` compiles five independent production faults:
+removing the trait hooks, disabling both cleanup closures, returning zero candle
+rows, returning only one row, and bypassing shared Date TimeClip. Every fault
+fails its named runtime assertion with exit101; exact byte restoration passes
+all five binding regressions. The TimeClip fault also fails the actual JavaScript
+ISO comparison, and restoration passes that separate target.
+
+The canonical ISO formatter moved from websocket diagnostics into
+`safe-cex-num::js_date_to_iso_string`; the websocket wrapper delegates to it.
+`safe-cex-num/tests/date_iso.rs` compares exactly1,044 raw-bit inputs and completed
+outputs with actual `new Date(value).toISOString()`, including extended years,
+nonfinite values, signed zero, fractional milliseconds and both TimeClip edges.
+Only four whole-websocket-file cancellation dependency hashes change after
+review of the formatter move. Future creator bodies and cleanup guards retain
+their existing ownership. The all-features cancellation target passes all seven
+tests including explicit discovery export, with211 creators and no open findings;
+the override target passes8 tests and binding scanner25 tests. Scoped invention
+checks pass54 BreakoutProp rows/136 public items and233 num rows/193 public items.
+These counts describe the inspected native scope, not universal runtime parity.
