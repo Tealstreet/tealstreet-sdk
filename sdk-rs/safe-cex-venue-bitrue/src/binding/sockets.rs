@@ -286,7 +286,34 @@ impl StreamHost for Rt {
         Ok(matches!(v,Js::Object(o) if o.class=="Blob"))
     }
     fn pair(&self, v: Js) -> Result<(Js, Js), Thrown> {
-        Ok((v.get("0")?, v.get("1")?))
+        let iterator = v.iterator()?;
+        let next = iterator.get("next")?;
+        let mut done = false;
+        let mut step = || {
+            if done {
+                return Ok(Js::Undefined);
+            }
+            let result = next.call(iterator.clone(), vec![])?;
+            if !result.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+            done = result.get("done")?.truthy();
+            if done {
+                Ok(Js::Undefined)
+            } else {
+                result.get("value")
+            }
+        };
+        let pair = (step()?, step()?);
+        if !done {
+            let close = iterator.get("return")?;
+            if !close.is_nullish() && !close.call(iterator, vec![])?.is_object() {
+                return Err(Thrown::type_error(
+                    "Iterator return result is not an object",
+                ));
+            }
+        }
+        Ok(pair)
     }
     fn null(&self) -> Js {
         Js::Null

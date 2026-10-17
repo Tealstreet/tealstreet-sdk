@@ -633,9 +633,7 @@ impl BookHost for SocketHost {
     // ts: `v(msg, 'bids') || []` iterated with for-of.
     fn iterable_or_empty(&self, value: Rc<Js>) -> Result<Self::Items, ExchangeError> {
         let items = if value.truthy() {
-            value
-                .array_values()
-                .ok_or_else(|| ExchangeError::new("book levels are not iterable"))?
+            value.iterable_values().map_err(ex)?
         } else {
             vec![]
         };

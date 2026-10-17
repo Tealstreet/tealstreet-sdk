@@ -8,24 +8,24 @@ pub fn num(value: &Value) -> Result<f64, JsCoercionError> {
     crate::income::to_number(value)
 }
 
-pub struct OkxPositionAdapterDeps<'a> {
+pub struct OkxPositionAdapterDeps<'a, E = JsCoercionError> {
     pub account: &'a str,
-    pub to_base: &'a dyn Fn(f64, &str) -> f64,
-    pub resolve_symbol: &'a dyn Fn(&str) -> Option<String>,
-    pub resolve_settle_currency: &'a dyn Fn(&str) -> Option<String>,
+    pub to_base: &'a dyn Fn(f64, &str) -> Result<f64, E>,
+    pub resolve_symbol: &'a dyn Fn(&str) -> Result<Option<String>, E>,
+    pub resolve_settle_currency: &'a dyn Fn(&str) -> Result<Option<String>, E>,
 }
 
 fn number(value: f64) -> JsJsonValue {
     JsJsonValue::Number(value)
 }
 
-pub fn map_okx_position_history(
+pub fn map_okx_position_history<E: From<JsCoercionError>>(
     row: &Map<String, Value>,
-    deps: &OkxPositionAdapterDeps<'_>,
-) -> Result<Option<JsObjectMap<JsJsonValue>>, JsCoercionError> {
+    deps: &OkxPositionAdapterDeps<'_, E>,
+) -> Result<Option<JsObjectMap<JsJsonValue>>, E> {
     let get = |key: &str| row.get(key).unwrap_or(&Value::Null);
     let instrument = nullish_string(get("instId"), "")?;
-    let Some(symbol) = (deps.resolve_symbol)(&instrument).filter(|s| !s.is_empty()) else {
+    let Some(symbol) = (deps.resolve_symbol)(&instrument)?.filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
     let side = if nullish_string(get("direction"), "")?.to_lowercase() == "short" {
@@ -35,12 +35,14 @@ pub fn map_okx_position_history(
     };
     let close_time = num(get("uTime"))?;
     let open_time = num(get("cTime"))?;
-    let closed_size = (deps.to_base)(num(get("closeTotalPos"))?.abs(), &instrument);
+    let closed_size = (deps.to_base)(num(get("closeTotalPos"))?.abs(), &instrument)?;
     if closed_size.is_nan() || closed_size <= 0.0 {
         return Ok(None);
     }
     let open_max = num(get("openMaxPos"))?.abs();
-    let max_size = (open_max > 0.0).then(|| (deps.to_base)(open_max, &instrument));
+    let max_size = (open_max > 0.0)
+        .then(|| (deps.to_base)(open_max, &instrument))
+        .transpose()?;
     let fees = -num(get("fee"))?;
     let funding = num(get("fundingFee"))?;
     let realized_pnl = num(get("realizedPnl"))? + fees - funding;
@@ -64,7 +66,7 @@ pub fn map_okx_position_history(
     record.insert("symbol".into(), JsJsonValue::String(symbol));
     let currency = truthy_string(get("ccy"))?;
     let currency = if currency.is_empty() {
-        (deps.resolve_settle_currency)(&instrument)
+        (deps.resolve_settle_currency)(&instrument)?
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "USDT".into())
     } else {
