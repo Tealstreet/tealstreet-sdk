@@ -1311,6 +1311,26 @@ signed native HTTP request, verifying its HMAC and expiry after a 90-second
 server correction. The core virtual-clock regression checks both getters and
 the independent raw Date clock.
 
+Shared JS promises run on a runtime-owned FIFO job queue. Their async bodies
+start synchronously through the first suspension; settled awaits and reactions
+resume in queued jobs. Returned promises receive a separate resolution job.
+Nonempty all/allSettled register each input reaction synchronously, retaining
+input order while observing the first rejection in settlement order.
+
+NativeRuntime drains that queue before and after each host future poll. All
+callbacks within a poll remain one batch; the checkpoint does not split socket
+frames that the host delivers together. Scope timers use the same queue and
+drain reactions before the next timer. Other runtime embedders still control
+their host callback boundaries; the scoped native witnesses cover this native
+checkpoint, timer cancellation and host task discard.
+
+The shared JS Promise sink reports unhandled rejections through the runtime
+exception boundary at a quiescent microtask checkpoint. Registering an await or
+reaction handles its source immediately; an unhandled propagated rejection
+belongs to the derived promise. Reading result() alone does not handle it.
+Checks retain discarded rejection values until their reporting turn, and host
+driver discard releases those pending captures without reporting them.
+
 String indexOf/lastIndexOf/includes/startsWith/endsWith search UTF-16 code
 units and honor their position argument after search-string coercion. Positions
 truncate and clamp; lastIndexOf treats NaN/undefined as the string length, while

@@ -912,7 +912,6 @@ fn business_socket_reopen_alone_resyncs_the_private_snapshot() {
 #[test]
 fn eu_order_reads_start_both_instruments_before_first_reply() {
     use std::{
-        cell::Cell,
         rc::Rc,
         task::{Context, Poll, Waker},
     };
@@ -940,7 +939,7 @@ fn eu_order_reads_start_both_instruments_before_first_reply() {
         });
         loaded(&h);
         h.http.requests.borrow_mut().clear();
-        let gate = Rc::new(Cell::new(false));
+        let gate = Rc::new(harness::release::Release::default());
         *h.http.held_instrument.borrow_mut() = Some((path.into(), "SWAP".into(), gate.clone()));
         let mut future = h.venue().fetch_orders(None);
         assert!(matches!(
