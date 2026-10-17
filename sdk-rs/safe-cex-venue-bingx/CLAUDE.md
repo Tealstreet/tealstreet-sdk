@@ -223,3 +223,9 @@ writes, terminal fill emission/status, and position writes before REST healing.
 Balance-only account rows remain ignored as in TS; this socket has no balance
 handler and the REST balance stays unchanged. Refused typed market rows emit an
 error containing their cause and retain the stored market snapshot.
+
+REST signature timestamps read the shared synced `VIRTUAL_CLOCK`, matching
+`bingx.api.ts`. Registry `native_host_bingx_clock` offsets server time by 90 seconds,
+performs a real signed account read, verifies the transmitted HMAC, and requires
+the timestamp to fall inside the synced interval. Raw runtime time remains the
+clock for source `Date.now()` paths.
