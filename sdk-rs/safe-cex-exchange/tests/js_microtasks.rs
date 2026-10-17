@@ -477,7 +477,8 @@ const trace=[];const a=Promise[method](values).then(()=>trace.push('all'));const
 fn native_host_task_checkpoint_preserves_callback_batches() {
     let output = Command::new("node").args(["-e", r#"
 const trace=[];let resolve;new Promise(r=>resolve=r).then(()=>trace.push('reaction'));
-setImmediate(()=>{trace.push('first');resolve();trace.push('second');setImmediate(()=>{trace.push('next-host');console.log(JSON.stringify(trace))})});
+setImmediate(()=>{trace.push('first');resolve();trace.push('second')});
+setImmediate(()=>{trace.push('next-host');console.log(JSON.stringify(trace))});
 "#]).output().unwrap();
     assert!(
         output.status.success(),
@@ -504,17 +505,17 @@ setImmediate(()=>{trace.push('first');resolve();trace.push('second');setImmediat
             )
             .unwrap();
         let fired = Rc::new(tokio::sync::Notify::new());
-        let ready = fired.clone();
-        let task_runtime = runtime.clone();
         let callback = trace.clone();
         drop(runtime.spawn_local(Box::pin(async move {
             callback.borrow_mut().push("first".into());
             pending.settle(Ok(Js::Undefined));
             callback.borrow_mut().push("second".into());
-            drop(task_runtime.spawn_local(Box::pin(async move {
-                callback.borrow_mut().push("next-host".into());
-                ready.notify_one();
-            })));
+        })));
+        let callback = trace.clone();
+        let ready = fired.clone();
+        drop(runtime.spawn_local(Box::pin(async move {
+            callback.borrow_mut().push("next-host".into());
+            ready.notify_one();
         })));
         tokio::time::timeout(Duration::from_secs(5), fired.notified())
             .await
@@ -558,4 +559,107 @@ fn native_host_discard_releases_polled_and_unpolled_promise_jobs() {
             "host discard releases job captures; polled={polled}"
         );
     }
+}
+
+#[test]
+fn native_returned_promise_adoption_and_finally_match_node_jobs() {
+    let output = Command::new("node").args(["-e", r#"
+(async()=>{const rows=[];for(const method of ['then','finally'])for(const kind of ['scalar','ready','pending']){
+const trace=[];const p=Promise.resolve();let resolve;const pending=new Promise(r=>resolve=r);
+const value=kind==='scalar'?1:kind==='ready'?Promise.resolve(1):pending;
+const a=p[method](()=>value).then(()=>trace.push('adopt'));
+const b=p.then().then().then(()=>trace.push('plain'));
+if(kind==='pending')setTimeout(()=>resolve(1),0);
+await Promise.all([a,b]);rows.push(trace);
+}console.log(JSON.stringify(rows))})()
+"#]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Vec<Vec<String>> = serde_json::from_slice(&output.stdout).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&rt, async {
+        let native = native_runtime();
+        let http = client::rest_http_host(
+            native.clone(),
+            Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+        );
+        let shared = Rc::new(ScopeShared::new(
+            native.clone(),
+            http,
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Js::object(vec![]),
+            (),
+        ));
+        globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+        let runtime: Rc<dyn ExchangeRuntime> = native;
+        let mut rows = Vec::new();
+        for method in ["then", "finally"] {
+            for kind in ["scalar", "ready", "pending"] {
+                let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+                let p = Js::Promise(Promise::settled(&runtime, Ok(Js::Undefined)));
+                let pending = Promise::pending(&runtime);
+                let value = match kind {
+                    "scalar" => Js::Number(1.0),
+                    "ready" => Js::Promise(Promise::settled(&runtime, Ok(Js::Number(1.0)))),
+                    _ => Js::Promise(pending.clone()),
+                };
+                let callback = trace.clone();
+                let a = p
+                    .call_method(
+                        method,
+                        vec![Js::function("return", move |_, _| Ok(value.clone()))],
+                    )
+                    .unwrap()
+                    .call_method(
+                        "then",
+                        vec![Js::function("adopt", move |_, _| {
+                            callback.borrow_mut().push("adopt".into());
+                            Ok(Js::Undefined)
+                        })],
+                    )
+                    .unwrap();
+                let callback = trace.clone();
+                let b = p
+                    .call_method("then", vec![])
+                    .unwrap()
+                    .call_method("then", vec![])
+                    .unwrap()
+                    .call_method(
+                        "then",
+                        vec![Js::function("plain", move |_, _| {
+                            callback.borrow_mut().push("plain".into());
+                            Ok(Js::Undefined)
+                        })],
+                    )
+                    .unwrap();
+                if kind == "pending" {
+                    shared
+                        .globals
+                        .get("setTimeout")
+                        .unwrap()
+                        .call(
+                            Js::Undefined,
+                            vec![
+                                Js::function("resolve", move |_, _| {
+                                    pending.settle(Ok(Js::Number(1.0)));
+                                    Ok(Js::Undefined)
+                                }),
+                                Js::Number(0.0),
+                            ],
+                        )
+                        .unwrap();
+                }
+                await_js(a).await.unwrap();
+                await_js(b).await.unwrap();
+                rows.push(trace.borrow().clone());
+            }
+        }
+        assert_eq!(rows, expected);
+    });
 }

@@ -152,6 +152,7 @@ async fn adopt(body: JsFuture<'static>) -> Result<Js, Thrown> {
     let mut value = body.await?;
     while let Js::Promise(inner) = &value {
         let inner = inner.clone();
+        jobs::yield_current().await;
         value = inner.wait().await?;
     }
     Ok(value)
