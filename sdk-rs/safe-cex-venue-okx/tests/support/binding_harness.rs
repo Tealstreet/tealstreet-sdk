@@ -203,6 +203,7 @@ pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
+    pub network_failures: RefCell<HashMap<String, VecDeque<String>>>,
     pub instrument_responses: RefCell<HashMap<(String, String), Value>>,
     pub held_instrument: RefCell<Option<(String, String, Rc<Cell<bool>>)>>,
 }
@@ -262,6 +263,23 @@ impl JsHttpHost for Http {
             },
             headers: read("headers"),
         });
+        if let Some(code) = self
+            .network_failures
+            .borrow_mut()
+            .get_mut(&url)
+            .and_then(VecDeque::pop_front)
+        {
+            let error = Thrown::error("Error", "scripted network failure");
+            error
+                .value
+                .define("code", Js::str(&code))
+                .expect("network code");
+            error
+                .value
+                .define("config", config)
+                .expect("original request config");
+            return Box::pin(async move { Err(error) });
+        }
         let held = self
             .held_instrument
             .borrow()
