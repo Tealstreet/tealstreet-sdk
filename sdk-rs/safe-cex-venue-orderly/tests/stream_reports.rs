@@ -510,6 +510,12 @@ impl WsHost for Host {
     }
 }
 impl ReportHost for Host {
+    fn ticker_patch_refusal(&self, _: &[u16], _: &[(&str, V)]) -> Result<Option<String>, E> {
+        Ok(None)
+    }
+    fn ticker_refusal_error(&self, _: Vec<String>) -> E {
+        panic!("source-only Store accepts raw ticker values")
+    }
     fn nullish(&self, v: &Raw) -> bool {
         matches!(v, Raw::Undefined | Raw::Null)
     }

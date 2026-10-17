@@ -593,6 +593,22 @@ impl crate::public_feeds::FeedHost for Host {
     }
 }
 impl crate::stream_reports::ReportHost for Host {
+    fn ticker_patch_refusal(&self, symbol: &[u16], fields: &[(&str, V)]) -> R<Option<String>> {
+        for (field, value) in fields {
+            if !matches!(&**value, Js::Number(_)) {
+                let rendered = self.global("JSON.stringify", vec![value.clone()])?;
+                return Ok(Some(format!(
+                    "Orderly ticker {} typed field {field} requires a number; received {}",
+                    String::from_utf16_lossy(symbol),
+                    text(&rendered)?
+                )));
+            }
+        }
+        Ok(None)
+    }
+    fn ticker_refusal_error(&self, messages: Vec<String>) -> Thrown {
+        Thrown::error("Error", &messages.join("; "))
+    }
     fn nullish(&self, value: &Js) -> bool {
         value.is_nullish()
     }
