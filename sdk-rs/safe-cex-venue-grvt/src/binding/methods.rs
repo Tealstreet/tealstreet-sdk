@@ -358,11 +358,7 @@ pub(super) fn invoke(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, T
                     },
                     |text, level| log(&h, text, level),
                     |text| {
-                        h.0.this
-                            .get("emitter")
-                            .and_then(|v| {
-                                v.call_method("emit", vec![Js::str("error"), Js::str(text)])
-                            })
+                        call(&h, "emitAndLogError", vec![Js::str(text)])
                             .map(|_| ())
                             .map_err(|e| e.to_exchange_error())
                     },
@@ -477,9 +473,7 @@ fn cancel(h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown> {
         };
         let logger = |text: &str, level| log(&h, text, level);
         let emit = |text: &str| {
-            h.0.this
-                .get("emitter")
-                .and_then(|v| v.call_method("emit", vec![Js::str("error"), Js::str(text)]))
+            call(&h, "emitAndLogError", vec![Js::str(text)])
                 .map(|_| ())
                 .map_err(|e| e.to_exchange_error())
         };

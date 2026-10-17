@@ -112,7 +112,7 @@ pub fn add_inline_tpsl_fallback_orders(
                             chaser_max_attempts: None,
                         }))
                         .into(),
-                        reduce_only: true,
+                        reduce_only: true.into(),
                         last_update: now(),
                         info: (info.cloned()).into(),
                         parent_id: (None).into(),

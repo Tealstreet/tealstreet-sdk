@@ -398,6 +398,15 @@ pub fn build_approve_integrator_data(
 pub fn validate_create_grouped_orders_params(
     params: &CreateGroupedOrdersParams,
 ) -> Result<(), TransactionBuildError> {
+    validate_grouped_orders_with_side_comparison(params, &|a, b| {
+        params.orders[a].is_buy == params.orders[b].is_buy
+    })
+}
+
+pub(crate) fn validate_grouped_orders_with_side_comparison(
+    params: &CreateGroupedOrdersParams,
+    same_side: &dyn Fn(usize, usize) -> bool,
+) -> Result<(), TransactionBuildError> {
     let orders = &params.orders;
     if orders.is_empty() || orders.len() > 3 {
         return Err(TransactionBuildError::error(
@@ -438,7 +447,7 @@ pub fn validate_create_grouped_orders_params(
                     "Lighter OCO grouped orders require matching base amounts",
                 ));
             }
-            if orders[0].is_buy != orders[1].is_buy {
+            if !same_side(0, 1) {
                 return Err(TransactionBuildError::error(
                     "Lighter OCO grouped orders require the same side",
                 ));
@@ -477,7 +486,7 @@ pub fn validate_create_grouped_orders_params(
                     "Lighter OTO child order must be stop-loss or take-profit",
                 ));
             }
-            if orders[0].is_buy == orders[1].is_buy {
+            if same_side(0, 1) {
                 return Err(TransactionBuildError::error(
                     "Lighter OTO child order must be opposite side from parent",
                 ));
@@ -516,7 +525,7 @@ pub fn validate_create_grouped_orders_params(
                     "Lighter OTOCO children require one stop-loss and one take-profit order",
                 ));
             }
-            if orders[0].is_buy == orders[1].is_buy || orders[0].is_buy == orders[2].is_buy {
+            if same_side(0, 1) || same_side(0, 2) {
                 return Err(TransactionBuildError::error(
                     "Lighter OTOCO child orders must be opposite side from parent",
                 ));

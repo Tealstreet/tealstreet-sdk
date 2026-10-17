@@ -34,6 +34,7 @@ pub struct ApiFailure {
     pub config: Option<Config>,
 }
 pub trait ApiWire {
+    fn install_request_interceptor(&self, api: Weak<DxApi>) -> Result<(), ExchangeError>;
     fn rate_limit(&self, max_rps: f64) -> Result<(), ExchangeError>;
     fn request(
         &self,
@@ -102,12 +103,14 @@ pub fn create_api(
     if options.tealstreet_tunnel == Some(true) {
         host.install_transport_adapter(&wire, &options, exchange)?;
     }
-    Ok(Rc::new_cyclic(|this| DxApi {
+    let api = Rc::new_cyclic(|this| DxApi {
         owner: Rc::downgrade(exchange),
-        wire,
+        wire: wire.clone(),
         options,
         this: this.clone(),
-    }))
+    });
+    wire.install_request_interceptor(Rc::downgrade(&api))?;
+    Ok(api)
 }
 impl DxApi {
     pub fn intercept_request(&self, config: &mut DxConfig) -> Result<(), ExchangeError> {
@@ -155,7 +158,6 @@ impl DxApi {
         Box::pin(async move {
             let mut current = config;
             loop {
-                api.intercept_request(&mut current.borrow_mut())?;
                 match api.wire.request(current.clone()).await {
                     Ok(data) => return Ok(data),
                     Err(failure) => {

@@ -172,7 +172,9 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
                 amount: unfilled + filled,
                 filled,
                 remaining: number(nullish(row, &["unfilledSize"]))?,
-                reduce_only: js_truthy(row.get("reduceOnly")) || js_truthy(row.get("reduce_only")),
+                reduce_only: (js_truthy(row.get("reduceOnly"))
+                    || js_truthy(row.get("reduce_only")))
+                .into(),
                 close: (None).into(),
                 info: (Some(row.clone())).into(),
                 time_in_force: (Some(time_in_force)).into(),

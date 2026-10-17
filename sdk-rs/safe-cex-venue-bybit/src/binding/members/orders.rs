@@ -116,10 +116,11 @@ pub(crate) async fn submit_create_orders_body(
                     .unwrap_or(Js::Undefined);
                 let message = error.value.get("message").unwrap_or(Js::Undefined);
                 emit(rt, &format_venue_error(rt, &data, &message)?)?;
-                let unknown =
-                    safe_cex_store::remaining_utils::is_unknown_outcome(&to_json(&error.value)?)
-                        .map_err(|m| Thrown::error("TypeError", &m))?;
-                if single && opts.get("clientOrderId")?.truthy() && unknown {
+                if single
+                    && opts.get("clientOrderId")?.truthy()
+                    && safe_cex_store::remaining_utils::is_unknown_outcome(&to_json(&error.value)?)
+                        .map_err(|m| Thrown::error("TypeError", &m))?
+                {
                     return Err(error);
                 }
             }
@@ -714,8 +715,8 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         let stop_loss = truthy(base.stop_loss).map(|p| adjust(p, p_price));
         let take_profit = truthy(base.take_profit).map(|p| adjust(p, p_price));
         let trigger_price = truthy(base.trigger_price).map(|p| adjust(p, p_price));
-        let trigger_direction = match trigger_price {
-            Some(trigger) if trigger != 0. => {
+        let trigger_direction = match truthy(trigger_price) {
+            Some(trigger) => {
                 let ticker = venue
                     .base
                     .store
@@ -734,7 +735,7 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
         };
         let mut kind = base.r#type;
         if base.r#type == OrderType::Conditional {
-            if trigger_price.is_none() {
+            if truthy(trigger_price).is_none() {
                 return Err(Thrown::new(error_object(
                     "Error",
                     &format!(
@@ -743,19 +744,19 @@ pub(crate) fn place_order(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                     ),
                 )));
             }
-            kind = if price.is_some() {
+            kind = if truthy(price).is_some() {
                 OrderType::Limit
             } else {
                 OrderType::Market
             };
         }
-        if trigger_price.is_some()
+        if truthy(trigger_price).is_some()
             && matches!(base.r#type, OrderType::StopLoss | OrderType::TakeProfit)
         {
             kind = OrderType::Market;
         }
         let priced = base.r#type == OrderType::Limit
-            || (base.r#type == OrderType::Conditional && price.is_some());
+            || (base.r#type == OrderType::Conditional && truthy(price).is_some());
         let price_text = |p: Option<f64>| num(p.unwrap_or(0.));
         use safe_cex_types::OrderStopTriggerType as T;
         let req = vec![

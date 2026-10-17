@@ -192,7 +192,7 @@ kind = "type"
 layer = "mirror"
 rs = "safe-cex-types/src/lib.rs::Order"
 status = "ported"
-note = "Static declaration projection is unchanged. Runtime output type/status/side, price, and optional fields use ModelField to retain absent, own undefined, and typed values. Native model bridge preserves presence; JSON omits absent/undefined fields. Public placement input remains strict."
+note = "Static declaration projection is unchanged. Runtime output type/status/side, price, reduceOnly, and optional fields use ModelField to retain absent, own undefined, and typed values. Native model bridge preserves presence; JSON omits absent/undefined fields. Public placement input remains strict."
 
 [[symbol]]
 ts = "PositionSide"
