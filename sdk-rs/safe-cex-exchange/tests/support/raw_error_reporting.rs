@@ -1,16 +1,23 @@
 use super::*;
 
 fn keys(value: &Js) -> Vec<String> {
-    value.own_keys().iter().map(|key| String::from_utf16_lossy(key)).collect()
+    value
+        .own_keys()
+        .iter()
+        .map(|key| String::from_utf16_lossy(key))
+        .collect()
 }
 
 fn observe_errors(assembled: &Assembled) -> Rc<RefCell<Vec<Vec<Js>>>> {
     let observed = Rc::new(RefCell::new(Vec::new()));
     let sink = observed.clone();
-    assembled.base.on_args("error", Rc::new(move |_, values| {
-        sink.borrow_mut().push(values.to_vec());
-        Ok(())
-    }));
+    assembled.base.on_args(
+        "error",
+        Rc::new(move |_, values| {
+            sink.borrow_mut().push(values.to_vec());
+            Ok(())
+        }),
+    );
     observed
 }
 
@@ -19,22 +26,56 @@ fn raw_reporter_retains_native_message_and_original_error_without_reading_code()
     let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
     assembled.runtime.worker.set(true);
     let observed = observe_errors(&assembled);
-    let message = Js::object(vec![("native", Js::Number(f64::INFINITY)), ("missing", Js::Undefined)]);
+    let message = Js::object(vec![
+        ("native", Js::Number(f64::INFINITY)),
+        ("missing", Js::Undefined),
+    ]);
     let raw = Js::object(vec![("message", message.clone())]);
-    raw.define_accessor("code", Some(Rc::new(|_| Err(Thrown::type_error("unexpected eager code read")))), None);
-    assembled.this.call_method("emitAndLogError", vec![raw.clone(), Js::Undefined,
-        Js::object(vec![("suppressConsoleLog", Js::Bool(true))])]).unwrap();
+    raw.define_accessor(
+        "code",
+        Some(Rc::new(|_| {
+            Err(Thrown::type_error("unexpected eager code read"))
+        })),
+        None,
+    );
+    assembled
+        .this
+        .call_method(
+            "emitAndLogError",
+            vec![
+                raw.clone(),
+                Js::Undefined,
+                Js::object(vec![("suppressConsoleLog", Js::Bool(true))]),
+            ],
+        )
+        .unwrap();
     let events = observed.borrow();
-    assert!(events[0][0].same_reference(&message), "RAW-REPORT native message identity");
+    assert!(
+        events[0][0].same_reference(&message),
+        "RAW-REPORT native message identity"
+    );
     let metadata = &events[0][1];
-    assert_eq!(keys(metadata), ["sendToSentry", "sentryData", "enhancedContext", "suppressConsoleLog"]);
+    assert_eq!(
+        keys(metadata),
+        [
+            "sendToSentry",
+            "sentryData",
+            "enhancedContext",
+            "suppressConsoleLog"
+        ]
+    );
     assert!(metadata.has_own("enhancedContext"));
     assert!(metadata.get("enhancedContext").unwrap().is_undefined());
     let data = metadata.get("sentryData").unwrap();
     assert_eq!(keys(&data), ["error", "tags", "extra"]);
     assert!(data.get("error").unwrap().same_reference(&raw));
     let extra = data.get("extra").unwrap();
-    assert!(extra.get("originalMessage").unwrap().same_reference(&message));
+    assert!(
+        extra
+            .get("originalMessage")
+            .unwrap()
+            .same_reference(&message)
+    );
     let options = extra.get("exchangeOptions").unwrap();
     assert_eq!(keys(&options), ["testnet", "publicDataOnly"]);
     assert!(options.get("testnet").unwrap().is_undefined());
@@ -47,16 +88,89 @@ fn raw_reporter_retains_utf16_and_coerces_after_both_console_calls() {
     assembled.runtime.worker.set(true);
     let observed = observe_errors(&assembled);
     let raw = Js::String(Rc::from([0xd800, 0x0061]));
-    assembled.this.call_method("emitAndLogError", vec![raw]).unwrap();
+    assembled
+        .this
+        .call_method("emitAndLogError", vec![raw])
+        .unwrap();
     let mut expected: Vec<u16> = "Exchange Error: ".encode_utf16().collect();
     expected.extend([0xd800, 0x0061]);
     assert_eq!(observed.borrow()[0][0].as_str().unwrap().as_ref(), expected);
     assembled.runtime.consoled.borrow_mut().clear();
     let runtime = assembled.runtime.clone();
-    let source = Js::object(vec![("toString", Js::function("toString", move |_, _| {
-        assert_eq!(runtime.consoled.borrow().iter().map(|(severity, _)| severity.as_str()).collect::<Vec<_>>(), ["error", "trace"], "RAW-REPORT console before source coercion");
-        Ok(Js::str("source object"))
-    }))]);
-    assembled.this.call_method("emitAndLogError", vec![source]).unwrap();
+    let source = Js::object(vec![(
+        "toString",
+        Js::function("toString", move |_, _| {
+            assert_eq!(
+                runtime
+                    .consoled
+                    .borrow()
+                    .iter()
+                    .map(|(severity, _)| severity.as_str())
+                    .collect::<Vec<_>>(),
+                ["error", "trace"],
+                "RAW-REPORT console before source coercion"
+            );
+            Ok(Js::str("source object"))
+        }),
+    )]);
+    assembled
+        .this
+        .call_method("emitAndLogError", vec![source])
+        .unwrap();
     assert!(observed.borrow()[1][0].strict_equals(&Js::str("source object")));
+}
+
+#[test]
+fn raw_reporter_main_metadata_retains_own_undefined_without_worker_fields() {
+    let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
+    let observed = observe_errors(&assembled);
+    assembled
+        .this
+        .call_method("emitAndLogError", vec![Js::str("plain")])
+        .unwrap();
+    let events = observed.borrow();
+    let metadata = &events[0][1];
+    assert_eq!(keys(metadata), ["enhancedContext", "suppressConsoleLog"]);
+    assert!(metadata.has_own("enhancedContext"));
+    assert!(metadata.get("enhancedContext").unwrap().is_undefined());
+    assert!(
+        metadata
+            .get("suppressConsoleLog")
+            .unwrap()
+            .strict_equals(&Js::Bool(false))
+    );
+    assert_eq!(assembled.runtime.exceptions.borrow().len(), 1);
+}
+
+#[test]
+fn raw_reporter_preserves_native_error_before_any_metadata_projection() {
+    let assembled = assemble(json!({"key":"k", "secret":"s"})).unwrap();
+    assembled.runtime.worker.set(true);
+    let observed = observe_errors(&assembled);
+    let error = Thrown::type_error("native subtype").value;
+    error.define_accessor(
+        "code",
+        Some(Rc::new(|_| {
+            Err(Thrown::type_error("unexpected code getter"))
+        })),
+        None,
+    );
+    assembled
+        .this
+        .call_method("emitAndLogError", vec![error.clone()])
+        .unwrap();
+    let events = observed.borrow();
+    assert!(events[0][0].strict_equals(&Js::str("native subtype")));
+    let reported = events[0][1]
+        .get("sentryData")
+        .unwrap()
+        .get("error")
+        .unwrap();
+    assert!(reported.same_reference(&error));
+    assert!(
+        reported
+            .get("name")
+            .unwrap()
+            .strict_equals(&Js::str("TypeError"))
+    );
 }

@@ -335,7 +335,7 @@ impl BlofinExchangeHost for NativeHost {
         message: Option<&Value>,
     ) -> Result<(), ExchangeError> {
         let input = message.map_or(ExchangeErrorInput::Missing, |v| {
-            ExchangeErrorInput::Raw(v.clone())
+            ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(v))
         });
         base.get().emit_and_log_error(input, None, None)
     }

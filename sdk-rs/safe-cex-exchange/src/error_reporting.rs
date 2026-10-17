@@ -149,7 +149,7 @@ pub enum ExchangeErrorInput {
     Message(String),
     Error(Box<ExchangeError>),
     /// A selected response value, before the source reporter inspects/coerces it.
-    Raw(Value),
+    Raw(Js),
     Missing,
 }
 pub(crate) fn truthy(value: &Value) -> bool {
@@ -269,8 +269,8 @@ pub(crate) fn formatted_context(error: &ExchangeError) -> Js {
     ]);
     sentry_context(&source).expect("typed error metadata has ordinary data properties")
 }
-pub(crate) fn raw_formatted_context(error: &Value) -> Result<Js, ExchangeError> {
-    sentry_context(&from_json(error)).map_err(Into::into)
+pub(crate) fn raw_formatted_context(error: &Js) -> Result<Js, ExchangeError> {
+    sentry_context(error).map_err(Into::into)
 }
 
 pub fn format_error_for_sentry(error: &ExchangeError) -> Js {
