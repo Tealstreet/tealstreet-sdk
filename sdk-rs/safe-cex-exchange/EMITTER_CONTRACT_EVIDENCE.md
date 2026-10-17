@@ -31,6 +31,10 @@ stack retained, including a lone UTF-16 surrogate and actual structured clone.
 Typed producers call the existing native codec before any JSON serialization.
 Previously JSON-shaped fixture observations remain explicit finite projections;
 they do not establish an arbitrary-value ingress or host capability.
+The owned host codec retains its data-tree profile: shared local object identity
+is not a cross-thread capability, and cycles, excess depth and executable values
+retain their visible refusals. Local emitter and browser-post identities are
+measured separately.
 Runtime exception-report callbacks and main-thread worker RPC arguments/success
 results retain their separately scoped JSON ABIs. Raw error-input widening is a
 separate follow-up, and Candle widening remains held.
