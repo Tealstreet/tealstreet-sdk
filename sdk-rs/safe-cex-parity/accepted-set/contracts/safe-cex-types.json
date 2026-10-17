@@ -48566,5 +48566,680 @@
         }
       ]
     }
+  },
+  "safe_cex_types::prepared_order::PreparedOrderOpts": {
+    "shape": "union",
+    "evidence": "Actual prepared amendment decoder and private wire companion; fixed ordinary JSON corpus and independent native field identities, not a public placement or arbitrary generic claim.",
+    "instantiation": "PreparedOrderOpts<String, f64, Option<bool>>",
+    "positive": [
+      {
+        "symbol": "left",
+        "amount": 7
+      },
+      {
+        "symbol": "right",
+        "amount": 13,
+        "type": "limit",
+        "side": "buy",
+        "price": 31.25,
+        "triggerPrice": 47.5,
+        "reduceOnly": true,
+        "clientOrderId": "client-right"
+      }
+    ],
+    "negative": [
+      [],
+      null,
+      {
+        "symbol": "left"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "type": null
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "side": "unknown"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "price": null
+      }
+    ],
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::PlaceOrderOpts",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::PlaceOrderOpts",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::prepared_order::PreparedOrderOpts",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Actual typed placement/prepared input conversion; does not parse raw input."
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnly\":decoded.reduce_only,\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "symbol",
+        "amountBits",
+        "priceBits",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "triggerPrice",
+        "reduceOnly",
+        "clientOrderId"
+      ],
+      "cases": [
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null
+          }
+        },
+        {
+          "input": {
+            "symbol": "right",
+            "amount": 13,
+            "type": "limit",
+            "side": "buy",
+            "price": 31.25,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "right",
+            "amountBits": "402a000000000000",
+            "priceBits": "403f400000000000",
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "type": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "side": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::PreparedWire": {
+    "shape": "union",
+    "evidence": "Actual prepared amendment decoder and private wire companion; fixed ordinary JSON corpus and independent native field identities, not a public placement or arbitrary generic claim.",
+    "positive": [
+      {
+        "symbol": "left",
+        "amount": 7
+      },
+      {
+        "symbol": "right",
+        "amount": 13,
+        "type": "limit",
+        "side": "buy",
+        "price": 31.25,
+        "triggerPrice": 47.5,
+        "reduceOnly": true,
+        "clientOrderId": "client-right"
+      }
+    ],
+    "negative": [
+      [],
+      null,
+      {
+        "symbol": "left"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "type": null
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "side": "unknown"
+      },
+      {
+        "symbol": "left",
+        "amount": 7,
+        "price": null
+      }
+    ],
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"amountBits\":format!(\"{:016x}\",decoded.amount.to_bits()),\"priceBits\":decoded.price.map(|n|format!(\"{:016x}\",n.to_bits())),\"typeAbsent\":decoded.r#type.is_absent(),\"typeLimit\":matches!(decoded.r#type,crate::ModelField::Value(crate::OrderType::Limit)),\"sideBuy\":matches!(decoded.side,crate::ModelField::Value(crate::OrderSide::Buy)),\"triggerPrice\":decoded.trigger_price,\"reduceOnly\":decoded.reduce_only,\"clientOrderId\":decoded.client_order_id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "symbol",
+        "amountBits",
+        "priceBits",
+        "typeAbsent",
+        "typeLimit",
+        "sideBuy",
+        "triggerPrice",
+        "reduceOnly",
+        "clientOrderId"
+      ],
+      "cases": [
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "left",
+            "amountBits": "401c000000000000",
+            "priceBits": null,
+            "typeAbsent": true,
+            "typeLimit": false,
+            "sideBuy": false,
+            "triggerPrice": null,
+            "reduceOnly": null,
+            "clientOrderId": null
+          }
+        },
+        {
+          "input": {
+            "symbol": "right",
+            "amount": 13,
+            "type": "limit",
+            "side": "buy",
+            "price": 31.25,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "right",
+            "amountBits": "402a000000000000",
+            "priceBits": "403f400000000000",
+            "typeAbsent": false,
+            "typeLimit": true,
+            "sideBuy": true,
+            "triggerPrice": 47.5,
+            "reduceOnly": true,
+            "clientOrderId": "client-right"
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "type": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "side": "unknown"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "symbol": "left",
+            "amount": 7,
+            "price": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::prepared_order::deserialize_optional": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "deserialize_optional",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Actual private optional-field decoder at f64; UnitDeserializer retains its None branch and explicit JSON null is refused.",
+    "call": "{ let decoded: Result<Option<f64>, serde_json::Error> = if $value[\"unit\"].as_bool() == Some(true) { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"present\":decoded.is_some(),\"numberBits\":decoded.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "value": 1.25
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "numberBits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": 13
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "numberBits": "402a000000000000"
+        }
+      },
+      {
+        "input": {
+          "unit": true
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "numberBits": null
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": "1.25"
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": {
+          "ok": false
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ let decoded: Result<Option<f64>, serde_json::Error> = if $value[\"unit\"].as_bool() == Some(true) { $type(serde::de::value::UnitDeserializer::<serde_json::Error>::new()) } else { $type($value[\"value\"].clone()) }; match decoded { Ok(decoded) => serde_json::json!({\"ok\":true,\"present\":decoded.is_some(),\"numberBits\":decoded.map(|n|format!(\"{:016x}\",n.to_bits()))}),Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "present",
+        "numberBits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "value": 1.25
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "numberBits": "3ff4000000000000"
+          }
+        },
+        {
+          "input": {
+            "value": 13
+          },
+          "output": {
+            "ok": true,
+            "present": true,
+            "numberBits": "402a000000000000"
+          }
+        },
+        {
+          "input": {
+            "unit": true
+          },
+          "output": {
+            "ok": true,
+            "present": false,
+            "numberBits": null
+          }
+        },
+        {
+          "input": {
+            "value": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": true
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": "1.25"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": []
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "value": {}
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }

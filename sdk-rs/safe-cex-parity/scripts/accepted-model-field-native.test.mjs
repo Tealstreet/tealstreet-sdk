@@ -12,7 +12,8 @@ import {buildScanner} from './accepted-scanner.mjs';
 import {runProbes} from './accepted-probes.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const names = ['safe_cex_types::model_field::ModelField', 'safe_cex_types::model_field::deserialize_info'];
+const names = ['safe_cex_types::model_field::ModelField', 'safe_cex_types::model_field::deserialize_info',
+  ...['PreparedOrderOpts', 'PreparedWire', 'deserialize_optional'].map(name => `safe_cex_types::prepared_order::${name}`)];
 function cargo(args, env = {}) {
   const result = spawnSync('cargo', args, {cwd: root, encoding: 'utf8', timeout: 180000,
     maxBuffer: 64 * 1024 * 1024, env: {...process.env, CARGO_BUILD_JOBS: '1', ...env}});
@@ -56,7 +57,7 @@ test('generic model field visitor has executed native decoder observations', {ti
   const wrongFields = structuredClone(contracts);
   wrongFields[names[0]].nativeObservation.nativeFields.reverse();
   assert.throws(() => check(local, helpers, source, wrongFields), /generic helper native fields changed/);
-  requireNativeDecoderObservations(found.types.find(owner => owner.name === names[0]), contracts[names[0]], 'FieldVisitor@ModelField');
+  for (const name of names) requireNativeDecoderObservations(found.types.find(owner => owner.name === name), contracts[name], name);
   const results = runProbes(root, metadata, [{...found, package: pkg.name, packageId: pkg.id,
     target, features: [], publicAliases: [], defaultWitnesses: [], locals: [], delegatedLocals: [],
   }], contracts, {target: 'native', features: [], jobs: 1});
