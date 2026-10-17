@@ -129,12 +129,10 @@ fn real_private_filled_update_closes_order_and_emits_fill() {
         assert_eq!(orders[0].filled, 2.5);
         assert_eq!(orders[0].remaining, 0.0);
         drop(orders);
-        // Native listeners currently receive an argument array. The shared
-        // emitter cutover owns arity; this pins exact fill contents meanwhile.
         assert_eq!(
             fills.borrow().as_slice(),
             [
-                json!([{"id":"ws-native-order","side":"buy","symbol":"BTC-USDC","price":"123.55","amount":2.5}])
+                json!({"id":"ws-native-order","side":"buy","symbol":"BTC-USDC","price":"123.55","amount":2.5})
             ],
             "real filled private update must emit exact fill payload"
         );
