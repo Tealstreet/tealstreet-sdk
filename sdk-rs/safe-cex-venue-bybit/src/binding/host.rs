@@ -289,6 +289,12 @@ impl SnapshotHost for Rt {
         match name {
             "null" => Ok(Js::Null),
             "globalThis" => Ok(self.shared.globals.clone()),
+            "Set" => self.global("Set")?.call(Js::Undefined, vec![]),
+            "select:mapBybitHistoricalOrder" => {
+                Ok(Js::function("mapBybitHistoricalOrder", |_, args| {
+                    crate::ledger_mapping::map_bybit_historical_order(&arg(&args, 0))
+                }))
+            }
             "select:mapBybitTransactionToIncomeRecords" => Ok(Js::function(
                 "mapBybitTransactionToIncomeRecords",
                 |_, args| {
