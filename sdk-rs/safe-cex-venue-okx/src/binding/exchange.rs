@@ -403,3 +403,7 @@ impl Exchange for OkxExchange {
         self.invoke("fetchOHLCV", a)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/callback_binding.rs"]
+mod callback_binding;

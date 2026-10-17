@@ -1,4 +1,6 @@
 //! OKX family protocol implementation; see the crate's CLAUDE.md for port evidence.
+#[cfg(test)]
+extern crate self as safe_cex_venue_okx;
 pub mod api;
 pub mod closed_pnl;
 pub mod exchange;
