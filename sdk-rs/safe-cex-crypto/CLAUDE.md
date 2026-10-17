@@ -145,6 +145,9 @@ hex formatting; WasmError carries the string verbatim. Native field identities
 precede wire checks, and encoded lone-unit controls preserve size while changing
 bytes so refusal of both inputs cannot hide a stale UTF16 witness. These records
 do not implement WASM loader state or random key generation.
+The mandatory `crypto:oracles:check` runner includes `live_poseidon_types` with
+`--include-ignored`, executing both native record identity and the encoded-content
+mutation control after the existing signing oracles and fixture drift check.
 
 Stark felt/shortstring inputs normalize numeric strings with shared `js_bigint`
 before the existing prime-range guard. Failed numeric conversions retain the

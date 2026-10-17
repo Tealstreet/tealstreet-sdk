@@ -929,3 +929,129 @@ fn public_ingress_pair_uses_iterator_and_closes_after_two_values() {
         );
     }
 }
+
+#[test]
+fn public_rest_parsers_retain_native_rows_arrays_and_source_read_order() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/public-payloads-oracle.cjs"
+        ))
+        .output()
+        .expect("maintained public payload parser arrows");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(expected["native"].as_array().unwrap().len(), 2);
+    assert_eq!(expected["reads"].as_array().unwrap().len(), 2);
+    let f = fixture();
+    let mut native = vec![];
+    for kind in ["array", "object"] {
+        let row = Js::object(vec![
+            ("price", Js::Number(f64::NAN)),
+            ("amount", Js::Number(f64::INFINITY)),
+            ("zero", Js::Number(-0.)),
+            ("label", Js::utf16(&[0xd800])),
+            ("missing", Js::Undefined),
+        ]);
+        row.set("cycle", row.clone()).unwrap();
+        let bids = Js::holey_array(vec![None, Some(row.clone()), Some(Js::Undefined)]);
+        let asks = Js::array(vec![]);
+        let tickers = if kind == "array" {
+            bids.clone()
+        } else {
+            Js::object(vec![("2", row.clone()), ("1", Js::Undefined)])
+        };
+        let payload = Js::object(vec![
+            (
+                "order_book",
+                Js::object(vec![("bids", bids.clone()), ("asks", asks.clone())]),
+            ),
+            ("order_book_stats", tickers.clone()),
+        ]);
+        let book = f
+            .socket
+            .call_method("parseRestOrderBookLevels", vec![payload.clone()]);
+        let items = f.socket.call_method("parseRestTickerItems", vec![payload]);
+        let (book, items) = match (book, items) {
+            (Ok(book), Ok(items)) => (book, items),
+            (book, items) => {
+                native.push(json!({"kind":kind,
+                    "bookError":book.err().map(|error| error.message()),
+                    "tickerError":items.err().map(|error| error.message()),
+                }));
+                row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+                continue;
+            }
+        };
+        let entries = items.array_items().unwrap();
+        let observed = entries
+            .iter()
+            .flatten()
+            .find(|v| !v.is_undefined())
+            .unwrap();
+        let tags: Vec<_> = entries
+            .iter()
+            .map(|v| match v {
+                None => "hole",
+                Some(v) if v.same_reference(&row) => "row",
+                Some(v) if v.is_undefined() => "undefined",
+                _ => "other",
+            })
+            .collect();
+        native.push(json!({"kind":kind,
+            "bidsIdentity":book.get("bids").unwrap().same_reference(&bids),
+            "asksIdentity":book.get("asks").unwrap().same_reference(&asks),
+            "tickerIdentity":items.same_reference(&tickers),
+            "bidHole":book.get("bids").unwrap().array_items().unwrap()[0].is_none(),
+            "tags":tags,
+            "rowIdentity":entries.iter().flatten().filter(|v| !v.is_undefined()).all(|v| v.same_reference(&row)),
+            "nan":observed.get("price").unwrap().to_number().unwrap().is_nan(),
+            "infinity":observed.get("amount").unwrap().to_number().unwrap() == f64::INFINITY,
+            "zero":observed.get("zero").unwrap().to_number().unwrap().to_bits() == (-0_f64).to_bits(),
+            "units":observed.get("label").unwrap().to_js_string().unwrap().as_ref(),
+            "ownUndefined":observed.own_keys().contains(&"missing".encode_utf16().collect()) && observed.get("missing").unwrap().is_undefined(),
+            "cycle":observed.get("cycle").unwrap().same_reference(&row),
+        }));
+        row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+    }
+    let mut reads = vec![];
+    for method in ["parseRestOrderBookLevels", "parseRestTickerItems"] {
+        let trace = Rc::new(RefCell::new(vec![]));
+        let row = Js::object(vec![]);
+        let bids = Js::array(vec![row.clone()]);
+        let book = Js::object(vec![]);
+        for (name, value) in [("bids", bids), ("asks", Js::array(vec![]))] {
+            let trace = trace.clone();
+            book.define_accessor(
+                name,
+                Some(Rc::new(move |_| {
+                    trace.borrow_mut().push(name);
+                    Ok(value.clone())
+                })),
+                None,
+            );
+        }
+        let payload = Js::object(vec![
+            ("order_book", book),
+            ("order_book_stats", Js::array(vec![row])),
+        ]);
+        for name in ["data", "result"] {
+            let trace = trace.clone();
+            payload.define_accessor(
+                name,
+                Some(Rc::new(move |_| {
+                    trace.borrow_mut().push(name);
+                    Ok(Js::object(vec![]))
+                })),
+                None,
+            );
+        }
+        f.call(method, vec![payload]);
+        reads.push(json!({"method":method,"trace":*trace.borrow()}));
+    }
+    assert_eq!(json!({"native":native,"reads":reads}), expected);
+}

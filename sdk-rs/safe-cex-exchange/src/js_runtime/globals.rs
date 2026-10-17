@@ -388,6 +388,15 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 ))
             }),
         ),
+        (
+            "isSafeInteger",
+            Js::function("isSafeInteger", |_, a| {
+                Ok(Js::Bool(matches!(
+                    arg(&a, 0),
+                    Js::Number(n) if n.is_finite() && n.trunc() == n && n.abs() <= 9_007_199_254_740_991.0
+                )))
+            }),
+        ),
         ("MAX_SAFE_INTEGER", Js::Number(9_007_199_254_740_991.0)),
         ("NaN", Js::Number(f64::NAN)),
         ("parseFloat", parse_float),

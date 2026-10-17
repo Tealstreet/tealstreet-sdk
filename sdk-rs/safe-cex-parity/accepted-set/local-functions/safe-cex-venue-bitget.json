@@ -1,12 +1,17 @@
 {
   "safe-cex-venue-bitget/src/binding/hosts/assembly.rs::LOCAL_FUNCTION:enc": {
     "category": "non-decoder",
-    "reason": "Reviewed qs_stringify::enc: percent-encodes the UTF-8 bytes of an outgoing query key/value, or copies it when encoding is disabled. It constructs request text and admits no inbound schema.",
-    "sourceSha256": "aaa1b4e5c5cbb5c83dd1bc52a895831a192b10a72df64de067338a302eb757a3"
+    "reason": "Reviewed qs_stringify::enc: percent-encodes the UTF-8 bytes of an outgoing query key/value, or copies it when encoding is disabled. It constructs request text and admits no inbound schema. Reviewed source changes through c876a20471: response-key lookup now checks inherited keys and primitive in-operator refusal; transport error forwarding passes the base. Both changes are outside qs_stringify, whose enc/walk bodies and outbound-only role are unchanged.",
+    "sourceSha256": "c16871f0101fbcdcdf8c0a767daa3c7af53fea2d332c13491c965f1432476ecf"
   },
   "safe-cex-venue-bitget/src/binding/hosts/assembly.rs::LOCAL_FUNCTION:walk": {
     "category": "non-decoder",
-    "reason": "Reviewed qs_stringify::walk: recursively emits outgoing bracket query keys and encoded scalar text, omitting undefined/functions and emitting empty null values. It traverses existing VM values to serialize an HTTP request; it constructs no decoded typed response or validated authority.",
-    "sourceSha256": "aaa1b4e5c5cbb5c83dd1bc52a895831a192b10a72df64de067338a302eb757a3"
+    "reason": "Reviewed qs_stringify::walk: recursively emits outgoing bracket query keys and encoded scalar text, omitting undefined/functions and emitting empty null values. It traverses existing VM values to serialize an HTTP request; it constructs no decoded typed response or validated authority. Reviewed source changes through c876a20471: response-key lookup now checks inherited keys and primitive in-operator refusal; transport error forwarding passes the base. Both changes are outside qs_stringify, whose enc/walk bodies and outbound-only role are unchanged.",
+    "sourceSha256": "c16871f0101fbcdcdf8c0a767daa3c7af53fea2d332c13491c965f1432476ecf"
+  },
+  "safe-cex-venue-bitget/src/binding/hosts/assembly.rs::LOCAL_FUNCTION:contains": {
+    "category": "non-decoder",
+    "reason": "Inside get_key: checks own properties, prototype-chain members and native array/function builtins on an existing Js receiver. It returns only property presence for the source in-operator lookup; it performs no wire parse or typed record construction.",
+    "sourceSha256": "c16871f0101fbcdcdf8c0a767daa3c7af53fea2d332c13491c965f1432476ecf"
   }
 }

@@ -51,7 +51,7 @@ fn from_order(order: &Order) -> PreparedOrderOpts {
         trigger_price: None,
         stop_loss: None,
         take_profit: None,
-        reduce_only: Some(order.reduce_only),
+        reduce_only: order.reduce_only.into_property(),
         time_in_force: None,
         trigger_type: None,
         tp_trigger_type: None,
@@ -450,11 +450,11 @@ impl ApexOmniExchange {
             .collect::<Result<Vec<_>, _>>()?;
         services.throttle_fetch_orders()?;
         ids.into_iter()
-            .map(|id| match id {
-                J::String(id) => Ok(id),
-                _ => Err(failure(
-                    "typed order ID refuses a non-string response field".into(),
-                )),
+            .map(|id| {
+                if matches!(id, J::Undefined) {
+                    return Err(failure("ApexOmni placement response is missing id".into()));
+                }
+                text(&id)
             })
             .collect()
     }

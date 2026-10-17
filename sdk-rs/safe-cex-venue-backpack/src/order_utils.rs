@@ -140,7 +140,7 @@ pub fn map_order<E>(
         remaining: amount - safe_cex_num::parse_float(executed),
         status: (map_order_status(status)).into(),
         last_update: order.createdAt,
-        reduce_only: order.reduceOnly.unwrap_or(is_trigger_order),
+        reduce_only: order.reduceOnly.unwrap_or(is_trigger_order).into(),
         time_in_force: (Some(map_backpack_time_in_force(tif))).into(),
         parent_id: (None).into(),
         close: (None).into(),

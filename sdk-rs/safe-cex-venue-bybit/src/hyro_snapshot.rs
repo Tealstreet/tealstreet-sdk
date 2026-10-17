@@ -7,20 +7,41 @@ macro_rules! call {
         $h.apply(selected, $args)?
     }};
 }
+/// Closed set of lexical callbacks created by this module and selected by the native host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Callback {
+    SnapshotCurrent,
+    SnapshotPnl,
+    MarketUsdt,
+    MarketEntry,
+}
+impl Callback {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "snapshot-current" => Some(Self::SnapshotCurrent),
+            "snapshot-pnl" => Some(Self::SnapshotPnl),
+            "market-usdt" => Some(Self::MarketUsdt),
+            "market-entry" => Some(Self::MarketEntry),
+            _ => None,
+        }
+    }
+}
+
 pub fn dispatch<H: AccountRefreshHost>(
     h: &H,
-    code: &str,
+    code: Callback,
     args: Vec<H::Value>,
 ) -> Result<H::Value, H::Error> {
     match code {
-        "snapshot-current" => Ok(h.boolean(true)),
-        "snapshot-pnl" => h.intrinsic(
+        Callback::SnapshotCurrent => Ok(h.boolean(true)),
+        Callback::SnapshotPnl => h.intrinsic(
             "addition",
             vec![args[0].clone(), h.get(&args[1], "unrealizedPnl")?],
         ),
-        "market-usdt" => Ok(h.boolean(h.equal(&h.get(&args[0], "quote")?, &h.literal("USDT")))),
-        "market-entry" => Ok(h.array(vec![h.get(&args[0], "symbol")?, args[0].clone()])),
-        _ => h.intrinsic("unknown callback", vec![h.literal(code)]),
+        Callback::MarketUsdt => {
+            Ok(h.boolean(h.equal(&h.get(&args[0], "quote")?, &h.literal("USDT"))))
+        }
+        Callback::MarketEntry => Ok(h.array(vec![h.get(&args[0], "symbol")?, args[0].clone()])),
     }
 }
 pub fn reconcile_private_state<H: AccountRefreshHost>(

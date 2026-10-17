@@ -96,7 +96,7 @@ where
     let mut mapped = Vec::with_capacity(rows.len());
     for row in rows {
         let fees = fees.as_array().ok_or("fees.find is not a function")?;
-        mapped.push(Some(map_market(
+        mapped.push(map_market(
             row,
             fees,
             category,
@@ -105,9 +105,16 @@ where
             } else {
                 Family::Spot
             },
-        )?));
+        )?);
     }
-    Ok(mapped)
+    let mut admitted = Vec::with_capacity(mapped.len());
+    for market in mapped {
+        match market {
+            Ok(market) => admitted.push(Some(market)),
+            Err(message) => emit_error(Some(&Value::String(message)))?,
+        }
+    }
+    Ok(admitted)
 }
 #[cfg(test)]
 mod tests;

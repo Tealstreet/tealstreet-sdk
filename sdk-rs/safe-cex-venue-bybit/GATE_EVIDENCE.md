@@ -1578,6 +1578,8 @@ Final Python 3.11 tomllib census at 5111a4891f versus pinned merged integration 
 
 ## Inverse/spot recent-order cache — 833ebb09cf36f2244f2a6a73ebf8035aeac009fb
 
+Historical evidence retired: the standalone cache facade, its fake-host oracle, mutation runner and generated control files have been removed. Production cache rows now map to the native lifecycle receiver; variant_reconciliation_binding, private_frame_binding, inverse_batch_binding and Brazil Spot cancellation cover the live consumers. The commands and counts below describe the removed facade only.
+
 Fresh branch feat/bybit-local-order-cache starts directly at reviewed integration cc3d25150b; no unreviewed slice ancestor. Initial implementation dda677324a, callback correction bf6f6cc1e9, control-only correction 833ebb09cf. Python 3.11 tomllib census at 833ebb09cf against original parent exits 0: exactly 10 pending rows moved (2 pending->ported / 8 pending->CHOSEN divergent), Bybit 120 ported / 78 divergent / 322 pending. Five identical source families across inverse and spot map to five real Rust functions. Constructors, REST consumers and the linear exchange's distinct timer/reconciliation cache remain pending. Two C3 exemptions name anonymous Map storage and its read-only observer, not fabricated exchange implementations. Target-file arrays were mechanically derived from mapped rows and serialized by extractor writer.
 
 Measured at 833ebb09cf: scoped cargo check --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-bybit --all-targets --jobs 2 exits 0. Earlier scoped check dda677324a also exited 0, but its later-changed implementation does not cover this revision. scripts/local-order-cache-controls.py at 833ebb09cf exits 0: live baseline exits 0 (1 passed / 0 failed / 0 ignored), all eight compiling mutations exit 101 with the recorded named native assertion, and all eight restores exit 0 (1 passed / 0 failed / 0 ignored). Tracked evidence/local-order-cache-controls.json binds every exit to this exact SHA. Exact src/tests/scripts restoration diff exits 0. No runtime mutation survivors. Selected control floor is eight (five new families and three actual review regressions); stopped after read-only store reentry, iteration 8.
@@ -4094,3 +4096,52 @@ one Bybit receiver cancellation edge is added, with the enclosing receiver body
 fingerprints refreshed. Every non-Bybit entry remains equal to the base revision.
 The inverse manifest now points to cancel_symbol_orders rather than the unrelated
 cancel_orders_helper body.
+
+## Zero unbound-name ratchet outside owned buckets
+
+Frozen mirror master `a7ad809e16b28f0d58a3916c068c13a15a6a725e` has13 unbound names:
+Bybit2, Bitrue1, Paradex1, Hyperliquid9; all other venue name rows are empty.
+MEXC's two old references and stale baseline were already removed by merged649
+(`6bfa52bc14`) and659 (`a917a844f1`). Bitrue/Paradex belong to453; HL9 belongs to
+the Realm plan. Separate method rows (Bitrue utcOffset; Lighter/WOO pop;
+Orderly reverse; Phemex startOf) also belong to453 and are unchanged here.
+
+Bybit's two names have7 exact static sites. `super.dispose` occurs only in
+`hyro_private_session::dispose`, with no production caller. Only3 synthetic
+oracle cases invoke it. The live route is BaseWebSocket::dispose ->
+PrivateProtocol::dispose -> the actual retained Hyro receiver's resetSession,
+then core owned-task/timer/socket cleanup. That route and its source export stay;
+the orphan wrapper, its test-only base operation and those3 cases are deleted.
+The original session corpus is now439 cases, exactly442 minus the3 deleted
+wrapper cases, with constructor/reset/ACK/reconnect/disposal-state cases retained.
+The obsolete wrapper mutation control is also retired;8 live controls remain.
+
+`unknown callback` occurs in the default arm of6 dispatchers, selected only by
+fixed internal lexical callback tags. Native `binding/host::dispatch_callback`
+selects the private-read10, snapshot4, publication5, inverse-read3 and account4
+names. `binding/session::callback` routes8 socket names; `hyro_socket::callback`
+handles current/reconnect itself and selects the6 session-body names. Source
+factories allocate precisely these32 body selectors. Closed per-module enums now
+encode that already-proved closure; dispatch matches are exhaustive and the6
+unreachable intrinsic references are deleted. Nonmatching namespaces retain the
+existing host routing; no fake intrinsic registration or scanner exception is
+introduced. Live read/publication/account algorithms and socket bodies are kept.
+
+With original master bodies, lowering Bybit's baseline2->0 compiles and fails
+`every_venue_reference_has_a_production_binding` for exactly these names:
+commit `dfd41f106b`, `/tmp/unbound-bybit-baseline-red.log`. This is a static-dead-code
+proof, not a claimed behavioral RED for a path that production cannot reach.
+Actual configured Hyro, private refresh and all6 retained source-body witnesses
+exercise the preserved production behavior separately. Both old references are
+absent from production source after the cutover; owned baselines are unchanged.
+
+
+Validation at the normally refreshed head: scoped native37pass, including actual
+Hyro22 +actual four-family private refresh4 and six source suites11tests; native
+and WASM strict all-target Clippy pass; full parity7459/16592 and extractor0updates
+pass. Final current-master inventory after the clean unrelated test/CI merge passes:
+cancellation6pass/1explicit export-ignore, override7pass/1live-TS-ignore and
+binding25pass (/tmp/bybit-unbound-refreshed-inventories.log). No changed body has a stale
+cancellation/override pin. Actual final inventory lists only the11 owned names.
+The parity manifest uses indexed core WsProtocol/BaseWebSocket/reset-body targets;
+its note identifies the actual non-indexed PrivateProtocol trait implementation.

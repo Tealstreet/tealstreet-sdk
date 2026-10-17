@@ -1,6 +1,7 @@
 //! Real production class members, with native values observed before projection.
 use crate::binding_test_harness as binding_harness;
 use binding_harness::{Harness, harness, options};
+use safe_cex_exchange::exchange::Exchange;
 use safe_cex_exchange::js_runtime::{
     promise::await_js,
     value::{Js, from_json},
@@ -284,4 +285,150 @@ fn live_algo_filter_error_and_clock_order_match_all_12_source_cases() {
             );
         }
     }
+}
+
+#[test]
+fn mixed_algo_rows_refuse_only_the_bad_strict_field_through_the_real_binding() {
+    use safe_cex_exchange::{exchange::Exchange, js_runtime::value::from_typed};
+    use std::rc::Rc;
+    for (source_field, model_field, bad_value) in [
+        ("quantity", "amount", "not-an-amount"),
+        ("totalExecutedQuantity", "filled", "not-filled"),
+        ("reduceOnly", "reduceOnly", "truthy-non-bool"),
+    ] {
+        for consumer in ["trait", "store"] {
+            let valid = |id: u64| json!({"algoOrderId":id,"rootAlgoOrderId":20,"symbol":"PERP_BTC_USDT","algoType":"STOP_LOSS","side":"SELL","triggerPrice":90,"triggerPriceType":"MARK_PRICE","quantity":2.5,"totalExecutedQuantity":0.5,"reduceOnly":true});
+            let mut bad = valid(22);
+            bad[source_field] = json!(bad_value);
+            let mut undefined = valid(23);
+            undefined.as_object_mut().unwrap().remove("reduceOnly");
+            let mut false_row = valid(24);
+            false_row["reduceOnly"] = json!(false);
+            let h = setup(|http| {
+                http.route("GET","/v1/orders",200.,json!({"success":true,"rows":[{"order_id":11,"symbol":"PERP_BTC_USDT","side":"BUY","type":"LIMIT","price":99,"quantity":1,"executed":0,"status":"NEW","reduce_only":false}],"meta":{"total":1,"records_per_page":100}}));
+                http.route("GET","/v3/algo/orders",200.,json!({"success":true,"data":{"rows":[valid(21),bad,undefined,false_row],"meta":{"total":4,"records_per_page":100}}}));
+            });
+            let errors = Rc::new(std::cell::RefCell::new(Vec::new()));
+            let seen = errors.clone();
+            h.venue().base().on(
+                "error",
+                Rc::new(move |_, data| {
+                    seen.borrow_mut().push(data.to_string());
+                    Ok(())
+                }),
+            );
+            let rows = if consumer == "trait" {
+                let rows = h
+                    .drive(h.venue().fetch_orders(None))
+                    .expect("one malformed algo field must not discard valid orders");
+                from_typed(&rows).unwrap()
+            } else {
+                let pending = h
+                    .exchange
+                    .rt
+                    .this
+                    .call_method("fetchOrders", vec![])
+                    .unwrap();
+                let rows = h
+                    .drive(Box::pin(async move {
+                        await_js(pending)
+                            .await
+                            .map_err(|error| error.to_exchange_error())
+                    }))
+                    .unwrap();
+                h.exchange
+                    .rt
+                    .this
+                    .get("store")
+                    .unwrap()
+                    .call_method("update", vec![Js::object(vec![("orders", rows.clone())])])
+                    .expect("configured fetchOrders must not poison the Store snapshot");
+                assert_eq!(
+                    h.store.orders().len(),
+                    4,
+                    "good rows reach the actual DefaultStore"
+                );
+                rows
+            };
+            let rows = rows.array_values().unwrap();
+            assert_eq!(
+                rows.iter()
+                    .map(|row| row.get("id").unwrap().to_display())
+                    .collect::<Vec<_>>(),
+                ["11", "21", "23", "24"],
+                "bad {model_field} row only, via {consumer}"
+            );
+            assert!(
+                rows[2].has_own("reduceOnly") && rows[2].get("reduceOnly").unwrap().is_undefined(),
+                "own undefined stays distinct from false"
+            );
+            assert!(
+                rows[3]
+                    .get("reduceOnly")
+                    .unwrap()
+                    .strict_equals(&Js::Bool(false))
+            );
+            assert!(
+                rows[1]
+                    .get("reduceOnly")
+                    .unwrap()
+                    .strict_equals(&Js::Bool(true))
+            );
+            assert_eq!(rows[1].get("amount").unwrap().as_f64(), Some(2.5));
+            assert_eq!(rows[1].get("filled").unwrap().as_f64(), Some(0.5));
+            let errors = errors.borrow();
+            assert_eq!(errors.len(), 1, "one visible refusal per bad row");
+            assert!(
+                errors[0].contains(model_field)
+                    && errors[0].contains(bad_value)
+                    && errors[0].contains("22"),
+                "refusal names the field, original value and row: {:?}",
+                *errors
+            );
+            assert_eq!(h.http.calls("/v1/orders").len(), 1);
+            assert_eq!(h.http.calls("/v3/algo/orders").len(), 1);
+            h.exchange.dispose().unwrap();
+        }
+    }
+}
+
+#[test]
+fn real_client_id_rule_matches_source_safe_integer_limits() {
+    let h = setup(|_| {});
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/client-id-rule-source.cjs"
+        ))
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source["rows"].as_array().unwrap().len(), 26);
+    let rule = h.exchange.rt.this.get("clientOrderIdRule").unwrap();
+    assert_eq!(
+        rule.get("label").unwrap().to_display(),
+        source["label"].as_str().unwrap()
+    );
+    assert_eq!(
+        rule.get("requirement").unwrap().to_display(),
+        source["requirement"].as_str().unwrap()
+    );
+    for row in source["rows"].as_array().unwrap() {
+        let actual = rule
+            .call_method("isValid", vec![Js::str(row["input"].as_str().unwrap())])
+            .expect(
+                "real constructed WOO client-ID rule must call the shared safe-integer builtin",
+            );
+        assert!(
+            actual.strict_equals(&Js::Bool(row["valid"].as_bool().unwrap())),
+            "source client-ID rule {row}"
+        );
+    }
+    h.exchange.dispose().unwrap();
 }

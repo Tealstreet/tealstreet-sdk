@@ -138,7 +138,7 @@ mod tests {
             amount: 2.0,
             filled: 0.0,
             remaining: 2.0,
-            reduce_only: false,
+            reduce_only: false.into(),
             close: (None).into(),
             info: (None).into(),
             time_in_force: (Some(OrderTimeInForce::GoodTillCancel)).into(),

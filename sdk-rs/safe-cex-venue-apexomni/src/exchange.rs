@@ -470,10 +470,13 @@ impl ApexOmniExchange {
         let reduce_only = match raw_reduce_only {
             J::Bool(value) => *value,
             value if !truthy(value) => false,
-            _ => {
-                return Err(failure(
-                    "shared typed Order refuses non-boolean reduceOnly".into(),
-                ));
+            value => {
+                self.host.console(
+                    "warn",
+                    &format!("[APEX OMNI] Refused order row: Order.reduceOnly must be boolean, got {value:?}"),
+                    None,
+                )?;
+                return Ok(Vec::new());
             }
         };
         let order = Order {
@@ -487,7 +490,7 @@ impl ApexOmniExchange {
             amount,
             filled,
             remaining,
-            reduce_only,
+            reduce_only: reduce_only.into(),
             info: (Some(fields(row)?)).into(),
             time_in_force: time_in_force.into(),
             last_update,
@@ -839,34 +842,56 @@ impl ApexOmniExchange {
             ));
         }
         let mut markets = Vec::new();
-        for (row, precision, limits) in mapped {
-            let active = if let J::Bool(value) = get(row, "enableTrade") {
-                *value
-            } else {
-                return Err(failure(
-                    "shared typed Market refuses non-boolean enableTrade".into(),
-                ));
-            };
-            markets.push(Market {
-                id: field_string(get(row, "symbol"))?,
-                symbol: field_string(get(row, "crossSymbolName"))?,
-                base: field_string(get(row, "baseTokenId"))?,
-                quote: field_string(get(row, "settleAssetId"))?,
-                active,
-                precision,
-                limits,
-                is_expiring: Some(false),
-                is_perpetual: None,
-                info: Some(fields(row)?),
-                pretty_symbol: None,
-                contract_size: None,
-                is_inverse: None,
-                is_spot: None,
-                is_read_only: None,
-                taker_fee: None,
-                maker_fee: None,
-                option: None,
-            });
+        for (index, (row, precision, limits)) in mapped.into_iter().enumerate() {
+            let projected: Result<Market, ExchangeError> = (|| {
+                let typed_string = |field, raw_field| {
+                    let value = get(row, raw_field);
+                    field_string(value)
+                        .map_err(|cause| failure(format!("{field}={value:?}: {}", cause.message)))
+                };
+                let active = if let J::Bool(value) = get(row, "enableTrade") {
+                    *value
+                } else {
+                    return Err(failure(format!(
+                        "active={:?}: expected boolean",
+                        get(row, "enableTrade")
+                    )));
+                };
+                Ok(Market {
+                    id: typed_string("id", "symbol")?,
+                    symbol: typed_string("symbol", "crossSymbolName")?,
+                    base: typed_string("base", "baseTokenId")?,
+                    quote: typed_string("quote", "settleAssetId")?,
+                    active,
+                    precision,
+                    limits,
+                    is_expiring: Some(false),
+                    is_perpetual: None,
+                    info: Some(
+                        fields(row)
+                            .map_err(|cause| failure(format!("info={row:?}: {}", cause.message)))?,
+                    ),
+                    pretty_symbol: None,
+                    contract_size: None,
+                    is_inverse: None,
+                    is_spot: None,
+                    is_read_only: None,
+                    taker_fee: None,
+                    maker_fee: None,
+                    option: None,
+                })
+            })();
+            match projected {
+                Ok(market) => markets.push(market),
+                Err(cause) => self.base.log(
+                    &format!(
+                        "Refused ApexOmni market row {index} id={:?}: {}",
+                        get(row, "symbol"),
+                        cause.message
+                    ),
+                    "warning",
+                )?,
+            }
         }
         Ok(markets)
     }

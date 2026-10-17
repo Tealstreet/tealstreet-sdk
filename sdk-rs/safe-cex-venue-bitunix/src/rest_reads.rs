@@ -86,12 +86,13 @@ pub async fn fetch_markets<E, F>(
     cached: impl FnOnce() -> Vec<Market>,
     read: impl FnOnce(&'static str, Value) -> F,
     mut trace: impl FnMut(&E),
+    mut refuse: impl FnMut(&str),
 ) -> Vec<Market>
 where
     E: From<JsCoercionError>,
     F: Future<Output = Result<Option<Value>, E>>,
 {
-    let result: Result<Vec<Market>, E> = async {
+    let result: Result<(Vec<Market>, Vec<String>), E> = async {
         let response = read(endpoint("MARKETS"), json!({})).await?;
         let rows = response
             .as_ref()
@@ -99,34 +100,50 @@ where
             .and_then(Value::as_array)
             .ok_or_else(|| E::from(error("Market response data must be an array")))?;
         let mut markets = Vec::new();
-        for row in rows {
+        let mut refusals = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
             if key(row, "symbolStatus").and_then(Value::as_str) != Some("OPEN")
                 || key(row, "quote").and_then(Value::as_str) != Some("USDT")
                 || !is_api_trading_supported(key(row, "isApiSupported"))
             {
                 continue;
             }
-            let base = key(row, "base")
-                .and_then(Value::as_str)
-                .ok_or_else(|| E::from(error("Market base must be a string")))?;
-            let symbol = row
-                .get("symbol")
-                .and_then(Value::as_str)
-                .ok_or_else(|| E::from(error("Market symbol must be a string")))?;
+            let id = format!("{}/USDT", js_string(key(row, "base"))?);
+            let amount_precision = precision(key(row, "basePrecision"))?;
+            let price_precision = precision(key(row, "quotePrecision"))?;
+            let Some(base) = key(row, "base").and_then(Value::as_str) else {
+                let value = key(row, "base").map_or_else(|| "undefined".into(), Value::to_string);
+                let symbol = row.get("symbol").map_or_else(|| "undefined".into(), Value::to_string);
+                refusals.push(format!("Refused Bitunix market row {index} symbol={symbol}: base={value}: expected string"));
+                continue;
+            };
+            let Some(symbol) = row.get("symbol").and_then(Value::as_str) else {
+                let value = row.get("symbol").map_or_else(|| "undefined".into(), Value::to_string);
+                refusals.push(format!("Refused Bitunix market row {index}: symbol={value}: expected string"));
+                continue;
+            };
+            let max_amount = match js_number(key(row, "maxLimitOrderVolume")) {
+                Ok(value) => value,
+                Err(cause) => {
+                    let value = key(row, "maxLimitOrderVolume").map_or_else(|| "undefined".into(), Value::to_string);
+                    refusals.push(format!("Refused Bitunix market row {index} symbol={symbol:?}: limits.amount.max={value}: {}", cause.message));
+                    continue;
+                }
+            };
             markets.push(Market {
-                id: format!("{base}/USDT"),
+                id,
                 symbol: symbol.into(),
                 base: base.into(),
                 quote: "USDT".into(),
                 active: true,
                 precision: MarketPrecision {
-                    amount: precision(key(row, "basePrecision"))?,
-                    price: precision(key(row, "quotePrecision"))?,
+                    amount: amount_precision,
+                    price: price_precision,
                 },
                 limits: MarketLimits {
                     amount: MarketLimitsAmount {
                         min: 0.0,
-                        max: js_number(key(row, "maxLimitOrderVolume"))?,
+                        max: max_amount,
                     },
                     leverage: MarketLimitsLeverage {
                         min: 1.0,
@@ -147,11 +164,16 @@ where
                 option: None,
             });
         }
-        Ok(markets)
+        Ok((markets, refusals))
     }
     .await;
     match result {
-        Ok(markets) => markets,
+        Ok((markets, refusals)) => {
+            for message in refusals {
+                refuse(&message);
+            }
+            markets
+        }
         Err(error) => {
             trace(&error);
             cached()

@@ -498,6 +498,9 @@ fn merge_order(target: &mut Order, incoming: Order) {
     if target.price.is_absent() {
         target.price = old.price;
     }
+    if target.reduce_only.is_absent() {
+        target.reduce_only = old.reduce_only;
+    }
     if target.close.is_absent() {
         target.close = old.close;
     }
@@ -1270,25 +1273,45 @@ impl StoreState {
             self.retained_balance = Arc::new(balance.clone());
             self.data.balance = balance;
         }
-        macro_rules! apply { ($($field:ident),*) => {$(if let Some(value)=changes.$field {self.data.$field=value;})*}; }
-        apply!(
-            latency,
-            displayed_positions,
-            orders_risk,
-            active_chasers,
-            active_twaps,
-            loaded,
-            options,
-            fetched_leverage
-        );
-        macro_rules! optional { ($($field:ident),*) => {$(if let Some(value)=changes.$field {self.data.$field=Some(value);})*}; }
-        optional!(
-            displayed_margin,
-            message_handler_stats,
-            stark_config,
-            zk_link_config,
-            user_data
-        );
+        if let Some(value) = changes.latency {
+            self.data.latency = value;
+        }
+        if let Some(value) = changes.displayed_positions {
+            self.data.displayed_positions = value;
+        }
+        if let Some(value) = changes.orders_risk {
+            self.data.orders_risk = value;
+        }
+        if let Some(value) = changes.active_chasers {
+            self.data.active_chasers = value;
+        }
+        if let Some(value) = changes.active_twaps {
+            self.data.active_twaps = value;
+        }
+        if let Some(value) = changes.loaded {
+            self.data.loaded = value;
+        }
+        if let Some(value) = changes.options {
+            self.data.options = value;
+        }
+        if let Some(value) = changes.fetched_leverage {
+            self.data.fetched_leverage = value;
+        }
+        if let Some(value) = changes.displayed_margin {
+            self.data.displayed_margin = Some(value);
+        }
+        if let Some(value) = changes.message_handler_stats {
+            self.data.message_handler_stats = Some(value);
+        }
+        if let Some(value) = changes.stark_config {
+            self.data.stark_config = Some(value);
+        }
+        if let Some(value) = changes.zk_link_config {
+            self.data.zk_link_config = Some(value);
+        }
+        if let Some(value) = changes.user_data {
+            self.data.user_data = Some(value);
+        }
         if let Some(stats) = changes.request_stats {
             self.request_stats = Some(stats);
         }

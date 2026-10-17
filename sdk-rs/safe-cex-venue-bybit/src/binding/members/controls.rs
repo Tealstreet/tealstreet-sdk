@@ -6,7 +6,7 @@ use crate::{
         rt::{Rt, venue},
         value::{Js, Thrown, from_json, to_json},
     },
-    position_controls::{self as controls, Positions},
+    position_controls as controls,
 };
 use serde_json::{Map, Value};
 use std::rc::Rc;
@@ -50,11 +50,11 @@ fn post(
     })
 }
 
-/// `this.fetchPositions(symbols)` awaited, as the retained JSON batch.
+/// Preserve the native fetched batch through Store publication.
 fn fetch(
     rt: &Rt,
     symbols: Option<Vec<String>>,
-) -> Result<impl Future<Output = Result<Positions, Error>> + use<>, Error> {
+) -> Result<impl Future<Output = Result<Js, Error>> + use<>, Error> {
     let symbols = symbols.map_or(Js::Undefined, |s| {
         Js::array(s.iter().map(|s| Js::str(s)).collect())
     });
@@ -62,13 +62,7 @@ fn fetch(
         .this
         .call_method("fetchPositions", vec![symbols])
         .map_err(to_error)?;
-    Ok(async move {
-        let positions = await_js(pending).await.map_err(to_error)?;
-        match to_json(&positions).map_err(to_error)? {
-            Value::Array(rows) => Ok(Rc::new(rows)),
-            _ => Ok(Rc::new(vec![])),
-        }
-    })
+    Ok(async move { await_js(pending).await.map_err(to_error) })
 }
 
 fn store_call(rt: &Rt, member: &str, value: Js) -> Result<(), Error> {
@@ -77,10 +71,6 @@ fn store_call(rt: &Rt, member: &str, value: Js) -> Result<(), Error> {
         .and_then(|store| store.call_method(member, vec![value]))
         .map_err(to_error)?;
     Ok(())
-}
-
-fn positions_js(positions: &Positions) -> Js {
-    Js::array(positions.iter().map(from_json).collect())
 }
 
 fn emit(rt: &Rt, message: Option<Value>) -> Result<(), Error> {
@@ -245,14 +235,8 @@ pub(crate) fn change_position_mode_helper(rt: &Rt, args: &[Js]) -> Result<Js, Th
             symbol.as_deref(),
             |endpoint, payload| post(&rt, endpoint, payload),
             |symbols| fetch(&rt, symbols),
-            |positions| {
-                store_call(
-                    &rt,
-                    "update",
-                    Js::object(vec![("positions", positions_js(&positions))]),
-                )
-            },
-            |positions| store_call(&rt, "addOrUpdatePositions", positions_js(&positions)),
+            |positions| store_call(&rt, "update", Js::object(vec![("positions", positions)])),
+            |positions| store_call(&rt, "addOrUpdatePositions", positions),
             |message| emit(&rt, message),
         )
         .await
@@ -307,13 +291,7 @@ pub(crate) fn change_margin_type(rt: &Rt, isolated: Js, symbol: Js) -> Result<Js
                 Ok(())
             },
             |symbols| fetch(&rt, symbols),
-            |positions| {
-                store_call(
-                    &rt,
-                    "update",
-                    Js::object(vec![("positions", positions_js(&positions))]),
-                )
-            },
+            |positions| store_call(&rt, "update", Js::object(vec![("positions", positions)])),
         )
         .await
         .map_err(to_thrown)?;

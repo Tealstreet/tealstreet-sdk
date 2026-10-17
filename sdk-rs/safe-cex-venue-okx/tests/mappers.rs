@@ -1,3 +1,4 @@
+use safe_cex_num::JsCoercionError;
 #[path = "support/cardinality.rs"]
 mod cardinality;
 use safe_cex_types::Market;
@@ -19,14 +20,14 @@ fn canonical_numbers(value: Value) -> Value {
         value => value,
     }
 }
-fn convert(native: f64, market: &Market, price: Option<f64>) -> f64 {
-    if market.is_inverse.unwrap_or(false) {
+fn convert(native: f64, market: &Market, price: Option<f64>) -> Result<f64, JsCoercionError> {
+    Ok(if market.is_inverse.unwrap_or(false) {
         price
             .filter(|p| *p > 0.0)
             .map_or(0.0, |p| native * market.contract_size.unwrap() / p)
     } else {
         native * market.contract_size.unwrap()
-    }
+    })
 }
 
 #[test]
@@ -115,10 +116,10 @@ fn maintained_typescript_ledger_history_and_closed_mappers() {
                 let row = input["row"].as_object().unwrap();
                 let market: Market = serde_json::from_value(input["market"].clone()).unwrap();
                 let error = match case["op"].as_str().unwrap() {
-                    "income_error" => {
-                        income::map_okx_bill_to_income_records(row, |_| Some("DOGEUSDT".into()))
-                            .unwrap_err()
-                    }
+                    "income_error" => income::map_okx_bill_to_income_records(row, |_| {
+                        Ok::<_, JsCoercionError>(Some("DOGEUSDT".into()))
+                    })
+                    .unwrap_err(),
                     "closed_error" => closed_pnl::map_okx_closed_position(
                         row,
                         Some(&market),
@@ -151,7 +152,9 @@ fn maintained_typescript_ledger_history_and_closed_mappers() {
             "income" => {
                 let result =
                     income::map_okx_bill_to_income_records(input.as_object().unwrap(), |id| {
-                        (id == "DOGE-USDT-SWAP").then(|| "DOGEUSDT".into())
+                        Ok::<_, JsCoercionError>(
+                            (id == "DOGE-USDT-SWAP").then(|| "DOGEUSDT".into()),
+                        )
                     });
                 if case["corrected"] == true {
                     let bad = case["sourcePrototype"]

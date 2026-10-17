@@ -4,5 +4,50 @@
     "runtimeOwner": "safe_cex_venue_hyperliquid::rate_limit::get_hyperliquid_rest_request_weight",
     "reason": "The unchanged private text coercer is reached by the actual inventoried get_hyperliquid_rest_request_weight caller through raw_request_weight -> raw_number. Its direct native weight bits/text and thrown-error observations cover nested arrays and own-toString errors; the compiled comma-separator mutation proves this exact helper is exercised. No private function is renamed, exposed or omitted.",
     "sourceSha256": "b147ca525ffac1439ed6d128d5d2779b4be6a964540f3e5c592bec461a3a103a"
+  },
+  "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::LOCAL_FUNCTION:attempt_switch": {
+    "category": "non-decoder",
+    "reason": "Inside switch_to_correct_network: constructs and calls wallet_switchEthereumChain using host operations, awaits its result and reports success as a bool. It is browser effect orchestration with an existing chain id, not wire/model decoding.",
+    "sourceSha256": "3880c2b47c80018f229565df3deb435606798dbc8919758e21729221110ea4c5"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:each": {
+    "category": "non-decoder",
+    "reason": "Inside array builtin installation: executes the live-array callback loop with property-presence checks and forwards each callback result to the selected visitor. This is VM iteration/control flow over native values, not typed wire admission.",
+    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:find": {
+    "category": "non-decoder",
+    "reason": "Inside array builtin installation: implements find/findIndex callback evaluation, including holes, and returns the matched native value/index. It does not parse input or construct a domain schema.",
+    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:flatten": {
+    "category": "non-decoder",
+    "reason": "Inside the flat builtin: recursively flattens existing VM arrays to the requested depth into runtime Values. It is an array operation with no typed record or raw response admission.",
+    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:unary": {
+    "category": "non-decoder",
+    "reason": "Inside numeric builtin installation: applies the selected f64 operation after the realm ToNumber coercion and returns a VM Number. Arithmetic coercion is not a typed domain decoder.",
+    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:error_construct": {
+    "category": "non-decoder",
+    "reason": "Inside install_errors: selects the already implemented native Error constructor callback for the requested intrinsic class. It returns a function pointer and admits no raw/model data.",
+    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:make_error": {
+    "category": "non-decoder",
+    "reason": "Inside install_errors: constructs an intrinsic VM Error with the selected prototype and hidden message/cause fields from native constructor arguments. This implements JavaScript object construction, not a wire Error deserializer or typed response admission.",
+    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/builtins.rs::LOCAL_FUNCTION:time": {
+    "category": "non-decoder",
+    "reason": "Inside Date builtin installation: reads the numeric internal slot of an existing VM Date and throws for an incompatible receiver. It is intrinsic receiver validation, not wire/domain decoding.",
+    "sourceSha256": "aa9de3210500bd0293dd9faf7ad56c85b13a097d6db64c281a95e51b0af85000"
+  },
+  "safe-cex-venue-hyperliquid/src/realm/host_market.rs::LOCAL_FUNCTION:parts": {
+    "category": "non-decoder",
+    "reason": "Inside compare_decimal: splits a decimal spelling into normalized sign/integer/fraction components solely for exact arithmetic ordering. It constructs no wire/domain record; rejected spellings produce no ordering result.",
+    "sourceSha256": "fbd8dcca9b3ef5f8fec2562d3ad7a8a6f2d93d6e2112b83c47a481c1f71b29a3"
   }
 }

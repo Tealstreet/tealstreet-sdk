@@ -1043,3 +1043,71 @@ The shared remote ref advanced during fetch; a standalone fetch retry exited 0
 and the next merge reported already up to date. The same standalone scoped
 byte-preservation command against `d879bbb561ae4a29b05b07a32b856ddf663596a8`
 again exited 0 after this merge. Native and mutation gates remain applicable.
+
+## Visible strict placement amount refusal (2026-10-18)
+
+Overseer shared decision3 keeps nonfinite order amounts outside the admitted
+placement-input domain. The maintained formatCreateOrder still produces quantity
+"NaN", an empty positive-infinity payload list, or quantity"-Infinity"; those
+actual-source observations remain in the existing oracle's optional
+nativePlacementNumbers mode, without changing original corpus inputs or floors.
+
+Previously the constructed public typed entry projected the amount to JSON null
+and returned a generic decode Error with no field report. The native body
+BitunixVenue::validate_placement_input, invoked by the existing typed capability
+hook after caller-ID preflight, now emits the amount/original value and returns
+TypeError before hydration or HTTP. Six single/batch cases cover all3 nonfinite
+values without a caller-ID confound. Existing caller-ID rejection priority stays
+intact. No carrier widening or zero substitution occurs.
+
+The final regression compiles/fails against the old behavior; a control admitting
+NaN through the final guard also compiles/fails at the field-error assertion.
+Exact production source bytes are restored. Final constructed identity/dispatch7
+tests pass, alongside the earlier9 unchanged source/orchestration tests. Required
+all-feature cancellation7/override8/binding25, strict native/Wasm all-target
+Clippy, formatting/diff, parity7459/16613 and extraction0 pass. Logs
+/tmp/bitunix-visible-{amount-control-red,amount-fixed,final-native,
+final-inventories,final-native-clippy,final-wasm-clippy,final-parity,
+final-extract}.log. This accepted input residual is recorded in known-residuals.md.
+
+## Money-path D: attached amendment cancel/recreate
+
+Maintained source `updateOrder` catches an unsupported-operation refusal on an
+attached virtual TP/SL leg and calls `recreateAttachedTpslParentOrder`. The native
+binding previously emitted/threw without recovery. The new public
+`native_identity::attached_amendment_recreates_only_after_matching_refusal_and_successful_cancel`
+regression constructs the actual venue, signed clients and DefaultStore, replacing
+only terminal REST responses. Its optional source-oracle mode executes actual
+amendment, fallback, hydration, formatter and placement bodies with the actual
+TypeScript DefaultStore; the original model corpus stays unchanged.
+
+Eight source/native cases retain TP/SL trigger types and protection legs, reject
+nonmatching errors and ordinary-parent unsupported errors without cancel, refuse
+both LIMIT leg execution semantics before cancel, preserve Store on failed
+cancel, and retain canceled Store status on failed placement. Exact payloads and
+request order, returned chart aliases, visible errors and exact parent/child
+versus neighboring-ID status changes are compared. Fixture error envelopes keep
+`data: {}` so method emissions are observed independently of the API's separate
+msg-without-data diagnostic.
+
+The regression compiled and failed on master (`f203fd13c2`, expected NEW__tp,
+actual unsupported-operation error). With the final assertions, restoring the
+original `update_order` body compiled and failed the same recovery assertion;
+exact source restoration passed. Logs: `/tmp/bitunix-attached-red.log`,
+`/tmp/bitunix-attached-control-red.log`, and
+`/tmp/bitunix-attached-control-restored.log`.
+
+Scoped native identity/model/placement/trait tests, strict native and WASM
+all-target Clippy, all-feature cancellation/override/binding inventories and full
+parity passed. Inventory outcomes are cancellation6pass/1explicit export-ignore,
+override7pass/1live-TS-ignore and binding25pass. Changed production bodies have no
+cancellation/override body pins; the required target passed without a pin edit.
+Manifest rows now map the fallback, string classifier and internal trigger helper
+using the existing retained snapshot/UTF-8 boundaries. No carrier migration.
+
+Final normal-master refresh `c5b55adb18` preserves both distinct append-only test
+and doc additions. All18 scoped native tests (including the inherited80-case
+ticker witness), native/WASM strict all-target lint, inventories6+7+25 with the two
+explicit ignores, parity7459/16587 and extractor0updates pass. The independent
+money-path audit WEEX receipt is57 concrete binding tests +1 original trading
+corpus, all passing. All checks ran serially with Cargo jobs1.
