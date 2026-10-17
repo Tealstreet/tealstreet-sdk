@@ -1,4 +1,6 @@
-use safe_cex_exchange::runtime::{ExchangeRuntime, ExchangeTask};
+use crate::exchange::Exchange;
+use crate::runtime::{ExchangeRuntime, ExchangeTask};
+use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -147,4 +149,26 @@ impl<T> Drop for ThrottleManager<T> {
             task.cancel();
         }
     }
+}
+
+pub fn symbol_metadata_throttler(exchange: Rc<dyn Exchange>) -> Rc<ThrottleManager<String>> {
+    let venue = exchange.clone();
+    ThrottleManager::new(
+        exchange.base().runtime.clone(),
+        move |symbol: String| {
+            let venue = venue.clone();
+            let runtime = venue.base().runtime.clone();
+            runtime.spawn_local(Box::pin(async move {
+                if let Err(error) = venue.update_symbol_metadata(symbol).await {
+                    // TS leaves this Promise unawaited; the host receives its unhandled error.
+                    venue
+                        .base()
+                        .runtime
+                        .report_exception(&error, &json!({"method":"updateSymbolMetadata"}));
+                }
+            }));
+        },
+        500,
+        String::clone,
+    )
 }
