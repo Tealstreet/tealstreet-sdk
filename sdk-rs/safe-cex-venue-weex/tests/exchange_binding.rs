@@ -1152,7 +1152,10 @@ fn gap_snapshot_rejection_is_silent_and_keeps_the_existing_book() {
     h.venue().base().on(
         "log",
         Rc::new(move |_, message| {
-            delivered.borrow_mut().push(message.clone());
+            delivered.borrow_mut().push(
+                safe_cex_exchange::js_runtime::value::to_json(message)
+                    .expect("finite fixture event"),
+            );
             Ok(())
         }),
     );
