@@ -146,9 +146,8 @@ fn real_algo_frame_keeps_open_order_with_unmapped_plan_type() {
     s.h.venue().dispose().unwrap();
 }
 
-#[test]
-fn real_rest_orders_keep_unmapped_status_and_plan_type() {
-    let h = harness(ExchangeName::Bitget, options(), |http| {
+fn rest_orders_keep_unmapped(name: ExchangeName) {
+    let h = harness(name, options(), |http| {
         script(http);
         http.routes
             .borrow_mut()
@@ -180,7 +179,35 @@ fn real_rest_orders_keep_unmapped_status_and_plan_type() {
     );
     assert_eq!(
         serde_json::to_value(&orders[1]).unwrap()["type"],
-        "take_profit"
+        "take_profit_market"
     );
     h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_rest_orders_keep_unmapped_status_and_plan_type() {
+    for name in [ExchangeName::Bitget, ExchangeName::Bitgetusdc] {
+        rest_orders_keep_unmapped(name);
+    }
+}
+
+#[test]
+fn real_inverse_rest_orders_keep_unmapped_status_and_plan_type() {
+    rest_orders_keep_unmapped(ExchangeName::Bitgetinverse);
+}
+
+#[test]
+fn real_algo_unmapped_status_still_evaluates_mapper() {
+    let s = Scene::connect();
+    let mut malformed = algo("algo-invalid", "executing", "normal_plan");
+    malformed["symbol"] = json!({});
+    s.send(
+        "orders-algo",
+        json!([malformed, algo("algo-later", "live", "profit_plan")]),
+    );
+    assert!(
+        s.h.store.orders().is_empty(),
+        "source mapper error must still stop the frame before later rows"
+    );
+    s.h.venue().dispose().unwrap();
 }
