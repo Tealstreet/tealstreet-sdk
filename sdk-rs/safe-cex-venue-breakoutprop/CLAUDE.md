@@ -177,6 +177,9 @@ mapping uses first USD replacement, first margin tier and separate amount/price
 increments. Only source-accessed fields are projected. Mapping property errors
 report their cause and return cached markets before inspecting later rows. Raw
 info retains unknown fields, signed zero and overflow lexemes.
+Ticker mapping reads only symbol/bid/ask; unused type/time fields never validate
+a response. Mapping property errors report and return cached tickers. Twenty
+additional source cases and three actual HTTP regressions cover these paths.
 Ticker events absent/null produce source undefined (`None`), while empty events
 produce `Some([])`. Session/account/HTTP failures report and return current stored
 tickers; reporter errors retain their original ExchangeError. The market combined
