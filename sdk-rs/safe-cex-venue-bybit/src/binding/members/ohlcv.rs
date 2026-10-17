@@ -66,7 +66,10 @@ pub(crate) fn fetch_ohlcv(rt: &Rt, options: Js) -> Result<Js, Thrown> {
     let rt = rt.clone();
     Ok(rt.clone().spawn(Box::pin(async move {
         let name = venue(&rt)?.base.name.clone();
-        let primary = matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo);
+        let primary = matches!(
+            name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Hyrotrader
+        );
         if primary {
             rt.this
                 .call_method("validateCandleInterval", vec![options.get("interval")?])?;

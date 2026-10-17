@@ -79,6 +79,37 @@ function failsNamed(result, name) {
   assert.equal(result.status, 1, `negative control exits 1: ${name}`);
   assert(result.stderr.includes(name), `negative control reaches named assertion: ${name}`);
 }
+function healthControl(before, after, expected) {
+  const original = fs.readFileSync(gateFile, 'utf8');
+  const declaration = original.split('\n').find(line => line.startsWith('const rustHealth = sourceText('));
+  assert(declaration, 'production health source reader');
+  const gate = original.replace(declaration,
+    declaration.slice(0, -1) + `.replace(${JSON.stringify(before)}, ${JSON.stringify(after)});`);
+  control({gate}, result => failsNamed(result, expected));
+}
+test('health return carrier cannot hide behind fallible callback signatures', () => {
+  healthControl(') -> Result<(), PortfolioFailure> {\n        let detail',
+    ') -> Result<(), String> {\n        let detail',
+    'mark_private_user_stream_auth_failed must expose the fallible Store contract');
+});
+test('health callbacks must retain the fallible native carrier', () => {
+  healthControl('log: impl FnMut(&str, &str) -> Result<(), PortfolioFailure>',
+    'log: impl FnMut(&str, &str)',
+    'mark_private_user_stream_auth_failed must retain fallible log capability');
+});
+test('health Store notification origin cannot be flattened', () => {
+  healthControl('.map_err(|error| Rc::new(PortfolioThrown::from(error)))?;',
+    '.map_err(|_| Rc::new(PortfolioThrown::from_value(None)))?;',
+    'health native origin bridge retains StoreMutationError');
+});
+test('health log failures cannot be discarded', () => {
+  healthControl('log(reason, "warning")?;', 'let _ = log(reason, "warning");',
+    'health log failure must propagate');
+});
+test('health warning failures cannot be discarded', () => {
+  healthControl('emit_warning(reason)?;', 'let _ = emit_warning(reason);',
+    'health warning failure must propagate');
+});
 function reviewedWalk(result) {
   assert.equal(result.status, 0, result.stderr);
   const value = JSON.parse(result.stdout);

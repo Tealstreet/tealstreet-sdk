@@ -76,6 +76,18 @@ at [strings](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),
 [numeric ingress](../parity/MANIFEST-SPEC.md#numeric-ingress-defect), and
 [surrogate observability](../parity/MANIFEST-SPEC.md#forced-surrogate-conflict).
 
+## Health capability carrier audit after #691
+
+The degraded/auth-failed health methods return the existing `PortfolioFailure`
+carrier because both Store notifications and log/warning callbacks can fail.
+Message-received and standalone snapshot publication retain their direct
+`StoreMutationError` results. The source audit checks each exact outer signature,
+fallible callback signatures, unchanged native Store origin bridge, and `?`
+propagation from log/warning calls. It does not accept a callback's Result as
+evidence of the enclosing method's return type. Five negative controls reject
+flattened health errors, infallible callbacks and discarded callback failures;
+all existing notification classifications and controls remain intact.
+
 ## Original audit, before the snapshot bridge repair
 
 The review starts from integration `ac0f5fccf24207b26c279e67da2a88f2c72a7aae`. Its 262 ported callable rows are retained in `scripts/store-notification-reviewed-roots.json`, including every subsequently reclassified row. The current audit walks all 262 roots; it does not shrink the cohort when a finding is recorded. Current ported callables number 247 after the class snapshot publication withdrawal below.

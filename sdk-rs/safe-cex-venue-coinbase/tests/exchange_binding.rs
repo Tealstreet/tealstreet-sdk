@@ -558,6 +558,102 @@ fn public_stream_listeners_use_real_parser_and_shared_book_operations() {
     h.venue().dispose().unwrap();
 }
 #[test]
+fn public_book_copyback_preserves_duplicate_price_levels() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{
+        cell::RefCell,
+        io::Write,
+        process::{Command, Stdio},
+        rc::Rc,
+    };
+    let frames = json!([
+        {"channel":"l2_data","events":[{"type":"snapshot","product_id":"BTC-USD","updates":[
+            {"side":"bid","price_level":"42","new_quantity":"2"},
+            {"side":"bid","price_level":"42","new_quantity":"3"},
+            {"side":"bid","price_level":"40","new_quantity":"7"},
+            {"side":"offer","price_level":"43","new_quantity":"4"},
+            {"side":"offer","price_level":"43","new_quantity":"5"}]}]},
+        {"channel":"l2_data","events":[{"type":"update","product_id":"BTC-USD","updates":[
+            {"side":"bid","price_level":"42","new_quantity":"8"},
+            {"side":"offer","price_level":"43","new_quantity":"0"}]}]},
+        {"channel":"l2_data","events":[{"type":"update","product_id":"BTC-USD","updates":[
+            {"side":"bid","price_level":"41","new_quantity":"6"},
+            {"side":"offer","price_level":"44","new_quantity":"9"}]}]}
+    ]);
+    let mut source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/book-copyback-binding.cjs"
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    source
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(frames.to_string().as_bytes())
+        .unwrap();
+    let source = source.wait_with_output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(expected[0]["bids"][0]["amount"], 2);
+    assert_eq!(expected[0]["bids"][1]["amount"], 3);
+    assert_eq!(expected[0]["bids"][1]["total"], 5);
+    let expected_books: Vec<OrderBook> = serde_json::from_value(expected).unwrap();
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let captures = Rc::new(RefCell::new(Vec::new()));
+        let observed = captures.clone();
+        let cleanup = h
+            .venue()
+            .listen_order_book(
+                "BTC-USDC".into(),
+                Rc::new(move |book| {
+                    observed.borrow_mut().push(book);
+                }),
+            )
+            .unwrap();
+        let public = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
+            .unwrap()
+            .1
+            .clone();
+        for frame in frames.as_array().unwrap() {
+            public
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+            h.runtime.pump();
+        }
+        assert_eq!(
+            captures.borrow().len(),
+            3,
+            "every real public frame reaches the listener"
+        );
+        assert_eq!(
+            &*captures.borrow(),
+            &expected_books,
+            "real book copyback must retain each source level and running total"
+        );
+        cleanup().unwrap();
+        h.venue().dispose().unwrap();
+    }
+}
+#[test]
 fn startup_publication_keeps_store_subscriber_cause_after_commit() {
     use std::{cell::Cell, error::Error, rc::Rc};
     let h = harness(ExchangeName::Coinbase, options(), script);
