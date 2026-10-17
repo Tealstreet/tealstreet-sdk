@@ -243,3 +243,13 @@ before awaiting. A seventh control reinstalls deferred setLeverage logging and
 must fail `spot_warning_native_eager:setLeverage`, then restore to a pass. The
 control floor is seven, ending at eager-prefix. Native future-drop scheduling
 beyond this body is not claimed.
+
+The imported ethers `decodeBase64` native binding reuses the shared Node Buffer
+decoder already used for Kraken WS auth. Supplied L2 secrets retain source
+acceptance of noncanonical trailing bits, ignored characters and incomplete
+quartets. `exchange_binding` compares actual signed balance requests for eight
+secrets against the maintained TS helper with real ethers and independent Node
+crypto. This measures the Node dependency profile, not a new browser-profile claim.
+Private order frames assert Store orders and matched fills; trade frames assert
+fill delivery and authoritative position refresh. The source has no private
+balance topic, so those frames retain the REST account balance until its poll.
