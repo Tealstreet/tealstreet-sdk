@@ -294,13 +294,16 @@ APIs, method bodies, TypeScript sources and native witnesses; only the import-dr
 Rust line spans and whole-file hash change. This visibility repair does not
 classify the remaining unreviewed owners.
 
-GRVT SDK OrderWithBuilderFee signing treats its 20-byte 0x-prefixed builder
-address as bytes, matching the vendored MetaMask signer rather than ethers'
-checksum admission. Normalize only that address's casing in the local typed-data
-copy before calling shared EIP-712; preserve the caller's original spelling and
-all existing integer conversion. The 24-case actual-SDK signature matrix covers
-three address spellings across both networks, order kinds and integer ranges.
-Shared ethers address validation and legacy signing retain their own boundaries.
+GRVT SDK OrderWithBuilderFee signing converts the builder field with MetaMask's
+address rules in the local typed-data copy before shared EIP-712. Short hex and
+either prefix casing are padded to 20 bytes; safe integer Numbers become bytes.
+Other strings use the SDK dependency's legacy base-10 loop over UTF-16 units,
+including its first-20-byte selection for oversized results. Preserve source
+error names/messages, the caller's original value/reference, and integer-field
+conversion after the address's Number conversion. The original 24-case signature
+matrix remains; a separate constructed SDK host compares 24 independently
+authored address inputs with the actual vendored Signer. Shared ethers address
+validation and legacy signing retain their own boundaries.
 
 The native `Exchange::refresh_markets` entry calls the existing GRVT receiver
 override, which always replaces stored markets. It must not inherit the shared

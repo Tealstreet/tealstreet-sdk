@@ -431,6 +431,9 @@ impl RustVenueHost for NativeVenueHost {
         Ok(
             safe_cex_venue_paradex::native_exchange::ParadexDependencies {
                 runtime: self.runtime.clone(),
+                // The native registry uses a UTC date realm, as for WEEX and
+                // Coinbase. Other embeddings provide their own host timezone.
+                local_wall_time_to_utc: Rc::new(|ms| ms),
                 http: Rc::new(move |options| {
                     if options.remote_signer.is_some() {
                         return Err(ExchangeError::new(

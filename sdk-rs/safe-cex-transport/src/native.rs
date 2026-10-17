@@ -106,9 +106,56 @@ fn axios_default_query(params: &serde_json::Value) -> Result<String, TransportEr
     crate::query::axios_default_query(&params.clone().into())
 }
 fn network_failure(error: &reqwest::Error, request: &RestRequest) -> RestFailure {
+    let mut cause = std::error::Error::source(error);
+    let mut originating_code = None;
+    let mut detail = error.to_string();
+    while let Some(current) = cause {
+        detail = current.to_string();
+        // Hyper's connector erases its DNS error type but retains this context.
+        if detail == "dns error" {
+            originating_code = Some("ENOTFOUND");
+        }
+        if originating_code == Some("ENOTFOUND")
+            && detail.contains("Temporary failure in name resolution")
+        {
+            originating_code = Some("EAI_AGAIN");
+        }
+        if let Some(rustls::Error::InvalidCertificate(certificate)) =
+            current.downcast_ref::<rustls::Error>()
+        {
+            use rustls::CertificateError;
+            originating_code = Some(match certificate {
+                CertificateError::Expired | CertificateError::ExpiredContext { .. } => {
+                    "CERT_HAS_EXPIRED"
+                }
+                CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => {
+                    "CERT_NOT_YET_VALID"
+                }
+                CertificateError::Revoked => "CERT_REVOKED",
+                CertificateError::NotValidForName
+                | CertificateError::NotValidForNameContext { .. } => "ERR_TLS_CERT_ALTNAME_INVALID",
+                CertificateError::BadSignature => "CERT_SIGNATURE_FAILURE",
+                CertificateError::InvalidPurpose
+                | CertificateError::InvalidPurposeContext { .. } => "INVALID_PURPOSE",
+                _ => "CERT_REJECTED",
+            });
+        }
+        if let Some(io) = current.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::NetworkUnreachable
+        {
+            originating_code = Some("ENETUNREACH");
+        }
+        // io::Error::source skips its immediate custom error; TLS lives there.
+        cause = current
+            .downcast_ref::<std::io::Error>()
+            .and_then(|io| io.get_ref().map(|inner| inner as &dyn std::error::Error))
+            .or_else(|| current.source());
+    }
     let (code, message) = if error.is_timeout() {
         let ms = request.timeout_ms.unwrap_or(0);
         ("ECONNABORTED", format!("timeout of {ms}ms exceeded"))
+    } else if let Some(code) = originating_code {
+        (code, format!("{code}: {detail}"))
     } else if error.is_connect() {
         (
             "ECONNREFUSED",
@@ -416,6 +463,10 @@ impl TunnelHost for NativeTunnelHost {
     }
     fn sync_server_time(&self, _server_time: u64) {}
 }
+
+#[cfg(test)]
+#[path = "native_network_tests.rs"]
+mod network_tests;
 
 #[cfg(test)]
 mod url_tests {

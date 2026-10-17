@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "7d6a52cfa924a04942fcf8938a5c162a40ff124f514e5c7690b3e8f18d3ce93f"
+          "sha256": "3b97886efbf4f91c08dfe1fac9a27766e6ba9973f315b9bdf29d29d619eac8b4"
         }
       ],
       "guards": [
@@ -1637,9 +1637,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "d45d7aa04cf20562cf4512ba1e8c0868ea437a2a67d177c41675edd99d667362",
+      "producer_sha256": "f1997ddcf13d1b6ae83ade69b57c34f1b2dc8683987cd3dbc957f2e42a4a316e",
       "classification": "no-owned-latch",
-      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added."
+      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added. RetainedJsonInput restoration replaces JSON projection synchronously before the same await; local config values own no new task, borrow, reservation or cancellation registration."
     },
     {
       "owner": "src/js_runtime/client.rs::RestHttpHost as JsHttpHost::send",
@@ -2101,7 +2101,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "7d6a52cfa924a04942fcf8938a5c162a40ff124f514e5c7690b3e8f18d3ce93f"
+          "sha256": "3b97886efbf4f91c08dfe1fac9a27766e6ba9973f315b9bdf29d29d619eac8b4"
         }
       ],
       "guards": [

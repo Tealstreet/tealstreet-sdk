@@ -90,7 +90,7 @@ fn grvt_registry_uses_real_http_and_preserves_direct_sdk_session_headers() {
         let account = requests.iter().find(|r| r.url == "/lite/v1/account_summary").unwrap();
         assert_eq!(account.headers["X-Ts-Grvt-Session"],"session-local");
         assert!(!account.headers.contains_key("Cookie"),"direct source never promotes custom grvtCookie");
-        assert_eq!(account.config_extensions["grvtCookie"],json!("rm=true; gravity=session-local"));
+        assert_eq!(account.config_extensions["grvtCookie"].clone().into_value().unwrap(),json!("rm=true; gravity=session-local"));
         assert_eq!(requests[0].base_url.as_deref(),Some("https://market-data.grvt.io"));
         drop(requests);
         exchange.dispose().unwrap();
