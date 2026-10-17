@@ -534,7 +534,7 @@ Scoped ratchet logs and exact native/WASM receipts are preserved as `/tmp/port-t
 
 ## Publication recheck (2026-10-18 SGT)
 
-Current master `e352e84bf9e63ccc02376307a1fffe19f3d2dfbe` was normally merged before publication. The exact
+Current master `bc706182c181eeaf34eaeacf122f62da12143eb6` was normally merged before publication. The exact
 123 exchange +108 types exemption rows remain unchanged from `f759dc8be2`.
 All26 Rust source files containing those declarations are byte-identical to the
 reviewed baseline, and the ledger has exactly one row for every current entry.
@@ -560,4 +560,4 @@ Publication gates after that merge:
 - Production accepted-set ratchet: old types debt RED, its removal GREEN on both native and WASM receipts; removal-only ancestry validation PASS.
 - Full-resolution scoped parity: PASS, 7,459 rows / 813 exchange public items and 7,459 rows / 253 types public items.
 - Required all-features cancellation inventory (`--jobs 1`): PASS, six tests and one intentional discovery-export ignore.
-- Extractor dependency check: PASS. Global extraction check reports one pre-existing Lighter manifest serialization drift on the merged master, with zero added/orphaned symbols; reported to the overseer. Neither PR file changes extraction inputs.
+- Extractor dependency and global extraction checks: PASS, zero manifest changes or added/orphaned symbols, after normal-merging master with #759's Lighter manifest repair. Neither PR file changes extraction inputs.
