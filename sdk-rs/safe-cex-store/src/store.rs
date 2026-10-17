@@ -285,7 +285,7 @@ impl StoreState {
         let mut changed = false;
         for order in &mut self.orders {
             if ids.contains(&order.id.as_str()) {
-                order.status = status;
+                order.status = (status).into();
                 changed = true;
             }
         }
@@ -474,8 +474,12 @@ fn empty_request_counts() -> RequestOutcomeCounts {
         other: 0.0,
     }
 }
-fn terminal(status: OrderStatus) -> bool {
-    matches!(status, OrderStatus::Closed | OrderStatus::Canceled)
+fn terminal(status: impl Into<safe_cex_types::ModelField<OrderStatus>>) -> bool {
+    let status = status.into();
+    matches!(
+        status,
+        safe_cex_types::ModelField::Value(OrderStatus::Closed | OrderStatus::Canceled)
+    )
 }
 fn merge_order(target: &mut Order, incoming: Order) {
     let old = std::mem::replace(target, incoming);
@@ -781,7 +785,7 @@ impl StoreState {
     }
     fn update_order_status(&mut self, id: &str, status: OrderStatus) {
         if let Some(index) = self.orders.iter().position(|o| o.id == id) {
-            self.orders[index].status = status;
+            self.orders[index].status = (status).into();
             self.order_update_id += 1.0;
             self.data.update_ids.orders = self.order_update_id;
             self.notify(false);
@@ -887,9 +891,9 @@ impl StoreState {
         position.unrealized_pnl = 0.0;
         position.contracts = 0.0;
         position.liquidation_price = 0.0;
-        position.margin_size = Some(0.0);
-        position.info = None;
-        position.extra = None;
+        position.margin_size = (Some(0.0)).into();
+        position.info = (None).into();
+        position.extra = (None).into();
         position
     }
     fn add_or_update_positions_full(&mut self, positions: Vec<Position>) {

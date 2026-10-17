@@ -347,3 +347,9 @@ removed. Spot limiter rows now name only the production `spot_client` bodies.
 checks per-instance tokens, default weight, the exact minute refill and recursive
 Promise/timer acquisition. Historical SPOT_LIMITER_BODIES_EVIDENCE.json records
 the removed adapter; it does not establish production binding coverage.
+
+The accepted request-weight contract includes cancelByCloid batches of 39, 40 and
+80 for both raw and native JSON bodies. `rate_encoded` compares the actual TS
+weights and the production ApiClient.prepare_request limiter reservations. The
+cloid-weight binding control deletes each classifier arm independently, requires
+a compiled pacing assertion failure, restores exact bytes and reruns the witness.

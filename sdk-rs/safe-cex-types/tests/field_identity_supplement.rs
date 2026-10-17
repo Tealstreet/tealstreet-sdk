@@ -108,7 +108,7 @@ fn decoded_loaded_flags_are_one_hot_and_orders_read_native_fields() {
     assert_eq!(order.id, "order-id", "FIELD-IDENTITY Order.id");
     assert_eq!(order.symbol, "order-symbol", "FIELD-IDENTITY Order.symbol");
     for (field, actual, expected) in [
-        ("price", order.price, 11.0_f64),
+        ("price", order.price.to_number(), 11.0_f64),
         ("amount", order.amount, 23.0),
         ("filled", order.filled, 5.0),
         ("remaining", order.remaining, 18.0),

@@ -314,3 +314,18 @@ annotation). Its offline vendored-SDK matrix compares 24 complete signatures and
 r/s/v values across both networks, order kinds, Number integer boundaries and
 builder-address casing. It requires Node, TypeScript and vendored SDK dependencies;
 missing dependencies fail the oracle rather than silently skipping signing checks.
+
+The accepted builder fee contract includes negative-half and signed-zero bits.
+The production placement witness feeds negative authorization caps through the
+real client/builder check and verifies its refusal message before any order write.
+`tests/negative-half-binding-control.py` swaps only Math.round for Rust round,
+requires that binding assertion to fail after compilation, restores exact bytes
+and requires the witness to pass. Native private frame tests also assert orders,
+fill events, positions and the balance UPNL updated by a position event.
+
+`convertInterval` preserves the twelve stock inherited table members in the
+assembled class as native realm references. The typed OHLCV caller still uses the
+closed Timeframe union; the receiver-level test calls the real constructor's
+method, compares all 93 maintained-source cases, and checks inherited kind,
+stringification, arity and repeated reference identity. The accepted helper row
+now witnesses every inherited member (17 -> 27 cases).

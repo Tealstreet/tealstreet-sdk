@@ -195,6 +195,7 @@ pub struct Request {
     pub params: Value,
     pub data: Value,
     pub headers: Value,
+    pub signing_clock_at_send: f64,
 }
 
 /// Scripted HTTP: (method, path) -> queue of responses; the last one repeats.
@@ -204,6 +205,7 @@ pub struct Http {
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
     pub advance_after_send_ms: Cell<f64>,
+    pub advance_signing_clock_after_send_ms: Cell<f64>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
@@ -244,17 +246,25 @@ impl JsHttpHost for Http {
         };
         let method = read("method").as_str().unwrap_or("get").to_uppercase();
         let url = read("url").as_str().unwrap_or_default().to_owned();
+        let signing_clock_at_send =
+            safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
         self.requests.borrow_mut().push(Request {
             method: method.clone(),
             url: url.clone(),
             params: read("params"),
             data: read("data"),
             headers: read("headers"),
+            signing_clock_at_send,
         });
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime
                 .now
                 .set(runtime.now.get() + self.advance_after_send_ms.get());
+        }
+        let signing_advance = self.advance_signing_clock_after_send_ms.get();
+        if signing_advance != 0.0 {
+            safe_cex_store::virtual_clock::VIRTUAL_CLOCK
+                .sync_from_server_time(signing_clock_at_send + signing_advance);
         }
         let response = {
             let mut routes = self.routes.borrow_mut();

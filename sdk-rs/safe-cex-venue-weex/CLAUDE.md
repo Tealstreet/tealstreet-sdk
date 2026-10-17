@@ -489,3 +489,10 @@ binding regressions retain caller IDs verbatim and exercise generated ordinary,
 conditional, protective and minted IDs with controlled runtime entropy. Real
 private frames additionally cover order/position Store writes, the REST balance
 refresh triggered by account frames, and the emitted fill event.
+
+API signing and private WebSocket upgrade headers read the shared synced
+`VIRTUAL_CLOCK`, matching the source's `getCurrentTimeMs()` calls. Retry-After
+parsing and public socket pacing retain their source raw clocks. The production
+binding's `synced_clock` regression independently checks HMACs and synced time
+for REST and two private dials with different server corrections, so reopening
+must reevaluate the current offset.
