@@ -44,6 +44,100 @@ fn script(wire: &support::Wire) {
     responses.insert("/fapi/v1/trades".into(),json!([{"id":4,"price":"101","qty":"0.03","quoteQty":"3.03","time":1700000000000u64,"isBuyerMaker":true}]));
 }
 
+#[test]
+fn sparse_position_risk_rows_use_source_coercion_in_v1_and_v3() {
+    for v3 in [false, true] {
+        let options = if v3 {
+            let secret = format!("{:064x}", 1);
+            let wallet =
+                safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&secret).unwrap();
+            json!({"key":wallet.address().to_checksum(None),"secret":secret,
+                "applicationId":"0x1111111111111111111111111111111111111111"})
+        } else {
+            json!({"key":"fixture-key","secret":"fixture-secret"})
+        };
+        let (venue, rt, _, wire) = support::fixture(options);
+        script(&wire);
+        wire.responses.borrow_mut().insert(
+            "/fapi/v1/positionSide/dual".into(),
+            json!({"dualSidePosition":true}),
+        );
+        if v3 {
+            let mapped = wire
+                .responses
+                .borrow()
+                .iter()
+                .map(|(path, value)| {
+                    (
+                        path.replace("/v1/", "/v3/")
+                            .replace("/v4/account", "/v3/account"),
+                        value.clone(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            wire.responses.borrow_mut().extend(mapped);
+        }
+        drive(&rt, venue.start()).unwrap();
+        let path = if v3 {
+            "/fapi/v3/positionRisk"
+        } else {
+            "/fapi/v1/positionRisk"
+        };
+        let sparse = json!({"symbol":"BTCUSDT","positionAmt":"2","entryPrice":"99",
+            "unRealizedProfit":"6","leverage":20.0,"positionSide":"LONG",
+            "isAutoAddMargin":false,"extraVenueField":{"retained":true}});
+        wire.responses
+            .borrow_mut()
+            .insert(path.into(), json!([sparse.clone()]));
+        let positions = drive(&rt, venue.fetch_positions(None))
+            .expect("sparse positionRisk must reach the real position mapper");
+        assert_eq!(positions.len(), 2);
+        let long = positions
+            .iter()
+            .find(|p| p.side == PositionSide::Long)
+            .unwrap();
+        assert_eq!(long.contracts, 2.0);
+        assert_eq!(long.entry_price, 99.0);
+        assert!(
+            long.notional.is_nan(),
+            "missing notional keeps parseFloat(undefined)"
+        );
+        assert_eq!(long.leverage, 20.0);
+        assert_eq!(long.liquidation_price, 0.0);
+        assert_eq!(
+            long.info.as_ref(),
+            Some(&sparse),
+            "raw fields stay untouched"
+        );
+        let short = positions
+            .iter()
+            .find(|p| p.side == PositionSide::Short)
+            .unwrap();
+        assert_eq!(short.contracts, 0.0);
+        assert_eq!(
+            short.leverage, 20.0,
+            "numeric leverage reaches the placeholder"
+        );
+
+        // Flat and filtered rows still contribute leverage before the amount filter.
+        wire.responses.borrow_mut().insert(
+            path.into(),
+            json!([
+                {"symbol":"BTCUSDT","positionAmt":0,"leverage":7,"isAutoAddMargin":false},
+                {"symbol":"OTHER","positionAmt":"1","leverage":3}
+            ]),
+        );
+        let positions = drive(&rt, venue.fetch_positions(Some(vec!["BTCUSDT".into()]))).unwrap();
+        assert_eq!(positions.len(), 2);
+        assert!(
+            positions
+                .iter()
+                .all(|p| p.contracts == 0.0 && p.leverage == 7.0)
+        );
+        venue.dispose().unwrap();
+    }
+}
+
 fn request_path(request: &RestRequest) -> &str {
     request.url.split('?').next().unwrap()
 }

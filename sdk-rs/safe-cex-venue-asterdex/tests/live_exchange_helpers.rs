@@ -1345,10 +1345,9 @@ fn exchange_helpers_match_typescript() {
                 assert_eq!(output.info.as_ref().unwrap()["symbol"], "INFO_AFTER");
             }
             "position" => {
-                let mut input: safe_cex_venue_asterdex::types::AsterDEXPositionResponse =
-                    serde_json::from_value(c["input"].clone()).unwrap();
+                let mut input = c["input"].clone();
                 let mut output = transform_position(&input, &[]).unwrap();
-                input.symbol = "SOURCE_AFTER".to_owned();
+                input["symbol"] = json!("SOURCE_AFTER");
                 assert_eq!(output.symbol, "BTC", "{kind} mapped scalar snapshot");
                 assert_eq!(
                     output.info.as_ref().unwrap()["symbol"],
@@ -1357,7 +1356,7 @@ fn exchange_helpers_match_typescript() {
                 );
                 output.info.as_mut().unwrap()["symbol"] = json!("INFO_AFTER");
                 assert_eq!(
-                    input.symbol, "SOURCE_AFTER",
+                    input["symbol"], "SOURCE_AFTER",
                     "{kind} typed info mutation cannot reach source"
                 );
                 assert_eq!(output.info.as_ref().unwrap()["symbol"], "INFO_AFTER");
@@ -1478,12 +1477,19 @@ fn exchange_helpers_match_typescript() {
             let mut input: safe_cex_venue_asterdex::types::AsterDEXTickerResponse =
                 serde_json::from_value(wire).unwrap();
             input.close_time = value;
-            transform_ticker(&input, None).map(|output| output.info.unwrap())
+            transform_ticker(&input, None)
+                .map(|output| output.info.unwrap())
+                .map_err(|e| e.to_string())
         } else {
-            let mut input: safe_cex_venue_asterdex::types::AsterDEXPositionResponse =
-                serde_json::from_value(wire).unwrap();
-            input.update_time = value;
-            transform_position(&input, &[]).map(|output| output.info.unwrap())
+            safe_cex_types::retained_json::RetainedJsonInput::Float(value)
+                .into_value()
+                .map_err(|e| e.to_string())
+                .and_then(|raw| {
+                    wire[field] = raw;
+                    transform_position(&wire, &[])
+                        .map(|output| output.info.unwrap())
+                        .map_err(|e| e.1)
+                })
         };
         assert_eq!(
             c["raw"],
@@ -2589,9 +2595,15 @@ fn mapper_metadata_retains_native_numbers() {
             "ticker" => mapped!(AsterDEXTickerResponse, input,
                 transform_ticker(&input,None).map(|o|o.info.unwrap()).map_err(|e|e.to_string()),
                 "/openTime"=>open_time, "/closeTime"=>close_time, "/firstId"=>first_id, "/lastId"=>last_id, "/count"=>count),
-            "position" => mapped!(AsterDEXPositionResponse, input,
-                transform_position(&input,&[]).map(|o|o.info.unwrap()).map_err(|e|e.to_string()),
-                "/updateTime"=>update_time),
+            "position" => safe_cex_types::retained_json::RetainedJsonInput::Float(value)
+                .into_value()
+                .map_err(|e| e.to_string())
+                .and_then(|raw| {
+                    *wire.pointer_mut(pointer).unwrap() = raw;
+                    transform_position(&wire, &[])
+                        .map(|o| o.info.unwrap())
+                        .map_err(|e| e.1)
+                }),
             "order" => mapped!(AsterDEXOrderResponse, input,
                 transform_order(&input).map(|o|o.info.unwrap()).map_err(|e|e.1),
                 "/orderId"=>order_id, "/time"=>time, "/updateTime"=>update_time, "/workingTime"=>working_time),
