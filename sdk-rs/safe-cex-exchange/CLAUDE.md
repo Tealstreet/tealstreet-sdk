@@ -1232,3 +1232,12 @@ ordinary digits coercion. Exact binary ties round away from zero; negative zero,
 nonfinite values, the 1e21 exponent threshold and RangeError use ECMAScript rules.
 `tests/js_number_to_fixed.rs` compares the production native dispatcher with Node;
 Polymarket's concrete binding witness checks the resulting signed order amounts.
+
+JS socket listener throws are host exceptions, never transport errors. Plain
+EventTarget dispatch continues after each throw; source ReconnectingWebSocket
+(header/relay/configured wrapper) dispatch stops its grouped callback at the
+throw. The resolved connection records that choice before delivery. Returned
+promises do not enter the socket-error path; general unhandled-rejection
+reporting is a separate runtime concern. `tests/js_socket_listener_errors.rs`
+compares eight real native loopback open/message cases with Node EventTarget
+and the maintained RWS implementation, and checks the native exception output.
