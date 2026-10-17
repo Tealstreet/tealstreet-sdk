@@ -21,7 +21,9 @@ async function open(t, hold = false) {
   } }, () => {}, () => {});
   const close = async () => { if (id !== undefined) { await native.nativeAccountClose(id); id = undefined; } };
   t.after(async () => {
-    for (const response of responses) response.end('{"code":"0","data":[]}');
+    for (const response of responses) {
+      if (!response.writableEnded) response.end('{"code":"0","data":[]}');
+    }
     try { await close(); }
     finally {
       server.closeAllConnections();
@@ -50,7 +52,7 @@ test('native metadata calls acknowledge before the real HTTP response settles', 
 test('native metadata calls coalesce each symbol independently', async t => {
   const h = await open(t);
   await Promise.all([h.call('BTCUSDT'), h.call('BTCUSDT'), h.call('BTCUSDT'), h.call('ETHUSDT')]);
-  await eventually(() => h.seen.filter(symbol => symbol === 'BTCUSDT').length >= 2);
+  await eventually(() => h.seen.filter(symbol => symbol === 'BTCUSDT').length >= 2 && h.seen.includes('ETHUSDT'));
   assert.equal(h.seen.filter(symbol => symbol === 'BTCUSDT').length, 2);
   assert.equal(h.seen.filter(symbol => symbol === 'ETHUSDT').length, 1);
 });
