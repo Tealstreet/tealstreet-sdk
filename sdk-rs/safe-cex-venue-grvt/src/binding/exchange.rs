@@ -418,3 +418,7 @@ mod interval_binding_tests {
         assert_eq!(inherited, 12);
     }
 }
+
+#[cfg(test)]
+#[path = "signing_admission_tests.rs"]
+mod signing_admission_tests;
