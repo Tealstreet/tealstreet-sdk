@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "212 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "214 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1715,9 +1715,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "ef909e450c22e2cce6af4a638cc5f2a6ebdb9a815ed237d930d3ad1e8ddff1cc",
+      "producer_sha256": "950defe84fd793717563be445aafae2430bc067b2ddd9bd7708ca068e4124781",
       "classification": "no-owned-latch",
-      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits. Reviewed JSON.parse repair: its synchronous closure decodes UTF-16 directly into existing Js values, without creating any future, task, registration or shared latch. The four existing Promise boundaries and their cancellation ownership are unchanged. Reviewed console.info/debug bindings: both add synchronous uses of the existing console closure, which string-coerces arguments and invokes the runtime sink. They introduce no future, registration or shared latch; the four existing Promise boundaries and ownership remain unchanged."
+      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits. Reviewed JSON.parse repair: its synchronous closure decodes UTF-16 directly into existing Js values, without creating any future, task, registration or shared latch. The four existing Promise boundaries and their cancellation ownership are unchanged. Reviewed standard Error instance repair: constructor installation delegates to the shared synchronous error factory, with optional UTF-16 messages and stock descriptor/prototype data. Prototype stringifiers capture no runtime or scope and retain no cycle. No future, registration or latch is added; the existing four Promise boundaries keep their cancellation ownership. Reviewed console.info/debug bindings: both add synchronous uses of the existing console closure, which string-coerces arguments and invokes the runtime sink. They introduce no future, registration or shared latch; the four existing Promise boundaries and ownership remain unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::install_library",
@@ -1730,9 +1730,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "7fb6b43491f7189e913cc4f66f00bb7d81f4d70798edab212b1112a1283c7e79",
+      "producer_sha256": "7a69323a31a06d3bfd710daa9681bfe52283cd17881d4fcda9b57dc1f6e4befc",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical. Reviewed shared throttle installation: the added callback is synchronous and creates no new await or Promise; the same seven async boundaries and Promise/loop captures remain unchanged. Throttle delegates timer ownership/cancellation to Scope.set_timeout/clear_timeout, exercised by js_throttle native scheduling/cancel traces and the existing Scope timer regression. Reviewed #533 qs options: the only change inside this installer forwards argument 1 into the synchronous stringify helper; all seven async boundaries and captured Promise/loop ownership are unchanged. Reviewed #554 synced dayjs clock getter: a synchronous func now reads VIRTUAL_CLOCK and constructs the date value; it captures no future, timer, task or shared lifecycle latch. The same seven async boundaries and Promise/loop captures remain unchanged."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical. Reviewed shared throttle installation: the added callback is synchronous and creates no new await or Promise; the same seven async boundaries and Promise/loop captures remain unchanged. Throttle delegates timer ownership/cancellation to Scope.set_timeout/clear_timeout, exercised by js_throttle native scheduling/cancel traces and the existing Scope timer regression. Reviewed #533 qs options: the only change inside this installer forwards argument 1 into the synchronous stringify helper; all seven async boundaries and captured Promise/loop ownership are unchanged. Reviewed #554 synced dayjs clock getter: a synchronous func now reads VIRTUAL_CLOCK and constructs the date value; it captures no future, timer, task or shared lifecycle latch. The same seven async boundaries and Promise/loop captures remain unchanged. Reviewed orderbook totals repair: the synchronous callback captures both sides before traversal, re-reads live lengths/rows and uses existing fallible JS addition. It creates no future, task, timer, registration or lifecycle slot; all seven async boundaries and Promise/loop captures remain unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
@@ -1904,6 +1904,15 @@
       "producer_sha256": "3a33833762410a3e47e96d24141addcf14718dc69671aaf5067a7523694d6e37",
       "classification": "immediate",
       "reason": "std write! formatting is synchronous; no future is constructed."
+    },
+    {
+      "owner": "src/js_runtime/value.rs::opaque-macro:thread_local:1",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "f17025fce719f16a750c4bc474449cb9e8492071d3f9bf183b522b5cf768ca5e",
+      "classification": "no-owned-latch",
+      "reason": "Reviewed this exact thread_local macro body: initialization builds only the stock Error prototype map, ordinary data descriptors and a synchronous stringifier. Prototype parent links form an acyclic graph; the stringifier captures no prototype, runtime or scope. Initialization invokes no user callback, creates no future or task, and installs no timer, waiter or in-flight slot. These are thread-local intrinsic data, not a cancellation owner. The installed-native Error corpus exercises the resulting factory and field behavior; macro expansion remains an explicit source-pinned review obligation."
     },
     {
       "owner": "src/loop_util.rs::loop_once",
