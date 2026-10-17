@@ -249,7 +249,6 @@ impl crate::trading_runtime::TradingHost for Host {
 mod tests {
     use super::*;
     #[test]
-    #[ignore = "requires Node, maintained TypeScript and the vendored SDK dependencies"]
     fn native_sdk_signature_matches_actual_sdk_source() {
         let output = std::process::Command::new("node")
             .arg(concat!(

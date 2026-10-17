@@ -20,7 +20,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::store::DefaultStore;
+use safe_cex_store::{store::DefaultStore, virtual_clock::VIRTUAL_CLOCK};
 use safe_cex_transport::{TransportProvider, socket::SocketFrame, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use serde_json::{Value, json};
@@ -504,11 +504,21 @@ fn connect_dials_the_profile_url_and_open_subscribes_account_all_then_orders_wit
             "[Lighter][PWS] Connecting (direct, attempt #1): {URL}"
         )]
     );
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
     world.runtime.deliver(0, WsEvent::Open);
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
+    let frames = world.sent(0);
+    let timestamp = frames[0]["timestamp"]
+        .as_f64()
+        .expect("native ping timestamp");
+    assert!(
+        timestamp >= before && timestamp <= after,
+        "ping uses the synced virtual clock"
+    );
     assert_eq!(
-        world.sent(0),
+        frames,
         vec![
-            ping_frame(START),
+            ping_frame(timestamp),
             json!({"type": "subscribe", "channel": "account_all/7"}),
             json!({"type": "subscribe", "channel": "account_all_orders/7", "auth": "tok-1"}),
         ],
@@ -588,17 +598,14 @@ fn account_all_payload_updates_orders_positions_and_throttled_balance() {
     );
 }
 
-/// Ping frame timestamps, stepping the clock a second at a time.
-fn pings_until(world: &World, until: f64) -> Vec<f64> {
+/// Observe dispatch timing on the host scheduler, independently of the synced payload clock.
+fn ping_count_until(world: &World, until: f64) -> usize {
     while world.runtime.now.get() < START + until {
-        world.runtime.advance(1_000.0);
+        world
+            .runtime
+            .advance((START + until - world.runtime.now.get()).min(1_000.0));
     }
-    world
-        .sent(0)
-        .iter()
-        .filter(|f| f["type"] == "ping")
-        .map(|f| f["timestamp"].as_f64().unwrap() - START)
-        .collect()
+    world.sent(0).iter().filter(|f| f["type"] == "ping").count()
 }
 
 #[test]
@@ -607,14 +614,14 @@ fn pong_schedules_the_next_ping_at_the_ping_interval() {
     world.open();
     world.message(0, json!({"type": "pong"}));
     assert_eq!(
-        pings_until(&world, 5_000.0),
-        vec![0.0],
+        ping_count_until(&world, 5_000.0),
+        1,
         "only onOpen's ping so far"
     );
-    let pings = pings_until(&world, 10_000.0);
+    let before_deadline = ping_count_until(&world, 9_999.0);
     assert!(
-        pings.contains(&10_000.0),
-        "pong arms the next ping at getPingIntervalMs(): {pings:?}"
+        ping_count_until(&world, 10_000.0) > before_deadline,
+        "pong arms the next ping at getPingIntervalMs()"
     );
 }
 

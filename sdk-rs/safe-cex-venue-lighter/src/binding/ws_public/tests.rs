@@ -16,7 +16,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
-use safe_cex_store::Store;
+use safe_cex_store::{Store, virtual_clock::VIRTUAL_CLOCK};
 use safe_cex_transport::{
     TransportProvider, TransportRegistry,
     socket::{SocketFrame, TunnelHost},
@@ -551,7 +551,9 @@ fn unhydrated_tickers_fall_back_to_rest_polling() {
 #[test]
 fn open_subscribes_topics_primes_tickers_and_pings() {
     let f = fixture();
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
     f.open();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
     let dial = f.runtime.dials.borrow()[0].clone();
     assert!(
         dial.starts_with("wss://lighter.test/stream?requestId="),
@@ -567,9 +569,18 @@ fn open_subscribes_topics_primes_tickers_and_pings() {
         frames.contains(&json!({"type": "subscribe", "channel": "ticker/1"})),
         "subscribe bbo ticker: {frames:?}"
     );
+    let pings: Vec<_> = frames.iter().filter(|f| f["type"] == "ping").collect();
+    assert_eq!(pings.len(), 1, "one ping on open");
+    let timestamp = pings[0]["timestamp"]
+        .as_f64()
+        .expect("native ping timestamp");
     assert!(
-        frames.contains(&json!({"type": "ping", "timestamp": 1_000_000})),
-        "ping frame: {frames:?}"
+        timestamp >= before && timestamp <= after,
+        "ping uses the synced virtual clock"
+    );
+    assert_eq!(
+        *pings[0],
+        json!({"type":"ping", "timestamp":timestamp as u64})
     );
     assert_eq!(f.field("topics")["bbo_ticker_1"], json!("ticker/1"));
     assert_eq!(f.field("pingAt"), json!(1_000_000.0), "performance.now");

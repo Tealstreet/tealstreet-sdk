@@ -392,24 +392,7 @@ impl PrivateEventBindings for Bindings {
     }
     fn reject_reason(&mut self, data: &EventValue) -> Result<EventValue, Failure> {
         self.0.log(Trace::Reject);
-        let raw = data.read("r")?;
-        let text = if raw.truthy() {
-            raw.text()?
-        } else {
-            String::new()
-        };
-        let record = serde_json::Map::from_iter([("r".into(), json!(text))]);
-        safe_cex_venue_binance::private_order_logic::get_order_reject_reason(&record)
-            .map(|r| {
-                r.map_or(EventValue::Undefined, |r| {
-                    EventValue::enum_value(PrivateEnum::Reject(r))
-                })
-            })
-            .map_err(|e| {
-                let mut err = ExchangeError::new(e.message);
-                err.name = e.name.into();
-                Rc::new(err)
-            })
+        get_order_reject_reason(data)
     }
     fn asset_price(&mut self, asset: &EventValue) -> Result<f64, Failure> {
         let s = &self.0;

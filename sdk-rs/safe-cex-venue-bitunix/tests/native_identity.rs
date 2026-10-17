@@ -110,7 +110,7 @@ fn null_batch_rows_match_actual_source_errors_prefix_and_next_chunk() {
         venue.base().on(
             "error",
             Rc::new(move |_, v| {
-                sink.borrow_mut().push(v[0].as_str().unwrap().to_owned());
+                sink.borrow_mut().push(v.as_str().unwrap().to_owned());
                 Ok(())
             }),
         );
