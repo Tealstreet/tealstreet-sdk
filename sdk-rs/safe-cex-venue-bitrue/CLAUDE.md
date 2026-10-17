@@ -197,3 +197,12 @@ The registry's native_host_bitrue test verifies the HMAC at a local HTTP server.
 `routing-controls.py` compiles disconnected factory and adapter bindings; both
 must fail the constructed venue routing assertion, then pass after restoration.
 Run these controls sequentially without another compiler.
+
+The typed `Exchange::update_symbol_metadata` entry forwards to the assembled
+`updateSymbolMetadata` body. It fetches the symbol's leverage bracket and commits
+the returned maximum to the Store, preserving the source public-only guard and
+caught-fetch behavior. The real-binding regression in `tests/exchange_binding.rs`
+checks both the HTTP request and replacement of the stored leverage limit.
+The same test target drives a real private socket frame for each of orders,
+fills, positions and balance. Account/balance notifications exercise the source
+350ms refresh through the signed REST binding before checking the Store.
