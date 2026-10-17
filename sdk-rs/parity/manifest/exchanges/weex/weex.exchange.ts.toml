@@ -191,8 +191,8 @@ ts = "WeexExchange.fetchHistoricalFills"
 kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-weex/src/market_reads.rs::fetch_historical_fills" ]
-status = "ported"
-note = "Split: safe-cex-venue-weex/src/market_reads.rs::fetch_historical_fills. Retains public-only early return, native user-trade query helper, two row.symbol reads with market-map capture between them, imported execution normalization, truthy filter and descending stable timestamp sort."
+status = "divergent"
+note = "Split: safe-cex-venue-weex/src/market_reads.rs::fetch_historical_fills. Retains public-only early return, native user-trade query helper, two row.symbol reads with market-map capture between them, imported execution normalization, truthy filter and descending stable timestamp sort. CHOSEN final strict-field policy: the concrete native normalizer warns with the offending Execution field and raw value, then refuses only that row when maker is nonboolean or commissionAsset/coin is nonstring. Valid rows remain, without coercion/default/stringification into the model. Source conversion/capture errors and warning callback failures still propagate; public single-row utility errors retain their original shape. Maintained TS instead retains the malformed field/row. See sdk-rs/parity/MANIFEST-SPEC.md#weex-fill-projection-choice and real mixed-page production regressions in exchange_binding.rs."
 
 [[symbol]]
 ts = "WeexExchange.fetchIncomeHistory"
