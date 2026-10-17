@@ -82,16 +82,16 @@ impl ZkLinkHost for Services {
         panic!("not used by contracts")
     }
 }
-fn place(p: &PlaceOrderOpts) -> J {
+fn place(p: &safe_cex_types::PreparedOrderOpts) -> J {
     let mut fields = vec![
         ("symbol", s(&p.symbol)),
         (
             "type",
-            s(match p.r#type {
-                OrderType::Limit => "limit",
-                OrderType::Market => "market",
-                OrderType::StopLoss => "stop_market",
-                OrderType::TakeProfit => "take_profit_market",
+            s(match p.r#type.into_value() {
+                Some(OrderType::Limit) => "limit",
+                Some(OrderType::Market) => "market",
+                Some(OrderType::StopLoss) => "stop_market",
+                Some(OrderType::TakeProfit) => "take_profit_market",
                 _ => panic!(),
             }),
         ),
@@ -199,7 +199,10 @@ impl ApexServices for Services {
         self.host().record("socket:throttle-orders", vec![]);
         Ok(())
     }
-    fn place_orders(&self, orders: Vec<PlaceOrderOpts>) -> ExchangeFuture<'_, Vec<String>> {
+    fn place_orders(
+        &self,
+        orders: Vec<safe_cex_types::PreparedOrderOpts>,
+    ) -> ExchangeFuture<'_, Vec<String>> {
         self.host().record(
             "place:orders",
             vec![J::Array(orders.iter().map(place).collect())],

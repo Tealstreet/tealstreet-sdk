@@ -145,24 +145,25 @@ pub(crate) fn map_position_deferred(
     Ok(PositionMapping::Mapped(Box::new(Position {
         id: safe_cex_types::model_utils::create_position_id(symbol, Some(side), mode),
         symbol: symbol.into(),
-        side,
+        side: side.into(),
         entry_price,
         notional,
         leverage,
-        margin_type,
-        position_mode: mode,
+        margin_type: margin_type.into(),
+        position_mode: (mode).into(),
         unrealized_pnl: pnl,
-        realized_pnl: Some(realized_pnl),
+        realized_pnl: (Some(realized_pnl)).into(),
         contracts,
         liquidation_price,
-        margin_size: (margin > 0.).then_some(margin),
-        info: Some(raw.clone()),
-        extra: Some(PositionExtra {
+        margin_size: ((margin > 0.).then_some(margin)).into(),
+        info: (Some(raw.clone())).into(),
+        extra: (Some(PositionExtra {
             contracts_native: Some(contracts_native),
             unrealized_pnl_native: Some(pnl),
-        }),
-        last_update: Some(last_update),
-        option: None,
+        }))
+        .into(),
+        last_update: (Some(last_update)).into(),
+        option: (None).into(),
     })))
 }
 

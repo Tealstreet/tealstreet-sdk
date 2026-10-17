@@ -13,8 +13,8 @@ use safe_cex_num::{
 };
 use safe_cex_transport::{RestBody, RestRequest};
 use safe_cex_types::{
-    OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, PlaceOrderOpts,
-    PositionMode, PositionSide, retained_json::RetainedJsonInput,
+    OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode,
+    PositionSide, PreparedOrderOpts, retained_json::RetainedJsonInput,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -75,20 +75,21 @@ fn error_text(error: &ExchangeError) -> Result<String, ExchangeError> {
         Ok("{}".into())
     }
 }
-fn kind(kind: OrderType) -> &'static str {
-    match kind {
-        OrderType::Conditional => "",
-        OrderType::Limit => "LIMIT",
-        OrderType::Market => "MARKET",
-        OrderType::StopLoss => "STOP_MARKET",
-        OrderType::TakeProfit => "TAKE_PROFIT_MARKET",
-        OrderType::TrailingStopLoss => "TRAILING_STOP_MARKET",
+fn kind(kind: safe_cex_types::ModelField<OrderType>) -> Option<&'static str> {
+    match kind.into_value() {
+        Some(OrderType::Conditional) | None => None,
+        Some(OrderType::Limit) => Some("LIMIT"),
+        Some(OrderType::Market) => Some("MARKET"),
+        Some(OrderType::StopLoss) => Some("STOP_MARKET"),
+        Some(OrderType::TakeProfit) => Some("TAKE_PROFIT_MARKET"),
+        Some(OrderType::TrailingStopLoss) => Some("TRAILING_STOP_MARKET"),
     }
 }
-fn side(side: OrderSide) -> &'static str {
-    match side {
-        OrderSide::Buy => "BUY",
-        OrderSide::Sell => "SELL",
+fn side(side: safe_cex_types::ModelField<OrderSide>) -> Option<&'static str> {
+    match side.into_value() {
+        Some(OrderSide::Buy) => Some("BUY"),
+        Some(OrderSide::Sell) => Some("SELL"),
+        None => None,
     }
 }
 fn tif(tif: OrderTimeInForce) -> &'static str {
@@ -157,7 +158,7 @@ impl BingxPlacement {
     }
     pub async fn get_order_position_side(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
         override_mode: Option<PositionMode>,
     ) -> Result<String, ExchangeError> {
         let mode = match override_mode {
@@ -172,8 +173,8 @@ impl BingxPlacement {
                 "SHORT"
             };
             if matches!(
-                opts.r#type,
-                OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+                opts.r#type.into_value(),
+                Some(OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss)
             ) || opts.reduce_only == Some(true)
             {
                 value = if value == "LONG" { "SHORT" } else { "LONG" };
@@ -183,7 +184,7 @@ impl BingxPlacement {
     }
     pub async fn format_create_trailing_stop_loss_order(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Vec<Value>, ExchangeError> {
         let market = self
             .reads
@@ -250,15 +251,17 @@ impl BingxPlacement {
             );
         }
         let position_side = self
-            .get_order_position_side(opts, position.position_mode)
+            .get_order_position_side(opts, (position.position_mode).into_value())
             .await?;
-        Ok(vec![
-            json!({"symbol":market.id,"positionSide":position_side,"side":side(opts.side),"type":"TRAILING_STOP_MARKET","quantity":js_number_string(position.contracts),"priceRate":js_number_string(rate),"priceProtect":"true"}),
-        ])
+        let mut request = json!({"symbol":market.id,"positionSide":position_side,"side":side(opts.side),"type":"TRAILING_STOP_MARKET","quantity":js_number_string(position.contracts),"priceRate":js_number_string(rate),"priceProtect":"true"});
+        if opts.side.is_none() {
+            request.as_object_mut().unwrap().remove("side");
+        }
+        Ok(vec![request])
     }
     pub async fn format_create_order(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Vec<Value>, ExchangeError> {
         let client_id = self.reads.base.resolve_caller_client_order_id(opts)?;
         if opts.r#type == OrderType::TrailingStopLoss {
@@ -279,7 +282,7 @@ impl BingxPlacement {
             .positions()
             .iter()
             .find(|p| p.symbol == opts.symbol)
-            .and_then(|p| p.position_mode);
+            .and_then(|p| (p.position_mode).into_value());
         let mut mode = match existing_mode {
             Some(mode) => mode,
             None => self.reads.get_or_fetch_position_mode(false).await?,
@@ -292,7 +295,10 @@ impl BingxPlacement {
                 ));
             }
         }
-        let stop = matches!(opts.r#type, OrderType::StopLoss | OrderType::TakeProfit);
+        let stop = matches!(
+            opts.r#type.into_value(),
+            Some(OrderType::StopLoss | OrderType::TakeProfit)
+        );
         let position_side = self.get_order_position_side(opts, Some(mode)).await?;
         let amount = adjust(opts.amount, market.precision.amount);
         let full = stop && (opts.close == Some(true) || !truthy_number(amount));
@@ -319,12 +325,15 @@ impl BingxPlacement {
                     self.report(message.into(), None)?;
                     return Err(ExchangeError::new(message));
                 }
-                order_type = "TRIGGER_MARKET";
+                order_type = Some("TRIGGER_MARKET");
             }
         }
         let mut request =
             json!({"symbol":market.id,"positionSide":position_side,"side":side(opts.side)});
-        if !order_type.is_empty() {
+        if opts.side.is_none() {
+            request.as_object_mut().unwrap().remove("side");
+        }
+        if let Some(order_type) = order_type {
             request["type"] = json!(order_type);
         }
         if !full && truthy_number(amount) {
@@ -347,7 +356,7 @@ impl BingxPlacement {
         }
         if !full
             && mode != PositionMode::Hedged
-            && (order_type == "TRIGGER_MARKET" || (opts.reduce_only == Some(true) && !stop))
+            && (order_type == Some("TRIGGER_MARKET") || (opts.reduce_only == Some(true) && !stop))
         {
             request["reduceOnly"] = json!(true);
         }
@@ -381,7 +390,10 @@ impl BingxPlacement {
             0.0
         };
         let lot_size = adjust((amount - rest) / lots, market.precision.amount);
-        let ordinary = matches!(opts.r#type, OrderType::Limit | OrderType::Market);
+        let ordinary = matches!(
+            opts.r#type.into_value(),
+            Some(OrderType::Limit | OrderType::Market)
+        );
         let with_id = |mut payload: Value| -> Result<Value, ExchangeError> {
             if ordinary {
                 payload["clientOrderId"] = json!(match &client_id {
@@ -451,14 +463,14 @@ impl BingxPlacement {
     }
     pub async fn place_order(
         &self,
-        opts: &PlaceOrderOpts,
+        opts: &PreparedOrderOpts,
     ) -> Result<Vec<Option<Value>>, ExchangeError> {
         let payloads = self.format_create_order(opts).await?;
         self.place_order_batch(&payloads).await
     }
     pub async fn place_orders(
         self: &Rc<Self>,
-        orders: &[PlaceOrderOpts],
+        orders: &[PreparedOrderOpts],
     ) -> Result<Vec<Option<Value>>, ExchangeError> {
         self.reads.base.assert_caller_client_order_ids(orders)?;
         self.reads.get_or_fetch_position_mode(false).await?;

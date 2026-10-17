@@ -66,7 +66,7 @@ fn rest_order_configuration_sizing_and_raw_info() {
             let mut actual = json!(&result);
             if let Some(order) = result {
                 for (field, value) in [
-                    ("price", order.price),
+                    ("price", order.price.to_number()),
                     ("amount", order.amount),
                     ("filled", order.filled),
                     ("remaining", order.remaining),

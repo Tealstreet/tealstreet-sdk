@@ -300,6 +300,20 @@ fn sync(rt: &Rt, n: &str, a: &[Js], c: &[Js]) -> Result<Option<Js>, Thrown> {
                 |s, l| h.log(h.logger()?, s.encode_utf16().collect(), l),
             )?)
         }
+        "listenOrderBook" if rt.this.get("parent")?.is_undefined() => {
+            crate::subscription_delegates::listen_order_book(x, arg(a, 1), |symbol, callback| {
+                rt.this
+                    .get("publicWebsocket")?
+                    .call_method("listenOrderBook", vec![symbol, callback])
+            })?
+        }
+        "listenOHLCV" if rt.this.get("parent")?.is_undefined() => {
+            crate::subscription_delegates::listen_ohlcv(x, arg(a, 1), |opts, callback| {
+                rt.this
+                    .get("publicWebsocket")?
+                    .call_method("listenOHLCV", vec![opts, callback])
+            })?
+        }
         "toChainIdHex" => crate::account_rest::to_chain_id_hex(&h, x)?,
         "toChainQuantum" => super::sdk::quantum(rt, &x, &arg(a, 1))?,
         "getAccountAddress" => crate::sdk_state::get_account_address(
@@ -381,6 +395,11 @@ pub(super) fn select(rt: &Rt, n: &str) -> Result<Js, Thrown> {
         "signModifyOrder" => "requestSigner.signModifyOrder",
         "ensureAuth" => "ensurePrivateHistoryAuth",
         "buildOrder" => "buildMainOrderPayload",
+        "subscribeBook" => "subscribeToOrderBook",
+        "unsubscribeBook" => "unsubscribeFromOrderBook",
+        "cleanupStats" => "cleanupMessageHandlerStats",
+        "setSlippagePromise" => "parent.setMaxSlippage",
+
         "resolveIocPrice" => "resolveMarketIocExecutionPrice",
         "validateTpSl" => "validateTpSlPrices",
         "fetch" => return Ok(super::sdk::fetch_function(rt)),
@@ -413,6 +432,18 @@ pub(super) fn select(rt: &Rt, n: &str) -> Result<Js, Thrown> {
     }
 }
 async fn dispatch(rt: Rt, n: &str, a: Vec<Js>, c: Vec<Js>) -> Result<Js, Thrown> {
+    if n == "ohlcv-poll" {
+        return crate::runtime_assembly::poll_ohlcv(
+            &Host::new(&rt),
+            rt.this.clone(),
+            arg(&c, 0),
+            arg(&c, 1),
+            arg(&c, 2),
+            arg(&c, 3),
+            callback(&rt, n, c.clone()),
+        )
+        .await;
+    }
     if let Some(value) = super::sockets::asynchronous(&rt, n).await? {
         return Ok(value);
     }
@@ -426,6 +457,47 @@ async fn dispatch(rt: Rt, n: &str, a: Vec<Js>, c: Vec<Js>) -> Result<Js, Thrown>
         "fetchPositions" => crate::market_data::fetch_positions(&h).await,
         "fetchOrderBook" => crate::market_data::fetch_order_book(&h, x, arg(&a, 1)).await,
         "fetchOHLCV" => crate::market_data::fetch_ohlcv(&h, x).await,
+        "fetchHistoricalFills" => crate::account_rest::fetch_historical_fills(&h, x).await,
+        "fetchHistoricalOrders" => crate::account_rest::fetch_historical_orders(&h, x).await,
+        "fetchIncomeHistory" => crate::account_rest::fetch_income_history(&h, x).await,
+        "fetchIncomeHistoryRange" => {
+            let from = x.to_number()?;
+            let to = arg(&a, 1).to_number()?;
+            let kind: Option<String> = to_typed(&arg(&a, 2))?;
+            let records = crate::history_reads::fetch_income_history_range(
+                from,
+                to,
+                kind.as_deref(),
+                |opts| {
+                    let promise = rt
+                        .this
+                        .call_method("fetchIncomeHistory", vec![from_typed(&opts)?])?;
+                    Ok::<_, Thrown>(async move { to_typed(&await_js(promise).await?) })
+                },
+            )
+            .await?;
+            from_typed(&records)
+        }
+        "fetchHistoricalPositions" => {
+            let venue = rt
+                .shared
+                .sockets
+                .venue
+                .borrow()
+                .as_ref()
+                .and_then(std::rc::Weak::upgrade)
+                .ok_or_else(|| Thrown::error("Error", "Paradex exchange was dropped"))?;
+            let rows = venue
+                .fetch_historical_positions(safe_cex_exchange::journal::HistoricalPositionOptions {
+                    account: to_typed(&x.get("account")?)?,
+                    from: to_typed(&x.get("from")?)?,
+                    to: to_typed(&x.get("to")?)?,
+                })
+                .await
+                .map_err(Thrown::from)?;
+            from_typed(&rows)
+        }
+
         "setLeverage" => crate::account_rest::set_leverage(&h, x, arg(&a, 1)).await,
         "setMaxSlippage" => crate::account_rest::set_max_slippage(&h, x, arg(&a, 1)).await,
         "buildMainOrderPayload" => {

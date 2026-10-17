@@ -101,6 +101,131 @@ pub(super) fn sync(rt: &Rt, n: &str, a: &[Js], captures: &[Js]) -> Result<Option
     }
     let x = arg(a, 0);
     match n {
+        "listenOrderBook" => {
+            let callback = arg(a, 1);
+            let callbacks = crate::order_execution::register_order_book_listener(
+                &Host::new(rt),
+                x.clone(),
+                callback.clone(),
+            )?;
+            let weak = Rc::downgrade(&rt.shared);
+            let owner = rt.this.clone();
+            return Ok(Some(Js::function("cleanup", move |_, _| {
+                let rt = scope(&weak, owner.clone())?;
+                crate::order_execution::cleanup_order_book_listener(
+                    &Host::new(&rt),
+                    x.clone(),
+                    callbacks.clone(),
+                    callback.clone(),
+                )
+            })));
+        }
+        "subscribeToOrderBook" | "unsubscribeFromOrderBook" => {
+            let connected = || Ok(rt.this.get("isConnected")?.truthy());
+            let channel = |symbol: Js| {
+                Ok(Js::str(&crate::public_ws_helpers::get_order_book_channel(
+                    &super::text(&symbol)?,
+                )))
+            };
+            let send = |method, channel| rpc(rt, method, channel, None);
+            if n == "subscribeToOrderBook" {
+                crate::public_subscriptions::subscribe_to_order_book(x, connected, channel, send)?;
+            } else {
+                crate::public_subscriptions::unsubscribe_from_order_book(
+                    x, connected, channel, send,
+                )?;
+            }
+        }
+        "subscribeToTrades" => {
+            crate::public_subscriptions::subscribe_to_trades(
+                &x.to_js_string()?,
+                |symbol| optional_count(rt, "tradeSubscriptionCounts", symbol),
+                |symbol, count| set_count(rt, "tradeSubscriptionCounts", symbol, count),
+                |symbol| {
+                    rt.this
+                        .call_method("sendTradeSubscribe", vec![Js::utf16(symbol)])
+                        .map(|_| ())
+                },
+            )?;
+        }
+        "unsubscribeFromTrades" => {
+            crate::public_subscriptions::unsubscribe_from_trades(
+                &x.to_js_string()?,
+                |symbol| optional_count(rt, "tradeSubscriptionCounts", symbol),
+                |symbol| {
+                    rt.this
+                        .get("tradeSubscriptionCounts")?
+                        .call_method("delete", vec![Js::utf16(symbol)])
+                        .map(|_| ())
+                },
+                |symbol, count| set_count(rt, "tradeSubscriptionCounts", symbol, count),
+            )?;
+        }
+        "listenOHLCV" => {
+            return Ok(Some(crate::runtime_assembly::listen_ohlcv(
+                &Host::new(rt),
+                rt.this.clone(),
+                x,
+                arg(a, 1),
+            )?));
+        }
+        "ohlcv-cleanup" => {
+            return Ok(Some(crate::runtime_assembly::cleanup_ohlcv_listener(
+                &Host::new(rt),
+                rt.this.clone(),
+                arg(captures, 0),
+                arg(captures, 1),
+                arg(captures, 2),
+            )?));
+        }
+        "ohlcv-slippage-error" => {
+            return Ok(Some(crate::runtime_assembly::ohlcv_slippage_error(
+                &Host::new(rt),
+                rt.this.clone(),
+                arg(captures, 0),
+                Thrown::new(x),
+            )?));
+        }
+        "cleanupOhlcvSubscription" => {
+            crate::public_subscriptions::cleanup_ohlcv_subscription(
+                &x.to_js_string()?,
+                |key, active| {
+                    rt.this
+                        .get("ohlcvPollingActive")?
+                        .call_method("set", vec![Js::utf16(key), Js::Bool(active)])
+                        .map(|_| ())
+                },
+                |key| optional_count(rt, "ohlcvSubscriptionVersions", key),
+                |key, count| set_count(rt, "ohlcvSubscriptionVersions", key, count),
+                |key| {
+                    Ok(rt
+                        .this
+                        .get("ohlcvPollingTimeouts")?
+                        .call_method("has", vec![Js::utf16(key)])?
+                        .truthy())
+                },
+                |key| {
+                    Ok(Some(
+                        rt.this
+                            .get("ohlcvPollingTimeouts")?
+                            .call_method("get", vec![Js::utf16(key)])?,
+                    ))
+                },
+                |timer| clear(rt, timer),
+                |key| {
+                    rt.this
+                        .get("ohlcvPollingTimeouts")?
+                        .call_method("delete", vec![Js::utf16(key)])
+                        .map(|_| ())
+                },
+                |field, key| {
+                    rt.this
+                        .get(field)?
+                        .call_method("delete", vec![Js::utf16(key)])
+                        .map(|_| ())
+                },
+            )?;
+        }
         "throttledFetchPositions" => {
             let scheduled = deferred(rt, |rt, value| {
                 rt.this.set("positionFetchScheduled", Js::Bool(value))
@@ -649,4 +774,22 @@ fn schedule_once(rt: &Rt, callback: Box<dyn FnOnce() -> Result<(), Thrown>>, del
         }),
         delay,
     )
+}
+
+fn optional_count(rt: &Rt, field: &str, key: &[u16]) -> Result<Option<f64>, Thrown> {
+    let value = rt
+        .this
+        .get(field)?
+        .call_method("get", vec![Js::utf16(key)])?;
+    if value.is_undefined() {
+        Ok(None)
+    } else {
+        Ok(Some(value.to_number()?))
+    }
+}
+fn set_count(rt: &Rt, field: &str, key: &[u16], count: f64) -> Result<(), Thrown> {
+    rt.this
+        .get(field)?
+        .call_method("set", vec![Js::utf16(key), Js::Number(count)])
+        .map(|_| ())
 }
