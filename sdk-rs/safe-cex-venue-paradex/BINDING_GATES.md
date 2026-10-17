@@ -141,3 +141,9 @@ change the TypeScript reference or expected fixture values.
 Measured controls: all eight compiled faults fail their named regressions; every
 exact restoration passes all seven tests. The cleanup witness counts serialized
 query URLs and verifies that a changed post-cleanup candle is not delivered.
+
+Strict host all-target and WASM library clippy pass. Venue-local parity passes
+153 manifest rows and 508 public Rust items, retaining complete workspace target
+resolution. The override inventory adds fifteen reviewed Paradex hook edges:
+existing body ports, capability closures, and dynamic reads in the canonical
+journal adapter; no base-hook bypass or new exemption is introduced.
