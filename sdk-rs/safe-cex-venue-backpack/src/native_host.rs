@@ -68,7 +68,7 @@ pub fn native_inputs_signed(
                     safe_cex_exchange::js_runtime::client::transport_signer(signer.clone())
                 }),
                 account_name: remote.as_ref().and_then(|(_, name)| name.clone()),
-                adapter,
+                adapter: adapter.clone(),
                 host: Rc::new(NativeHttpHost {
                     events: events.clone(),
                 }),

@@ -756,3 +756,36 @@ fn bound_batch_formats_every_order_before_sending_the_first_payload() {
     h.runtime.reports.borrow_mut().clear();
     done(&h);
 }
+
+fn signature_type_error(status: f64) {
+    let h = fixture();
+    *h.http
+        .routes
+        .borrow_mut()
+        .iter_mut()
+        .find(|(m, p, _)| m == "GET" && p == BALANCE)
+        .unwrap()
+        .2
+        .front_mut()
+        .unwrap() = (status, json!({"code":{"toString":0}}));
+    let error = h.drive(h.exchange.get_account()).unwrap_err();
+    assert_eq!(
+        error.name, "TypeError",
+        "BINGX-SIGNATURE-TYPEERROR native account request retains coercion kind for status {status}"
+    );
+    assert_eq!(error.message, "Cannot convert object to primitive value");
+    assert_eq!(
+        h.http.calls(BALANCE).len(),
+        1,
+        "BINGX-SIGNATURE-TYPEERROR coercion failure must not resend"
+    );
+    done(&h);
+}
+#[test]
+fn resolved_signature_type_error_reaches_the_bingx_exchange() {
+    signature_type_error(200.0);
+}
+#[test]
+fn rejected_signature_type_error_reaches_the_bingx_exchange() {
+    signature_type_error(400.0);
+}

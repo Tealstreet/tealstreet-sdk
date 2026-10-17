@@ -269,7 +269,10 @@ impl WsProtocol for PrivateProtocol {
                 subscribe_private_feeds(socket)?;
                 receive(socket, "[mexc login] success")?;
             } else {
-                receive(socket, &format!("[mexc login] failed {value}"))?;
+                let diagnostic = safe_cex_num::js_json_stringify(&value.clone().into())
+                    .map_err(ExchangeError::from)?
+                    .expect("a parsed JSON frame is a defined value");
+                receive(socket, &format!("[mexc login] failed {diagnostic}"))?;
                 socket.emitter().emit_and_log_error(
                     "MEXC private ws login failed, double check your key and secret",
                     None,

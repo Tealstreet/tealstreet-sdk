@@ -31,6 +31,23 @@ use std::{
 };
 
 pub type JsonFuture<T> = Pin<Box<dyn Future<Output = Result<T, Value>>>>;
+
+// The JSON command surface admits object records. Flattened ignored fields keep
+// its existing surplus-field behavior while refusing Serde positional structs.
+#[derive(serde::Deserialize)]
+struct NativeOrderId {
+    id: String,
+    #[serde(flatten)]
+    _extra: BTreeMap<String, Value>,
+}
+#[derive(serde::Deserialize)]
+struct NativeHistoricalPositionOptions {
+    account: String,
+    from: Option<f64>,
+    to: Option<f64>,
+    #[serde(flatten)]
+    _extra: BTreeMap<String, Value>,
+}
 /// `sign` answers one remote-signer request (ts: RemoteSigner.sign); `proxy_token`
 /// selects the Tealstreet transport (ts: registerTealstreetTransport + accessToken).
 pub struct NativeAccountSpec {
@@ -454,11 +471,7 @@ pub fn native_account_call(
             }),
             "removeOrders" => {
                 // TS accepts Pick<Order, 'id'>[], not an array of bare IDs.
-                #[derive(serde::Deserialize)]
-                struct OrderId {
-                    id: String,
-                }
-                let orders: Vec<OrderId> = arg(&args, 0)?;
+                let orders: Vec<NativeOrderId> = arg(&args, 0)?;
                 let ids: Vec<String> = orders.into_iter().map(|order| order.id).collect();
                 done(base.remove_orders(&ids)).map(|_| Value::Null)
             }
@@ -542,13 +555,7 @@ pub fn native_account_call(
             )
             .and_then(encode),
             "fetchHistoricalPositions" => {
-                #[derive(serde::Deserialize)]
-                struct Options {
-                    account: String,
-                    from: Option<f64>,
-                    to: Option<f64>,
-                }
-                let options: Options = arg(&args, 0)?;
+                let options: NativeHistoricalPositionOptions = arg(&args, 0)?;
                 done(
                     venue
                         .fetch_historical_positions(

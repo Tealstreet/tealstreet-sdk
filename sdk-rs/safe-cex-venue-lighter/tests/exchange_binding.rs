@@ -579,3 +579,250 @@ fn injected_entropy_repeats_the_signed_wire_payload() {
         "fixed clock, nonce and entropy reproduce the wire signature"
     );
 }
+
+fn trait_candles(http: &Http) {
+    lighter(http);
+    http.ok(
+        "GET",
+        "/api/v1/candles",
+        json!({"code":200,"c":[
+            {"t":1700000060000.0,"o":"103","h":"107","l":"102","c":"106","v":"11"},
+            {"t":1700000000000.0,"o":"101","h":"105","l":"100","c":"104","v":"7"}
+        ]}),
+    );
+    http.ok(
+        "GET",
+        "/api/v1/orderBookOrders",
+        json!({"code":200,
+        "bids":[{"price":"100","remaining_base_amount":"2","size":"2"}],
+        "asks":[{"price":"101","remaining_base_amount":"3","size":"3"}]}),
+    );
+}
+
+#[test]
+fn real_trait_candles_reach_rest_and_preserve_sorted_fields() {
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    loaded(&h);
+    let rows = h
+        .drive(
+            h.venue().fetch_ohlcv(
+                serde_json::from_value(json!({
+                    "symbol":"BTC","interval":"1m","from":1699999900000.0,"to":1700000100000.0
+                }))
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 2, "actual REST candles");
+    assert_eq!(rows[0].timestamp, 1700000000.0);
+    assert_eq!(
+        (
+            rows[0].open,
+            rows[0].high,
+            rows[0].low,
+            rows[0].close,
+            rows[0].volume
+        ),
+        (101.0, 105.0, 100.0, 104.0, 7.0)
+    );
+    assert_eq!((rows[1].timestamp, rows[1].close), (1700000060.0, 106.0));
+    let calls = h.http.calls("/api/v1/candles");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["market_id"].as_f64(), Some(1.0));
+    assert_eq!(calls[0].params["resolution"], json!("1m"));
+    assert_eq!(
+        calls[0].params["start_timestamp"].as_f64(),
+        Some(1699999900000.0)
+    );
+}
+
+#[test]
+fn real_trait_candles_refuse_unknown_market() {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    let error = h
+        .drive(h.venue().fetch_ohlcv(
+            serde_json::from_value(json!({"symbol":"UNKNOWN","interval":"1m"})).unwrap(),
+        ))
+        .expect_err("source rejects missing market");
+    assert!(
+        error
+            .message
+            .contains("Market not found for symbol: UNKNOWN"),
+        "{}",
+        error.message
+    );
+    assert!(h.http.calls("/api/v1/candles").is_empty());
+}
+
+#[test]
+fn real_trait_fills_reach_signed_history_and_keep_both_rows() {
+    let mut opts = options();
+    opts.key = "0x1111111111111111111111111111111111111111".into();
+    let h = harness(ExchangeName::Lighter, opts, |http| {
+        lighter(http);
+        http.ok("GET","/api/v1/accountInactiveOrders",json!({"code":200,"fills":[
+            {"market_id":1,"order_id":"open","side":"BUY","price":"100","size":"2","timestamp":1700000000,"fee":"0.1","feeAsset":"USDC"},
+            {"market_id":1,"order_id":"close","side":"SELL","price":"110","size":"3","timestamp":1700000060,"fee":"0.2","feeAsset":"USDC"}
+        ]}));
+    });
+    loaded(&h);
+    let rows = h
+        .drive(
+            h.venue().fetch_historical_fills(
+                serde_json::from_value(
+                    json!({"symbol":"BTC","from":1699999999.0,"to":1700000100.0,"limit":10}),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "actual authenticated fill collection; urls={:?}, logs={:?}, reports={:?}",
+        h.http.urls(),
+        h.runtime.logs.borrow(),
+        h.runtime.reports.borrow()
+    );
+    assert_eq!(rows[0].order_id.as_deref(), Some("close"));
+    assert_eq!(
+        (rows[0].timestamp, rows[0].price, rows[0].qty),
+        (1700000060.0, 110.0, 3.0)
+    );
+    assert_eq!(rows[0].side, OrderSide::Sell);
+    assert_eq!(rows[0].commission, Some(0.2));
+    assert_eq!(rows[1].order_id.as_deref(), Some("open"));
+    assert_eq!(rows[1].side, OrderSide::Buy);
+    let calls = h.http.calls("/api/v1/accountInactiveOrders");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].params["account_index"], json!("42"));
+    assert_eq!(calls[0].params["market_id"].as_f64(), Some(1.0));
+    assert!(
+        calls[0].params["auth"]
+            .as_str()
+            .unwrap()
+            .contains(&auth_token_prefix())
+    );
+}
+
+#[test]
+fn real_trait_private_snapshot_updates_positions_orders_and_balance() {
+    let h = harness(ExchangeName::Lighter, options(), lighter);
+    loaded(&h);
+    h.drive(h.venue().fetch_and_set_private_snapshot(1))
+        .unwrap();
+    assert_eq!(
+        h.store.positions().len(),
+        1,
+        "venue snapshot loads positions"
+    );
+    assert_eq!(h.store.positions()[0].contracts, 0.5);
+    assert_eq!(h.store.orders().len(), 1);
+    assert_eq!(h.store.orders()[0].id, "777");
+    let state = h.store.loaded();
+    assert!(
+        state.positions && state.orders && state.balance,
+        "full venue snapshot flags"
+    );
+    assert_eq!(h.store.balance().free, 800.0);
+}
+
+#[test]
+fn real_trait_book_delivers_socket_changes_and_cleans_up() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let seen = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let sink = seen.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            "BTC".into(),
+            Rc::new(move |book| sink.borrow_mut().push(book)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(
+        socket
+            .subscriptions()
+            .contains(&json!({"type":"subscribe","channel":"order_book/1"})),
+        "actual subscription"
+    );
+    let frame = json!({"channel":"order_book:1","type":"update/order_book","order_book":{"bids":[{"price":"102","size":"4"}],"asks":[{"price":"103","size":"5"}]}});
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+    h.runtime.pump();
+    assert!(
+        seen.borrow().iter().any(|book| book
+            .bids
+            .iter()
+            .any(|level| level.price == 102.0 && level.amount == 4.0)),
+        "actual websocket book callback"
+    );
+    cleanup().unwrap();
+    let count = seen.borrow().len();
+    let mut after_cleanup = frame.clone();
+    after_cleanup["order_book"]["bids"][0]["price"] = json!("108");
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            after_cleanup.to_string(),
+        )));
+    h.runtime.advance(250.0);
+    assert_eq!(seen.borrow().len(), count, "cleanup removes actual parser");
+    assert!(
+        socket
+            .subscriptions()
+            .contains(&json!({"type":"unsubscribe","channel":"order_book/1"}))
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn real_trait_candle_listener_polls_deduplicates_and_cleans_up() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Lighter, options(), trait_candles);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let seen = Rc::new(RefCell::new(Vec::<Candle>::new()));
+    let sink = seen.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC","interval":"1m"})).unwrap(),
+            Rc::new(move |row| sink.borrow_mut().push(row)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    assert_eq!(seen.borrow().len(), 1, "initial real fallback candle");
+    assert_eq!(seen.borrow()[0].close, 106.0);
+    let calls = h.http.calls("/api/v1/candles").len();
+    h.runtime.advance(5000.0);
+    assert!(
+        h.http.calls("/api/v1/candles").len() > calls,
+        "actual repeated polling"
+    );
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "unchanged fallback candle is deduplicated"
+    );
+    cleanup().unwrap();
+    let calls = h.http.calls("/api/v1/candles").len();
+    h.runtime.advance(5000.0);
+    assert_eq!(
+        h.http.calls("/api/v1/candles").len(),
+        calls,
+        "cleanup stops actual polling"
+    );
+    assert_eq!(seen.borrow().len(), 1);
+    h.venue().dispose().unwrap();
+}

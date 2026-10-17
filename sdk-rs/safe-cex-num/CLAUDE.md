@@ -345,3 +345,13 @@ forwards to visit_map and cannot decode these variants. Require exactly one tag
 before dispatch; the bridge alone need not consume extra keys. Raw/owned/borrowed
 regressions inspect unit/newtype/tuple/record variants and numeric bits, while
 shared string-union front guards still reject tagged maps.
+
+
+`js_date_to_iso_string` applies the existing TimeClip boundary and returns the
+native RangeError name/message for invalid dates. It renders UTC milliseconds,
+including year zero and signed six-digit extended years, without a local timezone
+adapter. The formatter is shared with websocket diagnostics and native DXtrade
+candle bounds; no venue-local calendar copy is introduced. `tests/date_iso.rs`
+compares 1,044 independently counted native bit inputs with actual JavaScript
+Date construction/toISOString, including fractional, nonfinite and clip-edge
+values. It does not implement object-to-primitive Date constructor coercion.
