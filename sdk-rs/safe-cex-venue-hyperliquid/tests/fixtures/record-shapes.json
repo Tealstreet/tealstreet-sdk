@@ -15,16 +15,6 @@
     "positional": "[{\"tif\":\"Alo\"},{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}]"
   },
   {
-    "name": "Meta",
-    "raw": "{\"universe\":[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"maxLeverage\":17,\"onlyIsolated\":true,\"isDelisted\":true,\"marginTableId\":17,\"marginMode\":\"strictIsolated\",\"growthMode\":\"enabled\",\"lastGrowthModeChangeTime\":\"wire-雪\\u0000\"}]}",
-    "positional": "[[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"maxLeverage\":17,\"onlyIsolated\":true,\"isDelisted\":true,\"marginTableId\":17,\"marginMode\":\"strictIsolated\",\"growthMode\":\"enabled\",\"lastGrowthModeChangeTime\":\"wire-雪\\u0000\"}]]"
-  },
-  {
-    "name": "MetaUniverseItem",
-    "raw": "{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"maxLeverage\":17,\"onlyIsolated\":true,\"isDelisted\":true,\"marginTableId\":17,\"marginMode\":\"strictIsolated\",\"growthMode\":\"enabled\",\"lastGrowthModeChangeTime\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",17,17,true,true,17,\"strictIsolated\",\"enabled\",\"wire-雪\\u0000\"]"
-  },
-  {
     "name": "ClearinghouseState",
     "raw": "{\"assetPositions\":[{\"position\":{\"coin\":\"wire-雪\\u0000\",\"cumFunding\":{\"allTime\":\"wire-雪\\u0000\",\"sinceChange\":\"wire-雪\\u0000\",\"sinceOpen\":\"wire-雪\\u0000\"},\"entryPx\":\"wire-雪\\u0000\",\"leverage\":{\"rawUsd\":\"wire-雪\\u0000\",\"type\":\"wire-雪\\u0000\",\"value\":17},\"liquidationPx\":\"wire-雪\\u0000\",\"marginUsed\":\"wire-雪\\u0000\",\"maxLeverage\":17,\"positionValue\":\"wire-雪\\u0000\",\"returnOnEquity\":\"wire-雪\\u0000\",\"szi\":\"wire-雪\\u0000\",\"unrealizedPnl\":\"wire-雪\\u0000\"},\"type\":\"wire-雪\\u0000\"}],\"crossMaintenanceMarginUsed\":\"wire-雪\\u0000\",\"crossMarginSummary\":{\"accountValue\":\"wire-雪\\u0000\",\"totalMarginUsed\":\"wire-雪\\u0000\",\"totalNtlPos\":\"wire-雪\\u0000\",\"totalRawUsd\":\"wire-雪\\u0000\"},\"marginSummary\":{\"accountValue\":\"wire-雪\\u0000\",\"totalMarginUsed\":\"wire-雪\\u0000\",\"totalNtlPos\":\"wire-雪\\u0000\",\"totalRawUsd\":\"wire-雪\\u0000\"},\"time\":17,\"withdrawable\":\"wire-雪\\u0000\"}",
     "positional": "[[{\"position\":{\"coin\":\"wire-雪\\u0000\",\"cumFunding\":{\"allTime\":\"wire-雪\\u0000\",\"sinceChange\":\"wire-雪\\u0000\",\"sinceOpen\":\"wire-雪\\u0000\"},\"entryPx\":\"wire-雪\\u0000\",\"leverage\":{\"rawUsd\":\"wire-雪\\u0000\",\"type\":\"wire-雪\\u0000\",\"value\":17},\"liquidationPx\":\"wire-雪\\u0000\",\"marginUsed\":\"wire-雪\\u0000\",\"maxLeverage\":17,\"positionValue\":\"wire-雪\\u0000\",\"returnOnEquity\":\"wire-雪\\u0000\",\"szi\":\"wire-雪\\u0000\",\"unrealizedPnl\":\"wire-雪\\u0000\"},\"type\":\"wire-雪\\u0000\"}],\"wire-雪\\u0000\",{\"accountValue\":\"wire-雪\\u0000\",\"totalMarginUsed\":\"wire-雪\\u0000\",\"totalNtlPos\":\"wire-雪\\u0000\",\"totalRawUsd\":\"wire-雪\\u0000\"},{\"accountValue\":\"wire-雪\\u0000\",\"totalMarginUsed\":\"wire-雪\\u0000\",\"totalNtlPos\":\"wire-雪\\u0000\",\"totalRawUsd\":\"wire-雪\\u0000\"},17,\"wire-雪\\u0000\"]"
@@ -63,46 +53,6 @@
     "name": "UserFills",
     "raw": "{\"coin\":\"wire-雪\\u0000\",\"px\":\"wire-雪\\u0000\",\"sz\":\"wire-雪\\u0000\",\"side\":\"wire-雪\\u0000\",\"time\":17,\"startPosition\":\"wire-雪\\u0000\",\"dir\":\"wire-雪\\u0000\",\"closedPnl\":\"wire-雪\\u0000\",\"hash\":\"wire-雪\\u0000\",\"oid\":17,\"crossed\":true,\"fee\":\"wire-雪\\u0000\",\"tid\":17}",
     "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",17,\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",17,true,\"wire-雪\\u0000\",17]"
-  },
-  {
-    "name": "OrderResponseStatusCase0",
-    "raw": "{\"resting\":{\"oid\":17}}",
-    "positional": "[{\"oid\":17}]"
-  },
-  {
-    "name": "OrderResponseStatusCase0Resting",
-    "raw": "{\"oid\":17}",
-    "positional": "[17]"
-  },
-  {
-    "name": "OrderResponseStatusCase1",
-    "raw": "{\"filled\":{\"oid\":17,\"totalSz\":\"wire-雪\\u0000\",\"avgPx\":\"wire-雪\\u0000\"}}",
-    "positional": "[{\"oid\":17,\"totalSz\":\"wire-雪\\u0000\",\"avgPx\":\"wire-雪\\u0000\"}]"
-  },
-  {
-    "name": "OrderResponseStatusCase1Filled",
-    "raw": "{\"oid\":17,\"totalSz\":\"wire-雪\\u0000\",\"avgPx\":\"wire-雪\\u0000\"}",
-    "positional": "[17,\"wire-雪\\u0000\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "OrderResponseStatusCase2",
-    "raw": "{\"error\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "OrderResponse",
-    "raw": "{\"status\":\"wire-雪\\u0000\",\"response\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "OrderResponseResponseCase1",
-    "raw": "{\"type\":\"wire-雪\\u0000\",\"data\":{\"statuses\":[{\"resting\":{\"oid\":17}}]}}",
-    "positional": "[\"wire-雪\\u0000\",{\"statuses\":[{\"resting\":{\"oid\":17}}]}]"
-  },
-  {
-    "name": "OrderResponseResponseCase1Data",
-    "raw": "{\"statuses\":[{\"resting\":{\"oid\":17}}]}",
-    "positional": "[[{\"resting\":{\"oid\":17}}]]"
   },
   {
     "name": "WsTrade",
@@ -155,21 +105,6 @@
     "positional": "[\"wire-雪\\u0000\",17]"
   },
   {
-    "name": "SpotClearinghouseBalance",
-    "raw": "{\"coin\":\"wire-雪\\u0000\",\"token\":17,\"hold\":\"wire-雪\\u0000\",\"total\":\"wire-雪\\u0000\",\"entryNtl\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",17,\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "SpotClearinghouseState",
-    "raw": "{\"balances\":[{\"coin\":\"wire-雪\\u0000\",\"token\":17,\"hold\":\"wire-雪\\u0000\",\"total\":\"wire-雪\\u0000\",\"entryNtl\":\"wire-雪\\u0000\"}],\"tokenToAvailableAfterMaintenance\":[[17,\"wire-雪\\u0000\"]]}",
-    "positional": "[[{\"coin\":\"wire-雪\\u0000\",\"token\":17,\"hold\":\"wire-雪\\u0000\",\"total\":\"wire-雪\\u0000\",\"entryNtl\":\"wire-雪\\u0000\"}],[[17,\"wire-雪\\u0000\"]]]"
-  },
-  {
-    "name": "FrontendOpenOrders",
-    "raw": "{\"coin\":\"wire-雪\\u0000\",\"isPositionTpsl\":true,\"isTrigger\":true,\"limitPx\":\"wire-雪\\u0000\",\"oid\":17,\"orderType\":\"wire-雪\\u0000\",\"origSz\":\"wire-雪\\u0000\",\"reduceOnly\":true,\"side\":\"wire-雪\\u0000\",\"sz\":\"wire-雪\\u0000\",\"timestamp\":17,\"triggerCondition\":\"wire-雪\\u0000\",\"triggerPx\":\"wire-雪\\u0000\",\"tif\":\"Alo\"}",
-    "positional": "[\"wire-雪\\u0000\",true,true,\"wire-雪\\u0000\",17,\"wire-雪\\u0000\",\"wire-雪\\u0000\",true,\"wire-雪\\u0000\",\"wire-雪\\u0000\",17,\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"Alo\"]"
-  },
-  {
     "name": "L2Book",
     "raw": "{\"levels\":[[{\"px\":\"wire-雪\\u0000\",\"sz\":\"wire-雪\\u0000\",\"n\":17}],[{\"px\":\"wire-雪\\u0000\",\"sz\":\"wire-雪\\u0000\",\"n\":17}]]}",
     "positional": "[[[{\"px\":\"wire-雪\\u0000\",\"sz\":\"wire-雪\\u0000\",\"n\":17}],[{\"px\":\"wire-雪\\u0000\",\"sz\":\"wire-雪\\u0000\",\"n\":17}]]]"
@@ -185,89 +120,14 @@
     "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",17]"
   },
   {
-    "name": "CandleSnapshot",
-    "raw": "{\"T\":17,\"c\":\"wire-雪\\u0000\",\"h\":\"wire-雪\\u0000\",\"i\":\"wire-雪\\u0000\",\"l\":\"wire-雪\\u0000\",\"n\":17,\"o\":\"wire-雪\\u0000\",\"s\":\"wire-雪\\u0000\",\"t\":17,\"v\":\"wire-雪\\u0000\"}",
-    "positional": "[17,\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",17,\"wire-雪\\u0000\",\"wire-雪\\u0000\",17,\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "AssetCtx",
-    "raw": "{\"dayNtlVlm\":\"wire-雪\\u0000\",\"dayBaseVlm\":\"wire-雪\\u0000\",\"funding\":\"wire-雪\\u0000\",\"impactPxs\":[\"wire-雪\\u0000\",\"wire-雪\\u0000\"],\"markPx\":\"wire-雪\\u0000\",\"midPx\":\"wire-雪\\u0000\",\"openInterest\":\"wire-雪\\u0000\",\"oraclePx\":\"wire-雪\\u0000\",\"premium\":\"wire-雪\\u0000\",\"prevDayPx\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",[\"wire-雪\\u0000\",\"wire-雪\\u0000\"],\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "MetaAndAssetCtxs",
-    "raw": "{\"meta\":{\"universe\":[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"maxLeverage\":17,\"onlyIsolated\":true,\"isDelisted\":true,\"marginTableId\":17,\"marginMode\":\"strictIsolated\",\"growthMode\":\"enabled\",\"lastGrowthModeChangeTime\":\"wire-雪\\u0000\"}]},\"assetCtxs\":[{\"dayNtlVlm\":\"wire-雪\\u0000\",\"dayBaseVlm\":\"wire-雪\\u0000\",\"funding\":\"wire-雪\\u0000\",\"impactPxs\":[\"wire-雪\\u0000\",\"wire-雪\\u0000\"],\"markPx\":\"wire-雪\\u0000\",\"midPx\":\"wire-雪\\u0000\",\"openInterest\":\"wire-雪\\u0000\",\"oraclePx\":\"wire-雪\\u0000\",\"premium\":\"wire-雪\\u0000\",\"prevDayPx\":\"wire-雪\\u0000\"}]}",
-    "positional": "[{\"universe\":[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"maxLeverage\":17,\"onlyIsolated\":true,\"isDelisted\":true,\"marginTableId\":17,\"marginMode\":\"strictIsolated\",\"growthMode\":\"enabled\",\"lastGrowthModeChangeTime\":\"wire-雪\\u0000\"}]},[{\"dayNtlVlm\":\"wire-雪\\u0000\",\"dayBaseVlm\":\"wire-雪\\u0000\",\"funding\":\"wire-雪\\u0000\",\"impactPxs\":[\"wire-雪\\u0000\",\"wire-雪\\u0000\"],\"markPx\":\"wire-雪\\u0000\",\"midPx\":\"wire-雪\\u0000\",\"openInterest\":\"wire-雪\\u0000\",\"oraclePx\":\"wire-雪\\u0000\",\"premium\":\"wire-雪\\u0000\",\"prevDayPx\":\"wire-雪\\u0000\"}]]"
-  },
-  {
-    "name": "UserFundingDelta",
-    "raw": "{\"coin\":\"wire-雪\\u0000\",\"fundingRate\":\"wire-雪\\u0000\",\"szi\":\"wire-雪\\u0000\",\"type\":\"funding\",\"usdc\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"funding\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "UserFundingEntry",
-    "raw": "{\"delta\":{\"coin\":\"wire-雪\\u0000\",\"fundingRate\":\"wire-雪\\u0000\",\"szi\":\"wire-雪\\u0000\",\"type\":\"funding\",\"usdc\":\"wire-雪\\u0000\"},\"hash\":\"wire-雪\\u0000\",\"time\":17}",
-    "positional": "[{\"coin\":\"wire-雪\\u0000\",\"fundingRate\":\"wire-雪\\u0000\",\"szi\":\"wire-雪\\u0000\",\"type\":\"funding\",\"usdc\":\"wire-雪\\u0000\"},\"wire-雪\\u0000\",17]"
-  },
-  {
-    "name": "UserNonFundingLedgerDelta",
-    "raw": "{\"coin\":\"wire-雪\\u0000\",\"type\":\"deposit\",\"usdc\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",\"deposit\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "UserNonFundingLedgerEntry",
-    "raw": "{\"delta\":{\"coin\":\"wire-雪\\u0000\",\"type\":\"deposit\",\"usdc\":\"wire-雪\\u0000\"},\"hash\":\"wire-雪\\u0000\",\"time\":17}",
-    "positional": "[{\"coin\":\"wire-雪\\u0000\",\"type\":\"deposit\",\"usdc\":\"wire-雪\\u0000\"},\"wire-雪\\u0000\",17]"
-  },
-  {
     "name": "FundingHistoryEntry",
     "raw": "{\"coin\":\"wire-雪\\u0000\",\"fundingRate\":\"wire-雪\\u0000\",\"premium\":\"wire-雪\\u0000\",\"time\":17}",
     "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",17]"
   },
   {
-    "name": "SpotToken",
-    "raw": "{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"weiDecimals\":17,\"index\":17,\"tokenId\":\"wire-雪\\u0000\",\"isCanonical\":true,\"fullName\":\"wire-雪\\u0000\",\"evmContract\":{\"address\":\"wire-雪\\u0000\",\"evm_extra_wei_decimals\":17},\"deployerTradingFeeShare\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",17,17,17,\"wire-雪\\u0000\",true,\"wire-雪\\u0000\",{\"address\":\"wire-雪\\u0000\",\"evm_extra_wei_decimals\":17},\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "SpotTokenEvmContract",
-    "raw": "{\"address\":\"wire-雪\\u0000\",\"evm_extra_wei_decimals\":17}",
-    "positional": "[\"wire-雪\\u0000\",17]"
-  },
-  {
-    "name": "SpotMarket",
-    "raw": "{\"name\":\"wire-雪\\u0000\",\"tokens\":[17,17],\"index\":17,\"isCanonical\":true}",
-    "positional": "[\"wire-雪\\u0000\",[17,17],17,true]"
-  },
-  {
-    "name": "SpotMeta",
-    "raw": "{\"tokens\":[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"weiDecimals\":17,\"index\":17,\"tokenId\":\"wire-雪\\u0000\",\"isCanonical\":true,\"fullName\":\"wire-雪\\u0000\",\"evmContract\":{\"address\":\"wire-雪\\u0000\",\"evm_extra_wei_decimals\":17},\"deployerTradingFeeShare\":\"wire-雪\\u0000\"}],\"universe\":[{\"name\":\"wire-雪\\u0000\",\"tokens\":[17,17],\"index\":17,\"isCanonical\":true}]}",
-    "positional": "[[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"weiDecimals\":17,\"index\":17,\"tokenId\":\"wire-雪\\u0000\",\"isCanonical\":true,\"fullName\":\"wire-雪\\u0000\",\"evmContract\":{\"address\":\"wire-雪\\u0000\",\"evm_extra_wei_decimals\":17},\"deployerTradingFeeShare\":\"wire-雪\\u0000\"}],[{\"name\":\"wire-雪\\u0000\",\"tokens\":[17,17],\"index\":17,\"isCanonical\":true}]]"
-  },
-  {
-    "name": "SpotAssetCtx",
-    "raw": "{\"dayNtlVlm\":\"wire-雪\\u0000\",\"markPx\":\"wire-雪\\u0000\",\"midPx\":\"wire-雪\\u0000\",\"prevDayPx\":\"wire-雪\\u0000\",\"coin\":\"wire-雪\\u0000\",\"circulatingSupply\":\"wire-雪\\u0000\",\"totalSupply\":\"wire-雪\\u0000\",\"dayBaseVlm\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "SpotMetaAndAssetCtxs",
-    "raw": "{\"meta\":{\"tokens\":[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"weiDecimals\":17,\"index\":17,\"tokenId\":\"wire-雪\\u0000\",\"isCanonical\":true,\"fullName\":\"wire-雪\\u0000\",\"evmContract\":{\"address\":\"wire-雪\\u0000\",\"evm_extra_wei_decimals\":17},\"deployerTradingFeeShare\":\"wire-雪\\u0000\"}],\"universe\":[{\"name\":\"wire-雪\\u0000\",\"tokens\":[17,17],\"index\":17,\"isCanonical\":true}]},\"assetCtxs\":[{\"dayNtlVlm\":\"wire-雪\\u0000\",\"markPx\":\"wire-雪\\u0000\",\"midPx\":\"wire-雪\\u0000\",\"prevDayPx\":\"wire-雪\\u0000\",\"coin\":\"wire-雪\\u0000\",\"circulatingSupply\":\"wire-雪\\u0000\",\"totalSupply\":\"wire-雪\\u0000\",\"dayBaseVlm\":\"wire-雪\\u0000\"}]}",
-    "positional": "[{\"tokens\":[{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"weiDecimals\":17,\"index\":17,\"tokenId\":\"wire-雪\\u0000\",\"isCanonical\":true,\"fullName\":\"wire-雪\\u0000\",\"evmContract\":{\"address\":\"wire-雪\\u0000\",\"evm_extra_wei_decimals\":17},\"deployerTradingFeeShare\":\"wire-雪\\u0000\"}],\"universe\":[{\"name\":\"wire-雪\\u0000\",\"tokens\":[17,17],\"index\":17,\"isCanonical\":true}]},[{\"dayNtlVlm\":\"wire-雪\\u0000\",\"markPx\":\"wire-雪\\u0000\",\"midPx\":\"wire-雪\\u0000\",\"prevDayPx\":\"wire-雪\\u0000\",\"coin\":\"wire-雪\\u0000\",\"circulatingSupply\":\"wire-雪\\u0000\",\"totalSupply\":\"wire-雪\\u0000\",\"dayBaseVlm\":\"wire-雪\\u0000\"}]]"
-  },
-  {
     "name": "UserOpenOrder",
     "raw": "{\"coin\":\"wire-雪\\u0000\",\"limitPx\":\"wire-雪\\u0000\",\"oid\":17,\"side\":\"wire-雪\\u0000\",\"sz\":\"wire-雪\\u0000\",\"timestamp\":17}",
     "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",17,\"wire-雪\\u0000\",\"wire-雪\\u0000\",17]"
-  },
-  {
-    "name": "OrderRequest",
-    "raw": "{\"coin\":\"wire-雪\\u0000\",\"is_buy\":true,\"sz\":17,\"limit_px\":17,\"order_type\":{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},\"reduce_only\":true,\"cloid\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",true,17,17,{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},true,\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "OrderWire",
-    "raw": "{\"a\":17,\"b\":true,\"p\":\"wire-雪\\u0000\",\"s\":\"wire-雪\\u0000\",\"r\":true,\"t\":{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},\"c\":\"wire-雪\\u0000\"}",
-    "positional": "[17,true,\"wire-雪\\u0000\",\"wire-雪\\u0000\",true,{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},\"wire-雪\\u0000\"]"
   },
   {
     "name": "CancelOrderRequest",
@@ -283,21 +143,6 @@
     "name": "CancelByCloidRequest",
     "raw": "{\"coin\":\"wire-雪\\u0000\",\"cloid\":\"wire-雪\\u0000\"}",
     "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "ModifyRequest",
-    "raw": "{\"oid\":17,\"order\":{\"coin\":\"wire-雪\\u0000\",\"is_buy\":true,\"sz\":17,\"limit_px\":17,\"order_type\":{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},\"reduce_only\":true,\"cloid\":\"wire-雪\\u0000\"}}",
-    "positional": "[17,{\"coin\":\"wire-雪\\u0000\",\"is_buy\":true,\"sz\":17,\"limit_px\":17,\"order_type\":{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},\"reduce_only\":true,\"cloid\":\"wire-雪\\u0000\"}]"
-  },
-  {
-    "name": "ModifyWire",
-    "raw": "{\"oid\":17,\"order\":{\"a\":17,\"b\":true,\"p\":\"wire-雪\\u0000\",\"s\":\"wire-雪\\u0000\",\"r\":true,\"t\":{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},\"c\":\"wire-雪\\u0000\"}}",
-    "positional": "[17,{\"a\":17,\"b\":true,\"p\":\"wire-雪\\u0000\",\"s\":\"wire-雪\\u0000\",\"r\":true,\"t\":{\"limit\":{\"tif\":\"Alo\"},\"trigger\":{\"triggerPx\":17,\"isMarket\":true,\"tpsl\":\"tp\"}},\"c\":\"wire-雪\\u0000\"}]"
-  },
-  {
-    "name": "ScheduleCancelAction",
-    "raw": "{\"type\":\"scheduleCancel\",\"time\":17}",
-    "positional": "[\"scheduleCancel\",17]"
   },
   {
     "name": "Signature",
@@ -345,16 +190,6 @@
     "positional": "[true,[{\"time\":17,\"coin\":\"wire-雪\\u0000\",\"usdc\":\"wire-雪\\u0000\",\"type\":\"deposit\"}],\"wire-雪\\u0000\"]"
   },
   {
-    "name": "PerpDex",
-    "raw": "{\"name\":\"wire-雪\\u0000\",\"fullName\":\"wire-雪\\u0000\",\"deployer\":\"wire-雪\\u0000\",\"oracleUpdater\":\"wire-雪\\u0000\",\"feeRecipient\":\"wire-雪\\u0000\",\"assetToStreamingOiCap\":[[\"wire-雪\\u0000\",\"wire-雪\\u0000\"]],\"subDeployers\":[[\"wire-雪\\u0000\",[\"wire-雪\\u0000\"]]],\"deployerFeeScale\":\"wire-雪\\u0000\",\"lastDeployerFeeScaleChangeTime\":\"wire-雪\\u0000\",\"assetToFundingMultiplier\":[[\"wire-雪\\u0000\",\"wire-雪\\u0000\"]]}",
-    "positional": "[\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",\"wire-雪\\u0000\",[[\"wire-雪\\u0000\",\"wire-雪\\u0000\"]],[[\"wire-雪\\u0000\",[\"wire-雪\\u0000\"]]],\"wire-雪\\u0000\",\"wire-雪\\u0000\",[[\"wire-雪\\u0000\",\"wire-雪\\u0000\"]]]"
-  },
-  {
-    "name": "Hip3MarketInfo",
-    "raw": "{\"name\":\"wire-雪\\u0000\",\"szDecimals\":17,\"maxLeverage\":17,\"onlyIsolated\":true,\"marginTableId\":17,\"marginMode\":\"strictIsolated\",\"growthMode\":\"enabled\",\"isDelisted\":true,\"lastGrowthModeChangeTime\":\"wire-雪\\u0000\"}",
-    "positional": "[\"wire-雪\\u0000\",17,17,true,17,\"strictIsolated\",\"enabled\",true,\"wire-雪\\u0000\"]"
-  },
-  {
     "name": "BuilderInfo",
     "raw": "{\"b\":\"wire-雪\\u0000\",\"f\":17}",
     "positional": "[\"wire-雪\\u0000\",17]"
@@ -363,11 +198,6 @@
     "name": "BuilderFeeApprovalResult",
     "raw": "{\"success\":true,\"message\":\"wire-雪\\u0000\"}",
     "positional": "[true,\"wire-雪\\u0000\"]"
-  },
-  {
-    "name": "BuilderFeeCheckResult",
-    "raw": "{\"approved\":true,\"maxFeeRate\":\"wire-雪\\u0000\",\"maxFeeRateTenthsBps\":17,\"error\":\"wire-雪\\u0000\"}",
-    "positional": "[true,\"wire-雪\\u0000\",17,\"wire-雪\\u0000\"]"
   },
   {
     "name": "CancelOrderResponse",

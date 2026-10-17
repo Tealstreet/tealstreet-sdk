@@ -2,6 +2,7 @@
 #[path = "support/binding_harness.rs"]
 #[allow(dead_code)]
 mod support;
+include!("support/private_binding_frames.rs");
 use safe_cex_exchange::exchange::Exchange;
 use safe_cex_store::Store;
 use safe_cex_types::*;
@@ -17,6 +18,90 @@ fn raw_order() -> Value {
 }
 fn fixture() -> Harness {
     fixture_options(options())
+}
+
+#[test]
+fn stale_close_during_held_listen_key_rebuild_does_not_connect_twice() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::Cell, rc::Rc};
+    const KEYS: &str = "/openApi/user/auth/userDataStream";
+    for held_ms in [0.0, 3_100.0] {
+        let h = fixture();
+        h.drive(h.venue().start()).unwrap();
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        let stale = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url.contains("listenKey="))
+            .unwrap()
+            .1
+            .clone();
+        let gate = Rc::new(Cell::new(false));
+        *h.http.held_request.borrow_mut() = Some(("POST".into(), KEYS.into(), gate.clone()));
+        h.http
+            .routes
+            .borrow_mut()
+            .retain(|(method, path, _)| method != "POST" || path != KEYS);
+        h.http
+            .route("POST", KEYS, 200.0, json!({"listenKey":"fresh-key"}));
+        stale
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(
+                json!({"e":"listenKeyExpired"}).to_string(),
+            )));
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        assert_eq!(
+            h.http.calls(KEYS).len(),
+            2,
+            "initial key plus the held replacement"
+        );
+        assert!(
+            stale.closed.get(),
+            "source rebuild closes its detached socket"
+        );
+        let delivered = stale.delivered_events.get();
+        stale.events.borrow_mut().push_back(WsEvent::Close {
+            code: Some(1000),
+            reason: "stale socket".into(),
+        });
+        h.runtime.pump();
+        assert_eq!(
+            stale.delivered_events.get(),
+            delivered + 1,
+            "stale Close was delivered through the real event loop"
+        );
+        if held_ms > 0.0 {
+            h.runtime.advance(held_ms);
+        }
+        assert_eq!(
+            h.http.calls(KEYS).len(),
+            2,
+            "removed close callback cannot request another key"
+        );
+        gate.set(true);
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        h.runtime.advance(3_100.0);
+        assert_eq!(h.http.calls(KEYS).len(), 2);
+        let sockets = h.runtime.sockets.borrow();
+        let private: Vec<_> = sockets
+            .iter()
+            .filter(|(url, _)| url.contains("listenKey="))
+            .collect();
+        assert_eq!(private.len(), 2, "exactly one replacement socket");
+        assert!(private[1].0.contains("listenKey=fresh-key"));
+        drop(sockets);
+        done(&h);
+    }
 }
 fn fixture_options(opts: ExchangeOptions) -> Harness {
     let h = harness(ExchangeName::Bingx, opts, |http| {

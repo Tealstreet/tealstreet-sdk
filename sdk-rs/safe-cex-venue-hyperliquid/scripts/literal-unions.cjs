@@ -20,7 +20,9 @@ function visit(node, name) {
   if (ts.isTupleTypeNode(node)) return node.elements.forEach((n, i) => visit(n, name + 'Item' + i));
   if (ts.isTypeLiteralNode(node)) return node.members.filter(ts.isPropertySignature).forEach(n => visit(n.type, name + pascal(n.name.text)));
 }
+const notModeled = require('./not-modeled-types.cjs');
 for (const node of ast.statements) {
+  if ((ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) && notModeled.has(node.name.text)) continue;
   if (ts.isTypeAliasDeclaration(node)) visit(node.type, node.name.text);
   if (ts.isInterfaceDeclaration(node)) node.members.filter(ts.isPropertySignature).forEach(n => visit(n.type, node.name.text + pascal(n.name.text)));
 }

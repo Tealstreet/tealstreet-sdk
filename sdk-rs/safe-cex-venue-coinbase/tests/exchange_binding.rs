@@ -674,3 +674,46 @@ fn cached_balance_fallback_keeps_native_optional_fields_and_nested_currencies() 
         Some(json!({"nested":true}))
     );
 }
+
+#[test]
+fn portfolios_do_not_require_unobserved_name_or_deleted_fields() {
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        for extra in [
+            json!({}),
+            json!({"name":null}),
+            json!({"deleted":"unobserved"}),
+            json!({"name":[],"deleted":{}}),
+        ] {
+            let h = harness(name.clone(), options(), |http| {
+                script(http);
+                http.routes
+                    .borrow_mut()
+                    .retain(|(_, path, _)| path != "/api/v3/brokerage/portfolios");
+                let mut portfolio = json!({"uuid":"portfolio-synthetic","type":"DEFAULT"});
+                portfolio
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                http.ok(
+                    "GET",
+                    "/api/v3/brokerage/portfolios",
+                    json!({"portfolios":[portfolio]}),
+                );
+            });
+            let account = h
+                .drive(h.venue().get_account())
+                .expect("unused portfolio metadata must not reject selection");
+            assert_eq!(account.user_id, "portfolio-synthetic");
+            let balance = h.drive(h.exchange.fetch_balance()).unwrap();
+            let usdc = balance.currencies.as_ref().unwrap()["USDC"]
+                .as_balance()
+                .unwrap();
+            assert_eq!(
+                (usdc.free, usdc.used),
+                (13.25, 4.25),
+                "real breakdown must load after selecting the sparse portfolio"
+            );
+            h.venue().dispose().unwrap();
+        }
+    }
+}

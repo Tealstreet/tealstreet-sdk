@@ -34,7 +34,8 @@ function sample(n,stack=[]) {
  throw Error(ts.SyntaxKind[n.kind]);
 }
 function members(ms,stack){ const o={};for(const m of ms){if(ts.isIndexSignatureDeclaration(m)){o.BTC=sample(m.type,stack)}else {o[m.name.text]=sample(m.type,stack)}}return o;}
-const names=[...new Set(ast.statements.filter(s=>ts.isInterfaceDeclaration(s)||ts.isTypeAliasDeclaration(s)).map(s=>s.name.text))];
+const notModeled=require('./not-modeled-types.cjs');
+const names=[...new Set(ast.statements.filter(s=>ts.isInterfaceDeclaration(s)||ts.isTypeAliasDeclaration(s)).map(s=>s.name.text))].filter(name=>!notModeled.has(name));
 const cases=[];
 for(const name of names) {
  const rootType=ts.factory.createTypeReferenceNode(name);

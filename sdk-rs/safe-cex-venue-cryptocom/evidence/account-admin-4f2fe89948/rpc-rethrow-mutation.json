@@ -1,9 +1,0 @@
-{
-  "base_sha": "4f2fe8994826f63a08f4098aa854b7d7fca1ad1f",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/account_admin.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/account_admin.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/account_admin.rs\n@@ -81,7 +81,7 @@\n         .chain(host.error_as_template(&error)?)\n         .collect();\n     host.log(log, message, AdminSeverity::Error)?;\n-    Err(error)\n+    Ok(())\n }\n fn begin_admin<T: AdminHost>(\n     host: &T,\n",
-  "expected_named_assertion": "CRYPTOCOM-ADMIN-NATIVE-RETURN leverage-prepare-post",
-  "stop_case_index": 10,
-  "stop_case_name": "leverage-prepare-post",
-  "runtime_proof": true
-}

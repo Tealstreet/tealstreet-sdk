@@ -567,6 +567,168 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
     h.venue().dispose().expect("dispose");
 }
 
+fn started(script: impl FnOnce(&support::Http)) -> Harness {
+    let h = venue(|http| {
+        http.ok("POST", "/private/get-open-orders", open_orders());
+        http.ok(
+            "POST",
+            "/private/advanced/get-open-orders",
+            advanced_orders(),
+        );
+        http.ok("POST", "/private/get-positions", positions());
+        http.ok("POST", "/private/user-balance", balance());
+        script(http);
+    });
+    h.drive(h.venue().start()).expect("start");
+    h
+}
+
+fn market_socket(h: &Harness) -> std::rc::Rc<support::Socket> {
+    h.runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/market"))
+        .expect("public market socket")
+        .1
+        .clone()
+}
+
+fn public_frame(h: &Harness, result: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    market_socket(h)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"id": -1, "method": "subscribe", "code": 0, "result": result}).to_string(),
+        )));
+    for _ in 0..4 {
+        h.runtime.advance(50.0);
+    }
+}
+
+fn sent_channels(h: &Harness, method: &str) -> Vec<Value> {
+    market_socket(h)
+        .sent
+        .borrow()
+        .iter()
+        .filter_map(|m| serde_json::from_str::<Value>(m).ok())
+        .filter(|m| m["method"] == method)
+        .flat_map(|m| {
+            m["params"]["channels"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+// ts: cryptocom.exchange.ts fetchOHLCV posts public/get-candlestick and maps each row.
+#[test]
+fn fetch_ohlcv_reads_venue_candlesticks() {
+    let h = venue(|http| {
+        http.ok(
+            "GET",
+            "/public/get-candlestick",
+            ok(json!({"data": [
+                {"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}
+            ]})),
+        )
+    });
+    loaded(&h);
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let candles = h.drive(h.venue().fetch_ohlcv(opts)).expect("fetchOHLCV");
+    assert_eq!(candles.len(), 1, "venue candles are returned");
+    assert_eq!(candles[0].timestamp, 1_700_000_000_000.0);
+    assert_eq!(
+        (
+            candles[0].open,
+            candles[0].high,
+            candles[0].low,
+            candles[0].close,
+            candles[0].volume
+        ),
+        (1.0, 2.0, 0.5, 1.5, 10.0)
+    );
+    let call = &h.http.calls("/public/get-candlestick")[0];
+    assert_eq!(call.method, "GET", "public reads go out as GET");
+    assert_eq!(
+        call.params,
+        json!({"instrument_name": SYMBOL, "timeframe": "1h"})
+    );
+}
+
+// ts: cryptocom.ws-public.ts listenOrderBook subscribes book.<symbol>.50 and replaces both sides.
+#[test]
+fn listen_order_book_subscribes_and_delivers_snapshots() {
+    let h = started(|_| {});
+    let books = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = books.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            std::rc::Rc::new(move |b| sink.borrow_mut().push(b)),
+        )
+        .expect("listenOrderBook");
+    h.runtime.advance(50.0);
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "book subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "book", "subscription": format!("book.{SYMBOL}.50"),
+               "instrument_name": SYMBOL,
+               "data": [{"bids": [["30000", "1", "1"]], "asks": [["30001", "2", "1"]], "t": 1}]}),
+    );
+    let books = books.borrow();
+    assert!(!books.is_empty(), "order book callback fired");
+    let last = books.last().unwrap();
+    assert_eq!((last.bids[0].price, last.bids[0].amount), (30000.0, 1.0));
+    assert_eq!((last.asks[0].price, last.asks[0].amount), (30001.0, 2.0));
+    drop(books);
+    cleanup().expect("cleanup");
+    assert!(
+        sent_channels(&h, "unsubscribe").contains(&json!(format!("book.{SYMBOL}.50"))),
+        "last listener unsubscribes"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+// ts: cryptocom.ws-public.ts listenOHLCV subscribes candlestick.<interval>.<symbol>.
+#[test]
+fn listen_ohlcv_subscribes_and_delivers_candles() {
+    let h = started(|_| {});
+    let candles = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = candles.clone();
+    let opts: safe_cex_types::OHLCVOptions =
+        serde_json::from_value(json!({"symbol": SYMBOL, "interval": "1h"})).unwrap();
+    let _cleanup = h
+        .venue()
+        .listen_ohlcv(opts, std::rc::Rc::new(move |c| sink.borrow_mut().push(c)))
+        .expect("listenOHLCV");
+    h.runtime.advance(50.0);
+    let channel = format!("candlestick.1h.{SYMBOL}");
+    assert!(
+        sent_channels(&h, "subscribe").contains(&json!(channel)),
+        "candlestick subscription sent"
+    );
+    public_frame(
+        &h,
+        json!({"channel": "candlestick", "subscription": channel, "instrument_name": SYMBOL,
+               "interval": "1h",
+               "data": [{"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}]}),
+    );
+    let candles = candles.borrow();
+    assert_eq!(candles.len(), 1, "candle callback fired once");
+    assert_eq!(candles[0].close, 1.5);
+    drop(candles);
+    h.venue().dispose().expect("dispose");
+}
+
 #[test]
 fn constructing_another_venue_name_is_refused() {
     let runtime = std::rc::Rc::new(support::Runtime::default());
@@ -909,4 +1071,247 @@ fn create_api_routes_through_the_provider_and_tunnel_adapter() {
             assert_eq!(call.headers["Authorization"], "Bearer proxy-token");
         }
     }
+}
+
+fn private_socket(h: &Harness) -> std::rc::Rc<support::Socket> {
+    h.runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/user"))
+        .expect("private user socket")
+        .1
+        .clone()
+}
+
+fn private_frame(h: &Harness, frame: Value) {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    private_socket(h)
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+    for _ in 0..4 {
+        h.runtime.advance(50.0);
+    }
+}
+
+fn authenticated_private_venue() -> Harness {
+    let h = started(|_| {});
+    h.runtime.advance(1000.0);
+    private_frame(&h, json!({"method":"public/auth","code":0}));
+    assert!(
+        private_socket(&h).sent.borrow().iter().any(|text| {
+            let f: Value = serde_json::from_str(text).expect("sent JSON");
+            f["method"] == "subscribe"
+                && f["params"]["channels"]
+                    == json!([
+                        "user.order",
+                        "user.advance.order",
+                        "user.positions",
+                        "user.balance"
+                    ])
+        }),
+        "private subscription reaches transport after auth"
+    );
+    h
+}
+
+fn live_order(id: &str, status: &str, filled: &str) -> Value {
+    json!({"order_id":id,"instrument_name":SYMBOL,"quantity":"4",
+        "cumulative_quantity":filled,"limit_price":"29001.5","order_type":"LIMIT",
+        "side":"BUY","status":status,"update_time":77,"create_time":22,
+        "time_in_force":"GOOD_TILL_CANCEL","exec_inst":["REDUCE_ONLY"]})
+}
+
+fn stored_order(h: &Harness, id: &str) -> Order {
+    safe_cex_store::Store::orders(h.store.as_ref())
+        .iter()
+        .find(|o| o.id == id)
+        .unwrap_or_else(|| panic!("private order {id} reached Store"))
+        .clone()
+}
+
+// Source onMessage processes result/channel even when the frame also has code:0.
+#[test]
+fn private_order_frames_create_partially_fill_close_and_cancel_orders() {
+    let h = authenticated_private_venue();
+    let mut unknown = live_order("unknown", "ACTIVE", "0");
+    unknown["instrument_name"] = json!("UNKNOWN-PERP");
+    let advanced = json!({"order_id":"ws-advanced","instrument_name":SYMBOL,
+        "quantity":"2","cumulative_quantity":"0","ref_price":"25000.5",
+        "limit_price":"24000","order_type":"STOP_LOSS","side":"SELL",
+        "order_status":"ACTIVE","time_created":10,"time_updated":66,
+        "time_in_force":"IMMEDIATE_OR_CANCEL"});
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.order","data":[unknown,live_order("ws-order","ACTIVE","0")]}}),
+    );
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.advance.order","data":[advanced]}}),
+    );
+    let order = stored_order(&h, "ws-order");
+    assert_eq!(
+        (order.amount, order.filled, order.remaining),
+        (4.0, 0.0, 4.0)
+    );
+    assert_eq!(
+        (order.status, order.side, order.r#type),
+        (OrderStatus::Open, OrderSide::Buy, OrderType::Limit)
+    );
+    assert_eq!(order.price, 29001.5);
+    assert_eq!(order.last_update, 77.0);
+    assert!(order.reduce_only);
+    let advanced = stored_order(&h, "ws-advanced");
+    assert_eq!(
+        (advanced.r#type, advanced.side),
+        (OrderType::StopLoss, OrderSide::Sell)
+    );
+    assert_eq!((advanced.price, advanced.last_update), (25000.5, 66.0));
+    assert!(
+        !safe_cex_store::Store::orders(h.store.as_ref())
+            .iter()
+            .any(|o| o.id == "unknown")
+    );
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.order","data":[
+        live_order("ws-order","ACTIVE","1.5")]}}),
+    );
+    let partial = stored_order(&h, "ws-order");
+    assert_eq!(
+        (partial.status, partial.filled, partial.remaining),
+        (OrderStatus::Open, 1.5, 2.5)
+    );
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.order","data":[
+        live_order("ws-order","FILLED","4"), live_order("O1","CANCELED","1.5")]}}),
+    );
+    let filled = stored_order(&h, "ws-order");
+    assert_eq!(
+        (filled.status, filled.filled, filled.remaining),
+        (OrderStatus::Closed, 4.0, 0.0)
+    );
+    assert_eq!(stored_order(&h, "O1").status, OrderStatus::Canceled);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn private_position_frames_update_hedged_sides_and_remove_zero_quantity() {
+    let h = authenticated_private_venue();
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.positions","data":[
+            {"instrument_name":"UNKNOWN-PERP","quantity":"9"},
+            {"instrument_name":SYMBOL,"quantity":"-2","cost":"-60000",
+             "target_leverage":"7","liquidation_price":"40000.5","mark_price":"30001",
+             "open_position_pnl":"-3.5","isolation_type":"ISOLATED_MARGIN",
+             "isolation_id":"isolation-1","update_timestamp_ms":88},
+            {"instrument_name":SYMBOL,"quantity":"1","cost":"28000",
+             "leverage":"4","open_position_pnl":"5","isolation_type":"CROSS_MARGIN",
+             "update_timestamp_ms":89}
+        ]}}),
+    );
+    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    assert_eq!(
+        positions.len(),
+        2,
+        "both rows delivered without unknown market"
+    );
+    let short = positions
+        .iter()
+        .find(|p| p.side == PositionSide::Short)
+        .expect("short");
+    assert_eq!(
+        (short.contracts, short.entry_price, short.notional),
+        (2.0, -30000.0, 60000.0)
+    );
+    assert_eq!((short.leverage, short.liquidation_price), (7.0, 40000.5));
+    assert_eq!(short.unrealized_pnl, -3.5);
+    assert_eq!(
+        short.margin_type,
+        Some(safe_cex_types::MarginType::Isolated)
+    );
+    assert_eq!(
+        short.position_mode,
+        Some(safe_cex_types::PositionMode::Hedged)
+    );
+    assert_eq!(short.last_update, Some(88.0));
+    let serialized = serde_json::to_value(short).expect("position JSON");
+    assert_eq!(
+        serialized["info"],
+        json!({"markPrice":30001.0,"isolationId":"isolation-1"})
+    );
+    let long = positions
+        .iter()
+        .find(|p| p.side == PositionSide::Long)
+        .expect("long");
+    assert_eq!(
+        (long.contracts, long.entry_price, long.leverage),
+        (1.0, 28000.0, 4.0)
+    );
+    assert_ne!(short.id, long.id, "hedged sides keep distinct identities");
+    drop(positions);
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.positions","data":[
+        {"instrument_name":SYMBOL,"quantity":"0","cost":"0"}]}}),
+    );
+    assert!(
+        safe_cex_store::Store::positions(h.store.as_ref()).is_empty(),
+        "flat frame removes both sides"
+    );
+    h.venue().dispose().expect("dispose");
+}
+
+#[test]
+fn private_balance_frames_replace_rest_currency_shape_and_ignore_empty_updates() {
+    let h = authenticated_private_venue();
+    private_frame(
+        &h,
+        json!({"method":"subscribe","code":0,"result":{
+        "channel":"user.balance","data":[{
+            "total_margin_balance":"200","total_available_balance":"140",
+            "total_initial_margin":"60","total_session_unrealized_pnl":"-6",
+            "position_balances":[
+                {"instrument_name":"USD","quantity":"20","max_withdrawal_balance":"12"},
+                {"instrument_name":"BTC","quantity":"2","max_withdrawal_balance":"3"}
+            ]
+        }]}}),
+    );
+    let balance = safe_cex_store::Store::balance(h.store.as_ref());
+    assert_eq!(
+        (balance.total, balance.free, balance.used, balance.upnl),
+        (200.0, 140.0, 60.0, -6.0)
+    );
+    assert_eq!(
+        serde_json::to_value(&balance.currencies).unwrap(),
+        json!({
+            "USD":{"total":20.0,"free":12.0,"used":8.0,"upnl":0.0},
+            "BTC":{"total":2.0,"free":3.0,"used":0.0,"upnl":0.0}
+        }),
+        "WS currency shape follows source, replacing REST available/locked"
+    );
+    let before = serde_json::to_value(&*balance).unwrap();
+    drop(balance);
+    assert!(safe_cex_store::Store::loaded(h.store.as_ref()).balance);
+    private_frame(
+        &h,
+        json!({"code":0,"result":{"channel":"user.balance","data":[]}}),
+    );
+    assert_eq!(
+        serde_json::to_value(&*safe_cex_store::Store::balance(h.store.as_ref())).unwrap(),
+        before
+    );
+    h.venue().dispose().expect("dispose");
 }

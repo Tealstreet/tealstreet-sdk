@@ -744,3 +744,21 @@ pub fn accepted_typed_refusal(
     let f = refusal_fixture(input);
     observe_refusal(&f, || f.run(invoke(f.exchange.clone())))
 }
+
+#[test]
+fn generated_order_code_strips_nanoid_separators() {
+    let f = fixture();
+    f.fetch_markets();
+    *f.runtime.id.borrow_mut() = Some("A_b-cD_e-fG_h-iJ_k-lM".into());
+    assert_eq!(
+        f.run(f.exchange.base.place_order(f.exchange.as_ref(), opts()))
+            .unwrap(),
+        ["placed"]
+    );
+    let request = f.request("POST", "accounts/default:A/orders");
+    assert_eq!(
+        request["data"]["orderCode"], "tealstreet-AbcDefGhiJklM",
+        "production UUID strips both nanoid separators before prefixing"
+    );
+    assert_eq!(request["headers"]["Coinbase-Authorization"], "DXAPI token");
+}

@@ -1,5 +1,15 @@
 # Coinbase venue parity port
 
+The production private write-check timeout emits warning arguments as
+`(reason, {forceToast: true})`; retain the second emitter argument and the
+once-only latch until a received user frame resets it. Portfolio selection
+projects only `uuid` and `type` into mutable `PortfolioState`, retaining unused
+metadata as JSON. The declaration DTO remains strict; missing or malformed
+`name`/`deleted` cannot reject runtime selection or balance reads. Production
+regressions are in `tests/private_binding_frames.rs` and `tests/exchange_binding.rs`;
+`scripts/health-portfolio-binding-controls.py` compiles each boundary reversion,
+requires its named failure, and restores the source byte-for-byte.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/coinbase/CLAUDE.md).
 Core contract: [shared exchange trait](../safe-cex-exchange/CLAUDE.md).
 
