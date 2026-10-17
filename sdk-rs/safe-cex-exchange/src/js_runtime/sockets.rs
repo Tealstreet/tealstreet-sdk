@@ -197,6 +197,10 @@ impl JsProtocol {
     }
     fn emit(&self, event: &str, payload: Js) -> Result<(), ExchangeError> {
         let core = self.core()?;
+        let grouped = core
+            .base
+            .get()
+            .is_some_and(|base| base.grouped_listener_dispatch());
         let current = core.listeners.borrow().clone();
         let listeners: Vec<Js> = current
             .borrow()
@@ -209,13 +213,16 @@ impl JsProtocol {
             if event == "close" && skip.as_ref().is_some_and(|s| s.same_reference(&listener)) {
                 continue;
             }
-            let result = listener
-                .call(Js::Undefined, vec![payload.clone()])
-                .map_err(core_error)?;
-            if let Js::Promise(p) = result
-                && let Some(Err(e)) = p.result()
-            {
-                return Err(core_error(e));
+            if let Err(thrown) = listener.call(Js::Undefined, vec![payload.clone()]) {
+                core.context.runtime.report_exception(
+                    &core_error(thrown),
+                    &serde_json::json!({ "operation": "websocket listener", "event": event }),
+                );
+                // RWS invokes its listeners in one host callback; plain EventTarget
+                // reports each exception independently and continues dispatch.
+                if grouped {
+                    break;
+                }
             }
         }
         Ok(())
