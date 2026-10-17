@@ -350,3 +350,11 @@ all-features inventories (cancellation6+export-ignore, override7+live-TS-ignore,
 binding25), parity7459/16581 and extraction0 pass after normal master refresh.
 Logs: /tmp/blofin-gone-{native-red,final-native,native-clippy,wasm-clippy,
 inventories,parity,extract}.log. No reviewed fixture or source corpus replaced.
+
+The constructed ticker census in `tests/native_ping_latency.rs` drives 64
+field-independent cases through 192 real public ticker/funding frames. Null,
+strings, NaN-producing values, malformed objects, overflow, signed zero and
+false are checked with distinct good rows and finite Store resets. All native
+Ticker numeric bits match the constructed TS exchange and DefaultStore. The
+shared control runner misroutes the live last-price field and requires compiled
+failure followed by exact-restored success.

@@ -15,6 +15,9 @@ cases = {
     "hyperliquid": ("private_message_dispatch.rs", "binding", 'h.set(&buffer, "midPrice", &last)?;', 'h.set(&buffer, "mark", &last)?;'),
     "hyperliquidspot": ("spot_ws_dispatch.rs", "spot_binding", 'h.set(&buffer, "midPrice", &last)?;', 'h.set(&buffer, "mark", &last)?;'),
     "lighter": ("public_ingress.rs", "exchange_binding", 'let mark = parse_fields(&h, &data, &["markPrice", "mark_price", "mark"])?;', 'let mark = parse_fields(&h, &data, &["indexPrice", "index_price", "index"])?;'),
+    "blofin": ("public_stream_data.rs", "native_ping_latency", 'let last = float(update.get("last"))?;', 'let last = float(update.get("bidPrice"))?;'),
+    "cryptocom": ("socket_handlers.rs", "exchange_binding", '("last", parsed_field(h, &data, "a")?),', '("last", parsed_field(h, &data, "b")?),'),
+    "coinbase": ("public_stream_dispatch.rs", "exchange_binding", '"No handler for channel ".encode_utf16()', '"Unexpected ticker channel ".encode_utf16()'),
 }
 selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"

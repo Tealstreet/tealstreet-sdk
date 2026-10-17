@@ -31,12 +31,12 @@ satisfy this corpus.
 | Bitget | bitget/bitget.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Bitrue | bitrue/bitrue.ws-public.ts | Unary Number conversion; rose multiplied by 100 | Native proven: safe-cex-venue-bitrue/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 32 cases / 96 actual frames |
 | Bitunix | bitunix/bitunix.ws-public.ts | parseFloat; depth fallback with `|| 0` | Native proven: safe-cex-venue-bitunix/tests/native_identity.rs::production_ticker_coercion_matches_constructed_typescript; 80 cases / 240 primary and secondary frames |
-| BloFin | blofin/blofin.ws-public.ts | Numeric coercion | Pending; prioritize missing ticker binding corpus |
+| BloFin | blofin/blofin.ws-public.ts | parseFloat and rounded percentage; first row of each channel frame | Native proven: safe-cex-venue-blofin/tests/native_ping_latency.rs::production_ticker_coercion_matches_constructed_typescript; 64 cases / 192 ticker and funding frames |
 | Bybit primary/demo | bybit/bybit.ws-public.ts | parseFloat/arithmetic; category-dependent volumes | Pending complete coercion corpus |
 | Bybit inverse | bybit/bybitinverse.ws-public.ts | parseFloat/arithmetic; dedicated inverse volumes | Pending complete coercion corpus |
 | Bybit Spot | bybit/bybitspot.ws-public.ts | parseFloat/arithmetic | Pending complete coercion corpus |
-| Coinbase | coinbase/coinbase.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
-| Crypto.com | cryptocom/cryptocom.ws-public.ts | parseFloat | Pending; prioritize missing ticker binding corpus |
+| Coinbase | coinbase/coinbase.ws-public.ts | No active ticker handler: TS ticker_batch mapper and registration are commented out; reports unknown channel and leaves tickers unchanged | Native proven: safe-cex-venue-coinbase/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 56 malformed three-row batches through each Coinbase constructor, unchanged numeric fields and 56 visible unsupported-channel reports each |
+| Crypto.com | cryptocom/cryptocom.ws-public.ts | parseFloat ticker/book; nonempty string and finite Number guards for valuations | Native proven: safe-cex-venue-cryptocom/tests/exchange_binding.rs::production_ticker_coercion_matches_constructed_typescript; 96 cases / 288 ticker, book, mark, index and funding frames; numeric mapping scope, not throttle timing |
 | GRVT | grvt/grvt.ws-public.ts | Numeric coercion | Pending complete coercion corpus |
 | Hyperliquid futures | hyperliquid/hyperliquid.ws-public.ts | parseFloat mids; positive finite Number fast contexts | Native proven: safe-cex-venue-hyperliquid/tests/binding.rs::production_ticker_coercion_matches_constructed_typescript; 24 three-row frames, including raw-DEFLATE fast contexts and midPrice |
 | Hyperliquid Spot | hyperliquid/hyperliquidspot.ws-public.ts | parseFloat mids | Native proven: safe-cex-venue-hyperliquid/tests/spot_binding.rs::production_ticker_coercion_matches_constructed_typescript; 8 three-row frames including midPrice |
