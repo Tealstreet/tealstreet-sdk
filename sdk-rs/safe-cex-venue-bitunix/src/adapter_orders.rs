@@ -114,7 +114,7 @@ impl crate::order_models::OrderModelHost for OrderFrame {
         Ok(state.position_id_cache.get(key).cloned().map(Value::String))
     }
     fn uuid(&mut self) -> Result<String, Fault> {
-        Ok(self.venue.runtime.unique_id())
+        Ok(self.venue.runtime.unique_id().replace(['-', '_'], ""))
     }
     fn assert_single(&mut self, caller: Option<&str>, count: usize) -> Result<(), Fault> {
         Ok(self
@@ -434,7 +434,9 @@ impl crate::order_placement::BatchOrderHost for BatchFrame {
         self.venue.runtime.sleep(delay as u64)
     }
     fn uuid(&mut self) -> Result<V, ExchangeError> {
-        Ok(Rc::new(JsJsonValue::String(self.venue.runtime.unique_id())))
+        Ok(Rc::new(JsJsonValue::String(
+            self.venue.runtime.unique_id().replace(['-', '_'], ""),
+        )))
     }
     fn string(&mut self, text: Vec<u16>) -> Result<V, ExchangeError> {
         Ok(Rc::new(JsJsonValue::String(utf8(&text)?)))

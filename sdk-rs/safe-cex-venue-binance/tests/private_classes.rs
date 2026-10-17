@@ -3222,6 +3222,7 @@ fn native_import_default_weight_property_returns_existing_values() {
         std::sync::Arc::new(UnusedAdapter),
         Rc::new(|_, _| panic!("property forwarding must not construct external data")),
         None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
     );
     let receiver: &dyn ExchangeImports = dependencies.imports.as_ref();
     let child = record([("id", number(-0.0))]);
@@ -3261,6 +3262,7 @@ fn production_native_owner(venue: Venue) -> Rc<ExchangeOwner> {
         std::sync::Arc::new(IdOnlyAdapter),
         Rc::new(|_, _| panic!("no external provider is configured")),
         None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
     );
     let name = match venue {
         Venue::Futures => "binance",
@@ -3298,6 +3300,7 @@ fn production_native_client_ids_fit_every_family_and_payload_path() {
         std::sync::Arc::new(IdOnlyAdapter),
         Rc::new(|_, _| panic!("ID generation has no external-data dependency")),
         None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
     );
     let imports: &dyn ExchangeImports = dependencies.imports.as_ref();
     for _ in 0..128 {

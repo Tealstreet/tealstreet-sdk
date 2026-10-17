@@ -11,14 +11,14 @@ use crate::{
     public_data_host::{MarketBatch, PublicDataParent, PublicDataUpdate, TickerBatch},
 };
 use safe_cex_exchange::{
-    exchange::BaseExchange,
+    exchange::{BaseExchange, Exchange},
     external::ExternalPublicData,
     runtime::{ExchangeTask, ListenerCleanup, LogSeverity, RemoteSigner},
     websocket::{WsEvent, WsSocket},
 };
 use safe_cex_exchange::{
     js_runtime::base_exchange::{ExternalPublicDataFactory, HostedSigner},
-    native::native_runtime,
+    native::{NativeHttpEvents, native_runtime},
     runtime::ExchangeError,
     websocket::WsRuntime,
 };
@@ -55,12 +55,18 @@ pub fn hyperliquid_rate_limiter() -> Rc<HyperliquidRateLimiter> {
 
 pub struct NativeVenueHost {
     runtime: Rc<dyn WsRuntime>,
+    http_events: NativeHttpEvents,
     adapter: AdapterFactory,
     remote: Option<HostedSigner>,
     coinbase_keys: Rc<safe_cex_venue_coinbase::cdp_signing::CdpSigningCache>,
     kraken_nonces: Rc<safe_cex_venue_kraken::api::FuturesModule>,
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
     hyperliquid_limiter: Rc<HyperliquidRateLimiter>,
+}
+/// ts: safeCexAxiosCreate emits proxy failures on its own exchange. Binds the
+/// account's constructed exchange to every native HTTP host this host built.
+pub fn bind_http_events(host: &NativeVenueHost, exchange: &Rc<dyn Exchange>) {
+    *host.http_events.borrow_mut() = Some(Rc::downgrade(exchange));
 }
 /// Direct transport and real HTTP, as `directTransport` is the TypeScript default.
 pub fn native_venue_host(limiter: Rc<HyperliquidRateLimiter>) -> Rc<NativeVenueHost> {
@@ -82,6 +88,7 @@ pub fn native_venue_host_with(
 ) -> Rc<NativeVenueHost> {
     Rc::new(NativeVenueHost {
         runtime,
+        http_events: NativeHttpEvents::default(),
         adapter,
         remote: None,
         coinbase_keys: Rc::default(),
@@ -101,6 +108,7 @@ pub fn native_venue_host_signed(
 ) -> Rc<NativeVenueHost> {
     Rc::new(NativeVenueHost {
         runtime,
+        http_events: NativeHttpEvents::default(),
         adapter,
         remote: Some((signer, account_name)),
         coinbase_keys: Rc::default(),
@@ -144,7 +152,9 @@ impl RustVenueHost for NativeVenueHost {
             runtime: self.runtime.clone(),
             remote_signer: self.remote.clone(),
             wire: (self.adapter)()?,
-            http_host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
+            http_host: Rc::new(safe_cex_exchange::native::NativeHttpHost {
+                events: self.http_events.clone(),
+            }),
             rate_limit_clock: Arc::new(BybitClock(self.runtime.clone())),
             retry_clock: Rc::new(BybitClock(self.runtime.clone())),
             clock: safe_cex_store::virtual_clock::VIRTUAL_CLOCK.clone(),
@@ -165,6 +175,7 @@ impl RustVenueHost for NativeVenueHost {
         let runtime = self.runtime.clone();
         let adapter = (self.adapter)()?;
         let remote = self.remote.clone();
+        let events = self.http_events.clone();
         Ok(safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies {
             runtime: self.runtime.clone(),
             hosted_signer: self.remote.clone(),
@@ -176,6 +187,7 @@ impl RustVenueHost for NativeVenueHost {
                     options,
                     safe_cex_transport::RestRequest::default(),
                     remote.clone(),
+                    &events,
                 )
             }),
             registry: Rc::new(safe_cex_transport::TransportRegistry::default()),
@@ -195,6 +207,7 @@ impl RustVenueHost for NativeVenueHost {
                 options,
                 safe_cex_transport::RestRequest::default(),
                 self.remote.clone(),
+                &self.http_events,
             ),
             &safe_cex_transport::TransportRegistry::default(),
             Rc::new(NativeRetryClock(self.runtime.clone())),
@@ -257,6 +270,7 @@ impl RustVenueHost for NativeVenueHost {
                 )
                 .map_err(safe_cex_transport::TransportError::JavaScript)
             })),
+            &self.http_events,
         )?;
         if !options.public_data_only.unwrap_or(false) {
             safe_cex_exchange::http::install_transport_adapter(
@@ -288,6 +302,7 @@ impl RustVenueHost for NativeVenueHost {
         let runtime = self.runtime.clone();
         let adapter = self.adapter.clone();
         let remote = self.remote.clone();
+        let events = self.http_events.clone();
         Ok(
             safe_cex_venue_orderly::native_exchange::OrderlyDependencies {
                 runtime: self.runtime.clone(),
@@ -302,6 +317,7 @@ impl RustVenueHost for NativeVenueHost {
                         Arc::new(SourceApiRest {
                             name: name.clone(),
                             runtime: runtime.clone(),
+                            events: events.clone(),
                             adapter: adapter.clone(),
                             options: options.clone(),
                         }),
@@ -323,6 +339,7 @@ impl RustVenueHost for NativeVenueHost {
         let runtime = self.runtime.clone();
         let adapter = self.adapter.clone();
         let remote = self.remote.clone();
+        let events = self.http_events.clone();
         Ok(
             safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies {
                 runtime: self.runtime.clone(),
@@ -337,6 +354,7 @@ impl RustVenueHost for NativeVenueHost {
                         Arc::new(SourceApiRest {
                             name: safe_cex_types::ExchangeName::Asterdex,
                             runtime: runtime.clone(),
+                            events: events.clone(),
                             adapter: adapter.clone(),
                             options: options.clone(),
                         }),
@@ -372,6 +390,7 @@ impl RustVenueHost for NativeVenueHost {
                 self.runtime.clone(),
                 Arc::new(BreakoutRest {
                     runtime: self.runtime.clone(),
+                    events: self.http_events.clone(),
                     adapter: self.adapter.clone(),
                     options: options.clone(),
                     installed,
@@ -574,6 +593,7 @@ impl RustVenueHost for NativeVenueHost {
             options,
             safe_cex_transport::RestRequest::default(),
             self.remote.clone(),
+            &self.http_events,
         ))
     }
 
@@ -598,6 +618,7 @@ impl RustVenueHost for NativeVenueHost {
             (self.adapter)()?,
             gateway_factory(self.runtime.clone()),
             self.remote.clone(),
+            self.http_events.clone(),
         ))
     }
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError> {
@@ -605,6 +626,7 @@ impl RustVenueHost for NativeVenueHost {
             self.runtime.clone(),
             (self.adapter)()?,
             self.remote.clone(),
+            self.http_events.clone(),
         );
         Ok(BackpackDependencies {
             runtime: inputs.runtime,
@@ -632,6 +654,7 @@ impl RustVenueHost for NativeVenueHost {
             (self.runtime.clone(), self.adapter.clone(), built.clone());
         let install_runtime = self.runtime.clone();
         let remote = self.remote.clone();
+        let events = self.http_events.clone();
         Ok(BitunixDependencies {
             runtime: self.runtime.clone(),
             build: Rc::new(move |options| {
@@ -644,6 +667,7 @@ impl RustVenueHost for NativeVenueHost {
                     safe_cex_transport::RestRequest::default(),
                     remote.clone(),
                     None,
+                    &events,
                 )
             }),
             install: Rc::new(move |client| {
@@ -670,6 +694,7 @@ impl RustVenueHost for NativeVenueHost {
                 self.runtime.clone(),
                 self.adapter.clone(),
                 self.remote.clone(),
+                self.http_events.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
             remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
@@ -740,6 +765,7 @@ impl RestAdapter for HyperliquidHttp {
 struct SourceApiRest {
     name: safe_cex_types::ExchangeName,
     runtime: Rc<dyn WsRuntime>,
+    events: NativeHttpEvents,
     adapter: AdapterFactory,
     options: safe_cex_types::ExchangeOptions,
 }
@@ -757,6 +783,7 @@ impl RestAdapter for SourceApiRest {
                 request.clone(),
                 None,
                 None,
+                &self.events,
             )
             .map_err(|error| {
                 safe_cex_transport::RestFailure::pre_transmit(error.message, request.clone())
@@ -778,6 +805,7 @@ impl RestAdapter for SourceApiRest {
 // final request keeps source auth headers and the transport-resolved baseURL.
 struct BreakoutRest {
     runtime: Rc<dyn WsRuntime>,
+    events: NativeHttpEvents,
     adapter: AdapterFactory,
     options: safe_cex_types::ExchangeOptions,
     installed: Rc<Cell<bool>>,
@@ -796,6 +824,7 @@ impl RestAdapter for BreakoutRest {
                 request.clone(),
                 None,
                 None,
+                &self.events,
             )
             .map_err(|error| {
                 safe_cex_transport::RestFailure::pre_transmit(error.message, request.clone())
@@ -825,8 +854,17 @@ fn native_client(
     request: safe_cex_transport::RestRequest,
     remote: Option<HostedSigner>,
     params_serializer: Option<safe_cex_exchange::http::ParamsSerializer>,
+    events: &NativeHttpEvents,
 ) -> Result<safe_cex_exchange::http::HttpClient, ExchangeError> {
-    let mut input = native_http_options(runtime, adapter()?, exchange, options, request, remote);
+    let mut input = native_http_options(
+        runtime,
+        adapter()?,
+        exchange,
+        options,
+        request,
+        remote,
+        events,
+    );
     input.params_serializer = params_serializer;
     safe_cex_exchange::http::safe_cex_axios_create(
         input,
@@ -842,6 +880,7 @@ fn native_http_options(
     options: &safe_cex_types::ExchangeOptions,
     request: safe_cex_transport::RestRequest,
     remote: Option<HostedSigner>,
+    events: &NativeHttpEvents,
 ) -> safe_cex_exchange::http::HttpClientOptions {
     let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
     safe_cex_exchange::http::HttpClientOptions {
@@ -856,7 +895,9 @@ fn native_http_options(
         }),
         account_name: remote.and_then(|(_, name)| name),
         adapter,
-        host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
+        host: Rc::new(safe_cex_exchange::native::NativeHttpHost {
+            events: events.clone(),
+        }),
         runtime: exchange_runtime,
         store: None,
         stats: None,
@@ -888,6 +929,7 @@ fn blofin_http(
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
     remote: Option<HostedSigner>,
+    events: NativeHttpEvents,
 ) -> BlofinHttp {
     Rc::new(move |options, base_url, budget| {
         let request = safe_cex_transport::RestRequest {
@@ -903,6 +945,7 @@ fn blofin_http(
             request,
             remote.clone(),
             None,
+            &events,
         )
         .map_err(|e| e.message)?;
         Ok(Rc::new(client) as Rc<dyn RestAdapter>)

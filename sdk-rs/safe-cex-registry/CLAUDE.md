@@ -112,6 +112,17 @@ the FFI crate's Node tests cover the same calls through the actual napi addon.
 The hosted `HostSigner` and js_runtime `TransportSigner` forward `sign_query`; the
 transport default refuses, so a wrapper that drops it breaks hosted MEXC/Bybit GETs.
 
+Native `listenOHLCV`, `listenOHLCVs` and `listenOrderBook` calls retain their real
+venue callbacks and return a registration handle; `unlisten` runs the returned
+venue cleanup, and disposal closes all registrations. Stream notifications carry
+`{subscriptionId, data}` through the existing event watch. Binance gateway tests
+in `native_account_streams` verify live frames and actual unsubscribe traffic.
+
+Every native HTTP host an account host builds shares one emitter slot;
+`open_native_account` binds the constructed exchange with `bind_http_events`, so
+safeCexAxiosCreate's proxy auth/5xx `error` reaches the account's event watch.
+`tests/native_account_proxy_errors.rs` drives all three messages over a loopback proxy.
+
 GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
 terminal HTTP host and the common public-data provider. Its HTTP clients receive
 the shared hosted signer, including untagged public requests. Active GRVT SDK

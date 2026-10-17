@@ -333,29 +333,44 @@ impl WsProtocol for JsProtocol {
     ) -> Result<(), ExchangeError> {
         self.emit("close", close_event(code, reason, code != Some(1006)))
     }
-    /// ts: a subclass `onClose` field replaces the base one createWebsocket listens with.
+    /// ts: the venue registers its own close listener; the core handles the close only
+    /// when that listener is the base `onClose`. A replaced `onClose` field or a
+    /// no-event `handleClose = () => this.onClose()` owns it instead.
     fn owns_close_handling(&self) -> bool {
         let Ok(core) = self.core() else {
             return false;
         };
-        let this = core.this.borrow().clone();
-        let base_member = core.on_close_member.borrow().clone();
-        match this.get("onClose") {
-            Ok(on_close) => base_member.is_some_and(|base| !base.same_reference(&on_close)),
-            Err(thrown) => {
-                core.context.runtime.report_exception(
-                    &core_error(thrown),
-                    &serde_json::json!({ "operation": "onClose" }),
-                );
-                false
-            }
-        }
+        let Some(base_member) = core.on_close_member.borrow().clone() else {
+            return false;
+        };
+        let listeners = core.listeners.borrow().clone();
+        !listeners
+            .borrow()
+            .iter()
+            .any(|(event, listener)| event == "close" && listener.same_reference(&base_member))
     }
     fn watchdog_stale_threshold_ms(&self) -> Option<f64> {
         self.receiver_threshold("getWatchdogStaleThresholdMs")
     }
     fn watchdog_ping_threshold_ms(&self) -> Option<f64> {
         self.receiver_threshold("getWatchdogPingThresholdMs")
+    }
+    /// ts: a subclass `resyncsPrivateStateOnReopen` getter replaces base.ws.ts's
+    /// private-socket default; an undefined receiver member keeps that default.
+    fn resyncs_private_state_on_reopen(&self) -> Option<bool> {
+        let core = self.0.upgrade()?;
+        let this = core.this.borrow().clone();
+        match this.get("resyncsPrivateStateOnReopen") {
+            Ok(value) if value.is_undefined() => None,
+            Ok(value) => Some(value.truthy()),
+            Err(thrown) => {
+                core.context.runtime.report_exception(
+                    &core_error(thrown),
+                    &serde_json::json!({ "operation": "resyncsPrivateStateOnReopen" }),
+                );
+                None
+            }
+        }
     }
     fn on_error(&self, _socket: &BaseWebSocket, message: &str) -> Result<(), ExchangeError> {
         self.emit(
