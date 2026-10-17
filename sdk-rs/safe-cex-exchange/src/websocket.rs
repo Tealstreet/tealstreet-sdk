@@ -668,6 +668,7 @@ pub struct BaseWebSocket {
     pub treat_any_message_as_pong: Cell<bool>,
     pub direct_fallback: RefCell<WsDirectFallback>,
     connect_disabled: Cell<bool>,
+    grouped_listener_dispatch: Cell<bool>,
     before_close: RefCell<Option<Rc<dyn Fn()>>>,
 }
 impl BaseWebSocket {
@@ -693,6 +694,7 @@ impl BaseWebSocket {
             treat_any_message_as_pong: Cell::new(false),
             direct_fallback: RefCell::new(WsDirectFallback::new(2)),
             connect_disabled: Cell::new(false),
+            grouped_listener_dispatch: Cell::new(false),
             before_close: RefCell::new(None),
         })
     }
@@ -710,6 +712,9 @@ impl BaseWebSocket {
     }
     pub fn is_disposed(&self) -> bool {
         self.parent.is_disposed()
+    }
+    pub(crate) fn grouped_listener_dispatch(&self) -> bool {
+        self.grouped_listener_dispatch.get()
     }
     pub fn is_recovery_complete(&self) -> bool {
         self.protocol.recovery_complete()
@@ -1272,6 +1277,7 @@ impl BaseWebSocket {
             relay,
             reconnecting,
         } = connection;
+        self.grouped_listener_dispatch.set(reconnecting);
         // The core has already activated a dormant wrapper; do not nest another one.
         if reconnecting && descriptor.options.start_closed == Some(true) {
             descriptor.options.start_closed = Some(false);

@@ -72,6 +72,11 @@ impl PrivateHost for Rt {
     fn now(&self) -> Result<Js, Thrown> {
         Ok(Js::Number(self.shared.runtime.now_ms()))
     }
+    fn virtual_now(&self) -> Result<Js, Thrown> {
+        Ok(Js::Number(
+            safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+        ))
+    }
     fn parse_message(&self, data: Js) -> Result<Js, Thrown> {
         global_call(self, "bigIntAsStringJsonParse", vec![data])
     }

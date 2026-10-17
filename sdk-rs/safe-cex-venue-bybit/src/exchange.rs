@@ -313,9 +313,9 @@ impl BybitExchange {
         }
     }
 
-    pub(crate) fn validate_candle_interval(
+    pub(crate) fn validate_candle_interval<T: ?Sized>(
         &self,
-        _interval: &serde_json::Value,
+        _interval: &T,
     ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
         // Concrete linear Bybit always supports trade-derived candles. Its
         // source short-circuit does not inspect interval; subclass hooks differ.
