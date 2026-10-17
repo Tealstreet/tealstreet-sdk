@@ -807,3 +807,10 @@ Primary/demo and Spot defer typed asset refusals until source mapping completes;
 dedicated inverse admits assets after building its native rows. Each refused row
 reports its identity and field values, while valid siblings survive fetch/refresh.
 This intentionally differs from TS retaining malformed asset fields.
+
+Primary/demo single-order routing rechecks truthiness after price/trigger rounding.
+A conditional trigger rounded to zero rejects before placement; a zero-rounded
+conditional price selects Market and omits price/TIF. Adjusted NaN also skips
+trigger-direction ticker reads. Raw option gates still send
+zero-rounded bracket/trigger strings, and plain limit orders retain price zero.
+`adjusted_order_binding` covers both real class bindings and those payload controls.
