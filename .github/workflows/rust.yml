@@ -254,8 +254,6 @@ jobs:
         run: |
           node --test safe-cex-exchange/scripts/cancellable-futures.test.cjs
           cargo test --locked -p safe-cex-exchange --all-features --test cancellable_future_inventory --jobs 2
-      # The venue binding ratchet tests in the plain test run compare against the
-      # PR base, which a depth-1 checkout lacks, so fetch it before they run.
       - name: Fetch binding ratchet base
         if: matrix.check == 'test' && github.event_name == 'pull_request'
         env:
