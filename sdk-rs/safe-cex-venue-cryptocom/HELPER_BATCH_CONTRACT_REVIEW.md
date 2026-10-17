@@ -78,7 +78,8 @@ Selected validation passed: all twenty new direct native tests, the unchanged li
 source mapping/socket/error/lifecycle targets, all twenty body controls and six
 fixture-walk controls, and the fresh closed selector. It produced three actual native
 runtime decoder probes, seventeen separate compiler classification receipts and
-zero failed owners. Integrated readiness remains pending. Direct native evidence and body controls remain required
+zero failed owners. Integrated readiness results are recorded in the
+[PR validation record](https://github.com/Tealstreet/tealstreet-sdk/pull/379). Direct native evidence and body controls remain required
 for every one of the twenty owners; classification receipts alone are not runtime
 evidence. Other original/new owners, aliases, construction, local scopes, feature
 configurations and WASM contract execution remain separate obligations. No
