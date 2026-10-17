@@ -7,9 +7,7 @@ assembles the Rust exchange/API/socket bodies on `safe-cex-exchange::js_runtime`
 from real options, a Store, HTTP and WebSocket runtime dependencies. The Exchange
 trait forwards the supported methods and reproduces inherited source rejections
 for `fetchSymbolMaxLeverage`, `scheduleCancel` and `fetchPublicTrades`;
-`fetchHistoricalFills` returns the source's empty list. `cancelSymbolOrders` and
-`cancelAllOrders` forward to the source bodies, which post the venue
-`private/cancel-all-orders`; the base store-only sweep would miss unmapped orders. Registry wiring belongs
+`fetchHistoricalFills` returns the source's empty list. Registry wiring belongs
 to the registry lane. Tunnel installation currently rejects explicitly.
 
 Disposal follows the source flag write and public/private socket teardown.
@@ -25,6 +23,10 @@ loop surrounds the complete response chain, while axios-retry runs before the
 venue's rejection formatter. Delaying rejection formatting preserves the HTTP
 response/config used to identify a signature rejection. Removing the wrapper
 must fail the non-2xx signature-resend E2E test until the shared ordering is fixed.
+
+`cancelSymbolOrders` and `cancelAllOrders` forward to the source bodies, which post
+the venue `private/cancel-all-orders`; the base store-only sweep would miss
+orders the Store has not mapped. Both rethrow a venue rejection.
 
 Source REST `fetchBalance` returns currency records with `available`/`locked`
 under an `as any` cast. The binding uses shared `CurrencyBalance::AvailableLocked`
