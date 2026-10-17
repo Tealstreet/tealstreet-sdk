@@ -1,3 +1,22 @@
+# Retired standalone Spot limiter body view
+
+A repository-wide Rust reference audit found no production caller or production
+host implementation for spot_rate_limiter. Its only external users were the
+separate spot_rate_limiter test target and spot_limiter_host test support. The
+module, those consumers, the private source oracle/input fixture and the retired
+SPOT_LIMITER_BODIES_EVIDENCE receipt are removed. Historical entries below describe
+the retired view's previous measurements, not current production coverage.
+
+The existing spot_client RateLimiter class and constructor/refill/wait bodies
+remain unchanged. They have a Realm SpotClientHost implementation and retained
+spot_runtime source tests. All four TypeScript manifest rows retain their existing
+spot_client targets; three notes drop only the deleted view's extra proof claims.
+Exactly seven now-stale exemption entries and one obsolete helper_tasks::start
+inventory entry are removed after review. Other manifest statuses, exemptions
+and source-inventory rows compare unchanged; no manifest regeneration is used.
+The native production API continues to use its existing caller-owned shared
+limiter. This deletion adds no accepted-set contract or new exemption.
+
 # Production TP/SL, fills and serial placement imports
 
 The production Realm now registers `hasSeenFill`, `markFillSeen`,

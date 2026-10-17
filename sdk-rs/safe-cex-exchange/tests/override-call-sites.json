@@ -4902,12 +4902,6 @@
     "file": "safe-cex-venue-hyperliquid/src/spot_market_bootstrap.rs"
   },
   {
-    "function": "spot_wait_for_token",
-    "body": "8fd9dc71ffa5669c",
-    "reference": "helper_tasks :: start",
-    "file": "safe-cex-venue-hyperliquid/src/spot_rate_limiter.rs"
-  },
-  {
     "function": "run_exchange_method",
     "body": "74ce5094412fa2d2",
     "reference": "account :: validate_account",
