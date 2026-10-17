@@ -5,7 +5,7 @@ mod harness;
 use harness::*;
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const DETAILS: &str = "/api/v1/orderBookDetails";
 const ACCOUNT: &str = "/api/v1/account";
@@ -242,9 +242,11 @@ fn fetch_positions_maps_the_account_snapshot_and_placeholders() {
         .expect("fetchPositions");
     let reads = &h.http.requests.borrow()[before..];
     assert!(reads.iter().all(|r| r.url == ACCOUNT), "{reads:?}");
-    assert!(reads
-        .iter()
-        .all(|r| r.params == json!({"by": "index", "value": "42"})));
+    assert!(
+        reads
+            .iter()
+            .all(|r| r.params == json!({"by": "index", "value": "42"}))
+    );
     assert_eq!(
         positions.len(),
         1,
@@ -759,10 +761,12 @@ fn real_trait_fills_reach_signed_history_and_keep_both_rows() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].params["account_index"], json!("42"));
     assert_eq!(calls[0].params["market_id"].as_f64(), Some(1.0));
-    assert!(calls[0].params["auth"]
-        .as_str()
-        .unwrap()
-        .contains(&auth_token_prefix()));
+    assert!(
+        calls[0].params["auth"]
+            .as_str()
+            .unwrap()
+            .contains(&auth_token_prefix())
+    );
 }
 
 #[test]
@@ -837,9 +841,11 @@ fn real_trait_book_delivers_socket_changes_and_cleans_up() {
         )));
     h.runtime.advance(250.0);
     assert_eq!(seen.borrow().len(), count, "cleanup removes actual parser");
-    assert!(socket
-        .subscriptions()
-        .contains(&json!({"type":"unsubscribe","channel":"order_book/1"})));
+    assert!(
+        socket
+            .subscriptions()
+            .contains(&json!({"type":"unsubscribe","channel":"order_book/1"}))
+    );
     h.venue().dispose().unwrap();
 }
 
