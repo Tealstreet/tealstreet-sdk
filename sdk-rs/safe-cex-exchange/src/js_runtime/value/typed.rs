@@ -122,7 +122,7 @@ macro_rules! integer_input {
         $(fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
             if let Input::Float(value) = self.0
                 && value.is_finite() && value.fract() == 0.0
-                && value >= $min && value < $max {
+                && ($min..$max).contains(&value) {
                 return visitor.$visit(value as $kind);
             }
             self.deserialize_any(visitor)
