@@ -63,7 +63,10 @@ mutation is restored byte-for-byte. A first browser-control attempt failed to
 compile and is excluded; the corrected control compiles and fails its native
 missing-wallet assertion. The restored library, binding and placement targets
 pass 43 + 38 + 1 tests. Fourteen of the binding tests and four library tests are
-new in this slice. Independent final review reports no remaining findings.
+new in this slice. All 21 existing production Spot binding tests also pass after
+the shared import additions. Scoped formatting and strict native all-target Clippy
+pass. Global parity:check passes with 7459 rows and 17214 public Rust items,
+zero invention/status findings. Independent final review reports no remaining findings.
 
 The shared updateOrder result still returns Vec<String> and discards the named
 replacement clientOrderId property. The existing ReplacementOrderIds type and
