@@ -874,14 +874,14 @@
       ],
       "producer_sha256": "66c1af8009ca5fda0845db84a5369be74cffefec10d8fa755d2fb54f21ce3ee8",
       "classification": "guarded",
-      "reason": "WorkerReplyGuard unregisters the correlation listener on caller Drop; its listener closure owns reply/waker state. Reviewed owned-timer cutover: disposal closes owned work before fallible reset; listener callback failures report after interval rearm or timeout completion. Review and limits: CANCELLATION_REVIEW.md. Reviewed wrapper addition at 6fe4d89c24; existing guard, registry and disposal bodies are unchanged. Incoming 49a942e761 adds synchronous recovery/redaction only; the guard, producer and named TASK-drop witnesses remain byte-identical, so the combined-file dependency pin is reconciled after review. Incoming 53ee502232 signing predicate extraction leaves this producer, WorkerReplyGuard and its Drop and named witness byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged.",
+      "reason": "WorkerReplyGuard unregisters the correlation listener on caller Drop; its listener closure owns reply/waker state. Reviewed owned-timer cutover: disposal closes owned work before fallible reset; listener callback failures report after interval rearm or timeout completion. Review and limits: CANCELLATION_REVIEW.md. Reviewed wrapper addition at 6fe4d89c24; existing guard, registry and disposal bodies are unchanged. Incoming 49a942e761 adds synchronous recovery/redaction only; the guard, producer and named TASK-drop witnesses remain byte-identical, so the combined-file dependency pin is reconciled after review. Incoming 53ee502232 signing predicate extraction leaves this producer, WorkerReplyGuard and its Drop and named witness byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged. Reviewed offline recovery routing: set_online_status now synchronously delegates to recover_after_offline instead of reconnect; this guarded creator, its guard and Drop bodies remain unchanged.",
       "witnesses": [
         "tests/core_lifecycle.rs::dropping_worker_waiter_releases_its_listener_and_waker"
       ],
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "3b97886efbf4f91c08dfe1fac9a27766e6ba9973f315b9bdf29d29d619eac8b4"
+          "sha256": "6fd7379a66becfd3670ff075d23b458d42817bb0de17eb710506bd71b0777d6d"
         }
       ],
       "guards": [
@@ -2082,7 +2082,7 @@
       ],
       "producer_sha256": "a06b50a1c503f814c8b3f2c3661c0060e01c2e7cd6e2f27bcc81d4ea7bc68cce",
       "classification": "guarded",
-      "reason": "Registers before build/spawn and rejects stale host installation after inline completion, cancellation or discard. Slot.finish removes the exact registration and takes captures/host/cleanup once before callbacks. Driver owns a strong lease only for explicitly detached registries and releases it on completion or after Drop cleanup. Existing guard definitions and witnesses remain retained; new timeout witnesses separately cover detached handle drop and cancellation after sleep registration. Incoming 53ee502232 signing predicate extraction leaves Base.dispose and the entire registry/Driver implementation and named witnesses byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged.",
+      "reason": "Registers before build/spawn and rejects stale host installation after inline completion, cancellation or discard. Slot.finish removes the exact registration and takes captures/host/cleanup once before callbacks. Driver owns a strong lease only for explicitly detached registries and releases it on completion or after Drop cleanup. Existing guard definitions and witnesses remain retained; new timeout witnesses separately cover detached handle drop and cancellation after sleep registration. Incoming 53ee502232 signing predicate extraction leaves Base.dispose and the entire registry/Driver implementation and named witnesses byte-identical; only the coarse exchange.rs dependency digest changes after review. Incoming aab488a8e2 changes the eager signer-wait entrypoint outside these guarded producers; worker_reply, WorkerReplyGuard, Base disposal and the merged owned-task implementation remain unchanged. The exchange.rs dependency pin follows that reviewed file change. Reviewed socket-lookup changes: synchronous weak resolution does not change this guard or its drop cleanup. Reviewed setter helper adds only a synchronous Cell write; worker reply and owned-task guards and disposal remain unchanged. Reviewed offline recovery routing: set_online_status now synchronously delegates to recover_after_offline instead of reconnect; this guarded creator, its guard and Drop bodies remain unchanged.",
       "witnesses": [
         "src/owned_tasks_tests.rs::cancellation_removes_registration_before_host_and_releases_unpolled_capture",
         "src/owned_tasks_tests.rs::inline_completion_and_inline_close_never_install_stale_handles",
@@ -2101,7 +2101,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "3b97886efbf4f91c08dfe1fac9a27766e6ba9973f315b9bdf29d29d619eac8b4"
+          "sha256": "6fd7379a66becfd3670ff075d23b458d42817bb0de17eb710506bd71b0777d6d"
         }
       ],
       "guards": [
