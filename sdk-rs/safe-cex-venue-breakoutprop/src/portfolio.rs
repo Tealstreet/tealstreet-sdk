@@ -66,10 +66,7 @@ pub fn format_open_positions(
         let mut positions = Vec::with_capacity(rows.len());
         for (index, position) in rows.iter().enumerate() {
             let side_key = to_typed::<String>(&Js::String(position.get("side")?.to_js_string()?))?;
-            let symbol: String = to_typed(&position.get("symbol")?).map_err(|e| {
-                refusal = true;
-                e
-            })?;
+            let symbol: String = to_typed(&position.get("symbol")?).inspect_err(|_| refusal = true)?;
             let open_price = position.get("openPrice")?;
             let ticker = tickers.get(&symbol);
             let mark_price = ticker
@@ -106,17 +103,11 @@ pub fn format_open_positions(
             positions.push(Position {
                 symbol: symbol.clone(),
                 side,
-                entry_price: to_typed(&position.get("openPrice")?).map_err(|e| {
-                    refusal = true;
-                    e
-                })?,
+                entry_price: to_typed(&position.get("openPrice")?).inspect_err(|_| refusal = true)?,
                 notional,
                 leverage,
                 unrealized_pnl,
-                contracts: to_typed(&position.get("quantity")?).map_err(|e| {
-                    refusal = true;
-                    e
-                })?,
+                contracts: to_typed(&position.get("quantity")?).inspect_err(|_| refusal = true)?,
                 liquidation_price: 0.0,
                 margin_size: (Some(margin_size)).into(),
                 id: create_position_id(&symbol, None, None),
@@ -184,10 +175,7 @@ pub fn format_balance(
         let upnl = positions
             .iter()
             .fold(0.0, |total, p| total + p.unrealized_pnl);
-        let total: f64 = to_typed(&ops::add(&cash_balance, &Js::Number(upnl))?).map_err(|e| {
-            projection_refusal = true;
-            e
-        })?;
+        let total: f64 = to_typed(&ops::add(&cash_balance, &Js::Number(upnl))?).inspect_err(|_| projection_refusal = true)?;
         Ok(Balance {
             total,
             free: total - used,
@@ -377,10 +365,7 @@ pub fn format_orders(
                     extra: (None).into(),
                 })
             })();
-            orders.push(projected.map_err(|error| {
-                projection_refusal = true;
-                error
-            })?);
+            orders.push(projected.inspect_err(|_| projection_refusal = true)?);
         }
         if let Some(error) = refusal.as_ref() {
             return Err(ExchangeError::new(error.clone()));
