@@ -221,6 +221,7 @@ fn decode(text: &str) -> String {
 pub struct Request {
     pub method: String,
     pub url: String,
+    pub base_url: String,
     pub query: Option<String>,
     pub params: Value,
     pub data: Value,
@@ -293,6 +294,7 @@ impl JsHttpHost for Http {
         self.requests.borrow_mut().push(Request {
             method: method.clone(),
             url: url.clone(),
+            base_url: read("baseURL").as_str().unwrap_or_default().to_owned(),
             query,
             params,
             data: match read("data") {

@@ -146,6 +146,13 @@ route GETs to the secondary client and writes to the primary. Hosted HTTP signin
 signer view and API skip-local-signing branch receive the same capability.
 Payload-signing options remain unavailable without a host capability.
 
+The secondary read client's proxy is the first truthy secondaryProxyUrl or the
+provider's public CORS proxy. It always replaces the primary overrideProxyUrl,
+including clearing it for direct reads when neither resolves. Primary writes
+retain their own proxy and credentials. The production binding proxy regression
+checks routed URLs through DirectTransport for explicit, empty and absent
+secondary proxies, both with and without a public proxy.
+
 All 16 Exchange trait methods are bound. The source inherits the base rejection
 for fetchSymbolMaxLeverage, scheduleCancel and fetchPublicTrades; their tests
 assert the exact Error and zero requests. Other hooks delegate to the existing
