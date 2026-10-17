@@ -156,7 +156,7 @@ fn actual_history_read_reports_the_callback_error_and_returns_no_rows() {
     h.venue().base().on(
         "error",
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.to_string());
+            sink.borrow_mut().push(data.as_str().unwrap().to_owned());
             Ok(())
         }),
     );
@@ -171,5 +171,22 @@ fn actual_history_read_reports_the_callback_error_and_returns_no_rows() {
         orders.is_empty(),
         "a failed mapping must not publish a NaN row"
     );
-    assert_eq!(&*errors.borrow(), &["callback exploded"]);
+    assert_eq!(&*errors.borrow(), &["Exchange Error: callback exploded"]);
+}
+
+#[test]
+fn maintained_source_preserves_six_callback_throws() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/callback-source.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "6");
 }

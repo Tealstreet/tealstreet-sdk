@@ -158,3 +158,11 @@ runtime and joins already-started promises. Market/leverage and order-read bodie
 share that implementation. The real EU binding holds a SWAP response and verifies
 FUTURES starts before it completes for both normal and algorithmic orders, matching
 the actual TypeScript members with the installed p-iteration dependency.
+
+Mapper collaborators use a fallible callback ABI. The installed native globals
+preserve each original `Thrown` value and stop at the first failed conversion,
+symbol resolver or settle-currency resolver. The typed pure callers lift successful
+values into `Result` without changing their oracle assertions. Six source probes
+and six installed-global probes pin opaque error identity; a constructed Exchange
+history read pins one conversion, one error event and no returned rows. The
+seven native regressions fail on the previous swallowing implementation.
