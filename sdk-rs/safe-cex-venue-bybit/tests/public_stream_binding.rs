@@ -435,3 +435,91 @@ fn bulk_candle_listener_waits_for_the_source_connection_retry() {
     );
     h.venue().dispose().unwrap();
 }
+
+fn bulk_candle_interval(wire: &str, expected: Option<&str>) {
+    let (h, socket, symbol) = setup(ExchangeName::Bybit);
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    h.venue().listen_ohlcvs(
+        serde_json::from_value(json!({"symbols":[symbol],"interval":"1m"})).unwrap(),
+        Rc::new(move |candle| sink.borrow_mut().push(candle)),
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.{wire}.{symbol}"),"data":[{"start":1700000040000u64,"open":"1","high":"2","low":"0","close":"1","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 1);
+    let native = safe_cex_exchange::js_runtime::value::from_typed(&seen.borrow()[0]).unwrap();
+    let interval_key: Vec<u16> = "interval".encode_utf16().collect();
+    assert!(
+        native
+            .own_keys()
+            .iter()
+            .any(|key| key.as_ref() == interval_key.as_slice())
+    );
+    let serialized = serde_json::to_value(&seen.borrow()[0]).unwrap();
+    if let Some(expected) = expected {
+        assert_eq!(serialized["interval"], expected);
+    } else {
+        assert!(serialized.get("interval").is_none());
+        assert!(native.get("interval").unwrap().is_undefined());
+    }
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn bulk_candle_month_interval_reaches_native_callback() {
+    bulk_candle_interval("M", Some("1M"));
+}
+#[test]
+fn bulk_candle_unknown_interval_reaches_callback_as_own_undefined() {
+    bulk_candle_interval("999", None);
+}
+
+fn single_candle(name: ExchangeName) {
+    let spot = name == ExchangeName::Bybitspot;
+    let (h, socket, symbol) = setup(name);
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    let cleanup = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":symbol,"interval":"1m"})).unwrap(),
+            Rc::new(move |candle| sink.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "single candle listener must reach real public frame"
+    );
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("publicTrade.{symbol}"),"data":[{"T":1700000045000u64,"p":"104","v":"208","S":"Sell"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 2);
+    assert_eq!(seen.borrow()[1].close, 104.0);
+    assert_eq!(seen.borrow()[1].volume, 9.0);
+    assert_eq!(
+        seen.borrow()[1].last_side,
+        if spot {
+            None
+        } else {
+            Some(safe_cex_types::OrderSide::Sell)
+        }
+    );
+    cleanup().unwrap();
+    socket.on_message(&SocketFrame::Text(json!({"topic":format!("kline.1.{symbol}"),"data":[{"start":1700000040000u64,"open":"100","high":"105","low":"99","close":"103","volume":"7"}]}).to_string())).unwrap();
+    assert_eq!(seen.borrow().len(), 2);
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn primary_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybit);
+}
+#[test]
+fn demo_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybitdemo);
+}
+#[test]
+fn spot_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybitspot);
+}
+#[test]
+fn inverse_single_candle_reaches_real_socket() {
+    single_candle(ExchangeName::Bybitinverse);
+}

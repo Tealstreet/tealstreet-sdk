@@ -5,7 +5,7 @@ use safe_cex_exchange::{
     runtime::ExchangeError,
     websocket::{BaseWebSocket, MessageHandler},
 };
-use safe_cex_types::{Candle, OHLCVSOptions};
+use safe_cex_types::{Candle, ModelField, OHLCVSOptions};
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
 
@@ -28,8 +28,13 @@ fn map_bulk(frame: &Value) -> Result<SubscribedCandle, Thrown> {
                 .iter()
                 .find(|(_, wire)| wire.as_str() == Some(key.as_str()))
         })
-        .map(|(interval, _)| interval)
-        .ok_or_else(|| Thrown::error("TypeError", "Unknown Bybit candle interval"))?;
+        .map(|(interval, _)| {
+            serde_json::from_value(Value::String(interval.clone()))
+                .map(ModelField::Value)
+                .map_err(|error| Thrown::error("TypeError", &error.to_string()))
+        })
+        .transpose()?
+        .unwrap_or(ModelField::Undefined);
     Ok(SubscribedCandle {
         candle: Candle {
             timestamp: raw.get("start")?.to_number()? / 1000.,
@@ -41,8 +46,7 @@ fn map_bulk(frame: &Value) -> Result<SubscribedCandle, Thrown> {
             last_side: None,
         },
         symbol: String::from_utf16_lossy(&symbol.to_js_string()?),
-        interval: serde_json::from_value(Value::String(interval.clone()))
-            .map_err(|error| Thrown::error("TypeError", &error.to_string()))?,
+        interval,
     })
 }
 
@@ -100,4 +104,36 @@ pub(crate) fn listen_ohlcvs(
         .borrow_mut()
         .insert("kline".into(), Rc::new(RefCell::new(vec![parser])));
     connect_bulk(socket, Rc::new(topics), chunk_size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_bulk;
+    use serde_json::{Value, json};
+    #[test]
+    #[ignore = "requires workspace Node; mandatory venue-oracle:bybit"]
+    fn bulk_candle_callbacks_match_maintained_source() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/bulk-candle-fixtures.mjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(cases.len(), 21);
+        for (index, case) in cases.iter().enumerate() {
+            let candle = map_bulk(&case["frame"]).unwrap();
+            let mut actual = serde_json::to_value(&candle).unwrap();
+            if candle.interval.is_undefined() {
+                actual["interval"] = json!("$undefined");
+            }
+            assert_eq!(actual, case["emitted"], "maintained bulk case {index}");
+        }
+    }
 }
