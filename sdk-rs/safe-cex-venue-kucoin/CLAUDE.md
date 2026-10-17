@@ -329,3 +329,13 @@ registry hosts retain it for primary and unlimited clients. Private WS auth
 continues to obtain a bullet-private token through HTTP; no separate hosted WS
 protocol is introduced. Existing local hosts supply None. Actual-source/native
 evidence and omission controls are in [HOSTED_SIGNER_EVIDENCE.md](HOSTED_SIGNER_EVIDENCE.md).
+
+The concrete StreamOps for-of host consumes Js::iterator, captures next once,
+validates step objects, and closes on a body failure while preserving that throw.
+It does not replace iterable inputs with an array snapshot. The real connected
+`native_iteration` socket witness compares sixteen raw orderbook update frames
+with the maintained listener and actual orderbook utilities. String payloads,
+including astral Unicode, retain source iteration and native NaN levels; truthy
+non-iterables report one listener exception. Callback count and every price,
+amount and total are observed before JSON numeric projection. The test-only
+commit compiles and fails on master at the unexpected string-input exception.

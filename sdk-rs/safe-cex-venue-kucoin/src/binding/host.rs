@@ -326,17 +326,25 @@ fn filter(input: Js, f: Rc<dyn Fn(Js) -> Result<bool, Thrown>>) -> Result<Js, Th
 }
 
 pub(crate) fn for_of(input: Js, f: &dyn Fn(Js) -> Result<(), Thrown>) -> Result<(), Thrown> {
-    if !input.is_array() {
-        items(&input)?;
-    }
-    let mut i = 0;
+    let iterator = input.iterator()?;
+    let next = iterator.get("next")?;
     loop {
-        let len = input.get("length")?.to_number()? as usize;
-        if i >= len {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        if step.get("done")?.truthy() {
             return Ok(());
         }
-        f(input.get(&i.to_string())?)?;
-        i += 1;
+        if let Err(error) = f(step.get("value")?) {
+            // IteratorClose observes return; the original body throw takes precedence.
+            if let Ok(close) = iterator.get("return")
+                && !close.is_nullish()
+            {
+                let _ = close.call(iterator.clone(), vec![]);
+            }
+            return Err(error);
+        }
     }
 }
 

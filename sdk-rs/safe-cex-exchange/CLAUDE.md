@@ -1402,8 +1402,11 @@ For array inputs, JS Store `removeOrders` reads each element's `id` and applies
 source object-key coercion; it never treats a bare element as the ID itself.
 Property access and string-hint conversion failures propagate after the source's
 empty-input/empty-Store early return. `tests/js_store_bulk_id_matching.rs` compares
-24 maintained Store cases through the production facade, including numeric keys,
-primitive elements, nullish elements and throwing getters/conversions.
+30 maintained Store cases through the production facade, including numeric keys,
+primitive elements, nullish elements and throwing getters/conversions. Direct
+Symbols and object IDs converting to Symbols stay unmatched to native string IDs;
+conversion uses the shared string-hint property-key operation. The object-to-Symbol
+case compiles and fails on master before this repair.
 
 The numeric patch witnesses pass entity selectors (`{id}`), matching the source
 Store signatures, while retaining all numeric-bit, null and omission assertions.
@@ -1463,6 +1466,17 @@ throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
 installed NativeRuntime bindings, observing getter order, holes, duplicate amount
 reads, inserted identity and reentrant row/length changes. Both regressions compile
 and fail on the prior implementation; their inputs do not replace utility code.
+
+
+String.localeCompare uses the existing pinned JsRootCollator for the imported
+runtime's default English/root collation, including case, accents, canonical
+combining forms and lexicographic digits. Argument conversion uses the ordinary
+string hint and preserves thrown identity. No new collation dependency or data
+is added. tests/js_locale_compare.rs compares 2,116 Node pairs through the
+installed String and native host, plus primitive/default coercion and abrupt
+conversion. Locale/options selection is outside this default-profile binding.
+The overseer explicitly permits ICU replacement of unpaired UTF-16 surrogates;
+a separate native test pins both Node's distinct weights and ICU's equal weights.
 
 The imported get-key `v` helper rejects non-null primitive right-hand operands
 with TypeError before key conversion can execute user code. Null/undefined
