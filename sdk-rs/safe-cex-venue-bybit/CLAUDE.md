@@ -809,3 +809,8 @@ reports its identity and field values, while valid siblings survive fetch/refres
 This intentionally differs from TS retaining malformed string fields. Fee joins compare primitive symbol values strictly; distinct
 JSON objects/arrays never match by contents. Source numeric/property errors retain
 priority over typed row refusals.
+
+Spot and inverse install the same native recent-order recorder: cache the order
+and optionally publish Brazil REST fallback without primary reconciliation timers.
+Spot previously inherited the primary recorder; its compiled master-red HTTP
+probe regression now passes, with inverse and primary/demo timer controls.
