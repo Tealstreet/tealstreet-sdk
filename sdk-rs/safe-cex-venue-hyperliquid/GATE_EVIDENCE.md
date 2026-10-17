@@ -1,3 +1,43 @@
+# Twenty-four optional and nested record reviews
+
+This cohort reviews 24 concrete `types` records against the maintained
+`hyperliquid.types.ts` member declarations, native fields and private remote
+attributes. It includes order/request wrappers, perpetual and spot metadata,
+funding records, market contexts, builder results and nested collections. Each
+record retains its existing public decoder and private schema unchanged.
+
+The corpus contains 2,067 independently authored cases and 12,402 native
+observations across raw JSON, owned/borrowed Value and the three shared numeric
+ingress routes. Direct typed projections inspect every primitive leaf, native
+enum identity, binary64 bits, tuple shape, collection contents/order/cardinality
+and Option layers before owner serialization. Absent optional members are
+observed as outer None; explicit null on optional nullable members is Some(None).
+Required nullable members reject omission. The corpus also removes all optional
+members recursively, sets all nullable members to null, changes each primitive
+leaf independently and checks nested valid positional-array rejection.
+
+All 24 exact installed adapters pass. A separate compiled control removes each
+public map guard independently while retaining numeric capture and private wire
+attributes; every complete valid declaration-order array then fails its named
+native assertion. Three additional independent mutations remove only the
+presence attribute for an optional non-null member, an optional nullable member
+and a required nullable member. Each fails its corresponding native null or
+omission witness. The complete original source bytes are restored after every
+control, and the final restored 24-owner replay passes all 2,067 cases.
+
+Fresh compiler declarations confirm every reviewed recursive native field type
+and exact selected API. Public decoder/private companion hashes are retained,
+all master contracts remain unchanged, and the original 534 owners, 36 aliases
+and two construction obligations remain indexed. The shared native runner keeps
+its earlier 20-record cohort as the default and selects this cohort explicitly
+with `--cohort=optional`.
+
+This reviews only these 24 native/default owners. Local Serde helpers continue
+to require their actual enclosing owner evidence, and private companions, other
+owners, dependencies and feature/target configurations retain their own reviews.
+The diagnostic preflight census remains separate from accepted classifications;
+no whole-package clearance is claimed.
+
 # Request-weight nested helper ownership
 
 The local-functions policy previously delegated `rate_limit.rs::LOCAL_FUNCTION:text`
