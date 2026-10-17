@@ -1026,7 +1026,12 @@ fn private_account_frame_reaches_real_order_position_fill_and_balance_handlers()
         "private position uses real venue mapper and Store"
     );
     assert_eq!(
-        *fills.borrow(),
+        fills
+            .borrow()
+            .iter()
+            .map(safe_cex_exchange::js_runtime::value::to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("finite Lighter fill fixture"),
         vec![json!({"id":"888","side":"buy","symbol":"BTC","price":49000.0,"amount":0.1})],
         "private trade produces source fill payload"
     );
