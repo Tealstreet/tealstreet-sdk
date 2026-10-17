@@ -25,6 +25,13 @@ function observe(v){if(v===undefined)return {kind:'undefined'};if(typeof v==='nu
  handler.handle({op:'subscribeOHLCV',data:{symbol:'BTC',interval:'1m',subId:'a',tag:'metadata'}});
  callback(candles[0]);assert.equal(posts.length,1,'WORKER-DATA actual source one candle post');
  records.push({method:'listenOHLCV',expected:observe(posts.pop())});
- assert.equal(records.length,5,'WORKER-DATA actual source output census');
+ for(const method of ['fetchOrders','notAMethod']) {
+  const attempts=[],failure=Object.assign(new Error('native post rejected'),{name:'TypeError',stack:'native stack',code:42});
+  const rejected=new context.Handlers.CallMethodHandler('account','bybit',exchange,{postMessage(payload){attempts.push(structuredClone(payload));if(attempts.length===1)throw failure;}},{},{});
+  await rejected.handleCallMethod('failed-post',method,[null]);
+  assert.equal(attempts.length,2,'WORKER-DATA actual source post rejection catch');
+  records.push({method:'post-rejected:'+method,expected:observe(attempts[1])});
+ }
+ assert.equal(records.length,7,'WORKER-DATA actual source output census');
  process.stdout.write(JSON.stringify({runtime:{node:process.version,v8:process.versions.v8,arch:process.arch},records}));
 })().catch(e=>{console.error(e);process.exitCode=1;});
