@@ -652,3 +652,7 @@ cover all option terms, price minimum and Order.clientOrderId. Fixed inventories
 include 36 market-identity cases, 59/43 TWAP option cases/leaves, 56/41 TWAP state
 cases/leaves and 3960 numeric comparisons; future source additions still fail
 closed instead of shrinking the compared fields.
+
+Command dispatch rejects missing, null and primitive payloads before looking up
+or calling its executor; arrays retain the source object admission. Position
+failure replies use JavaScript Error string rules for empty names and messages.

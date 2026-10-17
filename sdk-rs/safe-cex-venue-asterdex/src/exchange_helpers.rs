@@ -421,24 +421,35 @@ pub fn transform_ticker(
 
 // ts: AsterDEXExchange.transformPosition
 pub fn transform_position(
-    pos: &crate::types::AsterDEXPositionResponse,
+    pos: &Value,
     existing: &[safe_cex_types::Position],
-) -> Result<safe_cex_types::Position, serde_json::Error> {
-    use safe_cex_num::parse_float;
+) -> Result<safe_cex_types::Position, (&'static str, String)> {
     use safe_cex_types::{MarginType, Position, PositionMode, PositionSide};
-    let amount = parse_float(&pos.position_amt);
-    let leverage = parse_float(if pos.leverage.is_empty() {
-        "0"
-    } else {
-        &pos.leverage
-    })
-    .abs();
+    let symbol = pos.get("symbol").and_then(Value::as_str).ok_or_else(|| {
+        (
+            "RepresentationError",
+            "transformPosition symbol is outside the shared string boundary".into(),
+        )
+    })?;
+    let number = |field: &str, or_zero: bool| -> Result<f64, (&'static str, String)> {
+        let value = pos.get(field);
+        let text = if or_zero && !js_truthy(value) {
+            "0".into()
+        } else {
+            js_string(value).map_err(|error| (error.name, error.to_string()))?
+        };
+        Ok(parse_float(&text))
+    };
+    let amount = number("positionAmt", false)?;
+    let leverage = number("leverage", true)?.abs();
     let leverage = if leverage == 0.0 || leverage.is_nan() {
         1.0
     } else {
         leverage
     };
-    let mode = if pos.position_side == "BOTH" || pos.position_side.is_empty() {
+    let mode = if pos.get("positionSide").and_then(Value::as_str) == Some("BOTH")
+        || !js_truthy(pos.get("positionSide"))
+    {
         PositionMode::OneWay
     } else {
         PositionMode::Hedged
@@ -446,14 +457,14 @@ pub fn transform_position(
     let long = if mode == PositionMode::OneWay {
         amount > 0.0
     } else {
-        pos.position_side == "LONG"
+        pos.get("positionSide").and_then(Value::as_str) == Some("LONG")
     };
     let side = if long {
         PositionSide::Long
     } else {
         PositionSide::Short
     };
-    let id = safe_cex_types::model_utils::create_position_id(&pos.symbol, Some(side), Some(mode));
+    let id = safe_cex_types::model_utils::create_position_id(symbol, Some(side), Some(mode));
     let realized_pnl = existing
         .iter()
         .find(|p| p.id == id)
@@ -461,35 +472,28 @@ pub fn transform_position(
         .unwrap_or(0.0);
     Ok(Position {
         id,
-        symbol: pos.symbol.clone(),
+        symbol: symbol.to_owned(),
         side: side.into(),
         contracts: amount.abs(),
-        entry_price: parse_float(&pos.entry_price),
-        notional: parse_float(&pos.notional),
+        entry_price: number("entryPrice", false)?,
+        notional: number("notional", false)?,
         leverage,
-        unrealized_pnl: parse_float(&pos.un_realized_profit),
-        realized_pnl: (Some(realized_pnl)).into(),
-        margin_type: (Some(if pos.margin_type == "ISOLATED" {
-            MarginType::Isolated
-        } else {
-            MarginType::Cross
-        }))
-        .into(),
-        liquidation_price: parse_float(if pos.liquidation_price.is_empty() {
-            "0"
-        } else {
-            &pos.liquidation_price
-        }),
-        position_mode: (Some(mode)).into(),
-        info: (Some(retained_info(
-            pos,
-            [("/updateTime".into(), Some(pos.update_time))],
-        )?))
-        .into(),
-        margin_size: (None).into(),
-        extra: (None).into(),
-        last_update: (None).into(),
-        option: (None).into(),
+        unrealized_pnl: number("unRealizedProfit", false)?,
+        realized_pnl: Some(realized_pnl).into(),
+        margin_type: Some(
+            if pos.get("marginType").and_then(Value::as_str) == Some("ISOLATED") {
+                MarginType::Isolated
+            } else {
+                MarginType::Cross
+            },
+        ).into(),
+        liquidation_price: number("liquidationPrice", true)?,
+        position_mode: Some(mode).into(),
+        info: Some(pos.clone()).into(),
+        margin_size: None.into(),
+        extra: None.into(),
+        last_update: None.into(),
+        option: None.into(),
     })
 }
 

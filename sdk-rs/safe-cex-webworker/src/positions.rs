@@ -121,11 +121,7 @@ impl UpdatePositionsHandler {
             Ok(false) => {}
             Err(error) => {
                 self.last_failed_request.set(now);
-                self.done(
-                    &request_id,
-                    false,
-                    Some(format!("{}: {}", error.name, error.message)),
-                );
+                self.done(&request_id, false, Some(error.js_error_string()));
             }
         }
         guard.settled = true;

@@ -3,7 +3,7 @@
 //! remain separate rows. Futures must be polled by the caller.
 use crate::{exchange_helpers as helpers, types::*};
 use safe_cex_exchange::{exchange::BaseExchange, runtime::ExchangeError};
-use safe_cex_num::{js_number_string, parse_float};
+use safe_cex_num::{js_number_string, js_string, js_truthy, parse_float};
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::{RestAdapter, RestBody, RestRequest};
 use safe_cex_types::{MarginType, Market, Order, Position, PositionSide, Ticker};
@@ -182,29 +182,49 @@ impl AccountFetch {
                     None,
                 )
                 .await?;
-            let positions: Vec<AsterDEXPositionResponse> = decode(data)?;
+            // The source consumes raw rows, not the full declared wire record.
+            let positions = data.as_array().ok_or_else(|| {
+                mapper_error(("TypeError", "positions.forEach is not a function".into()))
+            })?;
             let mode = helpers::get_account_position_mode(self.owner.store.options().is_hedged);
             let mut leverage_by_symbol = BTreeMap::new();
-            for pos in &positions {
-                let leverage = parse_float(if pos.leverage.is_empty() {
-                    "0"
+            for pos in positions {
+                if pos.is_null() {
+                    return Err(mapper_error((
+                        "TypeError",
+                        "Cannot read properties of null (reading 'leverage')".into(),
+                    )));
+                }
+                let raw = pos.get("leverage");
+                let text = if js_truthy(raw) {
+                    js_string(raw).map_err(|e| mapper_error((e.name, e.to_string())))?
                 } else {
-                    &pos.leverage
-                })
-                .abs();
+                    "0".into()
+                };
+                let leverage = parse_float(&text).abs();
                 if leverage.is_finite() && leverage > 0.0 {
-                    leverage_by_symbol.insert(pos.symbol.clone(), leverage);
+                    if let Some(symbol) = pos.get("symbol").and_then(Value::as_str) {
+                        leverage_by_symbol.insert(symbol.to_owned(), leverage);
+                    }
                 }
             }
             let selected = |symbol: &String| symbols.is_none_or(|symbols| symbols.contains(symbol));
             let mut result = Vec::new();
-            for pos in positions
-                .iter()
-                .filter(|pos| selected(&pos.symbol))
-                .filter(|pos| parse_float(&pos.position_amt) != 0.0)
-            {
+            for pos in positions {
+                if symbols.is_some_and(|symbols| {
+                    !symbols
+                        .iter()
+                        .any(|symbol| pos.get("symbol") == Some(&Value::String(symbol.clone())))
+                }) {
+                    continue;
+                }
+                let amount = js_string(pos.get("positionAmt"))
+                    .map_err(|e| mapper_error((e.name, e.to_string())))?;
+                if parse_float(&amount) == 0.0 {
+                    continue;
+                }
                 let position = helpers::transform_position(pos, &self.owner.store.positions())
-                    .map_err(|e| ExchangeError::new(e.to_string()))?;
+                    .map_err(mapper_error)?;
                 // uniqBy keeps the first real position, before all placeholders.
                 if !result.iter().any(|old: &Position| old.id == position.id) {
                     result.push(position);

@@ -747,6 +747,10 @@ impl BaseWebSocket {
     pub fn set_ping_at(&self, at: f64) {
         self.state.borrow_mut().ping_at = at;
     }
+    /// Replaces the heartbeat deadline shared with pong and close handling.
+    pub fn schedule_ping(self: &Rc<Self>, delay_ms: u64) {
+        self.schedule(Timer::Ping, delay_ms as f64);
+    }
     pub fn handle_pong_event(self: &Rc<Self>, next_ping_time: u64) -> Result<(), ExchangeError> {
         self.record_message_handler_stats("pong")?;
         let ping_at = self.state.borrow().ping_at;

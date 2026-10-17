@@ -3425,6 +3425,10 @@ rs = "safe-cex-venue-bingx/src/data_reads.rs::BingxDataReads::new"
 reason = "Injection-only partial receiver construction; no source constructor, API factory, startup or websocket implementation is claimed."
 
 [[exempt]]
+rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::PortfolioState"
+reason = "Rust receiver storage behind the Portfolio handle: carries the uuid/type fields observed by mapped portfolio selection and retains unused response metadata. It has no independent source declaration or selection/balance algorithm; the strict source declaration DTO remains separately mapped. Runtime projection behavior belongs to the mapped portfolio bodies, with real-binding missing/malformed metadata regressions."
+
+[[exempt]]
 rs = "safe-cex-venue-coinbase/src/portfolios_balances.rs::Portfolio"
 reason = "Native inline return/receiver and external call-site capability for the ten mapped portfolio/balance bodies. Shared handles retain source identity, ordinary currency-object prototype assignment and shallow balance aliases. This helper introduces no independent TS declaration; mapped functions own selection, probing, arithmetic and errors. Full class/transport assembly remains pending."
 
