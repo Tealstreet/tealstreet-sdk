@@ -1,6 +1,10 @@
 //! Scripted transport and runtime for driving the production CryptocomExchange.
-#[path = "../../../test-support/release.rs"]
-mod release;
+mod release {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/release.rs"
+    ));
+}
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,
@@ -25,8 +29,12 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-#[path = "../../../test-support/virtual_time.rs"]
-mod virtual_time;
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
