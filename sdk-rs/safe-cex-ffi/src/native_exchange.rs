@@ -126,7 +126,12 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                     reply,
                 } => {
                     let Some(open) = accounts.get(&id) else {
-                        let _ = reply.send(Err(host_error(&format!("no native account {id}"))));
+                        let error = if id > 0 && id < next {
+                            account_closed_error(id)
+                        } else {
+                            host_error(&format!("no native account {id}"))
+                        };
+                        let _ = reply.send(Err(error));
                         continue;
                     };
                     let account = open.account.clone();
@@ -145,7 +150,12 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                 }
                 Command::Close { id, reply } => {
                     let Some(open) = accounts.remove(&id) else {
-                        let _ = reply.send(Err(host_error(&format!("no native account {id}"))));
+                        let result = if id > 0 && id < next {
+                            Ok(())
+                        } else {
+                            Err(host_error(&format!("no native account {id}")))
+                        };
+                        let _ = reply.send(result);
                         continue;
                     };
                     (open.unwatch)();
@@ -162,6 +172,10 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
             }
         }
     });
+}
+
+fn account_closed_error(id: u32) -> Value {
+    json!({"name":"AccountClosedError","message":format!("native account {id} is closed"),"code":"ACCOUNT_CLOSED"})
 }
 
 fn host_error(message: &str) -> Value {

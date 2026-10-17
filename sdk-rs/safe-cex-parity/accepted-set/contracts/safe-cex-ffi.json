@@ -1431,5 +1431,53 @@
         }
       }
     ]
+  },
+  "safe_cex_ffi::native_exchange::account_closed_error": {
+    "category": "decoder",
+    "evidence": "Issued-but-released handle error envelope; actual Node native-account-lifecycle tests verify rejection class, message and code after release, with never-issued controls.",
+    "api": {
+      "kind": "function",
+      "name": "account_closed_error",
+      "signature": {
+        "inputs": [
+          [
+            "id",
+            {
+              "primitive": "u32"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "$type(u32::try_from($value.as_u64().expect(\"account id\")).expect(\"u32 account id\"))",
+    "cases": [
+      {
+        "input": 1,
+        "output": {
+          "name": "AccountClosedError",
+          "message": "native account 1 is closed",
+          "code": "ACCOUNT_CLOSED"
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "name": "AccountClosedError",
+          "message": "native account 17 is closed",
+          "code": "ACCOUNT_CLOSED"
+        }
+      }
+    ]
   }
 }

@@ -41,7 +41,13 @@ With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
 owned-value account host. Events and worker Store payloads are forwarded to JS; signing
 and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
 immediately, then resolves after disposal completes, or rejects with its error.
-Calls and repeated closes against a removed account reject.
+Repeating close on an issued handle resolves as a no-op without retaining the
+account. Calls on released handles reject with `name: "AccountClosedError"`,
+`code: "ACCOUNT_CLOSED"` and a message identifying the closed handle. Never-issued
+handles retain the missing-account error. Calling the `dispose` method keeps
+the handle available, matching the exchange API's disposal semantics.
+`tests/native-account-lifecycle.test.mjs` exercises these contracts through the
+compiled addon.
 Rejections are JavaScript Error objects with the source `name`, plain `message`
 and optional `code`. An absent source code stays absent; callers do not parse
 error messages as JSON. `tests/native-account-errors.test.mjs` checks this
