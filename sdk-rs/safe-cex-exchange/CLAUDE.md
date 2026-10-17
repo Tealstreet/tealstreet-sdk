@@ -1407,6 +1407,17 @@ info/debug severity dispatch. The original shared globals compile but fail at
 console.info before either host output can be observed. Console.log is handled
 by its separate source-binding change.
 
+BigNumber's private value representation distinguishes finite decimals, signed
+infinities and NaN; finite zero retains its sign. Arithmetic and comparisons use
+that representation directly, including zero division and infinity operations.
+Rounding a negative nonzero value to zero retains the minus in toFixed, while an
+actual negative zero formats unsigned. valueOf/toJSON and toNumber preserve its
+sign, and cloning uses the same value representation. The installed native
+`js_bignumber_special_values` target compares 22 scalar inputs, 49 operand pairs
+across six bound arithmetic and six comparison methods, and five min/max argument
+sets against the actual npm dependency. Positive finite precision stays decimal;
+the public shared model types are unchanged.
+
 Error prototype thread-local storage stays inside its sole private accessor.
 Module-level item macros are rejected by the parity indexer. The focused
 `safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
@@ -1421,3 +1432,8 @@ throw instead of becoming empty arrays. `tests/js_orderbook_source.rs` executes
 installed NativeRuntime bindings, observing getter order, holes, duplicate amount
 reads, inserted identity and reentrant row/length changes. Both regressions compile
 and fail on the prior implementation; their inputs do not replace utility code.
+
+BigNumber.isFinite reads the private decimal/Infinity/NaN variant directly; it
+never converts through f64. The Node oracle includes finite values at +/-1e1000
+and +/-1e-1000, which overflow or underflow a Number conversion, as well as
+NaN, both infinities, signed zero, clones and arithmetic results.
