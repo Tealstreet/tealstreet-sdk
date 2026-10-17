@@ -1,4 +1,5 @@
 const axios = require('axios');
+const assert = require('node:assert/strict');
 const units = s => Array.from({length:s.length}, (_,i) => s.charCodeAt(i));
 const number = n => { const b=Buffer.alloc(8); b.writeDoubleBE(n); return b.toString('hex'); };
 function observe(v) {
@@ -16,12 +17,20 @@ const texts = [
   '{"\\ud800":1,"\\ud800":2,"first":3}',
   '[-0,1e400,-1e400,9007199254740993,1.234567890123456789]',
   '"\\b\\f\\n\\r\\t\\/\\\\\\\""',' \r\n\t[true,false,null,"😀"] \t',
+  'null','true','false','0','-0','1.5e+2','1e-400',
+  '', ' ', '-', '+1', '.1', '1.', '1e', '1e+', '--1', '[,]', '{"a" 1}', '{"a":1,}', '{a:1}', 'nul',
   '01','[1,]','{"a":}','"\\uD80"','"\\x41"','"\u0001"','\ufeff{}','{} trailing'
 ];
-const cases = texts.map(text=>{
+assert.equal(texts.length,40,'independent syntax seed census');
+const expanded = texts.flatMap(text=>[text,`[${text}]`,`{"v":${text}}`,`${text},`,`${text}\u000b`]);
+const cases = expanded.map(text=>{
   try{return {text:units(text),value:observe(JSON.parse(text))};}
   catch(error){return {text:units(text),error:error.name};}
 });
+assert.equal(cases.length,200,'independent source syntax census');
+for(let unit=0;unit<65536;unit++) {
+  assert.deepEqual(units(JSON.parse('"\\u'+unit.toString(16).padStart(4,'0')+'"')),[unit]);
+}
 const rest='{"label":"tp \\ud83d","\\udfff":"kept","list":[1,2],"zero":-0}';
 const instance=axios.create({adapter:async config=>({data:rest,status:200,statusText:'OK',headers:{},config})});
-instance.get('/source').then(response=>console.log(JSON.stringify({cases,rest,restValue:observe(response.data)})));
+instance.get('/source').then(response=>console.log(JSON.stringify({cases,escapeCodeUnits:65536,rest,restValue:observe(response.data)})));

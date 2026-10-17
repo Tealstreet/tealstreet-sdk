@@ -1715,9 +1715,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "388f2b7ed83a8f0bbc45539ef6c4ec125e88c1192a7f785d0ef8a98b664b2287",
+      "producer_sha256": "4fc5b8647e9268a7be7071f696909ef4fb7db28470024f238c9a6ef13477bad5",
       "classification": "no-owned-latch",
-      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits."
+      "reason": "Reviewed Promise iterable cutover: both static combinators synchronously collect iterator inputs into an owned Result<Vec<Js>, Thrown>, then move it into a Promise body. Each body propagates a captured iterator error or awaits the existing native combinator. No shared in-flight slot, mutable latch or registration is installed by this factory; Promise::spawn owns the driver, and existing PromiseWait Drop guards own pending-member registrations. Real globals regressions prove pending iterable members stay pending, synchronously exhaust inputs, preserve native references/Number bits, and reject iterator failures. The four discovered boundaries are the two async bodies and their native combinator awaits. Reviewed JSON.parse repair: its synchronous closure decodes UTF-16 directly into existing Js values, without creating any future, task, registration or shared latch. The four existing Promise boundaries and their cancellation ownership are unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::install_library",

@@ -68,7 +68,7 @@ fn json_builtin_retains_lone_surrogate_units_and_matches_native_parse() {
     let source = source();
     assert_eq!(
         source["cases"].as_array().unwrap().len(),
-        19,
+        200,
         "independent JSON source census"
     );
     run(async {
@@ -148,4 +148,40 @@ fn real_http_json_response_retains_lone_surrogate_fields_and_rows() {
         );
     });
     server.join().unwrap();
+}
+
+#[test]
+fn json_builtin_preserves_every_escaped_utf16_code_unit() {
+    assert_eq!(
+        source()["escapeCodeUnits"],
+        65536,
+        "actual Node escape census"
+    );
+    run(async {
+        let runtime = native_runtime();
+        let http = client::rest_http_host(
+            runtime.clone(),
+            Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+        );
+        let shared = Rc::new(ScopeShared::new(
+            runtime,
+            http,
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Js::object(vec![]),
+            (),
+        ));
+        globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+        let json = shared.globals.get("JSON").unwrap();
+        for unit in 0..=u16::MAX {
+            let text = format!("\"\\u{unit:04x}\"");
+            let parsed = json
+                .call_method("parse", vec![Js::str(&text)])
+                .unwrap_or_else(|error| panic!("code unit {unit:04x}: {error:?}"));
+            assert_eq!(
+                parsed.to_js_string().unwrap().as_ref(),
+                &[unit],
+                "native JSON escape {unit:04x}"
+            );
+        }
+    });
 }
