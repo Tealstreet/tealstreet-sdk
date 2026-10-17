@@ -356,6 +356,11 @@ The order oracle checks native own-Undefined fields before JSON projection. It
 walks every output and checks native row counts before pairing with source rows:
 1,327 linear cases (1,263 source successes, 78 accepted own-Undefined cases) and
 1,166 inverse cases (1,095 source successes, 100 accepted own-Undefined cases).
+The field-identity supplement adds exactly one independently named successful
+case per family: 1,328/1,264 linear cases/successes and 1,167/1,096 inverse.
+Its own-Undefined counts remain 78 and 100. Each caller selects its expected
+profile explicitly; neither the base nor supplementary count is inferred from
+the generated corpus. Both profiles reject a missing or duplicate identity case.
 Representability checks visit every source row without short-circuiting.
 The actual socket/Store and authenticated REST witnesses additionally distinguish
 missing-side Undefined from absence across all three families, while unsupported
