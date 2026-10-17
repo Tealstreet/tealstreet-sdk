@@ -529,7 +529,11 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
 fn started(script: impl FnOnce(&support::Http)) -> Harness {
     let h = venue(|http| {
         http.ok("POST", "/private/get-open-orders", open_orders());
-        http.ok("POST", "/private/advanced/get-open-orders", advanced_orders());
+        http.ok(
+            "POST",
+            "/private/advanced/get-open-orders",
+            advanced_orders(),
+        );
         http.ok("POST", "/private/get-positions", positions());
         http.ok("POST", "/private/user-balance", balance());
         script(http);
@@ -570,7 +574,12 @@ fn sent_channels(h: &Harness, method: &str) -> Vec<Value> {
         .iter()
         .filter_map(|m| serde_json::from_str::<Value>(m).ok())
         .filter(|m| m["method"] == method)
-        .flat_map(|m| m["params"]["channels"].as_array().cloned().unwrap_or_default())
+        .flat_map(|m| {
+            m["params"]["channels"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
         .collect()
 }
 
@@ -579,7 +588,7 @@ fn sent_channels(h: &Harness, method: &str) -> Vec<Value> {
 fn fetch_ohlcv_reads_venue_candlesticks() {
     let h = venue(|http| {
         http.ok(
-            "POST",
+            "GET",
             "/public/get-candlestick",
             ok(json!({"data": [
                 {"t": 1_700_000_000_000_i64, "o": "1", "h": "2", "l": "0.5", "c": "1.5", "v": "10"}
@@ -593,12 +602,19 @@ fn fetch_ohlcv_reads_venue_candlesticks() {
     assert_eq!(candles.len(), 1, "venue candles are returned");
     assert_eq!(candles[0].timestamp, 1_700_000_000_000.0);
     assert_eq!(
-        (candles[0].open, candles[0].high, candles[0].low, candles[0].close, candles[0].volume),
+        (
+            candles[0].open,
+            candles[0].high,
+            candles[0].low,
+            candles[0].close,
+            candles[0].volume
+        ),
         (1.0, 2.0, 0.5, 1.5, 10.0)
     );
     let call = &h.http.calls("/public/get-candlestick")[0];
+    assert_eq!(call.method, "GET", "public reads go out as GET");
     assert_eq!(
-        envelope(call)["params"],
+        call.params,
         json!({"instrument_name": SYMBOL, "timeframe": "1h"})
     );
 }
@@ -611,7 +627,10 @@ fn listen_order_book_subscribes_and_delivers_snapshots() {
     let sink = books.clone();
     let cleanup = h
         .venue()
-        .listen_order_book(SYMBOL.into(), std::rc::Rc::new(move |b| sink.borrow_mut().push(b)))
+        .listen_order_book(
+            SYMBOL.into(),
+            std::rc::Rc::new(move |b| sink.borrow_mut().push(b)),
+        )
         .expect("listenOrderBook");
     h.runtime.advance(50.0);
     assert!(
