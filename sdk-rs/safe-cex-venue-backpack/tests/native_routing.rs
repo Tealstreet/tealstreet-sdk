@@ -166,3 +166,46 @@ fn native_request_uses_the_selected_private_proxy_region_and_authorization() {
         Some("Bearer routing-fixture-token")
     );
 }
+
+#[test]
+fn synced_clock_reaches_native_rest_auth_and_position_mapping() {
+    use base64::Engine;
+    use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
+    struct ResetClock;
+    impl Drop for ResetClock {
+        fn drop(&mut self) {
+            VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)());
+        }
+    }
+    let _reset = ResetClock;
+    VIRTUAL_CLOCK.sync_from_server_time((VIRTUAL_CLOCK.now)() + 40_000.0);
+    let runtime = Rc::new(support::Runtime::default());
+    runtime.now.set(123.0);
+    let wire = Arc::new(support::Wire::default());
+    wire.bodies.lock().unwrap().insert("/api/v1/position".into(), RestResponseBody::Untransformed(json!([{"symbol":"BTC_USDC_PERP","netQuantity":"2","entryPrice":"100","netExposureNotional":"200","pnlUnrealized":"3","estLiquidationPrice":"50"}])));
+    let secret = base64::engine::general_purpose::STANDARD.encode([1; 32]);
+    let owner = construct(
+        serde_json::from_value(json!({"key":"clock-key","secret":secret})).unwrap(),
+        runtime.clone(),
+        wire.clone(),
+    )
+    .unwrap();
+    let before = VIRTUAL_CLOCK.get_current_time_ms();
+    let positions = drive(&runtime, Exchange::fetch_positions(owner.as_ref(), None)).unwrap();
+    let after = VIRTUAL_CLOCK.get_current_time_ms();
+    assert_eq!(positions.len(), 1);
+    let requests = wire.requests.lock().unwrap();
+    let request = requests
+        .iter()
+        .find(|r| r.url == "/api/v1/position")
+        .expect("signed position request reaches the real native transport");
+    let auth_time = request.headers["X-Timestamp"].parse::<f64>().unwrap();
+    assert!(!request.headers["X-Signature"].is_empty());
+    let position_time = serde_json::to_value(&positions[0]).unwrap()["lastUpdate"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        (before..=after).contains(&auth_time) && (before..=after).contains(&position_time),
+        "synced source time {before}..={after}; REST auth={auth_time}, position lastUpdate={position_time}"
+    );
+}
