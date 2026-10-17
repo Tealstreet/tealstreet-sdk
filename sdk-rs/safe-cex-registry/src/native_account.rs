@@ -1,7 +1,7 @@
 //! One exchange account on the native host behind a JSON surface, for hosts that
 //! cannot name SDK types (the napi binding). Values cross as JSON; failures cross as
 //! `{name, message, code?}`. Requires a tokio `LocalSet`, like the native host.
-use crate::native_host::{native_venue_host_signed, native_venue_host_with};
+use crate::native_host::{bind_http_events, native_venue_host_signed, native_venue_host_with};
 use crate::rust_venues::rust_constructor;
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
@@ -142,12 +142,13 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
         ),
         None => native_venue_host_with(runtime, adapters, spec.hyperliquid_limiter),
     };
-    let constructor = rust_constructor(&name, host)
+    let constructor = rust_constructor(&name, host.clone())
         .ok_or_else(|| host_error(format!("no Rust constructor for {}", spec.exchange)))?;
     let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
     let exchange = constructor
         .construct(name, options, store.clone())
         .map_err(|error| exchange_error(&error))?;
+    bind_http_events(&host, &exchange);
     Ok(Rc::new(NativeAccount {
         exchange,
         store,
