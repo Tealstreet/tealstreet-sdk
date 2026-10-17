@@ -1,4 +1,4 @@
-// Execute the fourteen reviewed native/default Crypto.com record and carrier owners, not full discovery.
+// Execute the eleven reviewed native/default Crypto.com record and carrier owners, not full discovery.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
