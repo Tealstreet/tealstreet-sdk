@@ -159,3 +159,11 @@ for nested option numbers and forwards Store.update's fromWorker flag, preservin
 worker market merge behavior. The facade `option_fields` target compares eight
 actual source mutation paths across five numeric profiles; the ordinary production
 Store wiring gate remains required for Store changes.
+
+Position upserts overlay all nine ModelField slots by property presence: an
+Absent incoming field preserves the previous value, while own Undefined clears
+it and Value replaces it. This includes side as well as optional metadata.
+Do not use ModelField::or for this merge: its value-only fallback has a separate
+meaning. The production JS facade's position_model_merge regression compares
+81 outcomes with the maintained TypeScript Store across single, batch and full
+upserts; the shared carrier API remains unchanged.

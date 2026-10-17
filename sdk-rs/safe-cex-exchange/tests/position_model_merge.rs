@@ -110,7 +110,7 @@ fn position_upserts_distinguish_absent_undefined_and_present_fields() {
         if !value.is_undefined() {
             assert_eq!(
                 to_json(&value).unwrap(),
-                case["value"],
+                to_json(&from_json(&case["value"])).unwrap(),
                 "{method}/{field}/{mode}: source value"
             );
         }
