@@ -1451,7 +1451,7 @@ pub fn normalize_coinbase_starbase_order(
             amount,
             filled: 0.0,
             remaining: amount,
-            reduce_only: gateway.reduce_only.unwrap_or(false),
+            reduce_only: gateway.reduce_only.unwrap_or(false).into(),
             close: (None).into(),
             info: (Some(info)).into(),
             time_in_force: time_in_force.into(),
