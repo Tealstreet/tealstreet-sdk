@@ -193,3 +193,11 @@ The bounded follow-up API reviews are recorded in
 diagnostic section records the direct retained-number field decoder, JSON
 projection, error construction, raw URL parsing and separate typed selector
 review, with native/Wasm receipts and serial mutation controls.
+
+Signature-rejection predicate failures retain `TransportError::JavaScript`,
+including their original name/message and failed or effective request. They do
+not consume the retry stamp or schedule another attempt. The actual-source
+TypeError witness and native rejection/resend/read/write regressions live in
+`tests/signature_error_kind.rs`; `scripts/signature-error-kind-control.py`
+restores the original message-only wrapper to prove the failures, then restores
+exact source bytes and requires every witness to pass.
