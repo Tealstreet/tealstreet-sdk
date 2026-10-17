@@ -326,6 +326,16 @@ request account/metadata, delayed login, relay failure and pending-auth disposal
 callback ownership; each must compile and fail its named native test, then restore.
 
 
+Placement follows lodash `times` for out-of-range lot counts, including an empty
+submission when the market maximum is zero. It still schedules order refresh.
+Trigger-price fallback preserves an adjusted zero in the final `price` operand.
+All split payloads are submitted before response IDs are read and projected;
+a numeric ID cannot interrupt the remaining submissions or reconciliation.
+Exact non-string placement results remain a coordinated shared `Vec<String>`
+representation issue; they are never stringified or replaced by fabricated IDs.
+`tests/support/placement_parity.rs` drives all three cases through the real
+constructed binding and L2 signer, observing the signed HTTP requests.
+
 ## Accepted-set map records
 
 `public_records`, `private_records` and `config_records` use 26 private Serde
