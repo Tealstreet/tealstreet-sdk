@@ -111,10 +111,12 @@ pub(crate) fn bind(realm: &Realm) {
         Value::Number(crate::constants::SPOT_MAX_PRICE_DECIMALS as f64),
     );
 
-    // virtualClock: the runtime's wall clock (the venue offset is host-owned).
+    // The imported singleton retains the shared server clock correction.
     let clock = realm.new_object();
-    let now = realm.native("getCurrentTimeMs", 0, |r, _, _| {
-        Ok(Value::Number(r.runtime().now_ms()))
+    let now = realm.native("getCurrentTimeMs", 0, |_, _, _| {
+        Ok(Value::Number(
+            safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
+        ))
     });
     realm.define_hidden(&clock, PropKey::str("getCurrentTimeMs"), now);
     realm.bind_import("virtualClock", clock);
