@@ -89,3 +89,8 @@ compiled but threw from the code getter; a second baseline with only custom-fiel
 skipping still threw from the cause getter. Both pass after the descriptor repair.
 Existing DATA numeric/UTF-16/alias/cycle checks and Error stack/subtype checks pass.
 This is an actual Wasm plus Node structuredClone proof, not browser startup/DB execution.
+
+`safe-cex-webworker/scripts/error-clone-controls.py` separately restores custom
+member enumeration and accessor-cause reading. Each modified production adapter
+compiles to Wasm, reaches its expected throwing getter through the real DATA post,
+and fails the Node harness. Exact source restoration passes the complete harness.
