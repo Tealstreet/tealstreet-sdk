@@ -63,7 +63,10 @@ fn actual_order_results_retain_nonfinite_native_numbers() {
         );
         assert_eq!(orders[1]["price"].as_f64(), Some(f64::INFINITY));
         assert_eq!(orders[2]["price"].as_f64(), Some(f64::NEG_INFINITY));
-        assert!(orders[3]["price"].as_f64().unwrap().is_sign_negative());
+        assert_eq!(
+            orders[3]["price"].as_f64().unwrap().to_bits(),
+            (-0.0f64).to_bits()
+        );
         assert!(matches!(
             orders[3].get("type"),
             Some(NativeValue::Undefined)
