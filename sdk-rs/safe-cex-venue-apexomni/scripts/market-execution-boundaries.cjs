@@ -17,6 +17,21 @@ code = code.replace(driver, () => String.raw`
                price:'83.25',fillPrice:'83.25',size:'2.25',fillSize:'2.25',fee:'-0.75',orderId:'rest'};
  const cached = {...fill,price:'19.25',size:'0.25',orderId:'ws',token:'USDC'};
  const history = process.argv[2] === 'history';
+ const assetRows=[];
+ if (!history) for(const [field,wireField] of [['id','symbol'],['symbol','crossSymbolName'],['base','baseTokenId'],['quote','settleAssetId'],['active','enableTrade']]){
+  const values=field==='active'?[{asset:'wrong'},'truthy',17,[]]:[{asset:'wrong'},false,null,17,undefined];
+  for(const value of values){
+   const s=store();const venue=new Class('apexomni',{key:'key',secret:'secret'},s);
+   const bad={...contract,symbol:'BAD-USDC',crossSymbolName:'BADUSDC',[wireField]:value};
+   responses={'/v3/symbols':{data:{contractConfig:{perpetualContract:[contract,bad,{...contract,symbol:'LAST-USDC',crossSymbolName:'LASTUSDC'}]}}}};operations=[];
+   const result=await venue.fetchMarketsHelper();
+   assert.equal(result.length,3,'source keeps malformed field and siblings');
+   assert.equal(result[1][field],value,'source preserves raw field identity');
+   assert(!operations.some(op=>op[0]==='log'),'source has no typed refusal');
+   assetRows.push({field,value:native(value),result:native(result)});
+  }
+ }
+ assert.equal(assetRows.length,history?0:24,'strict market source cases');
  const marketCases = [
   ['valid',[contract,{...contract,symbol:'disabled',enableTrade:false}]],
   ['late-null',[{...contract,enableTrade:'truthy'},null]],
@@ -81,7 +96,7 @@ code = code.replace(driver, () => String.raw`
              cached:native(cached),result:native(result),operations:native(operations),cache:native(venue.recentWsExecutions)});
  }
  assert.equal(rows.length,history?21:32,'APEX-BOUNDARY independent source floor');
- console.log(JSON.stringify({rows,header:{node:process.version,arch:process.arch}}));
+ console.log(JSON.stringify({rows,assetRows,header:{node:process.version,arch:process.arch}}));
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `);
 const m = new Module(filename, module);

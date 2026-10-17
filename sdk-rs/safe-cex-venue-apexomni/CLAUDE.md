@@ -472,3 +472,9 @@ private frames, hosted signing, lifecycle, packing and signature proofs remain.
 Truthy non-boolean Order.reduceOnly is a maintainer-approved per-row refusal.
 The mapper warns with its field and original value, returning no orders for that
 row so valid surrounding REST/private rows continue; it never coerces the flag.
+
+
+Market batches retain the source config update, filter and complete numeric map
+before strict output admission. A refused id/symbol/base/quote/active/info row
+warns with its index, field and original value; valid siblings remain available
+to fetch and Store refresh. Source evaluation and reporting failures propagate.

@@ -413,3 +413,7 @@ reads occur twice as in the source. Native source tests retain UTF16 and sparse 
 Private market-payload flattening retains native JS rows and skips array holes
 without copying through JSON. The orders wrapper applies its object guard before
 calling the live owner helper; source oracles cover identity, numeric bits and UTF16.
+
+Nonce retry classification reads the original error's code and message directly.
+Both String conversions precede the final OR, so matching codes still observe
+message coercion failures. Unread surrogate fields and cycles stay untouched.
